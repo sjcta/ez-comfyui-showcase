@@ -1,40 +1,39 @@
 /**
- * Status & Service Management Module
- * Extracted from app.js — handles pollStatus, GPU display, service toggles
+ * Status Module
  */
 (function () {
   'use strict';
   var A = window.__APP__ || {};
-  var $ = A.$;
-  var $$ = A.$$;
-  var escH = A.escH;
-  var escA = A.escA;
-  var jobs = A.jobs;
-  var API = A.API;
+  var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
+  var jobs = A.jobs, API = A.API;
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  Status
-  // ══════════════════════════════════════════════════════════════════════════
-
-  async function pollStatus() {
+async function pollStatus() {
     try {
-      var r = await fetch(API + '/api/status');
-      var d = await r.json();
+      const r = await fetch(`${API}/api/status`);
+      const d = await r.json();
       updateServices(d);
       updateGPU(d.gpu);
-    } catch (e) {}
+    } catch {}
   }
 
-  function updateServices(d) {
-    var insts = d.instances || [];
-    var anyUp = insts.some(function (i) { return i.up; });
-    var comfyBtn = $('#svcComfyUI');
-    var comfyState = $('#comfyState');
+function updateServices(d) {
+    const insts = d.instances || [];
+    const anyUp = insts.some((i) => i.up);
+    const totalRun = insts.reduce((s, i) => s + (i.queue_running || 0), 0);
+    const totalPend = insts.reduce((s, i) => s + (i.queue_pending || 0), 0);
+    const comfyBtn = $('#svcComfyUI');
+    const comfyState = $('#comfyState');
     if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off');
     if (comfyState) {
-      var upCount = insts.filter(function (i) { return i.up; }).length;
-      var busyCount = insts.filter(function (i) { return i.up && i.queue_running > 0; }).length;
-      var pendCount = insts.filter(function (i) { return i.up && i.queue_pending > 0; }).length;
+      var upCount = insts.filter(function (i) {
+        return i.up;
+      }).length;
+      var busyCount = insts.filter(function (i) {
+        return i.up && i.queue_running > 0;
+      }).length;
+      var pendCount = insts.filter(function (i) {
+        return i.up && i.queue_pending > 0;
+      }).length;
       if (!anyUp) comfyState.textContent = '全部关闭';
       else if (busyCount > 0) comfyState.textContent = '出图中(' + busyCount + '/' + upCount + ')';
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
@@ -46,24 +45,26 @@
     if (othersState) othersState.textContent = d.vllm ? 'vLLM' : '-';
   }
 
-  function updateGPU(g) {
+function updateGPU(g) {
     if (!g) return;
-    var fill = $('#vramFill');
-    var pct = g.vram_pct || 0;
-    var temp = g.temp_c || 0;
+    const fill = $('#vramFill');
+    const pct = g.vram_pct || 0;
+    const temp = g.temp_c || 0;
     fill.style.width = pct + '%';
-    var isOverload = pct > 70 || temp > 65;
-    var isBusy = pct > 30 || temp > 50;
+    // State: green=idle, yellow=busy, orange=overloaded (vram>70% or temp>65)
+    const isOverload = pct > 70 || temp > 65;
+    const isBusy = pct > 30 || temp > 50;
     fill.className = 'sb-vram-fill' + (isOverload ? ' overload' : isBusy ? ' busy' : '');
-    var bar = $('#statusbar');
+    // Also tint the entire statusbar
+    const bar = $('#statusbar');
     if (bar) bar.dataset.state = isOverload ? 'overload' : isBusy ? 'busy' : 'idle';
     $('#vramText').textContent =
-      (g.vram_used_mb / 1024).toFixed(1) + ' / ' + (g.vram_total_mb / 1024).toFixed(0) + ' GB (' + pct + '%)';
-    $('#gpuTemp').textContent = temp + ' °C';
-    $('#gpuUtil').textContent = 'GPU ' + g.util_pct + '%';
+      `${(g.vram_used_mb / 1024).toFixed(1)} / ${(g.vram_total_mb / 1024).toFixed(0)} GB (${pct}%)`;
+    $('#gpuTemp').textContent = `${temp} °C`;
+    $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
     if (!$('#vramSegments').dataset.done) {
-      [25, 50, 75].forEach(function (pct) {
-        var seg = document.createElement('div');
+      [25, 50, 75].forEach((pct) => {
+        const seg = document.createElement('div');
         seg.className = 'sb-vram-seg';
         seg.style.left = pct + '%';
         $('#vramSegments').appendChild(seg);
@@ -72,11 +73,7 @@
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  Service toggles
-  // ══════════════════════════════════════════════════════════════════════════
-
-  function openInstPopup(mode) {
+function openInstPopup(mode) {
     var overlay = $('#instPopup');
     var title = $('#instPopupTitle');
     if (!overlay) return;
@@ -88,18 +85,20 @@
     else _refreshInstCards();
   }
 
-  function closeInstPopup() {
+function closeInstPopup() {
     var overlay = $('#instPopup');
     if (overlay) overlay.classList.remove('open');
   }
 
-  function _queueBarHtml(running, pending) {
+function _queueBarHtml(running, pending) {
     var total = running + pending;
     if (total === 0) return '<span style="color:var(--dim);font-size:11px">\u65e0</span>';
     var html = '';
+    // Running segment(s) — green
     for (var i = 0; i < running; i++) {
       html += '<div style="flex:1;height:8px;background:var(--green);border-radius:2px;min-width:4px"></div>';
     }
+    // Pending segment(s) — yellow dashed
     for (var i = 0; i < pending; i++) {
       html += '<div style="flex:1;height:8px;background:#f59e0b;border-radius:2px;opacity:0.6;min-width:4px"></div>';
     }
@@ -107,7 +106,7 @@
     return html;
   }
 
-  async function _refreshInstCards() {
+async function _refreshInstCards() {
     var box = $('#instCards');
     if (!box) return;
     box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:8px">\u52a0\u8f7d\u4e2d...</div>';
@@ -119,9 +118,7 @@
       for (var idx = 0; idx < (d.instances || []).length; idx++) {
         var inst = d.instances[idx];
         var statusCls = inst.up ? 'on' : 'off';
-        var btnLabel = inst.up
-          ? '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62'
-          : '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
+        var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
         var btnCls = inst.up ? 'stop' : 'start';
         var groupLabel = groupMap[inst.loaded_group] || inst.loaded_group || '';
         var stateText = !inst.up
@@ -145,7 +142,7 @@
           btnCls +
           '" onclick="CW.toggleInst(\'' +
           inst.name +
-          '\',' +
+          "'," +
           !inst.up +
           ')" id="instBtn' +
           inst.name +
@@ -157,21 +154,21 @@
           (inst.up ? 'active' : '') +
           '">' +
           stateText +
-          '</span></div>' +
-          '<div class="inst-card-row"><span>\u8fd0\u884c\u4e2d</span><span class="val ' +
-          (inst.queue_running ? 'active' : '') +
-          '">' +
+          `</span></div>` +
+          `<div class="inst-card-row"><span>\u8fd0\u884c\u4e2d</span><span class="val ` +
+          (inst.queue_running ? `active` : ``) +
+          `">` +
           inst.queue_running +
-          ' \u4efb\u52a1' +
-          (inst.queue_running > 0 && inst.current_workflow ? '(\u2009' + inst.current_workflow + ' - ' + inst.progress + '%)' : '') +
-          '</span></div>' +
-          '<div class="inst-card-row"><span>\u6392\u961f</span><span class="val ' +
-          (inst.queue_pending ? 'pending' : '') +
-          '">' +
+          ` \u4efb\u52a1` +
+          (inst.queue_running > 0 && inst.current_workflow ? `(\u2009${inst.current_workflow} - ${inst.progress}%)` : ``) +
+          `</span></div>` +
+          `<div class="inst-card-row"><span>\u6392\u961f</span><span class="val ` +
+          (inst.queue_pending ? `pending` : ``) +
+          `">` +
           inst.queue_pending +
-          ' \u4efb\u52a1' +
-          (inst.pending_workflows && inst.pending_workflows.length > 0 ? '(\u2009' + inst.pending_workflows.join(' ') + ')' : '') +
-          '</span></div>';
+          ` \u4efb\u52a1` +
+          (inst.pending_workflows && inst.pending_workflows.length > 0 ? `(\u2009${inst.pending_workflows.join(' ')}` + `)` : ``) +
+          `</span></div>`;
         if (inst.loaded_group) html += '<span class="inst-card-group">' + escH(inst.loaded_group) + '</span>';
         html += '</div>';
       }
@@ -182,7 +179,7 @@
     }
   }
 
-  async function _refreshGpuCards() {
+async function _refreshGpuCards() {
     var box = $('#instCards');
     if (!box) return;
     box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:8px">\u52a0\u8f7d\u4e2d...</div>';
@@ -192,17 +189,32 @@
       var procs = d.processes || [];
       var html = '<div class="popup-section-title">\u5360\u7528 GPU \u663e\u5b58\u7684\u8fdb\u7a0b</div>';
       if (procs.length === 0)
-        html += '<div style="color:var(--dim);font-size:12px;padding:8px">\u65e0\u5176\u4ed6\u663e\u5b58\u5360\u7528\u8fdb\u7a0b</div>';
+        html +=
+          '<div style="color:var(--dim);font-size:12px;padding:8px">\u65e0\u5176\u4ed6\u663e\u5b58\u5360\u7528\u8fdb\u7a0b</div>';
       for (var i = 0; i < procs.length; i++) {
         var p = procs[i];
         html +=
           '<div class="gpu-card">' +
           '<div class="gpu-card-info">' +
-          '<div class="gpu-card-name" title="' + escH(p.process) + '">' + escH(p.name) + '</div>' +
-          '<div class="gpu-card-detail">PID ' + p.pid + ' \u00b7 ' + escH(p.process) + '</div>' +
+          '<div class="gpu-card-name" title="' +
+          escH(p.process) +
+          '">' +
+          escH(p.name) +
           '</div>' +
-          '<span class="gpu-card-mem">' + p.mem_mb + ' MB</span>' +
-          '<button class="gpu-card-kill" onclick="CW.killGpuProc(' + p.pid + ')" id="gpuKill' + p.pid + '">\u7ec8\u6b62</button>' +
+          '<div class="gpu-card-detail">PID ' +
+          p.pid +
+          ' \u00b7 ' +
+          escH(p.process) +
+          '</div>' +
+          '</div>' +
+          '<span class="gpu-card-mem">' +
+          p.mem_mb +
+          ' MB</span>' +
+          '<button class="gpu-card-kill" onclick="CW.killGpuProc(' +
+          p.pid +
+          ')" id="gpuKill' +
+          p.pid +
+          '">\u7ec8\u6b62</button>' +
           '</div>';
       }
       box.innerHTML = html;
@@ -212,7 +224,7 @@
     }
   }
 
-  async function toggleInst(name, start) {
+async function toggleInst(name, start) {
     var btn = document.getElementById('instBtn' + name);
     if (btn) {
       btn.disabled = true;
@@ -229,7 +241,7 @@
     setTimeout(pollStatus, 2000);
   }
 
-  async function killGpuProc(pid) {
+async function killGpuProc(pid) {
     if (!confirm('\u786e\u5b9a\u7ec8\u6b62 PID ' + pid + ' \uff1f')) return;
     var btn = document.getElementById('gpuKill' + pid);
     if (btn) {
@@ -250,7 +262,7 @@
     setTimeout(_refreshGpuCards, 1500);
   }
 
-  function initServiceToggles() {
+function initServiceToggles() {
     var comfyBtn = $('#svcComfyUI');
     if (comfyBtn)
       comfyBtn.addEventListener('click', function () {
@@ -263,17 +275,9 @@
       });
   }
 
-  // ── Expose on window._statusMod for app.js to merge into window.CW ──
-  window._statusMod = {
-    openInstPopup: openInstPopup,
-    closeInstPopup: closeInstPopup,
-    toggleInst: toggleInst,
-    killGpuProc: killGpuProc,
-  };
-
-  // ── Expose init for main app.js ──
-  window._initStatusModule = initServiceToggles;
-
-  // ── Expose functions back to __APP__ for main app.js to call ──
-  A.pollStatus = pollStatus;
+  if (!window.CW) window.CW = {};
+  window.CW.openInstPopup = openInstPopup;
+  window.CW.closeInstPopup = closeInstPopup;
+  window.CW.toggleInst = toggleInst;
+  window.CW.killGpuProc = killGpuProc;
 })();

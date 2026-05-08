@@ -22,31 +22,17 @@
   let jobFields = {};
   // job_id → fields snapshot
   let historyItems = [];
-  let lbItems = [];
-  let lbIdx = -1;
   let _histVisibleCount = 0;
   let _lastRenderedHistCount = 0;
 
   /** Calculate how many columns the masonry grid currently has */
-  function _getColumnCount() {
-    const gallery = $('#gallery');
-    if (!gallery) return 3;
-    const w = gallery.clientWidth;
-    const gap = 10;
-    const minCol = 140;
-    return Math.max(1, Math.floor((w + gap) / (minCol + gap)));
-  }
+  
 
   /** Load 2 rows worth of items */
-  function _batchSize() {
-    return _getColumnCount() * 2;
-  }
+  
 
   /** Initialize first batch (called once after first history load) */
-  function _ensureInitialBatch() {
-    if (_histVisibleCount > 0) return;
-    _histVisibleCount = Math.min(_batchSize(), (_filteredHistory.length ? _filteredHistory.length : historyItems.length)); console.log("[GALLERY DEBUG] _ensureInitialBatch: batch=" + _batchSize() + " filtered=" + _filteredHistory.length + " hist=" + historyItems.length + " => count=" + _histVisibleCount);
-  }
+  
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
@@ -363,615 +349,48 @@
   //  Workflows
   // ══════════════════════════════════════════════════════════════════════════
 
-  async function loadWorkflows() {
-    try {
-      const [r, metaR] = await Promise.all([fetch(`${API}/api/workflows`), fetch(`${API}/api/workflows/meta`)]);
-      const wfs = await r.json();
-      try {
-        _wfMeta = await metaR.json();
-      } catch (e) {
-        _wfMeta = {};
-      }
-      var wfCountEl = $('#wfCount');
-      if (wfCountEl) wfCountEl.textContent = `(${wfs.length})`;
-      const grid = $('#wfGrid');
-      if (!wfs.length) {
-        grid.innerHTML =
-          '<div style="padding:12px;color:var(--dim);text-align:center;font-size:12px">无 workflow</div>';
-        return;
-      }
-      // Count history items per workflow + find latest thumb per workflow
-      const wfCounts = {};
-      const wfThumbs = {};
-      for (const h of historyItems) {
-        const wf = h.workflow || '';
-        wfCounts[wf] = (wfCounts[wf] || 0) + 1;
-        if (!wfThumbs[wf] && h.thumb) wfThumbs[wf] = h.thumb;
-      }
-      let cards = wfs
-        .map((w) => {
-          const meta = _wfMeta[w.name] || {};
-          const displayName = meta.name || w.name.replace('.json', '');
-          const count = wfCounts[w.name] || 0;
-          const thumb = wfThumbs[w.name];
-          const previewSrc = thumb ? `${API}/api/thumbs/${thumb}` : '';
-          const previewImg = previewSrc
-            ? `<img src="${previewSrc}" loading="lazy" alt="">`
-            : `<div class="wf-card-icon">⚙</div>`;
-          const typeTag = getWFType(w.name);
-          const catText = typeTag ? typeTag.text : '其他';
-          const typeClass = typeTag ? `wf-card-type-${typeTag.cls.replace('wf-tag-', '')}` : '';
-          return `<div class="wf-card ${typeClass}" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onclick="CW.selectWF('${escA(w.name)}')">
-        <div class="wf-card-preview">${previewImg}</div>
-        <div class="wf-card-body">
-          <div class="wf-card-name" title="${escA(w.name)}">
-            <span class="wf-card-name-text">${escH(displayName)}</span>
-            
-          </div>
-        </div>
-      </div>`;
-        })
-        .join('');
-      grid.innerHTML = cards;
-      // Build category tabs
-      const TAB_ORDER = ['文生图', '图生图', '文生视频', '图生视频', '其他'];
-      const cats = new Set(
-        wfs.map((w) => {
-          const t = getWFType(w.name);
-          return t ? t.text : '其他';
-        }),
-      );
-      const tabsEl = $('#wfTabs');
-      if (tabsEl) {
-        let tabHtml = '';
-        for (const t of TAB_ORDER) {
-          if (cats.has(t)) {
-            const catWfs = wfs.filter(w => { const tag = getWFType(w.name); return tag ? tag.text === t : t === '其他'; });
-            tabHtml += `<button class="wf-tab ${_currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
-          }
-        }
-        tabsEl.innerHTML = tabHtml;
-      }
-      // Apply current tab filter
-      _applyTabFilter();
-      // Restore last-used workflow from localStorage, fallback to first
-      let saved = '';
-      try {
-        saved = localStorage.getItem('cw:lastWF') || '';
-      } catch {}
-      const target =
-        currentWF && wfs.find((w) => w.name === currentWF)
-          ? currentWF
-          : saved && wfs.find((w) => w.name === saved)
-            ? saved
-            : wfs[0].name;
-      if (!currentWF || currentWF !== target) selectWF(target);
-      else highlightWF();
-    } catch (e) {
-      console.error('loadWorkflows:', e);
-    }
-  }
+  
 
-  async function selectWF(name) {
-    currentWF = name;
-    try {
-      localStorage.setItem('cw:lastWF', name);
-    } catch {}
-    highlightWF();
-    // Scroll active card into view
-    var ac = $$('.wf-card.active')[0];
-    if (ac) ac.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    // Show gen section when workflow is selected
-    var genTitle = $('#genTitle');
-    var genForm = $('#genForm');
-    var genFooter = $('.gen-footer');
-    if (genTitle) {
-      genTitle.style.display = '';
-      genTitle.textContent = name.replace('.json', '') + ' 快速出图';
-    }
-    if (genForm) {
-      genForm.style.display = '';
-      genForm.classList.add('mobile-open');
-    }
-    if (genFooter) {
-      genFooter.style.display = '';
-      genFooter.classList.add('mobile-open');
-    }
-    const ws = $('#wfSummary');
-    if (ws) ws.textContent = name.replace('.json', '');
-    try {
-      const r = await fetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
-      const d = await r.json();
-      const fields = d.fields || [];
-      _wfFieldMeta = fields.map((f) => ({
-        key: f.node_id + '::' + f.field,
-        node_id: f.node_id,
-        class_type: f.class_type,
-        field: f.field,
-        zone: f.zone || 'advanced',
-        visible: f.visible !== false,
-        type: f.type,
-        label: f.label,
-        value: f.value,
-        options: f.options,
-        step: f.step,
-        min: f.min,
-        max: f.max,
-      }));
-      renderAdvFields(fields);
-      // Detect if workflow has width/height (LatentImage nodes)
-      const hasSize = fields.some((f) => f.field === 'width' && f.class_type.includes('LatentImage'));
-      const sizeSection = $('#sizeSection');
-      if (sizeSection) sizeSection.style.display = hasSize ? '' : 'none';
-      for (const f of fields) {
-        if (f.field === 'width' && f.class_type.includes('LatentImage')) $('#widthInput').value = f.value;
-        if (f.field === 'height' && f.class_type.includes('LatentImage')) $('#heightInput').value = f.value;
-      }
-      // Set prompt placeholder based on detected text-encode fields
-      const promptField = fields.find(
-        (f) => f.zone === 'user_input' && (f.type === 'textarea' || f.class_type.includes('TextEncode')),
-      );
-      const promptEl = $('#promptInput');
-      const promptLabel = $('#promptLabel');
-      if (promptEl) {
-        if (promptField) {
-          const labelText = promptField.label || '提示词';
-          const nodeInfo = promptField.node_title ? ' [' + promptField.node_title.split('(')[0].trim() + ']' : '';
-          promptEl.placeholder = labelText + '...';
-          if (promptLabel) promptLabel.textContent = labelText + nodeInfo;
-        } else {
-          promptEl.placeholder = '输入提示词...';
-          if (promptLabel) promptLabel.textContent = '提示词';
-        }
-      }
-    } catch (e) {
-      console.error('selectWF:', e);
-    }
-  }
+  
 
-  function highlightWF() {
-    $$('.wf-card').forEach((el) => el.classList.toggle('active', el.dataset.name === currentWF));
-  }
-  function clearWF() {
-    currentWF = '';
-    highlightWF();
-    var genTitle = $('#genTitle');
-    var genForm = $('#genForm');
-    var genFooter = $('.gen-footer');
-    if (genTitle) genTitle.style.display = 'none';
-    if (genForm) {
-      genForm.style.display = 'none';
-      genForm.classList.remove('mobile-open');
-    }
-    if (genFooter) {
-      genFooter.style.display = 'none';
-      genFooter.classList.remove('mobile-open');
-    }
-  }
-  function switchTab(tab) {
-    _currentTab = tab;
-    // Update active tab button
-    $$('.wf-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
-    _applyTabFilter();
-    // Scroll workflow grid back to start
-    var wfGrid = $('#wfGrid');
-    if (wfGrid) wfGrid.scrollLeft = 0;
-  }
+  
+  
+  
 
-  function _applyTabFilter() {
-    $$('.wf-card').forEach((el) => {
-      const cat = el.dataset.cat || '其他';
-      el.style.display = cat === _currentTab ? '' : 'none';
-    });
-  }
+  
 
-  function toggleGenForm() {
-    const form = $('#genForm');
-    const btn = $('#genToggleMobile');
-    const open = form.classList.toggle('mobile-open');
-    if (btn) btn.textContent = open ? '⚡ 收起 ▴' : '⚡ 快速出图 ▾';
-  }
+  
 
-  function renderAdvFields(fields) {
-    const box = $('#advFields');
+  
+ // zone-aware field metadata for current workflow
 
-    // ── Zone-aware field routing ──
-    // user_input text-encode fields → main prompt textarea (handled in doGenerate)
-    // user_input LoadImage → ref image section
-    // user_input LatentImage size → size section
-    // advanced → advanced params
-    // hidden → not shown
+  
 
-    // Detect LoadImage in user_input zone
-    _loadImageFields = fields.filter((f) => {
-      if (f.class_type !== 'LoadImage' || f.field !== 'image') return false;
-      const zone = f.zone || 'advanced';
-      return zone === 'user_input';
-    });
-    // Fallback: if no zone info, use old logic
-    if (!_loadImageFields.length && !fields.some((f) => f.zone)) {
-      _loadImageFields = fields.filter((f) => f.class_type === 'LoadImage' && f.field === 'image');
-    }
-    const hasLoadImage = _loadImageFields.length > 0;
-    const section = $('#refImageSection');
-    if (section) section.style.display = hasLoadImage ? '' : 'none';
-    if (hasLoadImage) _initRefImageZone();
-    else _resetRefImage();
+  
 
-    // Build advanced fields: only 'advanced' zone (or fallback for unzoned)
-    const hasZones = fields.some((f) => f.zone);
-    const advFields = fields.filter((f) => {
-      const zone = f.zone || 'advanced';
-      // Skip hidden zone OR explicitly invisible fields
-      if (zone === 'hidden') return false;
-      if (f.visible === false) return false;
-      // Skip user_input fields that are handled by dedicated sections
-      if (zone === 'user_input') {
-        // Text-encode → main prompt
-        if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) return false;
-        // LoadImage → ref image section
-        if (f.class_type === 'LoadImage' && f.field === 'image') return false;
-        // LatentImage size → size section
-        if (f.class_type && f.class_type.includes('LatentImage') && (f.field === 'width' || f.field === 'height'))
-          return false;
-      }
-      // For unzoned workflows, use old filtering
-      if (!hasZones) {
-        if (f.class_type === 'CLIPTextEncode' && f.field === 'text') return false;
-        if (f.class_type && f.class_type.includes('LatentImage') && (f.field === 'width' || f.field === 'height'))
-          return false;
-        if (f.class_type === 'LoadImage' && f.field === 'image') return false;
-      }
-      // Skip output zone (read-only, handled by SaveImage)
-      if (zone === 'output') return false;
-      return true;
-    });
-
-    if (!advFields.length) {
-      box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:6px 0">无可编辑参数</div>';
-      return;
-    }
-    let html = '';
-    for (const f of advFields) {
-      const key = `${f.node_id}::${f.field}`;
-      const val = f.value ?? '';
-      html += `<div class="fg"><label>${escH(f.label)} <span class="node-tag">[${escH(f.node_title)}]</span></label>`;
-      switch (f.type) {
-        case 'select': {
-          const opts = (f.options || [])
-            .map((o) => `<option value="${escA(o)}" ${o === val ? 'selected' : ''}>${escH(o)}</option>`)
-            .join('');
-          html += `<select data-key="${key}">${opts}</select>`;
-          break;
-        }
-        case 'seed':
-          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"><button type="button" class="btn-dice" onclick="CW.rndSeed(this)">🎲</button></div>`;
-          break;
-        case 'number': {
-          const step = f.step || 1,
-            mn = f.min ?? '',
-            mx = f.max ?? '';
-          html += `<input type="number" data-key="${key}" value="${val}" step="${step}" ${mn !== '' ? `min="${mn}"` : ''} ${mx !== '' ? `max="${mx}"` : ''}>`;
-          break;
-        }
-        default:
-          html += `<input type="text" data-key="${key}" value="${escH(String(val))}">`;
-      }
-      html += `</div>`;
-    }
-    box.innerHTML = html;
-  }
-
-  let _loadImageFields = [];
-  let _wfFieldMeta = []; // zone-aware field metadata for current workflow
-
-  function _initRefImageZone() {
-    const zone = $('#refImageZone');
-    if (!zone || zone._bound) return;
-    zone._bound = true;
-    zone.addEventListener('click', () => $('#refImageFile').click());
-    zone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      zone.classList.add('dragover');
-    });
-    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-    zone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      zone.classList.remove('dragover');
-      const file = e.dataTransfer?.files?.[0];
-      if (file && file.type.startsWith('image/')) _uploadRefImage(file);
-    });
-    $('#refImageFile').addEventListener('change', (e) => {
-      const file = e.target.files?.[0];
-      if (file) _uploadRefImage(file);
-    });
-  }
-
-  async function _uploadRefImage(file) {
-    if (!file) {
-      alert('未选择文件');
-      return;
-    }
-    const fd = new FormData();
-    try {
-      fd.append('file', file, file.name || 'upload.png');
-    } catch (e) {
-      fd.append('file', file);
-    }
-    try {
-      const r = await fetch(`${API}/api/upload-image`, { method: 'POST', body: fd });
-      if (!r.ok) {
-        let msg = '上传失败 (' + r.status + ')';
-        try {
-          const d = await r.json();
-          msg = d.detail || msg;
-        } catch (e) {}
-        throw new Error(msg);
-      }
-      const d = await r.json();
-      if (!d.filename) throw new Error('服务端未返回文件名');
-      $('#refImageValue').value = d.filename;
-      const preview = $('#refImagePreview');
-      const placeholder = $('#refImagePlaceholder');
-      if (preview) {
-        preview.src = `${API}/api/input-image/${encodeURIComponent(d.filename)}`;
-        preview.style.display = '';
-      }
-      if (placeholder) placeholder.style.display = 'none';
-    } catch (e) {
-      console.error('Upload error:', e);
-      alert('图片上传失败: ' + (e.message || e));
-    }
-  }
-
-  function _resetRefImage() {
-    const v = $('#refImageValue');
-    if (v) v.value = '';
-    const p = $('#refImagePreview');
-    if (p) {
-      p.src = '';
-      p.style.display = 'none';
-    }
-    const ph = $('#refImagePlaceholder');
-    if (ph) ph.style.display = '';
-    const f = $('#refImageFile');
-    if (f) f.value = '';
-  }
+  
 
   // initDropZone removed — upload card is built into loadWorkflows
 
-  async function uploadWF(file) {
-    if (!file.name.endsWith('.json')) {
-      alert('需要 .json 文件');
-      return;
-    }
-    const fd = new FormData();
-    fd.append('file', file);
-    try {
-      const r = await fetch(`${API}/api/workflows/upload`, { method: 'POST', body: fd });
-      if (!r.ok) {
-        const d = await r.json();
-        throw new Error(d.detail || '上传失败');
-      }
-      loadWorkflows();
-    } catch (e) {
-      alert('上传失败: ' + e.message);
-    }
-  }
+  
 
-  async function delWF(name) {
-    if (!confirm(`删除 ${name}？`)) return;
-    await fetch(`${API}/api/workflows/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (currentWF === name) currentWF = null;
-    loadWorkflows();
-  }
+  
 
   // ══════════════════════════════════════════════════════════════════════════
   //  Generate + Restore
   // ══════════════════════════════════════════════════════════════════════════
 
-  async function doGenerate() {
-    if (!currentWF) {
-      alert('请先选择 workflow');
-      return;
-    }
-    const btn = $('#btnGenerate');
-    btn.disabled = true;
-    btn.textContent = '提交中...';
+  
 
-    const fields = {};
-    const prompt = $('#promptInput').value;
-    const snapshot = { prompt, width: $('#widthInput').value, height: $('#heightInput').value, adv: {} };
+  
 
-    try {
-      const fr = await fetch(`${API}/api/workflows/${encodeURIComponent(currentWF)}/fields`);
-      const fd = await fr.json();
-      for (const f of fd.fields || []) {
-        const zone = f.zone || 'advanced';
-        const key = `${f.node_id}::${f.field}`;
-        // Text-encode in user_input zone → main prompt
-        if (zone === 'user_input' && (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode')))) {
-          fields[key] = prompt;
-          continue;
-        }
-        // Unzoned fallback
-        if (!f.zone && f.class_type === 'CLIPTextEncode' && f.field === 'text') {
-          fields[key] = prompt;
-          continue;
-        }
-        // LatentImage size
-        if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'width') {
-          fields[key] = parseInt($('#widthInput').value) || 1024;
-          continue;
-        }
-        if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'height') {
-          fields[key] = parseInt($('#heightInput').value) || 1920;
-          continue;
-        }
-        // LoadImage ref
-        if (f.class_type === 'LoadImage' && f.field === 'image' && (zone === 'user_input' || !f.zone)) {
-          const refVal = $('#refImageValue')?.value || '';
-          if (refVal) fields[key] = refVal;
-          continue;
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  
 
-    $$('#advFields [data-key]').forEach((el) => {
-      fields[el.dataset.key] = el.type === 'number' ? parseFloat(el.value) || 0 : el.value;
-      snapshot.adv[el.dataset.key] = el.value;
-    });
+  
 
-    try {
-      const r = await fetch(`${API}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow: currentWF,
-          fields,
-          width: parseInt($('#widthInput').value) || 0,
-          height: parseInt($('#heightInput').value) || 0,
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.detail || '提交失败');
-      jobFields[d.job_id] = snapshot;
-      // Add job to local store immediately so the card appears without waiting for poll
-      jobs[d.job_id] = {
-        id: d.job_id,
-        status: 'queued',
-        message: '排队中...',
-        workflow: currentWF,
-        seed: String(d.seed),
-        prompt_preview: $('#promptInput').value.slice(0, 300),
-        width: parseInt($('#widthInput').value) || 0,
-        height: parseInt($('#heightInput').value) || 0,
-        queued_at: new Date().toLocaleTimeString('en-GB'),
-      };
-      renderGallery();
-    } catch (e) {
-      alert('出图失败: ' + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '🚀 出图';
-    }
-  }
+  
 
-  async function restoreJob(jobId) {
-    // Try local snapshot first (submitted this session)
-    const snap = jobFields[jobId];
-    if (snap) {
-      if (snap.prompt) $('#promptInput').value = snap.prompt;
-      if (snap.width) $('#widthInput').value = snap.width;
-      if (snap.height) $('#heightInput').value = snap.height;
-      for (const [k, v] of Object.entries(snap.adv || {})) {
-        const el = $(`#advFields [data-key="${k}"]`);
-        if (el) el.value = v;
-      }
-      return;
-    }
-    // Fallback: restore from server job data
-    const j = jobs[jobId];
-    if (!j) return;
-    // Switch to correct workflow first
-    if (j.workflow && (!currentWF || j.workflow.replace('.json','') !== currentWF.replace('.json',''))) {
-      const tag = getWFType(j.workflow);
-      if (tag) switchTab(tag.text);
-      await selectWF(j.workflow);
-    }
-    // Restore prompt
-    if (j.prompt_preview) $('#promptInput').value = j.prompt_preview;
-    // Restore dimensions
-    if (j.width && j.height) {
-      $('#widthInput').value = j.width;
-      $('#heightInput').value = j.height;
-      if (typeof highlightRatio === 'function') highlightRatio(j.width, j.height);
-    }
-    // Restore seed
-    if (j.seed) {
-      const seedEl = document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
-      if (seedEl) seedEl.value = j.seed;
-    }
-    // Restore advanced fields from server fields data
-    if (j.fields && typeof j.fields === 'object') {
-      for (const [k, v] of Object.entries(j.fields)) {
-        if (k === 'prompt_preview') continue;
-        const el = $(`#advFields [data-key="${k}"]`);
-        if (el) el.value = v;
-      }
-    }
-  }
-
-  async function fillFormFromHistory(idx) {
-    const h = historyItems[idx];
-    if (!h) return;
-    // Switch to correct workflow first (so advanced fields exist in DOM)
-    if (h.workflow && h.workflow.replace('.json', '') !== currentWF.replace('.json', '')) {
-      // Auto-switch tab to match this workflow's category
-      const tag = getWFType(h.workflow);
-      switchTab(tag ? tag.text : '其他');
-      await selectWF(h.workflow);
-    }
-    if (h.prompt) $('#promptInput').value = h.prompt;
-    // Scale dimensions to fit within 1920, proportional, divisible by 64
-    if (h.width && h.height) {
-      const [w, h2] = scaleDim(h.width, h.height);
-      $('#widthInput').value = w;
-      $('#heightInput').value = h2;
-      highlightRatio(w, h2);
-    }
-    // Restore advanced fields if available
-    if (h.field_values) {
-      for (const [k, v] of Object.entries(h.field_values)) {
-        const el = $(`#advFields [data-key="${k}"]`);
-        if (el) el.value = v;
-      }
-    }
-    // Restore seed (covers old items without field_values, and ensures actual seed is used)
-    if (h.seed) {
-      const seedInput = document.querySelector('.seed-group input');
-      if (seedInput) seedInput.value = h.seed;
-    }
-    document.querySelector('.col-left').scrollTop = 0;
-  }
-
-  function scaleDim(w, h, maxSide = 1920) {
-    const longest = Math.max(w, h);
-    if (longest <= maxSide && w % 64 === 0 && h % 64 === 0) return [w, h];
-    const scale = maxSide / longest;
-    const sw = Math.round((w * scale) / 64) * 64;
-    const sh = Math.round((h * scale) / 64) * 64;
-    return [Math.max(sw, 256), Math.max(sh, 256)];
-  }
-
-  function highlightRatio(w, h) {
-    $$('.ratio-btn').forEach((b) => {
-      const bw = parseInt(b.dataset.w),
-        bh = parseInt(b.dataset.h);
-      b.classList.toggle('active', bw === w && bh === h);
-    });
-  }
-
-  function initRatioGrid() {
-    $$('.ratio-btn').forEach((b) => {
-      b.addEventListener('click', () => {
-        $$('.ratio-btn').forEach((x) => x.classList.remove('active'));
-        b.classList.add('active');
-        $('#widthInput').value = b.dataset.w;
-        $('#heightInput').value = b.dataset.h;
-      });
-    });
-    // Sync: if user manually changes inputs, clear active highlight
-    ['#widthInput', '#heightInput'].forEach((sel) => {
-      $(sel).addEventListener('input', () => {
-        const w = parseInt($('#widthInput').value) || 0,
-          h = parseInt($('#heightInput').value) || 0;
-        highlightRatio(w, h);
-      });
-    });
-  }
+  
 
   // ══════════════════════════════════════════════════════════════════════════
   //  Jobs + Gallery
@@ -1027,11 +446,11 @@
     if (job.status === 'done' && (!prev || prev.status !== 'done')) {
       if (prev && prev.status === 'error') return;
       delete jobs[job.id];
-      loadHistory();
+      window.CW.loadHistory();
       return;
     }
     if (prev && prev.status === job.status && updateJobCardInPlace(job)) return;
-    renderGallery();
+    window.CW.renderGallery();
   }
 
   /** Targeted DOM update for a single job card (progress/message/timer only). */
@@ -1121,399 +540,41 @@
   //  Gallery Filters
   // ══════════════════════════════════════════════════════════════════════════
 
-  let _galleryFilters = { type: '', size: '', style: '', workflow: '' };
-  let _filteredHistory = [];
 
-  function _filterHistory(arr) {
-    return arr.filter(function(j) {
-      if(_galleryFilters.type) {
-        var t = getWFType(j.workflow || "");
-        if(!t || t.text !== _galleryFilters.type) return false;
-      }
-      if(_galleryFilters.size) {
-        var maxDim = Math.max(j.width || 0, j.height || 0);
-        var sizeLevel = '';
-        if(maxDim <= 1024) sizeLevel = '1K';
-        else if(maxDim <= 2048) sizeLevel = '2K';
-        else if(maxDim <= 3840) sizeLevel = '4K';
-        else sizeLevel = '4K+';
-        if(sizeLevel !== _galleryFilters.size) return false;
-      }
-      if(_galleryFilters.style) {
-        var searchText = '';
-        searchText += (j.prompt_preview || '').toLowerCase() + ' ';
-        try {
-          var pObj = JSON.parse(j.prompt || '{}');
-          function _extractText(obj) {
-            var t = '';
-            if(typeof obj === 'string') return obj + ' ';
-            if(typeof obj === 'object' && obj !== null) {
-              for(var key in obj) { t += _extractText(obj[key]); }
-            }
-            return t;
-          }
-          searchText += _extractText(pObj).toLowerCase();
-        } catch(e) {
-          searchText += (j.prompt || '').toLowerCase();
-        }
-        if(searchText.indexOf(_galleryFilters.style) === -1) return false;
-      }
-      if(_galleryFilters.workflow) {
-        if((j.workflow || "").replace(".json", "") !== _galleryFilters.workflow) return false;
-      }
-      return true;
-    });
-  }
+  
 
-  function applyFilters() {
-    var el;
-    el = document.getElementById("gfType");
-    _galleryFilters.type = el ? el.value : "";
-    el = document.getElementById("gfSize");
-    _galleryFilters.size = el ? el.value : "";
-    el = document.getElementById("gfStyle"); _galleryFilters.style = el ? el.value.toLowerCase() : "";
-    el = document.getElementById("gfWF");    _galleryFilters.workflow = el ? el.value : "";
-    _filteredHistory = _filterHistory(historyItems);
-    _histVisibleCount = 0;
-    _lastRenderedHistCount = 0;
-    _lastGalleryHash = "";
-    renderGallery();
-  }
+  
 
-  function clearFilters() {
-    _galleryFilters = { type: "", size: "", style: "", workflow: "" };
-    var el;
-    el = document.getElementById("gfType");
-    if(el) el.value = "";
-    el = document.getElementById("gfSize");
-    if(el) el.value = "";
-    el = document.getElementById("gfStyle"); if(el) el.value = "";
-    el = document.getElementById("gfWF");    if(el) el.value = "";
-    _filteredHistory = _filterHistory(historyItems);
-    _histVisibleCount = 0;
-    _lastRenderedHistCount = 0;
-    _lastGalleryHash = "";
-    renderGallery();
-  }
+  
 
-  function _populateFilterOptions() {
-    var wfs = new Set();
-    var styles = new Set();
-    for(var k = 0; k < historyItems.length; k++) {
-      var j = historyItems[k];
-      if(j.workflow) wfs.add(j.workflow.replace(".json", ""));
-      try {
-        var pObj = JSON.parse(j.prompt || '{}');
-        if(pObj.style && typeof pObj.style === 'string') {
-          var s = pObj.style.trim();
-          if(s.length > 0) styles.add(s);
-        }
-      } catch(e) {}
-    }
-    var sizeSel = document.getElementById("gfSize");
-    if(sizeSel) {
-      sizeSel.innerHTML = '<option value="">全部尺寸</option>' +
-        '<option value="1K">1K (≤1024)</option>' +
-        '<option value="2K">2K (≤2048)</option>' +
-        '<option value="4K">4K (≤3840)</option>' +
-        '<option value="4K+">4K+ (>3840)</option>';
-    }
-    var wfSel = document.getElementById("gfWF");
-    if(wfSel) {
-      var cur2 = wfSel.value;
-      var arr2 = Array.from(wfs).sort();
-      var h2 = '<option value="">全部工作流</option>';
-      for(var m = 0; m < arr2.length; m++) {
-        h2 += '<option value="' + arr2[m] + '">' + arr2[m] + '</option>';
-      }
-      wfSel.innerHTML = h2;
-      if(cur2 && wfs.has(cur2)) wfSel.value = cur2;
-    }
-    var styleInput = document.getElementById("gfStyle");
-    if(styleInput && styles.size > 0) {
-      var dlId = 'styleDatalist';
-      var dl = document.getElementById(dlId);
-      if(!dl) {
-        dl = document.createElement('datalist');
-        dl.id = dlId;
-        document.body.appendChild(dl);
-        styleInput.setAttribute('list', dlId);
-      }
-      var sorted = Array.from(styles).sort();
-      dl.innerHTML = sorted.map(function(s) { return '<option value="' + escH(s) + '">'; }).join('');
-    }
-  }
+  
 
-  let _renderTimer = null;
-  let _lastGalleryHash = '';
-  function renderGallery() {
-    if (_renderTimer) return; // debounce: coalesce rapid updates
-    _renderTimer = requestAnimationFrame(() => {
-      _renderTimer = null;
-      _renderGalleryImpl();
-    });
-  }
+  
 
   /** Build a single history card HTML string */
-  function _histCardHTML(h, i) {
-    const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfTag = getWFType(h.workflow || '');
-    const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-    return `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
-    <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
-      <img src="${imgSrc}" loading="lazy" alt="">
-      ${tagBadge}
-      <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
-      <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">📋 复刻</button>
-    </div>
-    <div class="gi-info">
-      <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
-      <div class="gi-meta">
-        <span>⏱ ${h.elapsed}s</span>
-        <span>📐 ${h.width && h.height ? h.width + '×' + h.height : '—'}</span>
-        <span>🕐 ${h.time || '—'}</span>
-      </div>
-      ${h.seed ? `<div class="gi-seed">🌱 ${h.seed}</div>` : ''}
-    </div>
-  </div>`;
-  }
+  
 
   /** Append newly visible history cards without rebuilding the DOM (no flicker) */
-  function _appendNewHistoryCards() {
-    const gallery = $('#gallery');
-    if (!gallery) return;
-    const sentinel = gallery.querySelector('.masonry-sentinel');
-    const prevCount = _lastRenderedHistCount;
-    const filteredArr2 = _filteredHistory.length ? _filteredHistory : historyItems;
-    const newCount = Math.min(_histVisibleCount, filteredArr2.length);
-    if (newCount <= prevCount) {
-      if (sentinel) _attachSentinel();
-      return;
-    }
+  
 
-    let fragment = '';
-    for (let i = prevCount; i < newCount; i++) {
-      fragment += _histCardHTML(historyItems[i], i);
-    }
+  
+  
 
-    if (sentinel) sentinel.insertAdjacentHTML('beforebegin', fragment);
-    else gallery.insertAdjacentHTML('beforeend', fragment);
-
-    _lastRenderedHistCount = newCount;
-
-    if (newCount >= historyItems.length && sentinel) {
-      sentinel.remove();
-      if (_sentinelObs) _sentinelObs.disconnect();
-      return;
-    }
-
-    // Re-check: if sentinel is still visible after appending, load more immediately
-    if (sentinel && _histVisibleCount < filteredArr2.length) {
-      requestAnimationFrame(() => {
-        const rect = sentinel.getBoundingClientRect();
-        if (rect.top < window.innerHeight + 200) {
-          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), historyItems.length);
-          _appendNewHistoryCards();
-        } else {
-          _attachSentinel();
-        }
-      });
-    }
-  }
-
-  function _galleryHash(jobsObj, histArr) {
-    // Only structural changes trigger full rebuild: job added/removed, status transitions, history items added/removed
-    let s = '';
-    for (const j of Object.values(jobsObj)) {
-      s += j.id + j.status + '|';
-    }
-    return s + '::' + histArr.length;
-  }
-  function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.length + " filtered=" + _filteredHistory.length + " count=" + _histVisibleCount + " batch=" + _batchSize());
-    const gallery = $('#gallery');
-
-    // Ensure we have an initial batch size on first render
-    _ensureInitialBatch();
-
-    // Active jobs (queued, preparing, starting_comfyui, generating)
-    const activeJobs = Object.values(jobs).filter((j) => j.status !== 'done' && j.status !== 'error');
-    // Error jobs (kept briefly for visibility)
-    const errorJobs = Object.values(jobs).filter((j) => j.status === 'error');
-
-    const jobCards = [...activeJobs, ...errorJobs];
-
-    // ── Hash check: skip rebuild if nothing changed ──
-    const hash = _galleryHash(jobs, historyItems);
-    if (hash === _lastGalleryHash) return;
-    _lastGalleryHash = hash;
-
-    // Count: active jobs + history
-    $('#histCount').textContent = `(${activeJobs.length + historyItems.length})`;
-
-    let html = '';
-
-    // ── Job cards ──
-    for (const j of jobCards) {
-      const label = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
-      const statusMsg = j.message || j.status;
-      const hasImage = !!j.image;
-      const imgSrc = hasImage ? `${API}/api/images/${j.image}` : '';
-
-      html += `<div class="gi job-card ${j.status}" data-job-id="${j.id}">`;
-
-      if (hasImage) {
-        html += `<div class="gi-img" onclick="event.stopPropagation();CW.openJobLB('${escA(j.image)}','${escA(label)}')">
-        <img src="${imgSrc}" loading="lazy" alt="">
-      </div>`;
-      } else if (j.status === 'queued') {
-        html += `<div class="gi-img job-placeholder">
-        <div class="job-status-text queued">等待前序任务中</div>
-      </div>`;
-      } else {
-        const genTs = j.generating_at || 0;
-        html += `<div class="gi-img job-placeholder">
-        <div class="job-spinner"></div>
-        <div class="job-status-text ${j.status}">${escH(statusMsg)}</div>
-        ${j.status === 'generating' && genTs ? `<div class="gi-timer-row"><span class="gi-timer" data-ts="${genTs}">${formatElapsed(genTs)}</span></div>` : ''}
-      </div>`;
-      }
-
-      // Cancel/delete button (top-right) for all job states
-      const cancelLabel = j.status === 'generating' ? '取消' : '删除';
-      html += `<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${j.id}')" title="${cancelLabel}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>`;
-
-      // Workflow name badge (top-left) — use metadata edited name
-      const wfMeta = _wfMeta[j.workflow] || {};
-      const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
-      if (wfLabel) {
-        const wfTag = getWFType(j.workflow || '');
-        const tagHtml = wfTag
-          ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>`
-          : '';
-        const instBadge = j.instance
-          ? ` <span class="wf-tag" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px;background:#2d1b69;color:#a78bfa">#${escH(j.instance)}</span>`
-          : '';
-        html += `<div class="gi-wf-badge">${escH(wfLabel)}${tagHtml}${instBadge}</div>`;
-      }
-
-      const phaseMsg = j.message || (j.status === 'generating' ? '出图中' : j.status === 'error' ? '失败' : '排队中');
-      const showPhase = j.status !== 'generating'; // hide phase in meta for generating (timer only)
-      html += `<div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${j.id}')">
-      <div class="gi-prompt" title="${escA(j.prompt_preview || label)}">${escH(j.prompt_preview || label)}</div>
-      ${j.status !== 'generating' && j.message ? `<div class="gi-detail" title="${escA(j.message)}">${escH(j.message)}</div>` : ''}
-      ${j.status === 'generating' ? `<div class="gi-progress-bar"><div class="gi-progress-fill" style="width:${j.progress?.pct || 0}%"></div></div>` : ''}
-      ${j.status === 'error' ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${j.id}')">重新尝试</button></div>` : ''}
-      <div class="gi-meta">
-        <span>${j.status === 'generating' ? '' : phaseMsg}</span>
-        ${j.width && j.height ? `<span>📐 ${j.width}×${j.height}</span>` : ''}
-        ${j.queued_at ? `<span>🕐 ${j.queued_at}</span>` : ''}
-      </div>
-      ${j.seed ? `<div class="gi-seed">🌱 ${j.seed}</div>` : ''}
-    </div>`;
-
-      html += `</div>`;
-    }
-
-    // ── History items (lazy loaded) ──
-    const filteredArr = _filteredHistory.length ? _filteredHistory : historyItems;
-    lbItems = filteredArr;
-    const visibleItems = filteredArr.slice(0, _histVisibleCount);
-    for (let i = 0; i < visibleItems.length; i++) {
-      const h = visibleItems[i];
-      const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-      const wfTag = getWFType(h.workflow || '');
-      const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-
-      html += `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
-      <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
-        <img src="${imgSrc}" loading="lazy" alt="">
-        ${tagBadge}
-        <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
-        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">📋 复刻</button>
-      </div>
-      <div class="gi-info">
-        <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
-        <div class="gi-meta">
-          <span>⏱ ${h.elapsed}s</span>
-          <span>📐 ${h.width && h.height ? h.width + '×' + h.height : '—'}</span>
-          <span>🕐 ${h.time || '—'}</span>
-        </div>
-        ${h.seed ? `<div class="gi-seed">🌱 ${h.seed}</div>` : ''}
-      </div>
-    </div>`;
-    }
-
-    if (historyItems.length > _histVisibleCount) {
-      html += `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
-    }
-
-    if (!jobCards.length && !historyItems.length) {
-      html = `<div class="empty-hint"><div class="eh-icon">🖼️</div><p>暂无历史</p><p style="font-size:11px;margin-top:4px">出图后自动出现在这里</p></div>`;
-    }
-
-    try { gallery.innerHTML = html; } catch(e) { console.error("[GALLERY ERROR]", e); var ediv = document.getElementById("gallery"); if(ediv) ediv.innerHTML = "<div style=color:red;padding:20px>Render error: " + e.message + "</div>"; }
-
-    _lastRenderedHistCount = visibleItems.length;
-    lbItems = filteredArr;
-    _attachSentinel();
-  }
-
-  let _sentinelObs = null;
-  function _attachSentinel() {
-    const sentinel = document.getElementById('masonrySentinel');
-    if (!sentinel) return;
-    if (_sentinelObs) _sentinelObs.disconnect();
-    _sentinelObs = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && _histVisibleCount < historyItems.length) {
-          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), historyItems.length);
-          _appendNewHistoryCards();
-        }
-      },
-      { root: null, rootMargin: '300px', threshold: 0 },
-    );
-    _sentinelObs.observe(sentinel);
-  }
+  
 
   // ══════════════════════════════════════════════════════════════════════════
   //  History
   // ══════════════════════════════════════════════════════════════════════════
 
-  async function loadHistory() {
-    try {
-      const r = await fetch(`${API}/api/history`);
-      historyItems = await r.json();
-      _lastGalleryHash = '';
-      _populateFilterOptions();
-      applyFilters();
-      loadWorkflows();
-    } catch (e) {
-      console.error('loadHistory:', e);
-    }
-  }
+  
 
-  async function delHist(id) {
-    // Mark card as deleting immediately
-    var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
-    if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
-    try {
-      var r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
-      if (!r.ok) throw new Error('删除失败');
-      var idx = historyItems.findIndex(function(h) { return h.id === id; });
-      if (idx >= 0) historyItems.splice(idx, 1);
-      _filteredHistory = _filterHistory(historyItems);
-      renderGallery();
-    } catch (e) {
-      console.error('delHist:', e);
-      if (card) { card.classList.remove('deleting'); card.style.opacity = ''; card.style.pointerEvents = ''; }
-    }
-  }
+  
 
   async function cancelJob(jobId) {
     try {
       await fetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
       delete jobs[jobId];
-      renderGallery();
+      window.CW.renderGallery();
     } catch (e) {
       console.error('cancelJob:', e);
     }
@@ -1535,44 +596,15 @@
   //  Lightbox
   // ══════════════════════════════════════════════════════════════════════════
 
-  function openLB(idx) {
-    lbIdx = idx;
-    renderLB();
-    $('#lightbox').classList.add('open');
-    document.body.style.overflow = 'hidden';
-  }
+  
 
-  function openJobLB(filename, label) {
-    // Show a single-item lightbox for a job image
-    const imgSrc = `${API}/api/images/${filename}`;
-    $('#lbImg').src = imgSrc;
-    $('#lbInfo').textContent = label || '';
-    $('#lbPrev').style.display = 'none';
-    $('#lbNext').style.display = 'none';
-    $('#lightbox').classList.add('open');
-    document.body.style.overflow = 'hidden';
-  }
+  
 
-  function closeLB() {
-    $('#lightbox').classList.remove('open');
-    document.body.style.overflow = '';
-    lbIdx = -1;
-  }
+  
 
-  function renderLB() {
-    if (lbIdx < 0 || lbIdx >= lbItems.length) return;
-    const h = lbItems[lbIdx];
-    $('#lbImg').src = `${API}/api/images/${h.filename}`;
-    $('#lbInfo').textContent =
-      `${h.prompt || '—'} · ⏱ ${h.elapsed}s · 📐 ${h.width && h.height ? h.width + '×' + h.height : '—'} · 🌱 ${shortSeed(h.seed)} · 🕐 ${h.time || ''}`;
-    $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
-    $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
-  }
+  
 
-  function lbNav(dir) {
-    lbIdx = Math.max(0, Math.min(lbIdx + dir, lbItems.length - 1));
-    renderLB();
-  }
+  
 
   document.addEventListener('keydown', (e) => {
     if (!$('#lightbox').classList.contains('open')) return;
@@ -1585,136 +617,22 @@
   //  Advanced toggle / Seed / Init
   // ══════════════════════════════════════════════════════════════════════════
 
-  function initAdvToggle() {
-    $('#advToggle').addEventListener('click', () => {
-      advOpen = !advOpen;
-      $('#advToggle').classList.toggle('open', advOpen);
-      $('#advBody').classList.toggle('open', advOpen);
-    });
-  }
+  
 
-  function initOverlayUpload() {
-    const zone = $('#wfUploadZone');
-    const input = $('#wfUploadInput');
-    if (!zone || !input) return;
-    zone.addEventListener('click', (e) => {
-      if (e.target.tagName === 'LABEL') return; // let label click through
-      input.click();
-    });
-    input.addEventListener('change', () => {
-      if (input.files.length) wfUploadOverlay(Array.from(input.files));
-      input.value = '';
-    });
-    zone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      zone.classList.add('dragover');
-    });
-    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-    zone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      zone.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.name.endsWith('.json'));
-      if (files.length) wfUploadOverlay(files);
-    });
-  }
+  
 
-  async function wfUploadOverlay(files) {
-    const zone = $('#wfUploadZone');
-    let ok = 0,
-      fail = 0;
-    for (const file of files) {
-      if (!file.name.endsWith('.json')) {
-        fail++;
-        continue;
-      }
-      const fd = new FormData();
-      fd.append('file', file);
-      try {
-        const r = await fetch(`${API}/api/workflows/upload`, { method: 'POST', body: fd });
-        if (!r.ok) throw new Error('upload');
-        ok++;
-      } catch (e) {
-        fail++;
-      }
-    }
-    // Show result briefly
-    const msg = document.createElement('div');
-    msg.className = 'wf-upload-progress ' + (fail ? 'wf-upload-err' : 'wf-upload-ok');
-    msg.textContent = fail ? `完成：${ok} 成功，${fail} 失败` : `成功上传 ${ok} 个工作流`;
-    zone.parentElement.appendChild(msg);
-    setTimeout(() => msg.remove(), 3000);
-    loadWorkflows();
-    loadWfMeta();
-  }
+  
 
-  function rndSeed(btnEl) {
-    const input = btnEl ? btnEl.parentElement.querySelector('input') : null;
-    if (input) input.value = Math.floor(Math.random() * 2 ** 53);
-  }
+  
 
   /** Enable drag-to-scroll on horizontal scroll containers */
-  function initDragScroll(selector) {
-    var el = document.querySelector(selector);
-    if (!el) return;
-    var isDown = false, startX, scrollLeft;
-    el.addEventListener("mousedown", function(e) {
-      isDown = true;
-      startX = e.pageX - el.offsetLeft;
-      scrollLeft = el.scrollLeft;
-      el.style.scrollSnapType = "none";
-      el.classList.add("dragging");
-    });
-    el.addEventListener("mouseleave", function() {
-      if (!isDown) return;
-      isDown = false;
-      el.style.scrollSnapType = "";
-      el.classList.remove("dragging");
-    });
-    el.addEventListener("mouseup", function() {
-      if (!isDown) return;
-      isDown = false;
-      el.style.scrollSnapType = "";
-      el.classList.remove("dragging");
-    });
-    el.addEventListener("mousemove", function(e) {
-      if (!isDown) return;
-      e.preventDefault();
-      var x = e.pageX - el.offsetLeft;
-      var walk = (x - startX);
-      el.scrollLeft = scrollLeft - walk;
-    });
-  }
+  
 
   /** Show a floating toast notification */
-function showToast(message, type) {
-  var container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
-  }
-  var icons = { queued: '🕐', generating: '🎨', done: '✅', error: '❌' };
-  // Dedup: remove existing toast with same message
-  var existing = container.querySelectorAll('.toast');
-  for (var ei = 0; ei < existing.length; ei++) {
-    if (existing[ei].textContent.indexOf(message) >= 0) {
-      existing[ei].parentNode.removeChild(existing[ei]);
-      break;
-    }
-  }
-  var t = document.createElement('div');
-  t.className = 'toast toast-' + type;
-  t.innerHTML = '<span class="toast-icon">' + (icons[type] || 'ℹ️') + '</span>' + escH(message);
-  container.appendChild(t);
-  setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 4000);
-}
+
 
 /** Clear the prompt textarea and hide the clear button */
-function clearPrompt() {
-  var inp = $('#promptInput');
-  if (inp) { inp.value = ''; inp.dispatchEvent(new Event('input')); inp.focus(); }
-}
+
 
 function init() {
     pollStatus();
@@ -1722,15 +640,15 @@ function init() {
     setInterval(() => {
       if (ws && ws.readyState === 1) ws.send('ping');
     }, 30000);
-    loadHistory();
+    window.CW.loadHistory();
     pollJobs();
     setInterval(pollJobs, 5000);
     connectWS();
     initServiceToggles();
-    initAdvToggle();
-    initRatioGrid();
-    initOverlayUpload();
-    initResizeHandle();
+    window.CW.initAdvToggle();
+    window.CW.initRatioGrid();
+    window.CW.initOverlayUpload();
+    window.CW.initResizeHandle();
     setInterval(tickTimers, 1000);
     initDragScroll('.wf-grid');
   // Show/hide clear button on prompt input
@@ -1767,316 +685,42 @@ function init() {
   let _wfEditFilename = '';
   let _wfDelFilename = '';
 
-  function openWfMgr() {
-    $('#wfOverlay').classList.add('open');
-    loadWfMeta();
-    loadWfDirs();
-  }
-  function closeWfMgr() {
-    $('#wfOverlay').classList.remove('open');
-  }
+  
+  
 
   // ── Workflow Directory Management ──
 
-  async function loadWfDirs() {
-    try {
-      const r = await fetch(API + '/api/workflow-dirs');
-      const dirs = await r.json();
-      const list = $('#wfDirsList');
-      if (!list) return;
-      list.innerHTML = dirs
-        .map((d) => {
-          const escPath = escA(d.path);
-          const status = d.exists
-            ? `<span class="wf-dir-count">${d.count} workflows</span>`
-            : `<span class="wf-dir-missing">⚠ 不存在</span>`;
-          const delBtn =
-            dirs.length > 1
-              ? `<button class="wf-dir-del" onclick="CW.removeWfDir('${escPath}')" title="移除">✕</button>`
-              : '';
-          return `<div class="wf-dir-item">
-        <span class="wf-dir-path" title="${escPath}">${escH(d.path)}</span>
-        ${status}
-        ${delBtn}
-      </div>`;
-        })
-        .join('');
-    } catch (e) {
-      console.error('loadWfDirs:', e);
-    }
-  }
+  
 
-  function showAddDir() {
-    const el = $('#wfDirsAdd');
-    if (el) {
-      el.style.display = 'flex';
-      $('#wfDirInput').focus();
-    }
-  }
-  function hideAddDir() {
-    const el = $('#wfDirsAdd');
-    if (el) {
-      el.style.display = 'none';
-      $('#wfDirInput').value = '';
-    }
-  }
+  
+  
 
-  async function addWfDir() {
-    const input = $('#wfDirInput');
-    if (!input) return;
-    const path = input.value.trim();
-    if (!path) return;
-    try {
-      const r = await fetch(API + '/api/workflow-dirs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      if (!r.ok) {
-        const d = await r.json();
-        throw new Error(d.detail || '添加失败');
-      }
-      hideAddDir();
-      loadWfDirs();
-      loadWorkflows();
-    } catch (e) {
-      alert('添加失败: ' + e.message);
-    }
-  }
+  
 
-  async function removeWfDir(path) {
-    if (!confirm(`移除目录？\n${path}\n\n（不会删除目录中的文件）`)) return;
-    try {
-      const r = await fetch(API + `/api/workflow-dirs?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-      if (!r.ok) {
-        const d = await r.json();
-        throw new Error(d.detail || '移除失败');
-      }
-      loadWfDirs();
-      loadWorkflows();
-    } catch (e) {
-      alert('移除失败: ' + e.message);
-    }
-  }
+  
 
-  async function loadWfMeta() {
-    try {
-      const r = await fetch(API + '/api/workflows/meta');
-      _wfMeta = await r.json();
-    } catch (e) {
-      _wfMeta = {};
-    }
-    renderWfGrid();
-  }
+  
 
-  function renderWfGrid() {
-    const grid = $('#wfOverlayGrid');
-    const empty = $('#wfOverlayEmpty');
-    const entries = Object.entries(_wfMeta);
-    const wfFiles = new Set();
-    try {
-      for (const f of Object.values(jobs || {})) {
-        if (f.workflow) wfFiles.add(f.workflow);
-      }
-    } catch (e) {}
-    $('#wfOverlayCount').textContent = `(${entries.length})`;
-    if (!entries.length) {
-      grid.innerHTML = '';
-      empty.style.display = '';
-      return;
-    }
-    empty.style.display = 'none';
-
-    let html = '';
-    for (const [fname, meta] of entries) {
-      const displayName = meta.name || fname.replace('.json', '');
-      const tags = meta.tags || [];
-      const thumbUrl = meta.thumbnail ? `${API}/api/workflows/thumbnail/${meta.thumbnail}` : '';
-      const tagHtml = tags
-        .map((t) => {
-          const cls = t === '图生图' ? 'i2i' : t === '文生图' ? 't2i' : 'res';
-          return `<span class="wf-mgr-tag ${cls}">${escH(t)}</span>`;
-        })
-        .join('');
-      html += `<div class="wf-mgr-card" data-fname="${escA(fname)}">
-      <div class="wf-mgr-thumb" onclick="CW.onWfThumbClick('${escA(fname)}')">
-        ${thumbUrl ? `<img src="${thumbUrl}" alt="">` : `<div class="wf-mgr-thumb-placeholder">📷</div>`}
-      </div>
-      <div class="wf-mgr-body">
-        <div class="wf-mgr-name" title="${escA(displayName)}">${escH(displayName)}</div>
-        <div class="wf-mgr-filename" title="${escA(fname)}">${escH(fname)}</div>
-        <div class="wf-mgr-tags">${tagHtml || '<span style="color:var(--dim);font-size:10px">无标签</span>'}</div>
-        <div class="wf-mgr-actions">
-          <button class="wf-mgr-btn" onclick="CW.openWfEdit('${escA(fname)}')">✏️ 编辑</button>
-          <button class="wf-mgr-btn" onclick="CW.openNodeEditor('${escA(fname)}')">🔧 节点</button>
-          <button class="wf-mgr-btn danger" onclick="CW.openWfDel('${escA(fname)}')">🗑️ 删除</button>
-        </div>
-      </div>
-    </div>`;
-    }
-    grid.innerHTML = html;
-  }
+  
 
   // ── Edit Modal ──
-  function openWfEdit(fname) {
-    _wfEditFilename = fname;
-    const meta = _wfMeta[fname] || {};
-    $('#wfEditTitle').textContent = '编辑 ' + (meta.name || fname.replace('.json', ''));
-    $('#wfEditName').value = meta.name || fname.replace('.json', '');
-    // Render tags
-    const tagsDiv = $('#wfEditTags');
-    tagsDiv.innerHTML = '';
-    (meta.tags || []).forEach((t) => {
-      const span = document.createElement('span');
-      span.className = 'wf-edit-tag';
-      span.innerHTML = `${escH(t)} <span class="wf-edit-tag-remove" data-tag="${escA(t)}">✕</span>`;
-      span.querySelector('.wf-edit-tag-remove').addEventListener('click', () => {
-        span.remove();
-      });
-      tagsDiv.appendChild(span);
-    });
-    // Thumbnail
-    const thumbUrl = meta.thumbnail ? `${API}/api/workflows/thumbnail/${meta.thumbnail}` : '';
-    const img = $('#wfEditThumbImg');
-    const ph = $('#wfEditThumbPlaceholder');
-    if (thumbUrl) {
-      img.src = thumbUrl;
-      img.style.display = '';
-      ph.style.display = 'none';
-    } else {
-      img.src = '';
-      img.style.display = 'none';
-      ph.style.display = '';
-    }
-    // Reset tag select
-    $('#wfEditTagSelect').value = '';
-    $('#wfEditModal').classList.add('open');
-  }
-  function closeWfEdit() {
-    $('#wfEditModal').classList.remove('open');
-  }
+  
+  
 
-  function onAddWfTag(e) {
-    const val = e.target.value;
-    if (!val) return;
-    const tagsDiv = $('#wfEditTags');
-    // Prevent duplicates
-    const existing = [...tagsDiv.querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
-    if (existing.includes(val)) {
-      e.target.value = '';
-      return;
-    }
-    const span = document.createElement('span');
-    span.className = 'wf-edit-tag';
-    span.innerHTML = `${escH(val)} <span class="wf-edit-tag-remove" data-tag="${escA(val)}">✕</span>`;
-    span.querySelector('.wf-edit-tag-remove').addEventListener('click', () => {
-      span.remove();
-    });
-    tagsDiv.appendChild(span);
-    e.target.value = '';
-  }
+  
 
-  async function onWfThumbUpload(e) {
-    const file = e.target.files[0];
-    if (!file || !_wfEditFilename) return;
-    const fd = new FormData();
-    fd.append('filename', _wfEditFilename);
-    fd.append('file', file);
-    try {
-      await fetch(API + '/api/workflows/meta/thumbnail', { method: 'POST', body: fd });
-      // Show preview
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        $('#wfEditThumbImg').src = ev.target.result;
-        $('#wfEditThumbImg').style.display = '';
-        $('#wfEditThumbPlaceholder').style.display = 'none';
-      };
-      reader.readAsDataURL(file);
-    } catch (e) {}
-    e.target.value = '';
-  }
+  
 
-  async function saveWfEdit() {
-    if (!_wfEditFilename) return;
-    const name = $('#wfEditName').value.trim() || _wfEditFilename.replace('.json', '');
-    const tags = [...$('#wfEditTags').querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
-    try {
-      await fetch(API + '/api/workflows/meta/' + encodeURIComponent(_wfEditFilename), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, tags }),
-      });
-      _wfMeta[_wfEditFilename] = { ...(_wfMeta[_wfEditFilename] || {}), name, tags };
-    } catch (e) {}
-    closeWfEdit();
-    renderWfGrid();
-    // Also refresh main workflow grid if it shows names
-    loadWorkflows();
-  }
+  
 
-  function onWfThumbClick(fname) {
-    _wfEditFilename = fname;
-    $('#wfEditThumbInput').click();
-  }
+  
 
   // ── Delete Modal ──
-  function openWfDel(fname) {
-    _wfDelFilename = fname;
-    const meta = _wfMeta[fname] || {};
-    const displayName = meta.name || fname.replace('.json', '');
-    $('#wfDelMsg').textContent = `确定要删除工作流「${displayName}」吗？此操作不可撤销。`;
-    $('#wfDelModal').classList.add('open');
-  }
-  function closeWfDel() {
-    $('#wfDelModal').classList.remove('open');
-  }
-  async function confirmWfDel() {
-    if (!_wfDelFilename) return;
-    try {
-      await fetch(API + '/api/workflows/' + encodeURIComponent(_wfDelFilename), { method: 'DELETE' });
-      delete _wfMeta[_wfDelFilename];
-    } catch (e) {}
-    closeWfDel();
-    renderWfGrid();
-    loadWorkflows();
-  }
+  
+  
+  
 
-  function initResizeHandle() {
-    const handle = $('#resizeHandle');
-    const colLeft = $('#colLeft');
-    if (!handle || !colLeft) return;
-    let startX, startW;
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      startX = e.clientX;
-      startW = colLeft.offsetWidth;
-      handle.classList.add('active');
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-      const onMove = (e2) => {
-        const dx = e2.clientX - startX;
-        const nw = Math.max(280, Math.min(startW + dx, window.innerWidth * 0.5));
-        colLeft.style.width = nw + 'px';
-        colLeft.style.flex = 'none';
-      };
-      const onUp = () => {
-        handle.classList.remove('active');
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-    // Clear inline width on mobile so CSS media query takes effect
-    window.addEventListener('resize', () => {
-      if (window.innerWidth <= 900) {
-        colLeft.style.width = '';
-        colLeft.style.flex = '';
-      }
-    });
-  }
+  
 
   // ═══ Node Editor ══════════════════════════════════════════════════════
 
@@ -2092,46 +736,10 @@ function init() {
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
   window.CW = {
-    selectWF,
-    clearWF,
-    clearPrompt,
-    delWF,
-    openLB,
-    openJobLB,
-    closeLB,
-    lbNav,
-    delHist,
     cancelJob,
     retryJob,
     rndSeed,
-    restoreJob,
-    fillFormFromHistory,
-    uploadWF,
     wfUploadOverlay,
-    openWfMgr,
-    closeWfMgr,
-    openWfEdit,
-    closeWfEdit,
-    saveWfEdit,
-    onAddWfTag,
-    onWfThumbUpload,
-    onWfThumbClick,
-    openWfDel,
-    closeWfDel,
-    confirmWfDel,
-    loadWfDirs,
-    showAddDir,
-    hideAddDir,
-    addWfDir,
-    removeWfDir,
-    switchTab,
-    applyFilters,
-    clearFilters,
-    toggleGenForm,
-    openInstPopup,
-    closeInstPopup,
-    toggleInst,
-    killGpuProc,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
