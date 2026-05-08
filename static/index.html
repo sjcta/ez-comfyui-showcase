@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ez ComfyUI Showcase</title>
+<link rel="stylesheet" href="static/css/style.css?v=1778265880">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
+</head>
+<body>
+
+<!-- ═══ 标题栏 ═══ -->
+<header class="titlebar">
+  <div class="logo"><span>🎨</span> Ez ComfyUI Showcase</div>
+  <div class="titlebar-right">
+    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" title="工作流管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理</button>
+  </div>
+</header>
+
+<!-- ═══ 工作流管理覆盖层 ═══ -->
+<div class="wf-overlay" id="wfOverlay">
+  <div class="wf-overlay-inner">
+    <div class="wf-overlay-header">
+      <div class="wf-overlay-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理 <span class="wf-overlay-count" id="wfOverlayCount"></span></div>
+      <button class="wf-overlay-close" id="wfOverlayClose">✕</button>
+    </div>
+    <div class="wf-overlay-grid" id="wfOverlayGrid"></div>
+    <div class="wf-overlay-empty" id="wfOverlayEmpty" style="display:none">暂无工作流</div>
+    <div class="wf-bottom-actions">
+      <div class="wf-overlay-upload" id="wfOverlayUpload">
+        <div class="wf-upload-zone" id="wfUploadZone">
+          <div class="wf-upload-icon">📁</div>
+          <div class="wf-upload-text">拖入 workflow JSON 文件到此处</div>
+          <div class="wf-upload-hint">或 <label class="wf-upload-btn" for="wfUploadInput">选择文件</label></div>
+          <input type="file" id="wfUploadInput" accept=".json" multiple style="display:none">
+        </div>
+      </div>
+      <div class="wf-dirs-section" id="wfDirsSection">
+        <div class="wf-dirs-header">
+          <span class="wf-dirs-title">📂 工作流目录</span>
+          <button class="wf-dirs-add-btn" onclick="CW.showAddDir()" title="添加目录">＋ 新增目录</button>
+        </div>
+        <div class="wf-dirs-list" id="wfDirsList"></div>
+        <div class="wf-dirs-add" id="wfDirsAdd" style="display:none">
+          <input type="text" id="wfDirInput" placeholder="/path/to/workflows" class="wf-dir-input">
+          <button class="wf-dir-add-confirm" onclick="CW.addWfDir()">添加</button>
+          <button class="wf-dir-add-cancel" onclick="CW.hideAddDir()">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 编辑弹窗 ═══ -->
+<div class="wf-edit-modal" id="wfEditModal">
+  <div class="wf-edit-card">
+    <div class="wf-edit-header">
+      <span class="wf-edit-title" id="wfEditTitle">编辑工作流</span>
+      <button class="wf-edit-close" id="wfEditClose">✕</button>
+    </div>
+    <div class="wf-edit-body">
+      <div class="wf-edit-row">
+        <label>名称</label>
+        <input type="text" id="wfEditName" placeholder="工作流名称">
+      </div>
+      <div class="wf-edit-row">
+        <label>标签</label>
+        <div class="wf-edit-tags" id="wfEditTags"></div>
+        <div class="wf-edit-tag-add">
+          <select id="wfEditTagSelect">
+            <option value="">+ 添加标签</option>
+            <option value="文生图">文生图</option>
+            <option value="图生图">图生图</option>
+            <option value="2K">2K</option>
+            <option value="4K">4K</option>
+          </select>
+        </div>
+      </div>
+      <div class="wf-edit-row">
+        <label>缩略图</label>
+        <div class="wf-edit-thumb" id="wfEditThumb" title="点击上传缩略图">
+          <img id="wfEditThumbImg" src="" alt="">
+          <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder">📷</div>
+        </div>
+        <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
+      </div>
+    </div>
+    <div class="wf-edit-footer">
+      <button class="btn wf-edit-cancel" id="wfEditCancel">取消</button>
+      <button class="btn btn-primary wf-edit-save" id="wfEditSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 节点编辑器 ═══ -->
+<div class="ne-modal" id="nodeEditorModal">
+  <div class="ne-card">
+    <div class="ne-header">
+      <span class="ne-title" id="nodeEditorTitle">节点编辑</span>
+      <button class="ne-close" id="nodeEditorClose">✕</button>
+    </div>
+    <div class="ne-body">
+      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 👁️ 切换可见性</div>
+      <div class="ne-zones" id="neZones">
+        <div class="ne-zone" data-zone="user_input">
+          <div class="ne-zone-title">📝 用户输入</div>
+          <div class="ne-zone-cards" id="neZoneUserInput"></div>
+        </div>
+        <div class="ne-zone" data-zone="advanced">
+          <div class="ne-zone-title">⚙️ 高级参数</div>
+          <div class="ne-zone-cards" id="neZoneAdvanced"></div>
+        </div>
+        <div class="ne-zone" data-zone="output">
+          <div class="ne-zone-title">📤 输出</div>
+          <div class="ne-zone-cards" id="neZoneOutput"></div>
+        </div>
+        <div class="ne-zone" data-zone="hidden">
+          <div class="ne-zone-title">🚫 隐藏</div>
+          <div class="ne-zone-cards" id="neZoneHidden"></div>
+        </div>
+      </div>
+    </div>
+    <div class="ne-footer">
+      <button class="btn ne-reset" id="nodeEditorReset">恢复默认</button>
+      <div class="ne-footer-spacer"></div>
+      <button class="btn ne-cancel" id="nodeEditorCancel">取消</button>
+      <button class="btn btn-primary ne-save" id="nodeEditorSave">保存配置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 删除确认弹窗 ═══ -->
+<div class="wf-del-modal" id="wfDelModal">
+  <div class="wf-del-card">
+    <div class="wf-del-title">确认删除？</div>
+    <div class="wf-del-msg" id="wfDelMsg"></div>
+    <div class="wf-del-actions">
+      <button class="btn wf-del-cancel" id="wfDelCancel">取消</button>
+      <button class="btn btn-danger wf-del-confirm" id="wfDelConfirm">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 状态栏 ═══ -->
+<div class="statusbar" id="statusbar">
+  <div class="sb-vram">
+    <div class="sb-vram-label">VRAM</div>
+    <div class="sb-vram-track">
+      <div class="sb-vram-fill" id="vramFill" style="width:0%"></div>
+      <div class="sb-vram-segments" id="vramSegments"></div>
+    </div>
+    <div class="sb-vram-text" id="vramText">— / — GB</div>
+  </div>
+  <div class="sb-gpu">
+    <span class="sb-metric" id="gpuTemp">— °C</span>
+    <span class="sb-sep">·</span>
+    <span class="sb-metric" id="gpuUtil">GPU —%</span>
+  </div>
+  <div class="sb-spacer"></div>
+  <div class="sb-services">
+    <button class="svc-btn on" id="svcComfyUI" title="ComfyUI 实例管理">
+      <span class="svc-led" id="comfyLed"></span>
+      <span class="svc-label">ComfyUI</span>
+      <span class="svc-state" id="comfyState">ON</span>
+    </button>
+    <button class="svc-btn off" id="svcOthers" title="其他 GPU 进程">
+      <span class="svc-led"></span>
+      <span class="svc-label">其他</span>
+      <span class="svc-state" id="othersState">-</span>
+    </button>
+    
+  </div>
+</div>
+
+<!-- ═══ 主体 ═══ -->
+<div class="workspace">
+
+  <!-- 左列：Workflows + 快速出图 -->
+  <div class="col-left" id="colLeft"><div class="col-left-scroll" id="colLeftScroll">
+
+    <div class="col-section-header">
+      <span>工作流选择</span>
+    </div>
+    <div class="wf-tabs" id="wfTabs"></div>
+    <div class="wf-grid" id="wfGrid"></div>
+
+
+    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none">⚡ 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
+    <div class="gen-form" id="genForm" style="display:none">
+      <div class="fg">
+        <label id="promptLabel">提示词</label>
+        <div style="position:relative"><textarea id="promptInput" placeholder="输入提示词..."></textarea><button id="clearPromptBtn" style="display:none;position:absolute;top:4px;right:4px;background:rgba(255,255,255,.1);border:none;color:var(--dim);font-size:11px;padding:2px 8px;border-radius:4px;cursor:pointer" onclick="CW.clearPrompt()">清空</button></div>
+      </div>
+      <div class="fg" id="sizeSection">
+        <label>尺寸</label>
+        <div class="ratio-grid" id="ratioGrid">
+          <button class="ratio-btn" data-w="1024" data-h="1024" title="1024×1024"><span class="ratio-shape" style="width:22px;height:22px"></span><span class="ratio-label">1:1</span></button>
+          <button class="ratio-btn" data-w="1536" data-h="1024" title="1536×1024"><span class="ratio-shape" style="width:26px;height:17px"></span><span class="ratio-label">3:2</span></button>
+          <button class="ratio-btn" data-w="1920" data-h="1080" title="1920×1080"><span class="ratio-shape" style="width:28px;height:16px"></span><span class="ratio-label">16:9</span></button>
+          <button class="ratio-btn" data-w="1536" data-h="1152" title="1536×1152"><span class="ratio-shape" style="width:24px;height:18px"></span><span class="ratio-label">4:3</span></button>
+          <button class="ratio-btn" data-w="1152" data-h="1536" title="1152×1536"><span class="ratio-shape" style="width:18px;height:24px"></span><span class="ratio-label">3:4</span></button>
+          <button class="ratio-btn" data-w="1024" data-h="1536" title="1024×1536"><span class="ratio-shape" style="width:16px;height:24px"></span><span class="ratio-label">2:3</span></button>
+          <button class="ratio-btn active" data-w="1080" data-h="1920" title="1080×1920"><span class="ratio-shape" style="width:14px;height:24px"></span><span class="ratio-label">9:16</span></button>
+        </div>
+        <div class="ratio-custom">
+          <input type="number" id="widthInput" value="1080" step="64" min="256" max="2048">
+          <span>×</span>
+          <input type="number" id="heightInput" value="1920" step="64" min="256" max="2048">
+        </div>
+      </div>
+      <!-- 参考图片（i2i workflow 必选项） -->
+      <div class="ref-image-section" id="refImageSection" style="display:none">
+        <label>📷 参考图片</label>
+        <div class="img-upload-zone" id="refImageZone">
+          <div id="refImagePlaceholder" class="img-upload-placeholder">📷 点击或拖入参考图片</div>
+          <img id="refImagePreview" src="" class="img-upload-preview" style="display:none">
+          <input type="hidden" id="refImageValue" value="">
+          <input type="file" id="refImageFile" accept="image/*" style="display:none">
+        </div>
+      </div>
+      <button class="adv-toggle" id="advToggle"><span class="arrow">▶</span> 详细参数</button>
+      <div class="adv-body" id="advBody"><div id="advFields"></div></div>
+    </div>
+    
+</div><div class="gen-footer" style="display:none">
+      <button class="btn btn-primary" id="btnGenerate">🚀 出图</button>
+    </div>
+  </div>
+
+  <!-- 拖拽分隔条 -->
+  <div class="resize-handle" id="resizeHandle"></div>
+
+  <!-- 右列：出图中 + 历史（瀑布流） -->
+  <div class="col-center" id="colCenter">
+    <div class="col-header">
+      <span>📁 出图历史</span>
+      <span class="ch-count" id="histCount"></span>
+      <input class="gf-search" id="gfStyle" type="text" placeholder="🔍 搜索..." oninput="CW.applyFilters()">
+    </div>
+    <div class="gallery-filters" id="galleryFilters">
+      <select id="gfType" onchange="CW.applyFilters()">
+        <option value="">全部类型</option>
+        <option value="文生图">文生图</option>
+        <option value="图生图">图生图</option>
+        <option value="文生视频">文生视频</option>
+        <option value="图生视频">图生视频</option>
+      </select>
+      <span class="gf-sep"></span>
+      <select id="gfSize" onchange="CW.applyFilters()">
+        <option value="">全部尺寸</option>
+      </select>
+      <span class="gf-sep"></span>
+      <select id="gfWF" onchange="CW.applyFilters()">
+        <option value="">全部工作流</option>
+      </select>
+      <button class="gf-clear" onclick="CW.clearFilters()" title="清除">✕</button>
+    </div>
+    <div class="masonry" id="gallery"></div>
+      </div>
+
+</div>
+
+<!-- ═══ Lightbox ═══ -->
+<div class="lightbox" id="lightbox">
+  <button class="lb-close" onclick="CW.closeLB()">×</button>
+  <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)">‹</button>
+  <img id="lbImg" src="" alt="">
+  <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)">›</button>
+  <div class="lb-info" id="lbInfo"></div>
+</div>
+
+<input type="file" id="wfFileInput" accept=".json" style="display:none">
+<script src="static/js/app.js?v=1778243023"></script>
+
+<div class="inst-popup-overlay" id="instPopup" onclick="if(event.target===this)CW.closeInstPopup()">
+  <div class="inst-popup">
+    <div class="inst-popup-header">
+      <h3 id="instPopupTitle">ComfyUI 实例管理</h3>
+      <button class="inst-popup-close" onclick="CW.closeInstPopup()">✕</button>
+    </div>
+    <div id="instCards"></div>
+  </div>
+</div>
+</body>
+</html>
