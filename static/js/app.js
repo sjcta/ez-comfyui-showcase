@@ -51,6 +51,11 @@
     get: () => currentWF,
     set: (v) => { currentWF = v; }
   });
+  // Expose advOpen via getter/setter (used by ui.js)
+  Object.defineProperty(window.__APP__, 'advOpen', {
+    get: () => advOpen,
+    set: (v) => { advOpen = v; }
+  });
 
   function shortSeed(s) {
     if (!s) return '—';

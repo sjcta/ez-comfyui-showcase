@@ -166,9 +166,9 @@ function initOverlayUpload() {
 
 function initAdvToggle() {
     $('#advToggle').addEventListener('click', () => {
-      advOpen = !advOpen;
-      $('#advToggle').classList.toggle('open', advOpen);
-      $('#advBody').classList.toggle('open', advOpen);
+      A.advOpen = !A.advOpen;
+      $('#advToggle').classList.toggle('open', A.advOpen);
+      $('#advBody').classList.toggle('open', A.advOpen);
     });
   }
 
