@@ -428,7 +428,7 @@
           if (old && old.status !== j.status) { statusChanged = true; break; }
         }
       }
-      if (newCount !== prevCount || statusChanged) renderGallery();
+      if (newCount !== prevCount || statusChanged) { if (window.CW.renderGallery) window.CW.renderGallery(); }
     } catch {}
   }
 
@@ -611,9 +611,9 @@
 
   document.addEventListener('keydown', (e) => {
     if (!$('#lightbox').classList.contains('open')) return;
-    if (e.key === 'Escape') closeLB();
-    if (e.key === 'ArrowLeft') lbNav(-1);
-    if (e.key === 'ArrowRight') lbNav(1);
+    if (e.key === 'Escape' && window.CW.closeLB) window.CW.closeLB();
+    if (e.key === 'ArrowLeft' && window.CW.lbNav) window.CW.lbNav(-1);
+    if (e.key === 'ArrowRight' && window.CW.lbNav) window.CW.lbNav(1);
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -643,15 +643,15 @@ function init() {
     setInterval(() => {
       if (ws && ws.readyState === 1) ws.send('ping');
     }, 30000);
-    window.CW.loadHistory();
+    window.CW.loadHistory && window.CW.loadHistory();
     pollJobs();
     setInterval(pollJobs, 5000);
     connectWS();
     initServiceToggles();
-    window.CW.initAdvToggle();
-    window.CW.initRatioGrid();
-    window.CW.initOverlayUpload();
-    window.CW.initResizeHandle();
+    window.CW.initAdvToggle && window.CW.initAdvToggle();
+    window.CW.initRatioGrid && window.CW.initRatioGrid();
+    window.CW.initOverlayUpload && window.CW.initOverlayUpload();
+    window.CW.initResizeHandle && window.CW.initResizeHandle();
     setInterval(tickTimers, 1000);
     initDragScroll('.wf-grid');
   // Show/hide clear button on prompt input
@@ -661,25 +661,25 @@ function init() {
     pi.addEventListener('input', function() { cb.style.display = pi.value ? '' : 'none'; });
     cb.style.display = pi.value ? '' : 'none';
   }
-  $('#btnGenerate').addEventListener('click', doGenerate);
+  $('#btnGenerate').addEventListener('click', function() { if (window.CW.doGenerate) window.CW.doGenerate(); });
     $('#lightbox').addEventListener('click', (e) => {
-      if (e.target === $('#lightbox') || e.target === $('#lbImg')) closeLB();
+      if (e.target === $('#lightbox') || e.target === $('#lbImg')) { if (window.CW.closeLB) window.CW.closeLB(); }
     });
     // Workflow management overlay
-    $('#tbWfMgrBtn').addEventListener('click', openWfMgr);
-    $('#wfOverlayClose').addEventListener('click', closeWfMgr);
-    $('#wfEditClose').addEventListener('click', closeWfEdit);
-    $('#wfEditCancel').addEventListener('click', closeWfEdit);
-    $('#wfEditSave').addEventListener('click', saveWfEdit);
-    $('#wfEditThumb').addEventListener('click', () => $('#wfEditThumbInput').click());
-    $('#wfEditThumbInput').addEventListener('change', onWfThumbUpload);
-    $('#wfEditTagSelect').addEventListener('change', onAddWfTag);
-    $('#wfDelCancel').addEventListener('click', closeWfDel);
-    $('#wfDelConfirm').addEventListener('click', confirmWfDel);
-    $('#nodeEditorClose').addEventListener('click', closeNodeEditor);
-    $('#nodeEditorCancel').addEventListener('click', closeNodeEditor);
-    $('#nodeEditorSave').addEventListener('click', saveNodeConfig);
-    $('#nodeEditorReset').addEventListener('click', resetNodeConfig);
+    $('#tbWfMgrBtn').addEventListener('click', function() { if (window.CW.openWfMgr) window.CW.openWfMgr(); });
+    $('#wfOverlayClose').addEventListener('click', function() { if (window.CW.closeWfMgr) window.CW.closeWfMgr(); });
+    $('#wfEditClose').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
+    $('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
+    $('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });
+    $('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });
+    $('#wfEditThumbInput').addEventListener('change', function() { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(); });
+    $('#wfEditTagSelect').addEventListener('change', function() { if (window.CW.onAddWfTag) window.CW.onAddWfTag(); });
+    $('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });
+    $('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });
+    $('#nodeEditorClose').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
+    $('#nodeEditorCancel').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
+    $('#nodeEditorSave').addEventListener('click', function() { if (window.CW.saveNodeConfig) window.CW.saveNodeConfig(); });
+    $('#nodeEditorReset').addEventListener('click', function() { if (window.CW.resetNodeConfig) window.CW.resetNodeConfig(); });
   }
 
   // ── Workflow Management ──
@@ -736,6 +736,33 @@ function init() {
   
 
   
+  async function wfUploadOverlay(files) {
+    var zone = $('#wfUploadZone');
+    var ok = 0, fail = 0;
+    for (var fi = 0; fi < files.length; fi++) {
+      var file = files[fi];
+      if (!file.name.endsWith('.json')) { fail++; continue; }
+      var fd = new FormData();
+      fd.append('file', file);
+      try {
+        var r = await fetch(API + '/api/workflows/upload', { method: 'POST', body: fd });
+        if (!r.ok) throw new Error('upload');
+        ok++;
+      } catch (e) { fail++; }
+    }
+    var msg = document.createElement('div');
+    msg.className = 'wf-upload-progress ' + (fail ? 'wf-upload-err' : 'wf-upload-ok');
+    msg.textContent = fail ? '完成：' + ok + ' 成功，' + fail + ' 失败' : '成功上传 ' + ok + ' 个工作流';
+    if (zone && zone.parentElement) zone.parentElement.appendChild(msg);
+    setTimeout(function() { msg.remove(); }, 3000);
+    if (window.CW.loadWfDirs) window.CW.loadWfDirs();
+  }
+
+  function rndSeed(btnEl) {
+    var input = btnEl ? btnEl.parentElement.querySelector('input') : null;
+    if (input) input.value = Math.floor(Math.random() * Math.pow(2, 53));
+  }
+
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
   if (!window.CW) window.CW = {};
