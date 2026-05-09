@@ -180,7 +180,7 @@ function _appendNewHistoryCards() {
       return;
     }
 
-    fragment = '';
+    var fragment = '';
     for (let i = prevCount; i < newCount; i++) {
       fragment += _histCardHTML(historyItems[i], i);
     }
