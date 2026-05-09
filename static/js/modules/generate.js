@@ -5,7 +5,7 @@
   'use strict';
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
-  var API = A.API, jobs = A.jobs, jobFields = A.jobFields;
+  var API = A.API, jobs = A.jobs, jobFields = A.jobFields, historyItems = A.historyItems;
 
 function initRatioGrid() {
     $$('.ratio-btn').forEach((b) => {

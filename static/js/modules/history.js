@@ -86,7 +86,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       html += `<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${j.id}')" title="${cancelLabel}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>`;
 
       // Workflow name badge (top-left) — use metadata edited name
-      const wfMeta = _wfMeta[j.workflow] || {};
+      const wfMeta = A._wfMeta[j.workflow] || {};
       const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
       if (wfLabel) {
         const wfTag = window.CW.getWFType(j.workflow || '');
