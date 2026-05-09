@@ -315,6 +315,13 @@ function toggleGenForm() {
     if (btn) btn.textContent = open ? '⚡ 收起 ▴' : '⚡ 快速出图 ▾';
   }
 
+function _resetRefImage() {
+    // No-op: ref image section hidden via renderAdvFields when no LoadImage exists
+  }
+  function _initRefImageZone() {
+    // Placeholder: init ref image drag-drop zone
+  }
+
   if (!window.CW) window.CW = {};
   window.CW.toggleGenForm = toggleGenForm;
   window.CW.restoreJob = restoreJob;
