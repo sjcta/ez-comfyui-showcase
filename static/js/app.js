@@ -771,6 +771,9 @@ function init() {
     retryJob,
     rndSeed,
     wfUploadOverlay,
+    getWFType,
+    formatElapsed,
+    shortSeed,
   });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

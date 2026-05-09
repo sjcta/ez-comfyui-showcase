@@ -377,7 +377,7 @@ async function selectWF(name) {
       const r = await fetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
       const fields = d.fields || [];
-      _wfFieldMeta = fields.map((f) => ({
+      window.__APP__._wfFieldMeta = fields.map((f) => ({
         key: f.node_id + '::' + f.field,
         node_id: f.node_id,
         class_type: f.class_type,
@@ -392,7 +392,7 @@ async function selectWF(name) {
         min: f.min,
         max: f.max,
       }));
-      renderAdvFields(fields);
+      if (window.CW.renderAdvFields) window.CW.renderAdvFields(fields);
       // Detect if workflow has width/height (LatentImage nodes)
       const hasSize = fields.some((f) => f.field === 'width' && f.class_type.includes('LatentImage'));
       const sizeSection = $('#sizeSection');
@@ -458,7 +458,7 @@ async function loadWorkflows() {
           const previewImg = previewSrc
             ? `<img src="${previewSrc}" loading="lazy" alt="">`
             : `<div class="wf-card-icon">⚙</div>`;
-          const typeTag = getWFType(w.name);
+          const typeTag = window.CW.getWFType(w.name);
           const catText = typeTag ? typeTag.text : '其他';
           const typeClass = typeTag ? `wf-card-type-${typeTag.cls.replace('wf-tag-', '')}` : '';
           return `<div class="wf-card ${typeClass}" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onclick="CW.selectWF('${escA(w.name)}')">
@@ -477,7 +477,7 @@ async function loadWorkflows() {
       const TAB_ORDER = ['文生图', '图生图', '文生视频', '图生视频', '其他'];
       const cats = new Set(
         wfs.map((w) => {
-          const t = getWFType(w.name);
+          const t = window.CW.getWFType(w.name);
           return t ? t.text : '其他';
         }),
       );
@@ -486,7 +486,7 @@ async function loadWorkflows() {
         let tabHtml = '';
         for (const t of TAB_ORDER) {
           if (cats.has(t)) {
-            const catWfs = wfs.filter(w => { const tag = getWFType(w.name); return tag ? tag.text === t : t === '其他'; });
+            const catWfs = wfs.filter(w => { const tag = window.CW.getWFType(w.name); return tag ? tag.text === t : t === '其他'; });
             tabHtml += `<button class="wf-tab ${_currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
           }
         }
@@ -534,4 +534,6 @@ async function loadWorkflows() {
   window.CW.addWfDir = addWfDir;
   window.CW.removeWfDir = removeWfDir;
   window.CW.switchTab = switchTab;
+  window.CW.loadWorkflows = loadWorkflows;
+  window.CW.loadWfMeta = loadWfMeta;
 })();

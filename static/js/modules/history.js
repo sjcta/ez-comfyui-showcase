@@ -77,7 +77,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
         html += `<div class="gi-img job-placeholder">
         <div class="job-spinner"></div>
         <div class="job-status-text ${j.status}">${escH(statusMsg)}</div>
-        ${j.status === 'generating' && genTs ? `<div class="gi-timer-row"><span class="gi-timer" data-ts="${genTs}">${formatElapsed(genTs)}</span></div>` : ''}
+        ${j.status === 'generating' && genTs ? `<div class="gi-timer-row"><span class="gi-timer" data-ts="${genTs}">${window.CW.formatElapsed(genTs)}</span></div>` : ''}
       </div>`;
       }
 
@@ -89,7 +89,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       const wfMeta = _wfMeta[j.workflow] || {};
       const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
       if (wfLabel) {
-        const wfTag = getWFType(j.workflow || '');
+        const wfTag = window.CW.getWFType(j.workflow || '');
         const tagHtml = wfTag
           ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>`
           : '';
@@ -124,7 +124,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     for (let i = 0; i < visibleItems.length; i++) {
       const h = visibleItems[i];
       const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-      const wfTag = getWFType(h.workflow || '');
+      const wfTag = window.CW.getWFType(h.workflow || '');
       const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
 
       html += `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
@@ -211,7 +211,7 @@ function _appendNewHistoryCards() {
   }
 function _histCardHTML(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfTag = getWFType(h.workflow || '');
+    const wfTag = window.CW.getWFType(h.workflow || '');
     const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
     return `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
@@ -285,7 +285,7 @@ function _populateFilterOptions() {
 function _filterHistory(arr) {
     return arr.filter(function(j) {
       if(_galleryFilters.type) {
-        var t = getWFType(j.workflow || "");
+        var t = window.CW.getWFType(j.workflow || "");
         if(!t || t.text !== _galleryFilters.type) return false;
       }
       if(_galleryFilters.size) {
@@ -352,7 +352,7 @@ function renderLB() {
     const h = lbItems[lbIdx];
     $('#lbImg').src = `${API}/api/images/${h.filename}`;
     $('#lbInfo').textContent =
-      `${h.prompt || '—'} · ⏱ ${h.elapsed}s · 📐 ${h.width && h.height ? h.width + '×' + h.height : '—'} · 🌱 ${shortSeed(h.seed)} · 🕐 ${h.time || ''}`;
+      `${h.prompt || '—'} · ⏱ ${h.elapsed}s · 📐 ${h.width && h.height ? h.width + '×' + h.height : '—'} · 🌱 ${window.CW.shortSeed(h.seed)} · 🕐 ${h.time || ''}`;
     $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
     $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
   }
@@ -407,7 +407,7 @@ async function loadHistory() {
       _lastGalleryHash = '';
       _populateFilterOptions();
       applyFilters();
-      loadWorkflows();
+      window.CW.loadWorkflows();
     } catch (e) {
       console.error('loadHistory:', e);
     }

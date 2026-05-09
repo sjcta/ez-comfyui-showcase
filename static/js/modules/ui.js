@@ -135,8 +135,8 @@ async function wfUploadOverlay(files) {
     msg.textContent = fail ? `完成：${ok} 成功，${fail} 失败` : `成功上传 ${ok} 个工作流`;
     zone.parentElement.appendChild(msg);
     setTimeout(() => msg.remove(), 3000);
-    loadWorkflows();
-    loadWfMeta();
+    window.CW.loadWorkflows();
+    window.CW.loadWfMeta();
   }
 
 function initOverlayUpload() {

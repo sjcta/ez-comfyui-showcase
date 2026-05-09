@@ -7,10 +7,6 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs;
 
-  _wfFieldMeta = [];
-
-  _loadImageFields = [];
-
 function initRatioGrid() {
     $$('.ratio-btn').forEach((b) => {
       b.addEventListener('click', () => {
@@ -53,7 +49,7 @@ async function fillFormFromHistory(idx) {
     // Switch to correct workflow first (so advanced fields exist in DOM)
     if (h.workflow && h.workflow.replace('.json', '') !== currentWF.replace('.json', '')) {
       // Auto-switch tab to match this workflow's category
-      const tag = getWFType(h.workflow);
+      const tag = window.CW.getWFType(h.workflow);
       window.CW.switchTab(tag ? tag.text : '其他');
       await window.CW.selectWF(h.workflow);
     }
@@ -98,7 +94,7 @@ async function restoreJob(jobId) {
     if (!j) return;
     // Switch to correct workflow first
     if (j.workflow && (!currentWF || j.workflow.replace('.json','') !== currentWF.replace('.json',''))) {
-      const tag = getWFType(j.workflow);
+      const tag = window.CW.getWFType(j.workflow);
       if (tag) window.CW.switchTab(tag.text);
       await window.CW.selectWF(j.workflow);
     }
@@ -205,7 +201,7 @@ async function doGenerate() {
         height: parseInt($('#heightInput').value) || 0,
         queued_at: new Date().toLocaleTimeString('en-GB'),
       };
-      renderGallery();
+      window.CW.renderGallery();
     } catch (e) {
       alert('出图失败: ' + e.message);
     } finally {
@@ -215,10 +211,12 @@ async function doGenerate() {
   }
 
 
-  let _wfFieldMeta = [];
+  // Shared across modules via __APP__
+  var _wfFieldMeta = window.__APP__._wfFieldMeta || [];
+  window.__APP__._wfFieldMeta = _wfFieldMeta;
 
-
-  let _loadImageFields = [];
+  var _loadImageFields = window.__APP__._loadImageFields || [];
+  window.__APP__._loadImageFields = _loadImageFields;
 
 function renderAdvFields(fields) {
     const box = $('#advFields');
@@ -321,4 +319,7 @@ function toggleGenForm() {
   window.CW.toggleGenForm = toggleGenForm;
   window.CW.restoreJob = restoreJob;
   window.CW.fillFormFromHistory = fillFormFromHistory;
+  window.CW.doGenerate = doGenerate;
+  window.CW.renderAdvFields = renderAdvFields;
+  window.CW.renderQuickGen = renderQuickGen;
 })();
