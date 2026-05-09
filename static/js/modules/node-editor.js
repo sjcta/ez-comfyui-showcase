@@ -7,9 +7,9 @@
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs;
-  _nodeEditorConfig = null;
-  _nodeEditorData = null;
-  _nodeEditorFname = '';
+  var _nodeEditorConfig = null;
+  var _nodeEditorData = null;
+  var _nodeEditorFname = '';
 
 function resetNodeConfig() {
     if (!_nodeEditorFname) return;
