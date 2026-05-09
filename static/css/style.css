@@ -362,7 +362,7 @@ a { color: var(--accent); text-decoration: none; }
 
 .masonry {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: visible;
   overflow-x: hidden;
   padding: 14px;
   display: grid;
