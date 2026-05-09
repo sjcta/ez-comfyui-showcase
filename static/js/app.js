@@ -45,7 +45,12 @@
     return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
   // ── Expose shared state for modules ──
-  window.__APP__ = { $, $$, escH, escA, API, jobs, historyItems };
+  window.__APP__ = { $, $$, escH, escA, API, jobs, jobFields, historyItems };
+  // Expose currentWF via getter/setter so other IIFE modules can read/write it
+  Object.defineProperty(window.__APP__, 'currentWF', {
+    get: () => currentWF,
+    set: (v) => { currentWF = v; }
+  });
 
   function shortSeed(s) {
     if (!s) return '—';

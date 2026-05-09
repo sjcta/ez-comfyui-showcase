@@ -285,7 +285,7 @@ function openWfMgr() {
 async function delWF(name) {
     if (!confirm(`删除 ${name}？`)) return;
     await fetch(`${API}/api/workflows/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (currentWF === name) currentWF = null;
+    if (A.currentWF === name) A.currentWF = null;
     loadWorkflows();
   }
 
@@ -326,7 +326,7 @@ function switchTab(tab) {
   }
 
 function clearWF() {
-    currentWF = '';
+    A.currentWF = '';
     highlightWF();
     var genTitle = $('#genTitle');
     var genForm = $('#genForm');
@@ -343,11 +343,11 @@ function clearWF() {
   }
 
 function highlightWF() {
-    $$('.wf-card').forEach((el) => el.classList.toggle('active', el.dataset.name === currentWF));
+    $$('.wf-card').forEach((el) => el.classList.toggle('active', el.dataset.name === A.currentWF));
   }
 
 async function selectWF(name) {
-    currentWF = name;
+    A.currentWF = name;
     try {
       localStorage.setItem('cw:lastWF', name);
     } catch {}
@@ -500,12 +500,12 @@ async function loadWorkflows() {
         saved = localStorage.getItem('cw:lastWF') || '';
       } catch {}
       const target =
-        currentWF && wfs.find((w) => w.name === currentWF)
-          ? currentWF
+        A.currentWF && wfs.find((w) => w.name === A.currentWF)
+          ? A.currentWF
           : saved && wfs.find((w) => w.name === saved)
             ? saved
             : wfs[0].name;
-      if (!currentWF || currentWF !== target) selectWF(target);
+      if (!A.currentWF || A.currentWF !== target) selectWF(target);
       else highlightWF();
     } catch (e) {
       console.error('loadWorkflows:', e);

@@ -5,7 +5,7 @@
   'use strict';
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
-  var API = A.API, jobs = A.jobs;
+  var API = A.API, jobs = A.jobs, jobFields = A.jobFields;
 
 function initRatioGrid() {
     $$('.ratio-btn').forEach((b) => {
@@ -47,7 +47,7 @@ async function fillFormFromHistory(idx) {
     const h = historyItems[idx];
     if (!h) return;
     // Switch to correct workflow first (so advanced fields exist in DOM)
-    if (h.workflow && h.workflow.replace('.json', '') !== currentWF.replace('.json', '')) {
+    if (h.workflow && h.workflow.replace('.json', '') !== A.currentWF.replace('.json', '')) {
       // Auto-switch tab to match this workflow's category
       const tag = window.CW.getWFType(h.workflow);
       window.CW.switchTab(tag ? tag.text : '其他');
@@ -93,7 +93,7 @@ async function restoreJob(jobId) {
     const j = jobs[jobId];
     if (!j) return;
     // Switch to correct workflow first
-    if (j.workflow && (!currentWF || j.workflow.replace('.json','') !== currentWF.replace('.json',''))) {
+    if (j.workflow && (!A.currentWF || j.workflow.replace('.json','') !== A.currentWF.replace('.json',''))) {
       const tag = window.CW.getWFType(j.workflow);
       if (tag) window.CW.switchTab(tag.text);
       await window.CW.selectWF(j.workflow);
@@ -122,7 +122,7 @@ async function restoreJob(jobId) {
   }
 
 async function doGenerate() {
-    if (!currentWF) {
+    if (!A.currentWF) {
       alert('请先选择 workflow');
       return;
     }
@@ -135,7 +135,7 @@ async function doGenerate() {
     const snapshot = { prompt, width: $('#widthInput').value, height: $('#heightInput').value, adv: {} };
 
     try {
-      const fr = await fetch(`${API}/api/workflows/${encodeURIComponent(currentWF)}/fields`);
+      const fr = await fetch(`${API}/api/workflows/${encodeURIComponent(A.currentWF)}/fields`);
       const fd = await fr.json();
       for (const f of fd.fields || []) {
         const zone = f.zone || 'advanced';
@@ -180,7 +180,7 @@ async function doGenerate() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workflow: currentWF,
+          workflow: A.currentWF,
           fields,
           width: parseInt($('#widthInput').value) || 0,
           height: parseInt($('#heightInput').value) || 0,
@@ -194,7 +194,7 @@ async function doGenerate() {
         id: d.job_id,
         status: 'queued',
         message: '排队中...',
-        workflow: currentWF,
+        workflow: A.currentWF,
         seed: String(d.seed),
         prompt_preview: $('#promptInput').value.slice(0, 300),
         width: parseInt($('#widthInput').value) || 0,
