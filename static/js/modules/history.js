@@ -13,6 +13,8 @@
   var _filteredHistory = [];
   var lbIdx = -1;
   var lbItems = [];
+  var _galleryFilters = { type: '', size: '', style: '', workflow: '' };
+  var _renderTimer = null;
 function _attachSentinel() {
     const sentinel = document.getElementById('masonrySentinel');
     if (!sentinel) return;
@@ -411,6 +413,49 @@ async function loadHistory() {
     }
   }
 
+
+function applyFilters() {
+    var el;
+    el = document.getElementById("gfType");
+    _galleryFilters.type = el ? el.value : "";
+    el = document.getElementById("gfSize");
+    _galleryFilters.size = el ? el.value : "";
+    el = document.getElementById("gfStyle");
+    _galleryFilters.style = el ? el.value.toLowerCase() : "";
+    el = document.getElementById("gfWF");
+    _galleryFilters.workflow = el ? el.value : "";
+    _filteredHistory = _filterHistory(historyItems);
+    _histVisibleCount = 0;
+    _lastRenderedHistCount = 0;
+    _lastGalleryHash = "";
+    renderGallery();
+  }
+
+function clearFilters() {
+    _galleryFilters = { type: "", size: "", style: "", workflow: "" };
+    var el;
+    el = document.getElementById("gfType");
+    if (el) el.value = "";
+    el = document.getElementById("gfSize");
+    if (el) el.value = "";
+    el = document.getElementById("gfStyle");
+    if (el) el.value = "";
+    el = document.getElementById("gfWF");
+    if (el) el.value = "";
+    _filteredHistory = _filterHistory(historyItems);
+    _histVisibleCount = 0;
+    _lastRenderedHistCount = 0;
+    _lastGalleryHash = "";
+    renderGallery();
+  }
+
+function renderGallery() {
+    if (_renderTimer) return;
+    _renderTimer = requestAnimationFrame(function() {
+      _renderTimer = null;
+      _renderGalleryImpl();
+    });
+  }
 
   if (!window.CW) window.CW = {};
   window.CW.applyFilters = applyFilters;
