@@ -361,8 +361,7 @@ a { color: var(--accent); text-decoration: none; }
 /* ═══ 瀑布流 Grid ═══════════════════════════════════════════════════ */
 
 .masonry {
-  overflow-y: visible;
-  overflow-x: hidden;
+  overflow: visible;
   padding: 14px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
