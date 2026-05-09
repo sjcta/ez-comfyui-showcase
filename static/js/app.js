@@ -44,6 +44,9 @@
   function escA(s) {
     return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
+  // ── Expose shared state for modules ──
+  window.__APP__ = { $, $$, escH, escA, API, jobs, historyItems };
+
   function shortSeed(s) {
     if (!s) return '—';
     s = String(s);
@@ -735,12 +738,13 @@ function init() {
   
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
-  window.CW = {
+  if (!window.CW) window.CW = {};
+  Object.assign(window.CW, {
     cancelJob,
     retryJob,
     rndSeed,
     wfUploadOverlay,
-  };
+  });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
