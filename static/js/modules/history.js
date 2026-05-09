@@ -53,7 +53,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     // Count: active jobs + history
     $('#histCount').textContent = `(${activeJobs.length + historyItems.length})`;
 
-    html = '';
+    var html = '';
 
     // ── Job cards ──
     for (const j of jobCards) {
