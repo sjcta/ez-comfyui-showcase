@@ -45,11 +45,31 @@
     return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
   // ── Expose shared state for modules ──
-  window.__APP__ = { $, $$, escH, escA, API, jobs, jobFields, historyItems };
+  window.__APP__ = { $, $$, escH, escA, API, jobs, jobFields, historyItems, _wfMeta, _wfEditFilename, _wfDelFilename, _currentTab };
   // Expose currentWF via getter/setter so other IIFE modules can read/write it
   Object.defineProperty(window.__APP__, 'currentWF', {
     get: () => currentWF,
     set: (v) => { currentWF = v; }
+  });
+  // Expose _wfMeta via getter/setter (gets reassigned)
+  Object.defineProperty(window.__APP__, '_wfMeta', {
+    get: () => _wfMeta,
+    set: (v) => { _wfMeta = v; }
+  });
+  // Expose _wfEditFilename via getter/setter (string, reassigned)
+  Object.defineProperty(window.__APP__, '_wfEditFilename', {
+    get: () => _wfEditFilename,
+    set: (v) => { _wfEditFilename = v; }
+  });
+  // Expose _wfDelFilename via getter/setter (string, reassigned)
+  Object.defineProperty(window.__APP__, '_wfDelFilename', {
+    get: () => _wfDelFilename,
+    set: (v) => { _wfDelFilename = v; }
+  });
+  // Expose _currentTab via getter/setter (string, reassigned)
+  Object.defineProperty(window.__APP__, '_currentTab', {
+    get: () => _currentTab,
+    set: (v) => { _currentTab = v; }
   });
 
   function shortSeed(s) {

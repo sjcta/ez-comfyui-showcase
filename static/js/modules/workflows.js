@@ -8,10 +8,10 @@
   var API = A.API, jobs = A.jobs, historyItems = A.historyItems;
 
 async function confirmWfDel() {
-    if (!_wfDelFilename) return;
+    if (!A._wfDelFilename) return;
     try {
-      await fetch(API + '/api/workflows/' + encodeURIComponent(_wfDelFilename), { method: 'DELETE' });
-      delete _wfMeta[_wfDelFilename];
+      await fetch(API + '/api/workflows/' + encodeURIComponent(A._wfDelFilename), { method: 'DELETE' });
+      delete A._wfMeta[A._wfDelFilename];
     } catch (e) {}
     closeWfDel();
     renderWfGrid();
@@ -23,29 +23,29 @@ function closeWfDel() {
   }
 
 function openWfDel(fname) {
-    _wfDelFilename = fname;
-    const meta = _wfMeta[fname] || {};
+    A._wfDelFilename = fname;
+    const meta = A._wfMeta[fname] || {};
     const displayName = meta.name || fname.replace('.json', '');
     $('#wfDelMsg').textContent = `确定要删除工作流「${displayName}」吗？此操作不可撤销。`;
     $('#wfDelModal').classList.add('open');
   }
 
 function onWfThumbClick(fname) {
-    _wfEditFilename = fname;
+    A._wfEditFilename = fname;
     $('#wfEditThumbInput').click();
   }
 
 async function saveWfEdit() {
-    if (!_wfEditFilename) return;
-    const name = $('#wfEditName').value.trim() || _wfEditFilename.replace('.json', '');
+    if (!A._wfEditFilename) return;
+    const name = $('#wfEditName').value.trim() || A._wfEditFilename.replace('.json', '');
     const tags = [...$('#wfEditTags').querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
     try {
-      await fetch(API + '/api/workflows/meta/' + encodeURIComponent(_wfEditFilename), {
+      await fetch(API + '/api/workflows/meta/' + encodeURIComponent(A._wfEditFilename), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, tags }),
       });
-      _wfMeta[_wfEditFilename] = { ...(_wfMeta[_wfEditFilename] || {}), name, tags };
+      A._wfMeta[A._wfEditFilename] = { ...(A._wfMeta[A._wfEditFilename] || {}), name, tags };
     } catch (e) {}
     closeWfEdit();
     renderWfGrid();
@@ -55,9 +55,9 @@ async function saveWfEdit() {
 
 async function onWfThumbUpload(e) {
     const file = e.target.files[0];
-    if (!file || !_wfEditFilename) return;
+    if (!file || !A._wfEditFilename) return;
     const fd = new FormData();
-    fd.append('filename', _wfEditFilename);
+    fd.append('filename', A._wfEditFilename);
     fd.append('file', file);
     try {
       await fetch(API + '/api/workflows/meta/thumbnail', { method: 'POST', body: fd });
@@ -98,8 +98,8 @@ function closeWfEdit() {
   }
 
 function openWfEdit(fname) {
-    _wfEditFilename = fname;
-    const meta = _wfMeta[fname] || {};
+    A._wfEditFilename = fname;
+    const meta = A._wfMeta[fname] || {};
     $('#wfEditTitle').textContent = '编辑 ' + (meta.name || fname.replace('.json', ''));
     $('#wfEditName').value = meta.name || fname.replace('.json', '');
     // Render tags
@@ -135,7 +135,7 @@ function openWfEdit(fname) {
 function renderWfGrid() {
     const grid = $('#wfOverlayGrid');
     const empty = $('#wfOverlayEmpty');
-    const entries = Object.entries(_wfMeta);
+    const entries = Object.entries(A._wfMeta);
     const wfFiles = new Set();
     try {
       for (const f of Object.values(jobs || {})) {
@@ -183,9 +183,9 @@ function renderWfGrid() {
 async function loadWfMeta() {
     try {
       const r = await fetch(API + '/api/workflows/meta');
-      _wfMeta = await r.json();
+      A._wfMeta = await r.json();
     } catch (e) {
-      _wfMeta = {};
+      A._wfMeta = {};
     }
     renderWfGrid();
   }
@@ -311,12 +311,12 @@ async function uploadWF(file) {
 function _applyTabFilter() {
     $$('.wf-card').forEach((el) => {
       const cat = el.dataset.cat || '其他';
-      el.style.display = cat === _currentTab ? '' : 'none';
+      el.style.display = cat === A._currentTab ? '' : 'none';
     });
   }
 
 function switchTab(tab) {
-    _currentTab = tab;
+    A._currentTab = tab;
     // Update active tab button
     $$('.wf-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
     _applyTabFilter();
@@ -428,9 +428,9 @@ async function loadWorkflows() {
       const [r, metaR] = await Promise.all([fetch(`${API}/api/workflows`), fetch(`${API}/api/workflows/meta`)]);
       const wfs = await r.json();
       try {
-        _wfMeta = await metaR.json();
+        A._wfMeta = await metaR.json();
       } catch (e) {
-        _wfMeta = {};
+        A._wfMeta = {};
       }
       var wfCountEl = $('#wfCount');
       if (wfCountEl) wfCountEl.textContent = `(${wfs.length})`;
@@ -450,7 +450,7 @@ async function loadWorkflows() {
       }
       let cards = wfs
         .map((w) => {
-          const meta = _wfMeta[w.name] || {};
+          const meta = A._wfMeta[w.name] || {};
           const displayName = meta.name || w.name.replace('.json', '');
           const count = wfCounts[w.name] || 0;
           const thumb = wfThumbs[w.name];
@@ -487,7 +487,7 @@ async function loadWorkflows() {
         for (const t of TAB_ORDER) {
           if (cats.has(t)) {
             const catWfs = wfs.filter(w => { const tag = window.CW.getWFType(w.name); return tag ? tag.text === t : t === '其他'; });
-            tabHtml += `<button class="wf-tab ${_currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
+            tabHtml += `<button class="wf-tab ${A._currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
           }
         }
         tabsEl.innerHTML = tabHtml;
