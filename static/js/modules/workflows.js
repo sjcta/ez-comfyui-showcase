@@ -359,9 +359,11 @@ async function selectWF(name) {
     var genTitle = $('#genTitle');
     var genForm = $('#genForm');
     var genFooter = $('.gen-footer');
+    const _wfMeta = A._wfMeta[name] || {};
+    const _displayName = _wfMeta.name || name.replace('.json', '');
     if (genTitle) {
       genTitle.style.display = '';
-      genTitle.textContent = name.replace('.json', '') + ' 快速出图';
+      genTitle.textContent = '⚡ ' + _displayName + ' 快速出图';
     }
     if (genForm) {
       genForm.style.display = '';
@@ -372,7 +374,7 @@ async function selectWF(name) {
       genFooter.classList.add('mobile-open');
     }
     const ws = $('#wfSummary');
-    if (ws) ws.textContent = name.replace('.json', '');
+    if (ws) ws.textContent = _displayName;
     try {
       const r = await fetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
