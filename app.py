@@ -891,7 +891,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             # Listen for events
             while time.time() - start < timeout:
                 try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=120)
+                    async with asyncio.timeout(120):
+                        raw = await ws.recv()
                 except asyncio.TimeoutError:
                     break
                 except websockets.exceptions.ConnectionClosed:
