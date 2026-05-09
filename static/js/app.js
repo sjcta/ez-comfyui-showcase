@@ -653,7 +653,7 @@ function init() {
     window.CW.initOverlayUpload && window.CW.initOverlayUpload();
     window.CW.initResizeHandle && window.CW.initResizeHandle();
     setInterval(tickTimers, 1000);
-    initDragScroll('.wf-grid');
+    if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
   // Show/hide clear button on prompt input
   var pi = $('#promptInput');
   var cb = $('#clearPromptBtn');

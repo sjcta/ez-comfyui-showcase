@@ -174,4 +174,8 @@ function initAdvToggle() {
 
   if (!window.CW) window.CW = {};
   window.CW.clearPrompt = clearPrompt;
+  window.CW.initAdvToggle = initAdvToggle;
+  window.CW.initOverlayUpload = initOverlayUpload;
+  window.CW.initResizeHandle = initResizeHandle;
+  window.CW.initDragScroll = initDragScroll;
 })();

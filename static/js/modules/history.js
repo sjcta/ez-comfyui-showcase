@@ -162,7 +162,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
   }
 function _galleryHash(jobsObj, histArr) {
     // Only structural changes trigger full rebuild: job added/removed, status transitions, history items added/removed
-    s = '';
+    var s = '';
     for (const j of Object.values(jobsObj)) {
       s += j.id + j.status + '|';
     }
