@@ -1183,7 +1183,9 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
     except Exception as e:
+        import traceback
         jobs[job_id]["status"] = "error"
+        jobs[job_id]["trace"] = traceback.format_exc()[:500]
         if isinstance(e, TimeoutError):
             jobs[job_id]["message"] = "出图失败"
         else:
