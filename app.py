@@ -85,6 +85,8 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         await generate_task(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, instance=inst)
         _instance_last_active[inst["name"]] = time.time()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         if job_id in jobs and jobs[job_id].get("status") not in ("done", "error"):
             jobs[job_id]["status"] = "error"
             jobs[job_id]["message"] = str(e)[:200]
