@@ -784,7 +784,8 @@ function _getColumnCount() {
   window.CW.openLB = openLB;
   window.CW.openJobLB = openJobLB;
   window.CW.closeLB = closeLB;
-  window.CW.lbNav = lbNav;  window.CW.loadHistory = loadHistory;
+  window.CW.lbNav = lbNav;
+  window.CW.loadHistory = loadHistory;
   window.CW.renderGallery = renderGallery;
 
 })();
