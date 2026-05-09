@@ -322,6 +322,10 @@ function _resetRefImage() {
     // Placeholder: init ref image drag-drop zone
   }
 
+function renderQuickGen() {
+    // No-op: quick gen is rendered inline
+  }
+
   if (!window.CW) window.CW = {};
   window.CW.toggleGenForm = toggleGenForm;
   window.CW.restoreJob = restoreJob;
