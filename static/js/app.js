@@ -811,6 +811,43 @@ function init() {
 
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
+  window.CW._logEntries = [];
+  window.CW._onLog = function(entry) {
+    window.CW._logEntries.push(entry);
+    var body = document.getElementById('logBody');
+    if (!body) return;
+    var el = document.createElement('div');
+    el.className = 'log-entry';
+    var ts = new Date(entry.ts * 1000).toLocaleTimeString();
+    el.innerHTML = '<span class="log-time">' + ts + '</span>'
+      + '<span class="log-level ' + entry.level + '">' + entry.level.toUpperCase() + '</span>'
+      + '<span class="log-phase">[' + entry.phase + ']</span>'
+      + '<span class="log-msg">' + (entry.msg || '') + '</span>'
+      + (entry.details ? '<div class="log-details">' + entry.details + '</div>' : '');
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
+  };
+  window.CW.toggleLog = function() {
+    var panel = document.getElementById('logPanel');
+    if (!panel) return;
+    if (panel.style.display === 'none') {
+      panel.style.display = 'flex';
+      fetch(API + '/api/logs').then(function(r) { return r.json(); }).then(function(entries) {
+        window.CW._logEntries = entries;
+        var body = document.getElementById('logBody');
+        if (body) {
+          body.innerHTML = '';
+          entries.forEach(function(e) { window.CW._onLog(e); });
+        }
+      }).catch(function(e) {});
+    } else {
+      panel.style.display = 'none';
+    }
+  };
+  window.CW.closeLog = function() {
+    var panel = document.getElementById('logPanel');
+    if (panel) panel.style.display = 'none';
+  };
   if (!window.CW) window.CW = {};
   Object.assign(window.CW, {
     cancelJob,
