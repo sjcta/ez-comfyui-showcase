@@ -2185,6 +2185,27 @@ def api_activate_workflow_version(name: str, body: dict):
     return {"ok": True, "version": version}
 
 
+@app.delete("/api/workflows/{name}/versions/{version}")
+def api_delete_workflow_version(name: str, version: str):
+    """Delete a workflow version. v1 cannot be deleted."""
+    if version == "v1" or version == "base":
+        raise HTTPException(400, "Cannot delete base version")
+    meta = _load_wf_meta()
+    entry = meta.get(name, {})
+    versions = entry.get("versions", {})
+    vpath = versions.get(version, "")
+    if not vpath:
+        raise HTTPException(404, f"Version {version} not found")
+    if os.path.isfile(vpath):
+        os.remove(vpath)
+    del versions[version]
+    if entry.get("active_version") == version:
+        entry["active_version"] = "v1"
+    entry["versions"] = versions
+    meta[name] = entry
+    _save_wf_meta(meta)
+    return {"ok": True, "deleted": version}
+
 if __name__ == "__main__":
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
