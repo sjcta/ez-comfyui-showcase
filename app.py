@@ -45,6 +45,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
     try:
         workflow_name = os.path.basename(workflow_path)
         jobs[job_id]["status"] = "dispatching"
+        jobs[job_id]["last_update"] = time.time()
         jobs[job_id]["message"] = "排队等待..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -72,6 +73,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
 
         # Phase 2: wait for instance semaphore
         jobs[job_id]["status"] = "queued"
+        jobs[job_id]["last_update"] = time.time()
         jobs[job_id]["message"] = f"排队等待 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
         try:
@@ -218,6 +220,33 @@ async def _idle_instance_watcher():
                 except Exception:
                     pass
 
+async def _stuck_job_watcher():
+    """Kill jobs stuck >10min without status change. Stop its instance."""
+    while True:
+        await asyncio.sleep(60)
+        now = time.time()
+        for jid, j in list(jobs.items()):
+            if j.get("status") in ("done", "error"):
+                continue
+            last_up = j.get("last_update", j.get("generating_at", 0))
+            if last_up and now - last_up > 600:  # 10 minutes
+                j["status"] = "error"
+                j["message"] = "任务超时（10分钟无状态变化）"
+                print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {now-last_up:.0f}s)")
+                inst_name = j.get("instance", "")
+                if inst_name:
+                    svc = f"comfyui-{inst_name.lower()}"
+                    try:
+                        import subprocess
+                        subprocess.run(["systemctl", "--user", "stop", svc],
+                            capture_output=True, timeout=10,
+                            env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                                 "XDG_RUNTIME_DIR": "/run/user/1000"})
+                    except Exception:
+                        pass
+                asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -227,6 +256,7 @@ async def lifespan(app: FastAPI):
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
     _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
+    _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
@@ -846,6 +876,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         msg = "准备中..." if not current_node_cls and completed_units == 0 else (f"{label} {sampler_cur}/{sampler_total}" if label and sampler_total > 0 else ("采样准备中" if label and "采样" in label else ("超分准备中" if label and "超分" in label else (label if label else f"{pct:.0f}%..."))))
         jobs[job_id]["message"] = msg
         jobs[job_id]["progress"] = {"pct": pct}
+        jobs[job_id]["last_update"] = time.time()
         save_jobs()
 
     try:
