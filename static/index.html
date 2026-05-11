@@ -2,25 +2,194 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ez ComfyUI Showcase</title>
-<link rel="stylesheet" href="static/css/style.css?v=1778317007">
+<link rel="stylesheet" href="static/css/style.css?v=1778358888">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
-<script src="static/js/app.js?v=1778311832"></script>
-<script src="static/js/modules/status.js"></script>
-<script src="static/js/modules/node-editor.js"></script>
-<script src="static/js/modules/ui.js"></script>
-<script src="static/js/modules/workflows.js?v=1778311832"></script>
-<script src="static/js/modules/history.js?v=1778311833"></script>
-<script src="static/js/modules/generate.js?v=1778319000"></script>
+<script src="static/js/app.js?v=1778358888"></script>
+<script src="static/js/modules/icons.js"></script>
+<script src="static/js/modules/status.js?v=1778358888"></script>
+<script src="static/js/modules/node-editor.js?v=1778358888"></script>
+<script src="static/js/modules/ui.js?v=1778358888"></script>
+<script src="static/js/modules/workflows.js?v=1778358888"></script>
+<script src="static/js/modules/history.js?v=1778358888"></script>
+<script src="static/js/modules/generate.js?v=1778358888"></script>
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+<symbol id="icon-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="5 3 19 12 5 21 5 3"/>
+  </symbol>
+<symbol id="icon-dice-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="2" width="20" height="20" rx="2"/>
+    <circle cx="12" cy="12" r="1.5"/>
+  </symbol>
+<symbol id="icon-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  </symbol>
+<symbol id="icon-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z"/>
+    <path d="m14.5 12.5 2-2"/>
+    <path d="m11.5 9.5 2-2"/>
+    <path d="m8.5 6.5 2-2"/>
+    <path d="m17.5 15.5 2-2"/>
+  </symbol>
+<symbol id="icon-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </symbol>
+<symbol id="icon-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7 20h10"/>
+    <path d="M10 20c5.5-2.5 8-8 6-14.5C14 4 9.5 3 7 7c-2.5 4-1 9.5 3 13"/>
+    <path d="M10.5 12.5c2.5-2.5 6.5-3 8-1.5"/>
+  </symbol>
+<symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </symbol>
+<symbol id="icon-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+    <circle cx="9" cy="9" r="2"/>
+    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+  </symbol>
+<symbol id="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </symbol>
+<symbol id="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
+    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>
+    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>
+    <line x1="2" x2="22" y1="2" y2="22"/>
+  </symbol>
+<symbol id="icon-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+    <path d="m9 11 3 3L22 4"/>
+  </symbol>
+<symbol id="icon-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="m15 9-6 6"/>
+    <path d="m9 9 6 6"/>
+  </symbol>
+<symbol id="icon-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="13.5" cy="6.5" r=".5"/>
+    <circle cx="17.5" cy="10.5" r=".5"/>
+    <circle cx="8.5" cy="7.5" r=".5"/>
+    <circle cx="6.5" cy="12.5" r=".5"/>
+    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+  </symbol>
+<symbol id="icon-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+    <path d="m15 5 4 4"/>
+  </symbol>
+<symbol id="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </symbol>
+<symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" x2="12" y1="15" y2="3"/>
+  </symbol>
+<symbol id="icon-trash-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6h18"/>
+    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+    <line x1="10" x2="10" y1="11" y2="17"/>
+    <line x1="14" x2="14" y1="11" y2="17"/>
+  </symbol>
+<symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+    <circle cx="12" cy="13" r="3"/>
+  </symbol>
+<symbol id="icon-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+    <path d="M12 9v4"/>
+    <path d="M12 17h.01"/>
+  </symbol>
+<symbol id="icon-settings-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 7h-9"/>
+    <path d="M14 17H5"/>
+    <circle cx="17" cy="17" r="3"/>
+    <circle cx="7" cy="7" r="3"/>
+  </symbol>
+<symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 6 6 18"/>
+    <path d="m6 6 12 12"/>
+  </symbol>
+<symbol id="icon-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="10" x2="14" y1="2" y2="2"/>
+    <line x1="12" x2="15" y1="14" y2="11"/>
+    <circle cx="12" cy="14" r="8"/>
+  </symbol>
+<symbol id="icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" x2="12" y1="3" y2="15"/>
+  </symbol>
+<symbol id="icon-folder-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>
+  </symbol>
+<symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </symbol>
+<symbol id="icon-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" x2="12" y1="2" y2="6"/>
+    <line x1="12" x2="12.01" y1="18" y2="22"/>
+    <line x1="4.93" x2="7.76" y1="4.93" y2="7.76"/>
+    <line x1="16.24" x2="19.07" y1="16.24" y2="19.07"/>
+    <line x1="2" x2="6" y1="12" y2="12"/>
+    <line x1="18" x2="22" y1="12" y2="12"/>
+    <line x1="4.93" x2="7.76" y1="19.07" y2="16.24"/>
+    <line x1="16.24" x2="17.76" y1="4.93" y2="7.76"/>
+  </symbol>
+<symbol id="icon-refresh-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+    <path d="M21 3v5h-5"/>
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+    <path d="M8 16H3v5"/>
+  </symbol>
+<symbol id="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="22" x2="11" y1="2" y2="13"/>
+    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+  </symbol>
+<symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
+  </symbol>
+<symbol id="icon-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
+    <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
+    <path d="M10 9H8"/>
+    <path d="M16 13H8"/>
+    <path d="M16 17H8"/>
+  </symbol>
+<symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="8"/>
+    <path d="m21 21-4.3-4.3"/>
+  </symbol>
+<symbol id="icon-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="21" x2="14" y1="4" y2="4"/>
+    <line x1="10" x2="3" y1="4" y2="4"/>
+    <line x1="21" x2="12" y1="12" y2="12"/>
+    <line x1="8" x2="3" y1="12" y2="12"/>
+    <line x1="21" x2="16" y1="20" y2="20"/>
+    <line x1="12" x2="3" y1="20" y2="20"/>
+    <line x1="14" x2="14" y1="2" y2="6"/>
+    <line x1="8" x2="8" y1="10" y2="14"/>
+    <line x1="16" x2="16" y1="18" y2="22"/>
+  </symbol>
+</svg>
+
+
 
 <!-- ═══ 标题栏 ═══ -->
 <header class="titlebar">
-  <div class="logo"><span>🎨</span> Ez ComfyUI Showcase</div>
+  <div class="logo"><span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-palette"/></svg></span> Ez ComfyUI Showcase</div>
   <div class="titlebar-right">
-    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" title="工作流管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理</button>
+    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" onclick="if(window.CW&&CW.openWfMgr)CW.openWfMgr()" title="工作流管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理</button>
   </div>
 </header>
 
@@ -29,14 +198,28 @@
   <div class="wf-overlay-inner">
     <div class="wf-overlay-header">
       <div class="wf-overlay-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理 <span class="wf-overlay-count" id="wfOverlayCount"></span></div>
-      <button class="wf-overlay-close" id="wfOverlayClose">✕</button>
+      <button class="wf-overlay-close" id="wfOverlayClose" onclick="if(window.CW&&CW.closeWfMgr)CW.closeWfMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
+    </div>
+    <!-- ═══ 工具栏：分类筛选 + 排序 ═══ -->
+    <div class="wf-mgr-toolbar">
+      <div class="wf-mgr-filter-tabs" id="wfMgrFilterTabs"></div>
+      <div class="wf-mgr-sort">
+        <label class="wf-mgr-sort-label">排序</label>
+        <select id="wfMgrSortBy" class="wf-mgr-sort-select">
+          <option value="manual">手动排序</option>
+          <option value="name">名称</option>
+          <option value="tag">分类</option>
+          <option value="filename">文件名</option>
+        </select>
+        <button class="wf-mgr-sort-dir" id="wfMgrSortDir" onclick="CW.toggleMgrSortDir()" title="切换排序方向">↓</button>
+      </div>
     </div>
     <div class="wf-overlay-grid" id="wfOverlayGrid"></div>
     <div class="wf-overlay-empty" id="wfOverlayEmpty" style="display:none">暂无工作流</div>
     <div class="wf-bottom-actions">
       <div class="wf-overlay-upload" id="wfOverlayUpload">
         <div class="wf-upload-zone" id="wfUploadZone">
-          <div class="wf-upload-icon">📁</div>
+          <div class="wf-upload-icon"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-folder-open"/></svg></div>
           <div class="wf-upload-text">拖入 workflow JSON 文件到此处</div>
           <div class="wf-upload-hint">或 <label class="wf-upload-btn" for="wfUploadInput">选择文件</label></div>
           <input type="file" id="wfUploadInput" accept=".json" multiple style="display:none">
@@ -44,7 +227,7 @@
       </div>
       <div class="wf-dirs-section" id="wfDirsSection">
         <div class="wf-dirs-header">
-          <span class="wf-dirs-title">📂 工作流目录</span>
+          <span class="wf-dirs-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-folder"/></svg> 工作流目录</span>
           <button class="wf-dirs-add-btn" onclick="CW.showAddDir()" title="添加目录">＋ 新增目录</button>
         </div>
         <div class="wf-dirs-list" id="wfDirsList"></div>
@@ -63,7 +246,7 @@
   <div class="wf-edit-card">
     <div class="wf-edit-header">
       <span class="wf-edit-title" id="wfEditTitle">编辑工作流</span>
-      <button class="wf-edit-close" id="wfEditClose">✕</button>
+      <button class="wf-edit-close" id="wfEditClose" onclick="if(window.CW&&CW.closeWfEdit)CW.closeWfEdit()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
     </div>
     <div class="wf-edit-body">
       <div class="wf-edit-row">
@@ -74,20 +257,34 @@
         <label>标签</label>
         <div class="wf-edit-tags" id="wfEditTags"></div>
         <div class="wf-edit-tag-add">
-          <select id="wfEditTagSelect">
-            <option value="">+ 添加标签</option>
-            <option value="文生图">文生图</option>
-            <option value="图生图">图生图</option>
-            <option value="2K">2K</option>
-            <option value="4K">4K</option>
-          </select>
+          <input type="text" id="wfEditTagInput" list="wfEditTagSuggest" placeholder="输入或选择标签，回车添加" style="flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;outline:none">
+          <datalist id="wfEditTagSuggest">
+            <option value="文生图">
+            <option value="图生图">
+            <option value="文生视频">
+            <option value="图生视频">
+            <option value="2K">
+            <option value="4K">
+            <option value="8K">
+          </datalist>
+        </div>
+      </div>
+      <div class="wf-edit-row wf-edit-versions-row">
+        <label>版本管理</label>
+        <div class="wf-edit-versions">
+          <div class="wf-edit-version-upload">
+            <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
+            <button class="wf-mgr-btn" id="wfEditVersionBtn" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-upload"/></svg> 上传新版本</button>
+            <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
+          </div>
+          <div class="wf-edit-version-list" id="wfEditVersionList"></div>
         </div>
       </div>
       <div class="wf-edit-row">
         <label>缩略图</label>
         <div class="wf-edit-thumb" id="wfEditThumb" title="点击上传缩略图">
           <img id="wfEditThumbImg" src="" alt="">
-          <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder">📷</div>
+          <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-camera"/></svg></div>
         </div>
         <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
       </div>
@@ -104,25 +301,25 @@
   <div class="ne-card">
     <div class="ne-header">
       <span class="ne-title" id="nodeEditorTitle">节点编辑</span>
-      <button class="ne-close" id="nodeEditorClose">✕</button>
+      <button class="ne-close" id="nodeEditorClose"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
     </div>
     <div class="ne-body">
-      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 👁️ 切换可见性</div>
+      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-eye"/></svg> 切换可见性</div>
       <div class="ne-zones" id="neZones">
         <div class="ne-zone" data-zone="user_input">
-          <div class="ne-zone-title">📝 用户输入</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-file-text"/></svg> 用户输入</div>
           <div class="ne-zone-cards" id="neZoneUserInput"></div>
         </div>
         <div class="ne-zone" data-zone="advanced">
-          <div class="ne-zone-title">⚙️ 高级参数</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-settings"/></svg> 高级参数</div>
           <div class="ne-zone-cards" id="neZoneAdvanced"></div>
         </div>
         <div class="ne-zone" data-zone="output">
-          <div class="ne-zone-title">📤 输出</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-send"/></svg> 输出</div>
           <div class="ne-zone-cards" id="neZoneOutput"></div>
         </div>
         <div class="ne-zone" data-zone="hidden">
-          <div class="ne-zone-title">🚫 隐藏</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-eye-off"/></svg> 隐藏</div>
           <div class="ne-zone-cards" id="neZoneHidden"></div>
         </div>
       </div>
@@ -192,45 +389,15 @@
     <div class="wf-grid" id="wfGrid"></div>
 
 
-    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none">⚡ 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
+    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-zap"/></svg> 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
     <div class="gen-form" id="genForm" style="display:none">
-      <div class="fg">
-        <label id="promptLabel">提示词</label>
-        <div style="position:relative"><textarea id="promptInput" placeholder="输入提示词..."></textarea><button id="clearPromptBtn" style="display:none;position:absolute;top:4px;right:4px;background:rgba(255,255,255,.1);border:none;color:var(--dim);font-size:11px;padding:2px 8px;border-radius:4px;cursor:pointer" onclick="CW.clearPrompt()">清空</button></div>
-      </div>
-      <div class="fg" id="sizeSection">
-        <label>尺寸</label>
-        <div class="ratio-grid" id="ratioGrid">
-          <button class="ratio-btn" data-w="1024" data-h="1024" title="1024×1024"><span class="ratio-shape" style="width:22px;height:22px"></span><span class="ratio-label">1:1</span></button>
-          <button class="ratio-btn" data-w="1536" data-h="1024" title="1536×1024"><span class="ratio-shape" style="width:26px;height:17px"></span><span class="ratio-label">3:2</span></button>
-          <button class="ratio-btn" data-w="1920" data-h="1080" title="1920×1080"><span class="ratio-shape" style="width:28px;height:16px"></span><span class="ratio-label">16:9</span></button>
-          <button class="ratio-btn" data-w="1536" data-h="1152" title="1536×1152"><span class="ratio-shape" style="width:24px;height:18px"></span><span class="ratio-label">4:3</span></button>
-          <button class="ratio-btn" data-w="1152" data-h="1536" title="1152×1536"><span class="ratio-shape" style="width:18px;height:24px"></span><span class="ratio-label">3:4</span></button>
-          <button class="ratio-btn" data-w="1024" data-h="1536" title="1024×1536"><span class="ratio-shape" style="width:16px;height:24px"></span><span class="ratio-label">2:3</span></button>
-          <button class="ratio-btn active" data-w="1080" data-h="1920" title="1080×1920"><span class="ratio-shape" style="width:14px;height:24px"></span><span class="ratio-label">9:16</span></button>
-        </div>
-        <div class="ratio-custom">
-          <input type="number" id="widthInput" value="1080" step="64" min="256" max="2048">
-          <span>×</span>
-          <input type="number" id="heightInput" value="1920" step="64" min="256" max="2048">
-        </div>
-      </div>
-      <!-- 参考图片（i2i workflow 必选项） -->
-      <div class="ref-image-section" id="refImageSection" style="display:none">
-        <label>📷 参考图片</label>
-        <div class="img-upload-zone" id="refImageZone">
-          <div id="refImagePlaceholder" class="img-upload-placeholder">📷 点击或拖入参考图片</div>
-          <img id="refImagePreview" src="" class="img-upload-preview" style="display:none">
-          <input type="hidden" id="refImageValue" value="">
-          <input type="file" id="refImageFile" accept="image/*" style="display:none">
-        </div>
-      </div>
+            <div id="quickFormFields"></div>
       <button class="adv-toggle" id="advToggle"><span class="arrow">▶</span> 详细参数</button>
       <div class="adv-body" id="advBody"><div id="advFields"></div></div>
     </div>
     
 </div><div class="gen-footer" style="display:none">
-      <button class="btn btn-primary" id="btnGenerate">🚀 出图</button>
+      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-play"/></svg> 出图</button>
     </div>
   </div>
 
@@ -240,9 +407,9 @@
   <!-- 右列：出图中 + 历史（瀑布流） -->
   <div class="col-center" id="colCenter">
     <div class="col-header">
-      <span>📁 出图历史</span>
+      <span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-image"/></svg> 出图历史</span>
       <span class="ch-count" id="histCount"></span>
-      <input class="gf-search" id="gfStyle" type="text" placeholder="🔍 搜索..." oninput="CW.applyFilters()">
+      <input class="gf-search" id="gfStyle" type="text" placeholder="搜索..." oninput="CW.applyFilters()">
     </div>
     <div class="gallery-filters" id="galleryFilters">
       <select id="gfType" onchange="CW.applyFilters()">
@@ -260,7 +427,7 @@
       <select id="gfWF" onchange="CW.applyFilters()">
         <option value="">全部工作流</option>
       </select>
-      <button class="gf-clear" onclick="CW.clearFilters()" title="清除">✕</button>
+      <button class="gf-clear" onclick="CW.clearFilters()" title="清除"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
     </div>
     <div class="masonry" id="gallery"></div>
       </div>
@@ -283,7 +450,7 @@
   <div class="inst-popup">
     <div class="inst-popup-header">
       <h3 id="instPopupTitle">ComfyUI 实例管理</h3>
-      <button class="inst-popup-close" onclick="CW.closeInstPopup()">✕</button>
+      <button class="inst-popup-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
     </div>
     <div id="instCards"></div>
   </div>

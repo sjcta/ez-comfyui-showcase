@@ -71,14 +71,6 @@
     if (n.startsWith('t2i') || n.includes('-t2i') || n.includes('_t2i')) return { text: '文生图', cls: 'wf-tag-t2i' };
     return '';
   }
-  /** Prefer metadata tags[0] over filename-based guess, keep CSS class from filename. */
-  function wfTag(name, metaTags) {
-    const fallback = getWFType(name);
-    if (metaTags && metaTags.length > 0) {
-      return { text: metaTags[0], cls: fallback ? fallback.cls : 'wf-tag-info' };
-    }
-    return fallback;
-  }
 
   // ══════════════════════════════════════════════════════════════════════════
   //  WebSocket
@@ -429,114 +421,58 @@
           fetch(`${API}/api/jobs/${j.id}`, { method: 'DELETE' });
         }
       }
+      let changed = false;
       for (const j of arr) {
+        const prev = jobs[j.id];
+        if (!prev || prev.status !== j.status || prev.message !== j.message || prev.progress?.pct !== j.progress?.pct) {
+          changed = true;
+        }
         jobs[j.id] = j;
       }
       // Remove stale jobs no longer on server (keep error jobs even if server cleaned them up)
       const serverIds = new Set(arr.map((j) => j.id));
       for (const id of Object.keys(jobs)) {
-        if (!serverIds.has(id) && jobs[id]?.status !== 'error') delete jobs[id];
-      }
-      const newCount = Object.keys(jobs).length;
-      // Rebuild if count changed OR any status changed (e.g. error from instance stop)
-      var statusChanged = false;
-      if (newCount === prevCount) {
-        for (var j of arr) {
-          var old = jobs[j.id];
-          if (old && old.status !== j.status) { statusChanged = true; break; }
+        if (!serverIds.has(id) && jobs[id]?.status !== 'error') {
+          delete jobs[id];
+          changed = true;
         }
       }
-      if (newCount !== prevCount || statusChanged) { if (window.CW.renderGallery) window.CW.renderGallery(); }
+      if (changed && window.CW.renderGallery) window.CW.renderGallery();
     } catch {}
   }
 
   function onJobUpdate(job) {
     const prev = jobs[job.id];
-    // Show toast on status transitions (ignoring initial load)
+    // Toast on status change
     if (prev && prev.status !== job.status) {
-      var wf = (job.workflow || '').replace('.json', '');
       var shortId = job.id.slice(-6);
-      var jobTag = wfTag(job.workflow, (A._wfMeta && A._wfMeta[job.workflow] || {}).tags);
-      var typeLabel = jobTag ? jobTag.text : '';
-      if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + '任务 排队中', 'queued');
-      else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + '任务 出图开始', 'generating');
-      else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + '任务 出图完成', 'done');
-      else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + '任务 出图失败', 'error');
+      var wfTag = getWFType(job.workflow);
+      var typeLabel = wfTag ? wfTag.text : '';
+      try {
+        if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + ' 排队中', 'queued');
+        else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + ' 出图中', 'generating');
+        else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 完成', 'done');
+        else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + ' 失败', 'error');
+      } catch(e) {}
     }
     jobs[job.id] = job;
-    if (job.status === 'done' && (!prev || prev.status !== 'done')) {
-      if (prev && prev.status === 'error') return;
-      delete jobs[job.id];
-      window.CW.loadHistory();
+    // ── Done: immediate image swap + background history refresh ──
+    if (job.status === 'done' && job.image && (!prev || prev.status !== 'done' || !prev.image)) {
+      window.CW._onJobDone(job);
       return;
     }
-    if (prev && prev.status === job.status && updateJobCardInPlace(job)) return;
-    window.CW.renderGallery();
-  }
-
-  /** Targeted DOM update for a single job card (progress/message/timer only). */
-  function updateJobCardInPlace(job) {
-    const card = document.querySelector(`[data-job-id="${job.id}"]`);
-    if (!card) return false;
-
-    // Update CSS class
-    card.className = `gi job-card ${job.status}`;
-
-    // Status text
-    const st = card.querySelector('.job-status-text');
-    if (st && job.status === 'queued') {
-      st.textContent = '等待前序任务中';
-      st.className = 'job-status-text queued';
-    } else if (st && job.status !== 'queued') {
-      st.textContent = job.message || job.status;
-      st.className = `job-status-text ${job.status}`;
+    // ── Error: remove from active + re-render ──
+    if (job.status === 'error' && (!prev || prev.status !== 'error')) {
+      window.CW._onJobError(job);
+      return;
     }
-
-    // Detail message
-    const det = card.querySelector('.gi-detail');
-    if (det && job.message) {
-      det.textContent = job.message;
-      det.title = job.message;
+    // ── Status transition (queued→preparing→generating): full rebuild ──
+    if (!prev || prev.status !== job.status) {
+      window.CW.forceGalleryRerender();
+      return;
     }
-
-    // Progress bar — always update for generating jobs
-    if (job.status === 'generating') {
-      const pct = job.progress?.pct || 0;
-      let bar = card.querySelector('.gi-progress-fill');
-      if (bar) bar.style.width = pct + '%';
-    }
-
-    // Meta status label (first span in .gi-meta)
-    const metaSpan = card.querySelector('.gi-meta span:first-child');
-    if (metaSpan) {
-      if (job.status === 'generating') {
-        const phaseMsg = escH(job.message || '出图中');
-        const genTs = job.generating_at || 0;
-        let timer = metaSpan.querySelector('.gi-timer');
-        if (timer) {
-          // Update phase text before timer
-          const prev = timer.previousSibling;
-          if (prev && prev.nodeType === 3) prev.textContent = phaseMsg + ' ';
-          else metaSpan.insertBefore(document.createTextNode(phaseMsg + ' '), timer);
-        } else {
-          metaSpan.innerHTML = phaseMsg;
-        }
-      } else {
-        metaSpan.textContent = job.status === 'error' ? '失败' : '排队中';
-      }
-    }
-
-    // If image just appeared (was placeholder → now has image), swap in the image
-    if (job.image) {
-      const imgDiv = card.querySelector('.gi-img');
-      if (imgDiv && imgDiv.classList.contains('job-placeholder')) {
-        const label = job.prompt_preview || job.workflow?.replace('.json', '') || '...';
-        imgDiv.className = 'gi-img';
-        imgDiv.setAttribute('onclick', `event.stopPropagation();CW.openJobLB('${escA(job.image)}','${escA(label)}')`);
-        imgDiv.innerHTML = `<img src="${API}/api/images/${job.image}" loading="lazy" alt="">`;
-      }
-    }
-    return true;
+    // ── Same status (progress update): in-place patch, NO flicker ──
+    window.CW._patchJobCard(job);
   }
 
   // Live timer ticker — only runs when there are generating jobs
@@ -556,6 +492,73 @@
     return m > 0 ? `${m}m${String(s).padStart(2, '0')}s` : `${s}s`;
   }
 
+
+  // ── Polling fallback: sync active jobs via /api/jobs every 3s ──
+  let _pollTimer = null;
+  function _hasActiveJobs() {
+    return Object.values(jobs).some(j => j.status !== 'done' && j.status !== 'error');
+  }
+  async function _pollActiveJobs() {
+    if (!_hasActiveJobs()) { _pollTimer = null; return; }
+    try {
+      const r = await fetch(API + '/api/jobs');
+      const serverJobList = await r.json(); const serverJobs = {}; for (const j of serverJobList) serverJobs[j.id] = j;
+      // serverJobs is a dict {id: job_obj}
+      let needRerender = false;
+      let historyRefresh = false;
+      let alreadyRefreshed = false;
+      for (const [id, sj] of Object.entries(serverJobs)) {
+        const prev = jobs[id];
+        if (!prev) {
+          jobs[id] = sj;
+          needRerender = true;
+        } else if (prev.status !== sj.status) {
+          jobs[id] = sj;
+          onJobUpdate(sj);
+          // onJobUpdate handles loadHistory for done/error itself
+          if (sj.status === 'done' || sj.status === 'error') alreadyRefreshed = true;
+          else needRerender = true;
+        } else if (sj.status === 'generating' && sj.progress && prev.progress?.pct !== sj.progress.pct) {
+          jobs[id] = sj;
+          window.CW._patchJobCard && window.CW._patchJobCard(sj);
+        }
+      }
+      // Clean up jobs that server no longer tracks (completed while we weren't looking)
+      for (const id of Object.keys(jobs)) {
+        if (!serverJobs[id]) {
+          delete jobs[id];
+          historyRefresh = true;
+        }
+      }
+      if (alreadyRefreshed) {
+        // onJobUpdate already called loadHistory — only do forceGalleryRerender if there's still active jobs
+        if (historyRefresh || needRerender) window.CW.forceGalleryRerender();
+      } else if (historyRefresh) {
+        window.CW.forceGalleryRerender();
+        window.CW.loadHistory();
+      } else if (needRerender) {
+        window.CW.forceGalleryRerender();
+      }
+    } catch {}
+    if (_hasActiveJobs()) _pollTimer = setTimeout(_pollActiveJobs, 3000);
+    else _pollTimer = null;
+  }
+  function _startJobPoll() {
+    if (_pollTimer) return;
+    _pollTimer = setTimeout(_pollActiveJobs, 3000);
+  }
+
+  // Patch onJobUpdate to start polling when active jobs exist
+  const _origOnJobUpdate = onJobUpdate;
+  onJobUpdate = function(job) {
+    var _prev = jobs[job.id];
+    _origOnJobUpdate(job);
+    // Status changed → re-render gallery immediately
+    if (_prev && _prev.status !== job.status && job.status !== 'done' && job.status !== 'error') {
+      if (window.CW.renderGallery) window.CW.renderGallery();
+    }
+    if (job.status !== 'done' && job.status !== 'error') _startJobPoll();
+  };
 
   // ══════════════════════════════════════════════════════════════════════════
   //  Gallery Filters
@@ -592,6 +595,10 @@
   
 
   async function cancelJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    var label = j.status === 'generating' ? '终止本次出图？' : '删除这张卡片？';
+    if (!confirm(label)) return;
     try {
       await fetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
       delete jobs[jobId];
@@ -661,6 +668,7 @@ function init() {
     setInterval(() => {
       if (ws && ws.readyState === 1) ws.send('ping');
     }, 30000);
+    window.CW.loadWfMeta && window.CW.loadWfMeta();
     window.CW.loadHistory && window.CW.loadHistory();
     pollJobs();
     setInterval(pollJobs, 5000);
@@ -672,13 +680,8 @@ function init() {
     window.CW.initResizeHandle && window.CW.initResizeHandle();
     setInterval(tickTimers, 1000);
     if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
-  // Show/hide clear button on prompt input
-  var pi = $('#promptInput');
-  var cb = $('#clearPromptBtn');
-  if (pi && cb) {
-    pi.addEventListener('input', function() { cb.style.display = pi.value ? '' : 'none'; });
-    cb.style.display = pi.value ? '' : 'none';
-  }
+  // Clear button clears prompt and focuses input
+  // (always visible — toggled in HTML)
   $('#btnGenerate').addEventListener('click', function() { if (window.CW.doGenerate) window.CW.doGenerate(); });
     $('#lightbox').addEventListener('click', (e) => {
       if (e.target === $('#lightbox') || e.target === $('#lbImg')) { if (window.CW.closeLB) window.CW.closeLB(); }
@@ -687,11 +690,12 @@ function init() {
     $('#tbWfMgrBtn').addEventListener('click', function() { if (window.CW.openWfMgr) window.CW.openWfMgr(); });
     $('#wfOverlayClose').addEventListener('click', function() { if (window.CW.closeWfMgr) window.CW.closeWfMgr(); });
     $('#wfEditClose').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
+    $('#wfEditTagInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && window.CW.onAddWfTag) { window.CW.onAddWfTag(e.target.value); e.target.value = ''; } });
     $('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
     $('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });
     $('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });
     $('#wfEditThumbInput').addEventListener('change', function() { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(); });
-    $('#wfEditTagSelect').addEventListener('change', function() { if (window.CW.onAddWfTag) window.CW.onAddWfTag(); });
+
     $('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });
     $('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });
     $('#nodeEditorClose').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
@@ -802,9 +806,10 @@ function init() {
     retryJob,
     rndSeed,
     wfUploadOverlay,
-    getWFType, wfTag,
+    getWFType,
     formatElapsed,
     shortSeed,
+    onJobUpdate,
   });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

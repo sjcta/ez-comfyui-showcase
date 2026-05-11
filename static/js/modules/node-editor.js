@@ -126,7 +126,7 @@ function renderNodeEditor(analyze, config) {
       card.draggable = true;
       card.dataset.key = f.key;
       var valPreview = f.value !== undefined && f.value !== null ? String(f.value).substring(0, 80) : '';
-      var visIcon = f.visible ? '👁️' : '🚫';
+      var visIcon = f.visible ? CW.icon('eye') : CW.icon('eye-off');
       card.innerHTML =
         '<div class="ne-field-top">' +
         '<span class="ne-field-node" title="' +
@@ -162,7 +162,7 @@ function renderNodeEditor(analyze, config) {
         });
         card.querySelector('.ne-field-vis').addEventListener('click', function () {
           var isHidden = card.classList.toggle('hidden-field');
-          this.textContent = isHidden ? '🚫' : '👁️';
+          this.innerHTML = isHidden ? CW.icon('eye-off') : CW.icon('eye');
         });
       })(card, f);
       container.appendChild(card);
@@ -198,8 +198,7 @@ function closeNodeEditor() {
   }
 function openNodeEditor(fname) {
     _nodeEditorFname = fname;
-    var _neMeta = (A._wfMeta[fname] || {});
-    $('#nodeEditorTitle').textContent = '节点编辑: ' + (_neMeta.name || fname.replace('.json', ''));
+    $('#nodeEditorTitle').textContent = '节点编辑: ' + fname.replace('.json', '');
     Promise.all([
       fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/analyze').then(function (r) {
         return r.json();

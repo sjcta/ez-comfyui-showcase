@@ -7,6 +7,12 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs, historyItems = A.historyItems;
 
+  // ── Manager toolbar state ──
+  var _mgrFilter = '';  // '' = all
+  var _mgrSortBy = 'manual';
+  var _mgrSortAsc = true;
+  var _mgrDragIdx = -1;
+
 async function confirmWfDel() {
     if (!A._wfDelFilename) return;
     try {
@@ -14,12 +20,17 @@ async function confirmWfDel() {
       delete A._wfMeta[A._wfDelFilename];
     } catch (e) {}
     closeWfDel();
+    renderMgrFilterTabs();
     renderWfGrid();
     loadWorkflows();
   }
 
 function closeWfDel() {
     $('#wfDelModal').classList.remove('open');
+  }
+
+function downloadWf(fname) {
+    window.open(API + '/api/workflows/' + encodeURIComponent(fname) + '/download', '_blank');
   }
 
 function openWfDel(fname) {
@@ -73,28 +84,37 @@ async function onWfThumbUpload(e) {
     e.target.value = '';
   }
 
-function onAddWfTag(e) {
-    const val = e.target.value;
-    if (!val) return;
+function onAddWfTag(val) {
+    if (!val || !val.trim()) return;
+    val = val.trim();
     const tagsDiv = $('#wfEditTags');
     // Prevent duplicates
     const existing = [...tagsDiv.querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
-    if (existing.includes(val)) {
-      e.target.value = '';
-      return;
-    }
+    if (existing.includes(val)) return;
     const span = document.createElement('span');
     span.className = 'wf-edit-tag';
-    span.innerHTML = `${escH(val)} <span class="wf-edit-tag-remove" data-tag="${escA(val)}">✕</span>`;
+    span.innerHTML = `${escH(val)} <span class="wf-edit-tag-remove" data-tag="${escA(val)}">${CW.icon('x')}</span>`;
     span.querySelector('.wf-edit-tag-remove').addEventListener('click', () => {
       span.remove();
     });
     tagsDiv.appendChild(span);
-    e.target.value = '';
+    // Add to datalist if not already there
+    var dl = document.getElementById('wfEditTagSuggest');
+    if (dl) {
+      var exists = Array.from(dl.options).some(function(o) { return o.value === val; });
+      if (!exists) {
+        var opt = document.createElement('option');
+        opt.value = val;
+        dl.appendChild(opt);
+      }
+    }
   }
 
 function closeWfEdit() {
     $('#wfEditModal').classList.remove('open');
+    // Refresh management grid and filter tags after tag edit
+    renderMgrFilterTabs();
+    renderWfGrid();
   }
 
 function openWfEdit(fname) {
@@ -108,7 +128,7 @@ function openWfEdit(fname) {
     (meta.tags || []).forEach((t) => {
       const span = document.createElement('span');
       span.className = 'wf-edit-tag';
-      span.innerHTML = `${escH(t)} <span class="wf-edit-tag-remove" data-tag="${escA(t)}">✕</span>`;
+      span.innerHTML = `${escH(t)} <span class="wf-edit-tag-remove" data-tag="${escA(t)}">${CW.icon('x')}</span>`;
       span.querySelector('.wf-edit-tag-remove').addEventListener('click', () => {
         span.remove();
       });
@@ -127,22 +147,133 @@ function openWfEdit(fname) {
       img.style.display = 'none';
       ph.style.display = '';
     }
-    // Reset tag select
-    $('#wfEditTagSelect').value = '';
+    // Clear tag input
+    var tagInput = $('#wfEditTagInput');
+    if (tagInput) tagInput.value = '';
+    // Load versions
+    loadWfVersions(fname);
+    // Setup version upload handler
+    var vFileInput = $('#wfEditVersionFile');
+    if (vFileInput && !vFileInput._bound) {
+      vFileInput._bound = true;
+      vFileInput.addEventListener('change', async function(e) {
+        var file = e.target.files[0];
+        if (!file || !A._wfEditFilename) return;
+        var fd = new FormData();
+        fd.append('file', file);
+        try {
+          var r = await fetch(API + '/api/workflows/' + encodeURIComponent(A._wfEditFilename) + '/upload-version', { method: 'POST', body: fd });
+          if (!r.ok) { var d = await r.json(); throw new Error(d.detail || 'Upload failed'); }
+          var d = await r.json();
+          alert('✅ 版本 ' + d.version + ' 上传成功');
+          loadWfVersions(A._wfEditFilename);
+          loadWorkflows(); // refresh field cache
+        } catch (e) { alert('上传失败: ' + e.message); }
+        e.target.value = '';
+      });
+    }
     $('#wfEditModal').classList.add('open');
+    // Focus tag input
+    setTimeout(function() {
+      var ti = $('#wfEditTagInput');
+      if (ti) ti.focus();
+    }, 100);
   }
 
-function renderWfGrid() {
+function _tagCls(t) {
+    if (t === '图生图') return 'i2i';
+    if (t === '文生图') return 't2i';
+    if (t === '放大') return 'cat';
+    if (t === '文生视频') return 't2v';
+    if (t === '图生视频') return 'i2v';
+    return 'res';
+  }
+
+  function _mgrSortEntries(entries) {
+    if (_mgrSortBy === 'manual') {
+      entries.sort(function(a, b) {
+        var oa = (a[1].sort_order != null) ? a[1].sort_order : 9999;
+        var ob = (b[1].sort_order != null) ? b[1].sort_order : 9999;
+        if (oa !== ob) return oa - ob;
+        return a[0].localeCompare(b[0]);
+      });
+      return entries;
+    }
+    var dir = _mgrSortAsc ? 1 : -1;
+    entries.sort(function(a, b) {
+      if (_mgrSortBy === 'name') {
+        var na = (a[1].name || a[0]).toLowerCase();
+        var nb = (b[1].name || b[0]).toLowerCase();
+        return na.localeCompare(nb, 'zh') * dir;
+      }
+      if (_mgrSortBy === 'tag') {
+        var ta = _getPrimaryTag(a[0], a[1]);
+        var tb = _getPrimaryTag(b[0], b[1]);
+        var cmp = ta.localeCompare(tb, 'zh');
+        if (cmp !== 0) return cmp * dir;
+        return a[0].localeCompare(b[0]);
+      }
+      return a[0].localeCompare(b[0]) * dir;
+    });
+    return entries;
+  }
+
+  function renderMgrFilterTabs() {
+    var tabsEl = $('#wfMgrFilterTabs');
+    if (!tabsEl) return;
+    var entries = Object.entries(A._wfMeta);
+    var tagCounts = {};
+    tagCounts['全部'] = entries.length;
+    for (var i = 0; i < entries.length; i++) {
+      var fname = entries[i][0];
+      var meta = entries[i][1];
+      var mainTag = _getPrimaryTag(fname, meta);
+      if (mainTag) tagCounts[mainTag] = (tagCounts[mainTag] || 0) + 1;
+    }
+    var tagOrder = ['全部', '文生图', '图生图', '放大', '文生视频', '图生视频'];
+    var allTags = Object.keys(tagCounts);
+    allTags.sort(function(a, b) {
+      if (a === '全部') return -1;
+      if (b === '全部') return 1;
+      var ai = tagOrder.indexOf(a), bi = tagOrder.indexOf(b);
+      if (ai >= 0 && bi >= 0) return ai - bi;
+      if (ai >= 0) return -1;
+      if (bi >= 0) return 1;
+      return a.localeCompare(b, 'zh');
+    });
+    var html = '';
+    for (var k = 0; k < allTags.length; k++) {
+      var t = allTags[k];
+      var active = _mgrFilter === t || (t === '全部' && !_mgrFilter);
+      html += '<button class="wf-mgr-filter-tab' + (active ? ' active' : '') + '" data-mgr-tag="' + escA(t) + '" onclick="CW.mgrFilterTag(\'' + escA(t) + '\')">' + escH(t) + '<span class="count">' + tagCounts[t] + '</span></button>';
+    }
+    tabsEl.innerHTML = html;
+  }
+
+  function _getPrimaryTag(fname, meta) {
+    var tags = meta.tags || [];
+    var typeTag = window.CW.getWFType(fname);
+    return typeTag ? typeTag.text : (tags[0] || '');
+  }
+
+  function mgrFilterTag(tag) {
+    _mgrFilter = (tag === '全部') ? '' : tag;
+    renderMgrFilterTabs();
+    renderWfGrid();
+  }
+
+  function toggleMgrSortDir() {
+    _mgrSortAsc = !_mgrSortAsc;
+    var btn = $('#wfMgrSortDir');
+    if (btn) btn.textContent = _mgrSortAsc ? '↓' : '↑';
+    renderWfGrid();
+  }
+
+  function renderWfGrid() {
     const grid = $('#wfOverlayGrid');
     const empty = $('#wfOverlayEmpty');
-    const entries = Object.entries(A._wfMeta);
-    const wfFiles = new Set();
-    try {
-      for (const f of Object.values(jobs || {})) {
-        if (f.workflow) wfFiles.add(f.workflow);
-      }
-    } catch (e) {}
-    $('#wfOverlayCount').textContent = `(${entries.length})`;
+    var entries = Object.entries(A._wfMeta);
+    $('#wfOverlayCount').textContent = '(' + entries.length + ')';
     if (!entries.length) {
       grid.innerHTML = '';
       empty.style.display = '';
@@ -150,32 +281,43 @@ function renderWfGrid() {
     }
     empty.style.display = 'none';
 
+    // Filter by primary tag only
+    if (_mgrFilter) {
+      entries = entries.filter(function(e) {
+        return _getPrimaryTag(e[0], e[1]) === _mgrFilter;
+      });
+    }
+    // Sort
+    _mgrSortEntries(entries);
+
     let html = '';
-    for (const [fname, meta] of entries) {
+    for (var _mi = 0; _mi < entries.length; _mi++) {
+      var fname = entries[_mi][0], meta = entries[_mi][1];
       const displayName = meta.name || fname.replace('.json', '');
       const tags = meta.tags || [];
-      const thumbUrl = meta.thumbnail ? `${API}/api/workflows/thumbnail/${meta.thumbnail}` : '';
-      const tagHtml = tags
-        .map((t) => {
-          const cls = t === '图生图' ? 'i2i' : t === '文生图' ? 't2i' : 'res';
-          return `<span class="wf-mgr-tag ${cls}">${escH(t)}</span>`;
-        })
-        .join('');
-      html += `<div class="wf-mgr-card" data-fname="${escA(fname)}">
-      <div class="wf-mgr-thumb" onclick="CW.onWfThumbClick('${escA(fname)}')">
-        ${thumbUrl ? `<img src="${thumbUrl}" alt="">` : `<div class="wf-mgr-thumb-placeholder">📷</div>`}
-      </div>
-      <div class="wf-mgr-body">
-        <div class="wf-mgr-name" title="${escA(displayName)}">${escH(displayName)}</div>
-        <div class="wf-mgr-filename" title="${escA(fname)}">${escH(fname)}</div>
-        <div class="wf-mgr-tags">${tagHtml || '<span style="color:var(--dim);font-size:10px">无标签</span>'}</div>
-        <div class="wf-mgr-actions">
-          <button class="wf-mgr-btn" onclick="CW.openWfEdit('${escA(fname)}')">✏️ 编辑</button>
-          <button class="wf-mgr-btn" onclick="CW.openNodeEditor('${escA(fname)}')">🔧 节点</button>
-          <button class="wf-mgr-btn danger" onclick="CW.openWfDel('${escA(fname)}')">🗑️ 删除</button>
-        </div>
-      </div>
-    </div>`;
+      const thumbUrl = meta.thumbnail ? API + '/api/workflows/thumbnail/' + meta.thumbnail : '';
+      const tagHtml = tags.map(function(t) {
+        return '<span class="wf-mgr-tag ' + _tagCls(t) + '">' + escH(t) + '</span>';
+      }).join('');
+      var _pcat = _getPrimaryTag(fname, meta);
+      html += '<div class="wf-mgr-card" data-fname="' + escA(fname) + '" data-idx="' + _mi + '" data-cat="' + escA(_pcat) + '">' +
+      '<div class="wf-mgr-drag" draggable="true" ondragstart="WF_MGR._mgrDragStart(event)" ondragover="WF_MGR._mgrDragOver(event)" ondrop="WF_MGR._mgrDrop(event)" ondragend="WF_MGR._mgrDragEnd(event)" ontouchstart="WF_MGR._touchDragStart(event)" ontouchmove="WF_MGR._touchDragMove(event)" ontouchend="WF_MGR._touchDragEnd(event)">⠿</div>' +
+      '<div class="wf-mgr-thumb" onclick="CW.onWfThumbClick(\'' + escA(fname) + '\')">' +
+        (thumbUrl ? '<img src="' + thumbUrl + '" alt="">' : '<div class="wf-mgr-thumb-placeholder">'+CW.icon('camera')+'</div>') +
+      '</div>' +
+      '<div class="wf-mgr-body">' +
+        '<div class="wf-mgr-info">' +
+          '<div class="wf-mgr-name" title="' + escA(displayName) + '">' + escH(displayName) + ' ' + (tagHtml ? '<span class="wf-mgr-tags">' + tagHtml + '</span>' : '') + '</div>' +
+          '<div class="wf-mgr-filename" title="' + escA(fname) + '">' + escH(fname) + '</div>' +
+        '</div>' +
+        '<div class="wf-mgr-actions">' +
+          '<button class="wf-mgr-btn" onclick="CW.openWfEdit(\'' + escA(fname) + '\')">'+CW.icon('pencil')+' 编辑</button>' +
+          '<button class="wf-mgr-btn" onclick="CW.openNodeEditor(\'' + escA(fname) + '\')">'+CW.icon('settings')+' 节点</button>' +
+          '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\')">'+CW.icon('download')+' 下载</button>' +
+          '<button class="wf-mgr-btn danger" onclick="CW.openWfDel(\'' + escA(fname) + '\')">'+CW.icon('trash-2')+' 删除</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
     }
     grid.innerHTML = html;
   }
@@ -187,6 +329,7 @@ async function loadWfMeta() {
     } catch (e) {
       A._wfMeta = {};
     }
+    renderMgrFilterTabs();
     renderWfGrid();
   }
 
@@ -255,10 +398,10 @@ async function loadWfDirs() {
           const escPath = escA(d.path);
           const status = d.exists
             ? `<span class="wf-dir-count">${d.count} workflows</span>`
-            : `<span class="wf-dir-missing">⚠ 不存在</span>`;
+            : `<span class="wf-dir-missing">${CW.icon('alert-triangle')} 不存在</span>`;
           const delBtn =
             dirs.length > 1
-              ? `<button class="wf-dir-del" onclick="CW.removeWfDir('${escPath}')" title="移除">✕</button>`
+              ? `<button class="wf-dir-del" onclick="CW.removeWfDir('${escPath}')" title="移除">${CW.icon('x')}</button>`
               : '';
           return `<div class="wf-dir-item">
         <span class="wf-dir-path" title="${escPath}">${escH(d.path)}</span>
@@ -274,12 +417,23 @@ async function loadWfDirs() {
 
 function closeWfMgr() {
     $('#wfOverlay').classList.remove('open');
+    // Sync selection bar tabs after management changes
+    _syncSelectionBar();
+  }
+
+  function _syncSelectionBar() {
+    // Reload meta and refresh the selection bar tabs
+    if (window.CW.loadWorkflows) window.CW.loadWorkflows();
   }
 
 function openWfMgr() {
     $('#wfOverlay').classList.add('open');
     loadWfMeta();
     loadWfDirs();
+    // Init sort select
+    var sel = $('#wfMgrSortBy');
+    if (sel) sel.value = _mgrSortBy;
+    if (sel) sel.onchange = function() { _mgrSortBy = this.value; renderWfGrid(); };
   }
 
 async function delWF(name) {
@@ -309,14 +463,19 @@ async function uploadWF(file) {
   }
 
 function _applyTabFilter() {
-    $$('.wf-card').forEach((el) => {
-      const cat = el.dataset.cat || '其他';
-      el.style.display = cat === A._currentTab ? '' : 'none';
+    const tab = A._currentTab || '全部';
+    [...$$('.wf-card')].forEach((el) => {
+      if (tab === '全部') { el.style.display = ''; return; }
+      const cat = el.dataset.cat || '';
+      const wName = el.dataset.name;
+      const meta = (A._wfMeta || {})[wName] || {};
+      const tags = meta.tags || [];
+      el.style.display = (cat === tab || tags.includes(tab)) ? '' : 'none';
     });
   }
 
 function switchTab(tab) {
-    A._currentTab = tab;
+    A._currentTab = tab || '全部';
     // Update active tab button
     $$('.wf-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
     _applyTabFilter();
@@ -359,11 +518,9 @@ async function selectWF(name) {
     var genTitle = $('#genTitle');
     var genForm = $('#genForm');
     var genFooter = $('.gen-footer');
-    const _wfMeta = A._wfMeta[name] || {};
-    const _displayName = _wfMeta.name || name.replace('.json', '');
     if (genTitle) {
       genTitle.style.display = '';
-      genTitle.textContent = '⚡ ' + _displayName + ' 快速出图';
+      genTitle.textContent = name.replace('.json', '') + ' 快速出图';
     }
     if (genForm) {
       genForm.style.display = '';
@@ -374,7 +531,7 @@ async function selectWF(name) {
       genFooter.classList.add('mobile-open');
     }
     const ws = $('#wfSummary');
-    if (ws) ws.textContent = _displayName;
+    if (ws) ws.textContent = name.replace('.json', '');
     try {
       const r = await fetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
@@ -395,31 +552,8 @@ async function selectWF(name) {
         max: f.max,
       }));
       if (window.CW.renderAdvFields) window.CW.renderAdvFields(fields);
-      // Detect if workflow has width/height (LatentImage nodes)
-      const hasSize = fields.some((f) => f.field === 'width' && f.class_type.includes('LatentImage'));
-      const sizeSection = $('#sizeSection');
-      if (sizeSection) sizeSection.style.display = hasSize ? '' : 'none';
-      for (const f of fields) {
-        if (f.field === 'width' && f.class_type.includes('LatentImage')) $('#widthInput').value = f.value;
-        if (f.field === 'height' && f.class_type.includes('LatentImage')) $('#heightInput').value = f.value;
-      }
-      // Set prompt placeholder based on detected text-encode fields
-      const promptField = fields.find(
-        (f) => f.zone === 'user_input' && (f.type === 'textarea' || f.class_type.includes('TextEncode')),
-      );
-      const promptEl = $('#promptInput');
-      const promptLabel = $('#promptLabel');
-      if (promptEl) {
-        if (promptField) {
-          const labelText = promptField.label || '提示词';
-          const nodeInfo = promptField.node_title ? ' [' + promptField.node_title.split('(')[0].trim() + ']' : '';
-          promptEl.placeholder = labelText + '...';
-          if (promptLabel) promptLabel.textContent = labelText + nodeInfo;
-        } else {
-          promptEl.placeholder = '输入提示词...';
-          if (promptLabel) promptLabel.textContent = '提示词';
-        }
-      }
+      // Quick form is dynamically built from workflow fields
+      if (window.CW.renderQuickForm) { try { window.CW.renderQuickForm(fields); } catch(e) { console.error('renderQuickForm error:', e); } }
     } catch (e) {
       console.error('selectWF:', e);
     }
@@ -434,6 +568,13 @@ async function loadWorkflows() {
       } catch (e) {
         A._wfMeta = {};
       }
+      // Sort wfs by manual sort_order from _wfMeta
+      wfs.sort(function(a, b) {
+        var oa = ((A._wfMeta[a.name] || {}).sort_order != null) ? A._wfMeta[a.name].sort_order : 9999;
+        var ob = ((A._wfMeta[b.name] || {}).sort_order != null) ? A._wfMeta[b.name].sort_order : 9999;
+        if (oa !== ob) return oa - ob;
+        return a.name.localeCompare(b.name);
+      });
       var wfCountEl = $('#wfCount');
       if (wfCountEl) wfCountEl.textContent = `(${wfs.length})`;
       const grid = $('#wfGrid');
@@ -450,6 +591,28 @@ async function loadWorkflows() {
         wfCounts[wf] = (wfCounts[wf] || 0) + 1;
         if (!wfThumbs[wf] && h.thumb) wfThumbs[wf] = h.thumb;
       }
+      // Build wfTagMap BEFORE card loop (first tag = primary category)
+      const PRIORITY_TAGS = ['文生图', '图生图', '文生视频', '图生视频', '放大'];
+      const wfTagMap = {};
+      const wfAllTags = {};
+      wfs.forEach(w => {
+        const meta = A._wfMeta[w.name] || {};
+        const tags = meta.tags || [];
+        const typeTag = window.CW.getWFType(w.name);
+        const mainTag = typeTag ? typeTag.text : (tags[0] || '其他');
+        wfTagMap[w.name] = mainTag;
+        wfAllTags[w.name] = tags;
+      });
+      // Tag color scheme (const avoids TDZ/hoisting issues)
+      var _tagColor = function(t) {
+        if (t === '图生图') return 'wf-tag-i2i';
+        if (t === '文生图') return 'wf-tag-t2i';
+        if (t === '文生视频') return 'wf-tag-t2v';
+        if (t === '图生视频') return 'wf-tag-i2v';
+        if (t === '放大') return 'wf-tag-cat';
+        if (/^\d+K$/.test(t)) return 'wf-tag-res';
+        return '';
+      };
       let cards = wfs
         .map((w) => {
           const meta = A._wfMeta[w.name] || {};
@@ -459,38 +622,53 @@ async function loadWorkflows() {
           const previewSrc = thumb ? `${API}/api/thumbs/${thumb}` : '';
           const previewImg = previewSrc
             ? `<img src="${previewSrc}" loading="lazy" alt="">`
-            : `<div class="wf-card-icon">⚙</div>`;
-          const typeTag = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags);
-          const catText = typeTag ? typeTag.text : '其他';
-          const typeClass = typeTag ? `wf-card-type-${typeTag.cls.replace('wf-tag-', '')}` : '';
-          return `<div class="wf-card ${typeClass}" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onclick="CW.selectWF('${escA(w.name)}')">
+            : `<div class="wf-card-icon">${CW.icon('settings-2')}</div>`;
+          const catText = wfTagMap[w.name] || '其他';
+          const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
+            `<span class="wf-tag ${_tagColor(t)}" style="font-size:8px;padding:0 3px;margin-left:2px">${escH(t)}</span>`
+          ).join('');
+          return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onclick="CW.selectWF('${escA(w.name)}')">
         <div class="wf-card-preview">${previewImg}</div>
         <div class="wf-card-body">
           <div class="wf-card-name" title="${escA(w.name)}">
             <span class="wf-card-name-text">${escH(displayName)}</span>
-            
+            ${extraTags}
           </div>
         </div>
       </div>`;
         })
         .join('');
       grid.innerHTML = cards;
-      // Build category tabs
-      const TAB_ORDER = ['文生图', '图生图', '放大', '文生视频', '图生视频', '其他'];
-      const cats = new Set(
-        wfs.map((w) => {
-          const t = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags);
-          return t ? t.text : '其他';
-        }),
-      );
+      // Build dynamic tabs from all workflow tags
+      const allTags = new Set();
+      wfs.forEach(w => {
+        const meta = A._wfMeta[w.name] || {};
+        const tags = meta.tags || [];
+        const typeTag = window.CW.getWFType(w.name);
+        const mainTag = typeTag ? typeTag.text : (tags[0] || '');
+        wfTagMap[w.name] = mainTag;
+        if (mainTag) allTags.add(mainTag);
+      });
+      // Sort: priority tags first, then alphabetically
+      const sortedTags = [...allTags].sort((a, b) => {
+        const ai = PRIORITY_TAGS.indexOf(a), bi = PRIORITY_TAGS.indexOf(b);
+        if (ai >= 0 && bi >= 0) return ai - bi;
+        if (ai >= 0) return -1;
+        if (bi >= 0) return 1;
+        return a.localeCompare(b, 'zh');
+      });
       const tabsEl = $('#wfTabs');
       if (tabsEl) {
-        let tabHtml = '';
-        for (const t of TAB_ORDER) {
-          if (cats.has(t)) {
-            const catWfs = wfs.filter(w => { const tag = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags); return tag ? tag.text === t : t === '其他'; });
-            tabHtml += `<button class="wf-tab ${A._currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
-          }
+        let tabHtml = `<button class="wf-tab ${A._currentTab === '全部' ? 'active' : ''}" data-tab="全部" onclick="CW.switchTab('全部')"><span>全部</span> (${wfs.length})</button>`;
+        for (const t of sortedTags) {
+          const catWfs = wfs.filter(w => {
+            const meta = A._wfMeta[w.name] || {};
+            const tags = meta.tags || [];
+            const typeTag = window.CW.getWFType(w.name);
+            const mainTag = typeTag ? typeTag.text : (tags[0] || '');
+            return mainTag === t;
+          });
+          tabHtml += `<button class="wf-tab wf-tab-${_tagCls(t)} ${A._currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
         }
         tabsEl.innerHTML = tabHtml;
       }
@@ -510,12 +688,71 @@ async function loadWorkflows() {
       if (!A.currentWF || A.currentWF !== target) selectWF(target);
       else highlightWF();
     } catch (e) {
-      console.error('loadWorkflows:', e);
+      console.error("loadWorkflows:", e.message || "", e.stack || "(no stack)");
     }
+  }
+
+
+async function loadWfVersions(fname) {
+    var list = $('#wfEditVersionList');
+    var hint = $('#wfEditVersionHint');
+    if (!list) return;
+    list.innerHTML = '<span style="color:var(--dim);font-size:11px">加载中...</span>';
+    try {
+      var r = await fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/versions');
+      var d = await r.json();
+      var versions = d.versions || {};
+      var active = d.active_version || '';
+      var keys = Object.keys(versions).sort();
+      if (!keys.length) {
+        // Show base version (current file) with download
+        var baseHtml = '';
+        if (d.base && d.base.filename) {
+          baseHtml = '<div class="wf-version-item active">' +
+            '<span class="wf-version-name">基础版本</span>' +
+            '<span class="wf-version-filename">' + escH(d.base.filename) + '</span>' +
+            '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(d.base.filename) + '\')">'+CW.icon('download')+' 下载</button>' +
+            '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>' +
+          '</div>';
+        }
+        list.innerHTML = baseHtml || '<span style="color:var(--dim);font-size:11px">尚无版本</span>';
+        if (hint) hint.textContent = '上传将保留当前版本';
+        return;
+      }
+      var html = '';
+      for (var k of keys) {
+        var isActive = k === active;
+        html += '<div class="wf-version-item' + (isActive ? ' active' : '') + '">';
+        html += '<span class="wf-version-name">' + escH(k) + '</span>';
+        if (isActive) html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
+        else html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
+        html += '</div>';
+      }
+      list.innerHTML = html;
+      if (hint) hint.textContent = keys.length + ' 个版本';
+    } catch (e) {
+      list.innerHTML = '<span style="color:var(--red);font-size:11px">加载失败</span>';
+    }
+  }
+
+  async function activateWfVersion(fname, version) {
+    try {
+      var r = await fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/activate-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: version }),
+      });
+      if (!r.ok) { var d = await r.json(); throw new Error(d.detail || 'Activate failed'); }
+      alert('✅ 已切换到版本 ' + version);
+      loadWfVersions(fname);
+      loadWorkflows();
+    } catch (e) { alert('激活失败: ' + e.message); }
   }
 
   if (!window.CW) window.CW = {};
   window.CW.selectWF = selectWF;
+  window.CW.loadWfVersions = loadWfVersions;
+  window.CW.activateWfVersion = activateWfVersion;
   window.CW.clearWF = clearWF;
   window.CW.delWF = delWF;
   window.CW.uploadWF = uploadWF;
@@ -527,6 +764,7 @@ async function loadWorkflows() {
   window.CW.onAddWfTag = onAddWfTag;
   window.CW.onWfThumbUpload = onWfThumbUpload;
   window.CW.onWfThumbClick = onWfThumbClick;
+  window.CW.downloadWf = downloadWf;
   window.CW.openWfDel = openWfDel;
   window.CW.closeWfDel = closeWfDel;
   window.CW.confirmWfDel = confirmWfDel;
@@ -535,7 +773,132 @@ async function loadWorkflows() {
   window.CW.hideAddDir = hideAddDir;
   window.CW.addWfDir = addWfDir;
   window.CW.removeWfDir = removeWfDir;
+  // ── Drag-to-reorder (desktop + mobile touch) ──
+  var WF_MGR = {};
+  WF_MGR._mgrDragStart = function(e) {
+    _mgrDragIdx = parseInt(e.currentTarget.closest('.wf-mgr-card').dataset.idx);
+    e.currentTarget.style.opacity = '.4';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(_mgrDragIdx));
+  };
+  WF_MGR._mgrDragOver = function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var card = e.currentTarget.closest('.wf-mgr-card');
+    if (card) card.style.borderTop = '2px solid var(--accent)';
+  };
+  WF_MGR._mgrDrop = function(e) {
+    e.preventDefault();
+    var card = e.currentTarget.closest('.wf-mgr-card');
+    if (card) card.style.borderTop = '';
+    var targetIdx = parseInt(card ? card.dataset.idx : -1);
+    _mgrApplyReorder(targetIdx);
+  };
+  WF_MGR._mgrDragEnd = function(e) {
+    _mgrDragIdx = -1;
+    e.currentTarget.style.opacity = '';
+    $$('.wf-mgr-card').forEach(function(c) { c.style.borderTop = ''; });
+  };
+
+  // Shared reorder logic
+  function _mgrApplyReorder(targetIdx) {
+    if (_mgrDragIdx === targetIdx || _mgrDragIdx < 0) return;
+    var entries = Object.entries(A._wfMeta);
+    _mgrSortEntries(entries);
+    var moved = entries.splice(_mgrDragIdx, 1)[0];
+    entries.splice(targetIdx, 0, moved);
+    for (var i = 0; i < entries.length; i++) {
+      var fn = entries[i][0];
+      if (!A._wfMeta[fn]) A._wfMeta[fn] = {};
+      A._wfMeta[fn].sort_order = i;
+    }
+    _mgrSaveSortOrder(entries);
+    renderWfGrid();
+  }
+
+  function _mgrSaveSortOrder(entries) {
+    fetch(API + '/api/workflows/meta/sort', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(Object.fromEntries(
+        entries.map(function(e, i) { return [e[0], i]; })
+      ))
+    }).catch(function(err) { console.error('sort save failed:', err); });
+  }
+
+  // Touch-based drag for mobile
+  var _touchDragEl = null;
+  var _touchStartY = 0;
+  var _touchStartIdx = -1;
+  var _touchGhost = null;
+  var _touchTargetIdx = -1;
+
+  WF_MGR._touchDragStart = function(e) {
+    var handle = e.currentTarget;
+    var card = handle.closest('.wf-mgr-card');
+    if (!card) return;
+    _touchDragEl = card;
+    _touchStartIdx = parseInt(card.dataset.idx);
+    _touchStartY = e.touches[0].clientY;
+    _touchTargetIdx = _touchStartIdx;
+    _mgrDragIdx = _touchStartIdx;
+    // Create ghost element
+    _touchGhost = card.cloneNode(true);
+    _touchGhost.style.position = 'fixed';
+    _touchGhost.style.zIndex = '9999';
+    _touchGhost.style.opacity = '0.85';
+    _touchGhost.style.pointerEvents = 'none';
+    _touchGhost.style.width = card.offsetWidth + 'px';
+    _touchGhost.style.left = card.getBoundingClientRect().left + 'px';
+    _touchGhost.style.top = (e.touches[0].clientY - 20) + 'px';
+    _touchGhost.style.boxShadow = '0 4px 20px rgba(0,0,0,.3)';
+    document.body.appendChild(_touchGhost);
+    card.style.opacity = '0.3';
+    e.preventDefault();
+  };
+
+  WF_MGR._touchDragMove = function(e) {
+    if (!_touchGhost) return;
+    e.preventDefault();
+    var y = e.touches[0].clientY;
+    _touchGhost.style.top = (y - 20) + 'px';
+    // Find target card under touch point
+    _touchGhost.style.display = 'none';
+    var el = document.elementFromPoint(e.touches[0].clientX, y);
+    _touchGhost.style.display = '';
+    if (!el) return;
+    var targetCard = el.closest('.wf-mgr-card');
+    if (targetCard && targetCard !== _touchDragEl) {
+      _touchTargetIdx = parseInt(targetCard.dataset.idx);
+      $$('.wf-mgr-card').forEach(function(c) { c.style.borderTop = ''; });
+      targetCard.style.borderTop = '2px solid var(--accent)';
+    }
+  };
+
+  WF_MGR._touchDragEnd = function(e) {
+    if (_touchGhost) {
+      _touchGhost.remove();
+      _touchGhost = null;
+    }
+    if (_touchDragEl) {
+      _touchDragEl.style.opacity = '';
+      _touchDragEl = null;
+    }
+    $$('.wf-mgr-card').forEach(function(c) { c.style.borderTop = ''; });
+    if (_touchTargetIdx !== _touchStartIdx && _touchTargetIdx >= 0) {
+      _mgrApplyReorder(_touchTargetIdx);
+    }
+    _touchTargetIdx = -1;
+    _mgrDragIdx = -1;
+  };
+
+  // Expose as window.WF_MGR too
+  window.WF_MGR = WF_MGR;
+
   window.CW.switchTab = switchTab;
   window.CW.loadWorkflows = loadWorkflows;
   window.CW.loadWfMeta = loadWfMeta;
+  window.CW.mgrFilterTag = mgrFilterTag;
+  window.CW.toggleMgrSortDir = toggleMgrSortDir;
+  window.CW.renderMgrFilterTabs = renderMgrFilterTabs;
 })();

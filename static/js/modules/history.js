@@ -32,6 +32,165 @@ function _attachSentinel() {
   }
 
   _sentinelObs = null;
+  // ═══ Unified card rendering ═══
+  function _renderJobCard(j) {
+    const label = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
+    const statusMsg = j.message || j.status;
+    const hasImage = !!j.image;
+    const imgSrc = hasImage ? `${API}/api/images/${j.image}` : '';
+
+    // ── Image area ──
+    let imgHtml = '';
+    if (hasImage) {
+      imgHtml = `<img src="${imgSrc}" loading="lazy" alt="">`;
+    } else {
+      imgHtml = `<div class="job-spinner"></div>`;
+      // Status text ABOVE timer (always shown for non-image states)
+      if (j.status === 'queued') {
+        imgHtml += `<div class="job-status-text queued">排队中</div>`;
+      } else if (j.status === 'generating') {
+        imgHtml += `<div class="job-status-text generating">${escH(statusMsg)}</div>`;
+        if (j.generating_at) {
+          imgHtml += `<div class="gi-timer-row"><span class="gi-timer" data-ts="${j.generating_at}">${window.CW.formatElapsed(j.generating_at)}</span></div>`;
+        }
+      } else {
+        imgHtml += `<div class="job-status-text ${escH(j.status)}">${escH(statusMsg)}</div>`;
+      }
+    }
+
+    // ── Badge ──
+    const wfMeta = A._wfMeta[j.workflow] || {};
+    const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
+    const wfTag = window.CW.getWFType(j.workflow || '');
+    const tagHtml = wfTag ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:9px;padding:1px 5px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>` : '';
+    const instBadge = j.instance ? ` <span class="wf-tag" style="font-size:9px;padding:1px 5px;vertical-align:middle;margin-left:4px;background:#2d1b69;color:#a78bfa">#${escH(j.instance)}</span>` : '';
+
+    // ── Info area ──
+    // Type class for border color
+    const _jMeta1 = A._wfMeta[j.workflow] || {};
+    const _jTag1 = window.CW.getWFType(j.workflow || '');
+    const _jMain1 = _jTag1 ? _jTag1.text : ((_jMeta1.tags || [])[0] || '');
+    const _jCls1 = _jTag1 ? _jTag1.cls : (_jMain1 ? (_jMain1 === '放大' ? 'wf-tag-cat' : 'wf-tag-res') : '');
+    const jTypeCls = _jCls1 ? 'gi-type-' + _jCls1.replace('wf-tag-', '') : '';
+    return `<div class="gi job-card ${escH(j.status)} ${jTypeCls}" data-job-id="${escA(j.id)}">
+      <div class="gi-img ${hasImage ? '' : 'job-placeholder'}">
+        ${imgHtml}
+        <button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${escA(j.id)}')" title="${j.status === 'generating' ? '取消' : '删除'}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
+        ${wfLabel ? `<div class="gi-wf-badge">${escH(wfLabel)}${tagHtml}${instBadge}</div>` : ''}
+      </div>
+      <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
+        ${j.status === 'generating' ? `<div class="gi-progress-top"><div class="gi-progress-fill" style="width:${j.progress?.pct || 0}%"></div></div>` : ''}
+        <div class="gi-prompt" title="${escA(j.prompt_preview || label)}">${escH(j.prompt_preview || label)}</div>
+        ${j.status === 'error' ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ''}
+        ${j.status !== 'generating' ? `<div class="gi-meta">
+          ${j.queued_at ? `<span>${CW.icon("clock")} ${j.queued_at}</span>` : ''}
+          <div class="gi-meta-row">
+            ${j.width && j.height ? `<span>${CW.icon("ruler")} ${j.width}×${j.height}</span>` : ''}
+          </div>
+        </div>` : ''}
+        ${j.seed ? `<div class="gi-seed">${CW.icon("sprout")} ${j.seed}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // ═══ In-place DOM patching (no full rebuild) ═══
+  function _patchJobCard(job) {
+    const card = document.querySelector(`[data-job-id="${job.id}"]`);
+    if (!card) return;
+    // CSS class
+    card.className = `gi job-card ${job.status}`;
+    // Status text — update in image area
+    const st = card.querySelector('.job-status-text');
+    if (st) {
+      const label = job.message || (job.status === 'generating' ? '出图中' : job.status);
+      st.textContent = label;
+      st.className = `job-status-text ${job.status}`;
+    }
+    // Progress bar
+    const bar = card.querySelector('.gi-progress-fill');
+    if (bar) bar.style.width = (job.progress?.pct || 0) + '%';
+    // Timer
+    if (job.generating_at) {
+      const timerEl = card.querySelector('.gi-timer');
+      if (timerEl) {
+        timerEl.dataset.ts = job.generating_at;
+        timerEl.textContent = window.CW.formatElapsed(job.generating_at);
+      }
+    }
+  }
+
+  function _onJobDone(job) {
+    if (!job.image) return; // Wait for image to arrive
+    // Immediate visual: swap spinner → image
+    const card = document.querySelector(`[data-job-id="${job.id}"]`);
+    if (card) {
+      const imgDiv = card.querySelector('.gi-img');
+      if (imgDiv) {
+        imgDiv.className = 'gi-img';
+        imgDiv.setAttribute('onclick', `event.stopPropagation();CW.openJobLB('${escA(job.image)}','${escA(job.prompt_preview || '')}')`);
+        imgDiv.innerHTML = `<img src="${API}/api/images/${job.image}" loading="lazy" alt="">`;
+        card.className = 'gi job-card done';
+      }
+    }
+    // Remove from active jobs
+    delete jobs[job.id];
+    // Refresh history to show completed image card
+    window.CW.loadHistory();
+  }
+
+  function _onJobError(job) {
+    // Remove from active jobs
+    delete jobs[job.id];
+    // Re-render to show error state
+    window.CW.forceGalleryRerender();
+  }
+
+    
+  // ── Format helpers for meta display ──
+  function _fmtElapsed(sec) {
+    if (!sec && sec !== 0) return '—';
+    sec = Math.round(sec);
+    if (sec < 60) return sec + '秒';
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + '分' + (s > 0 ? s + '秒' : '');
+  }
+  function _fmtTime(t) {
+    if (!t) return '—';
+    // t = "2026-05-06 22:18:47"
+    return t;
+  }
+
+function _renderHistCard(h, i) {
+    const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
+    const wfTag = window.CW.getWFType(h.workflow || '');
+    const meta1 = A._wfMeta[h.workflow] || {};
+    const mainText1 = wfTag ? wfTag.text : ((meta1.tags || [])[0] || '');
+    const mainCls1 = wfTag ? wfTag.cls : (mainText1 ? (mainText1 === '放大' ? 'wf-tag-cat' : 'wf-tag-res') : '');
+    const tagBadge = mainText1 ? `<div class="gi-type-badge ${mainCls1}">${mainText1}</div>` : '';
+    const typeCls1 = mainCls1 ? 'gi-type-' + mainCls1.replace('wf-tag-', '') : '';
+
+    return `<div class="gi ${typeCls1}" data-wf="${escA(h.workflow || '')}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
+      <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
+        <img src="${imgSrc}" loading="lazy" alt="">
+        ${tagBadge}
+        <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
+        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">${CW.icon("copy")} 复刻</button>
+      </div>
+      <div class="gi-info">
+        <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
+        <div class="gi-meta">
+          <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
+          <div class="gi-meta-row">
+            <span>${CW.icon("timer")} ${_fmtElapsed(h.elapsed)}</span>
+            <span>${CW.icon("ruler")} ${h.width && h.height ? h.width + '×' + h.height : '—'}</span>
+          </div>
+        </div>
+        ${h.seed ? `<div class="gi-seed">${CW.icon("sprout")} ${h.seed}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
 function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.length + " filtered=" + _filteredHistory.length + " count=" + _histVisibleCount + " batch=" + _batchSize());
     const gallery = $('#gallery');
 
@@ -55,68 +214,9 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
 
     var html = '';
 
-    // ── Job cards ──
+    // ── Render all cards via unified functions ──
     for (const j of jobCards) {
-      const label = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
-      const statusMsg = j.message || j.status;
-      const hasImage = !!j.image;
-      const imgSrc = hasImage ? `${API}/api/images/${j.image}` : '';
-
-      var _jTag = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow] || {}).tags);
-      var _jTypeCls = _jTag ? 'gi-type-' + _jTag.cls.replace('wf-tag-', '') : '';
-      html += `<div class="gi job-card ${j.status} ${_jTypeCls}" data-job-id="${j.id}">`;
-
-      if (hasImage) {
-        html += `<div class="gi-img" onclick="event.stopPropagation();CW.openJobLB('${escA(j.image)}','${escA(label)}')">
-        <img src="${imgSrc}" loading="lazy" alt="">
-      </div>`;
-      } else if (j.status === 'queued') {
-        html += `<div class="gi-img job-placeholder">
-        <div class="job-status-text queued">等待前序任务中</div>
-      </div>`;
-      } else {
-        const genTs = j.generating_at || 0;
-        html += `<div class="gi-img job-placeholder">
-        <div class="job-spinner"></div>
-        <div class="job-status-text ${j.status}">${escH(statusMsg)}</div>
-        ${j.status === 'generating' && genTs ? `<div class="gi-timer-row"><span class="gi-timer" data-ts="${genTs}">${window.CW.formatElapsed(genTs)}</span></div>` : ''}
-      </div>`;
-      }
-
-      // Cancel/delete button (top-right) for all job states
-      const cancelLabel = j.status === 'generating' ? '取消' : '删除';
-      html += `<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${j.id}')" title="${cancelLabel}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>`;
-
-      // Workflow name badge (top-left) — use metadata edited name
-      const wfMeta = A._wfMeta[j.workflow] || {};
-      const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
-      if (wfLabel) {
-        const wfTag = window.CW.wfTag(j.workflow || '', wfMeta.tags);
-        const tagHtml = wfTag
-          ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>`
-          : '';
-        const instBadge = j.instance
-          ? ` <span class="wf-tag" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px;background:#2d1b69;color:#a78bfa">#${escH(j.instance)}</span>`
-          : '';
-        html += `<div class="gi-wf-badge">${escH(wfLabel)}${tagHtml}${instBadge}</div>`;
-      }
-
-      const phaseMsg = j.message || (j.status === 'generating' ? '出图中' : j.status === 'error' ? '失败' : '排队中');
-      const showPhase = j.status !== 'generating'; // hide phase in meta for generating (timer only)
-      html += `<div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${j.id}')">
-      <div class="gi-prompt" title="${escA(j.prompt_preview || label)}">${escH(j.prompt_preview || label)}</div>
-      ${j.status !== 'generating' && j.message ? `<div class="gi-detail" title="${escA(j.message)}">${escH(j.message)}</div>` : ''}
-      ${j.status === 'generating' ? `<div class="gi-progress-bar"><div class="gi-progress-fill" style="width:${j.progress?.pct || 0}%"></div></div>` : ''}
-      ${j.status === 'error' ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${j.id}')">重新尝试</button></div>` : ''}
-      <div class="gi-meta">
-        <span>${j.status === 'generating' ? '' : phaseMsg}</span>
-        ${j.width && j.height ? `<span>📐 ${j.width}×${j.height}</span>` : ''}
-        ${j.queued_at ? `<span>🕐 ${j.queued_at}</span>` : ''}
-      </div>
-      ${j.seed ? `<div class="gi-seed">🌱 ${j.seed}</div>` : ''}
-    </div>`;
-
-      html += `</div>`;
+      html += _renderJobCard(j);
     }
 
     // ── History items (lazy loaded) ──
@@ -124,29 +224,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     lbItems = filteredArr;
     const visibleItems = filteredArr.slice(0, _histVisibleCount);
     for (let i = 0; i < visibleItems.length; i++) {
-      const h = visibleItems[i];
-      const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-      const wfTag = window.CW.wfTag(h.workflow || '', (A._wfMeta[h.workflow] || {}).tags);
-      const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-      const typeCls = wfTag ? 'gi-type-' + wfTag.cls.replace('wf-tag-', '') : '';
-
-      html += `<div class="gi ${typeCls}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
-      <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
-        <img src="${imgSrc}" loading="lazy" alt="">
-        ${tagBadge}
-        <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
-        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">📋 复刻</button>
-      </div>
-      <div class="gi-info">
-        <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
-        <div class="gi-meta">
-          <span>⏱ ${h.elapsed}s</span>
-          <span>📐 ${h.width && h.height ? h.width + '×' + h.height : '—'}</span>
-          <span>🕐 ${h.time || '—'}</span>
-        </div>
-        ${h.seed ? `<div class="gi-seed">🌱 ${h.seed}</div>` : ''}
-      </div>
-    </div>`;
+      html += _renderHistCard(visibleItems[i], i);
     }
 
     if (historyItems.length > _histVisibleCount) {
@@ -154,12 +232,13 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     }
 
     if (!jobCards.length && !historyItems.length) {
-      html = `<div class="empty-hint"><div class="eh-icon">🖼️</div><p>暂无历史</p><p style="font-size:11px;margin-top:4px">出图后自动出现在这里</p></div>`;
+      html = `<div class="empty-hint"><div class="eh-icon">${CW.icon("image", 32)}</div><p>暂无历史</p><p style="font-size:11px;margin-top:4px">出图后自动出现在这里</p></div>`;
     }
 
     try { gallery.innerHTML = html; } catch(e) { console.error("[GALLERY ERROR]", e); var ediv = document.getElementById("gallery"); if(ediv) ediv.innerHTML = "<div style=color:red;padding:20px>Render error: " + e.message + "</div>"; }
 
     _lastRenderedHistCount = visibleItems.length;
+    _lastGalleryHash = '';  // force next renderGallery to rebuild
     lbItems = filteredArr;
     _attachSentinel();
   }
@@ -214,24 +293,29 @@ function _appendNewHistoryCards() {
   }
 function _histCardHTML(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfTag = window.CW.wfTag(h.workflow || '', (A._wfMeta[h.workflow] || {}).tags);
-    const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-    const typeCls = wfTag ? 'gi-type-' + wfTag.cls.replace('wf-tag-', '') : '';
-    return `<div class="gi ${typeCls}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
+    const wfTag = window.CW.getWFType(h.workflow || '');
+    const meta2 = A._wfMeta[h.workflow] || {};
+    const mainText2 = wfTag ? wfTag.text : ((meta2.tags || [])[0] || '');
+    const mainCls2 = wfTag ? wfTag.cls : (mainText2 ? (mainText2 === '放大' ? 'wf-tag-cat' : 'wf-tag-res') : '');
+    const tagBadge = mainText2 ? `<div class="gi-type-badge ${mainCls2}">${mainText2}</div>` : '';
+    const typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
+    return `<div class="gi ${typeCls2}" data-wf="${escA(h.workflow || '')}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
       <img src="${imgSrc}" loading="lazy" alt="">
       ${tagBadge}
       <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
-      <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">📋 复刻</button>
+      <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">${CW.icon("copy")} 复刻</button>
     </div>
     <div class="gi-info">
       <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
       <div class="gi-meta">
-        <span>⏱ ${h.elapsed}s</span>
-        <span>📐 ${h.width && h.height ? h.width + '×' + h.height : '—'}</span>
-        <span>🕐 ${h.time || '—'}</span>
+        <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
+        <div class="gi-meta-row">
+          <span>${CW.icon("timer")} ${_fmtElapsed(h.elapsed)}</span>
+          <span>${CW.icon("ruler")} ${h.width && h.height ? h.width + '×' + h.height : '—'}</span>
+        </div>
       </div>
-      ${h.seed ? `<div class="gi-seed">🌱 ${h.seed}</div>` : ''}
+      ${h.seed ? `<div class="gi-seed">${CW.icon("sprout")} ${h.seed}</div>` : ''}
     </div>
   </div>`;
   }
@@ -289,7 +373,7 @@ function _populateFilterOptions() {
 function _filterHistory(arr) {
     return arr.filter(function(j) {
       if(_galleryFilters.type) {
-        var t = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow] || {}).tags);
+        var t = window.CW.getWFType(j.workflow || "");
         if(!t || t.text !== _galleryFilters.type) return false;
       }
       if(_galleryFilters.size) {
@@ -354,9 +438,8 @@ function lbNav(dir) {
 function renderLB() {
     if (lbIdx < 0 || lbIdx >= lbItems.length) return;
     const h = lbItems[lbIdx];
-    $('#lbImg').src = `${API}/api/images/${h.filename}`;
-    $('#lbInfo').textContent =
-      `${h.prompt || '—'} · ⏱ ${h.elapsed}s · 📐 ${h.width && h.height ? h.width + '×' + h.height : '—'} · 🌱 ${window.CW.shortSeed(h.seed)} · 🕐 ${h.time || ''}`;
+    var lbImg = $('#lbImg'); lbImg.src = ''; lbImg.src = `${API}/api/images/${h.filename}`;
+    $('#lbInfo').textContent = h.prompt || '—';
     $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
     $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
   }
@@ -370,7 +453,7 @@ function closeLB() {
 function openJobLB(filename, label) {
     // Show a single-item lightbox for a job image
     const imgSrc = `${API}/api/images/${filename}`;
-    $('#lbImg').src = imgSrc;
+    var lbImg = $('#lbImg'); lbImg.src = ''; lbImg.src = imgSrc;
     $('#lbInfo').textContent = label || '';
     $('#lbPrev').style.display = 'none';
     $('#lbNext').style.display = 'none';
@@ -386,6 +469,7 @@ function openLB(idx) {
   }
 
 async function delHist(id) {
+    if (!confirm('确认删除这张图片？')) return;
     // Mark card as deleting immediately
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
     if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
@@ -470,6 +554,21 @@ function renderGallery() {
   window.CW.closeLB = closeLB;
   window.CW.lbNav = lbNav;
   window.CW.loadHistory = loadHistory;
+  // Data-only refresh (no gallery re-render)
+  async function loadHistoryNoRender() {
+    try {
+      const r = await fetch(`${API}/api/history`);
+      const newItems = await r.json();
+      historyItems.length = 0;
+      Array.prototype.push.apply(historyItems, newItems);
+    } catch (e) { console.error("loadHistoryNoRender:", e); }
+  }
+  window.CW.loadHistoryNoRender = loadHistoryNoRender;
   window.CW.renderGallery = renderGallery;
+  window.CW.forceGalleryRerender = renderGallery;
+  window.CW._renderJobCard = _renderJobCard;
+  window.CW._patchJobCard = _patchJobCard;
+  window.CW._onJobDone = _onJobDone;
+  window.CW._onJobError = _onJobError;
 
 })();
