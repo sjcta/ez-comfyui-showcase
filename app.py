@@ -828,6 +828,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             non_sampler_cnt += 1
 
     total_units = non_sampler_cnt + sampler_steps_total
+    print(f"[DEBUG] total_units={total_units} non_sampler={non_sampler_cnt} sampler_steps={sampler_steps_total}")
     completed_units = 0.0
     last_prog = 0
 
@@ -837,6 +838,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     def update_job():
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
+        print(f"[DEBUG] completed={completed_units}/{total_units} pct={pct}% label={label}")
         msg = label if label else f"{pct:.0f}%..."
         jobs[job_id]["message"] = msg
         jobs[job_id]["progress"] = {"pct": pct}
@@ -844,8 +846,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
 
     try:
         async with websockets.connect(ws_url) as ws:
-            phase_step = 'prepare'
-            completed_units = max(completed_units, UNITS_PREPARE)  # mark prepare started
             update_job()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
