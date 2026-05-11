@@ -1855,16 +1855,17 @@ select { cursor: pointer; }
     display: flex; gap: 8px; width: 100%;
     justify-content: stretch; flex-wrap: nowrap;
   }
-  .wf-mgr-btn {
-    flex: 1; padding: 8px 0; border: 1px solid var(--border);
+  .wf-mgr-actions .wf-mgr-btn {
+    flex: 1; padding: 8px 0;
+    border: 1px solid var(--border);
     border-radius: 6px; background: var(--bg); color: var(--dim);
     font-size: 12px; cursor: pointer; text-align: center;
     white-space: nowrap; transition: all .15s;
     min-height: 36px;
   }
-  .wf-mgr-btn:active { background: var(--card); }
-  .wf-mgr-btn.danger { color: #ef4444; border-color: rgba(239,68,68,.3); }
-  .wf-mgr-btn.danger:active { background: rgba(239,68,68,.15); }
+  .wf-mgr-actions .wf-mgr-btn:active { background: var(--card); }
+  .wf-mgr-actions .wf-mgr-btn.danger { color: #ef4444; border-color: rgba(239,68,68,.3); }
+  .wf-mgr-actions .wf-mgr-btn.danger:active { background: rgba(239,68,68,.15); }
 
   /* Toolbar */
   .wf-mgr-toolbar { padding: 8px 12px; gap: 8px; }
