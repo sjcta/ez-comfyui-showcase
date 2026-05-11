@@ -44,7 +44,9 @@ function _attachSentinel() {
     if (hasImage) {
       imgHtml = `<img src="${imgSrc}" loading="lazy" alt="">`;
     } else {
-      imgHtml = `<div class="job-spinner"></div>`;
+      if (j.status === 'generating' || j.status === 'preparing') {
+        imgHtml = `<div class="job-spinner"></div>`;
+      }
       // Status text ABOVE timer (always shown for non-image states)
       if (j.status === 'queued') {
         imgHtml += `<div class="job-status-text queued">排队中</div>`;
