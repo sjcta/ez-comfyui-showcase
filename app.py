@@ -21,6 +21,23 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn, urllib.request, urllib.error
 
+# ── Logging ──
+_log_buffer: list[dict] = []
+_MAX_LOG = 500
+
+def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = ""):
+    entry = {"ts": time.time(), "level": level, "phase": phase,
+             "msg": str(msg)[:200], "job_id": job_id[-12:], "details": str(details)[:500]}
+    _log_buffer.append(entry)
+    if len(_log_buffer) > _MAX_LOG:
+        _log_buffer[:50] = []
+    try:
+        asyncio.ensure_future(broadcast({"type": "log", "entry": entry}))
+    except Exception:
+        pass
+
+
+
 # ── 任务队列：per-instance semaphores for parallel routing ──
 _job_queue: asyncio.Queue = asyncio.Queue()
 
@@ -234,6 +251,7 @@ async def _stuck_job_watcher():
                 j["message"] = "任务超时（10分钟无状态变化）"
                 print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {now-last_up:.0f}s)")
                 add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
+                add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
                 inst_name = j.get("instance", "")
                 if inst_name:
                     svc = f"comfyui-{inst_name.lower()}"
@@ -261,6 +279,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
+@app.get("/api/logs")
+def api_logs(limit: int = 200):
+    return list(_log_buffer[-limit:])
 static_dir = Path(__file__).parent / "static"
 if static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -1057,6 +1078,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             ws_ok, pid = await comfyui_ws_track(job_id, wf, client_id, timeout=900, base_url=inst_url)
         except Exception as _ws_err:
             print(f"[WS_TRACK_ERROR] {job_id}: {_ws_err}")
+            add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
             add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
             jobs[job_id]["ws_error"] = str(_ws_err)[:300]
 
