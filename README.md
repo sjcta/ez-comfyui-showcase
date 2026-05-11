@@ -19,6 +19,20 @@ Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel C
 - **快速出图** — 一键复用历史配置重新生成
 - **冷启动自愈** — 无可用实例时自动拉起 ComfyUI
 
+## Screenshots
+
+![主界面](screenshots/01_main_dashboard.png)
+*主界面 — 左侧生成控制面板（工作流选择、Prompt 输入、尺寸预设、参数调节）+ 右侧出图历史画廊*
+
+![生成参数面板](screenshots/03_params_expanded.png)
+*展开的详细参数面板 — batch_size、seed、steps、cfg、sampler、scheduler、denoise 完整控制*
+
+![历史画廊与筛选](screenshots/02_main_dashboard_gallery.png)
+*出图历史画廊 — 176 张生成记录，支持按类型/尺寸/工作流筛选和关键词搜索*
+
+![工作流管理](screenshots/04_workflow_management.png)
+*工作流管理页 — 管理 10 条预置工作流（文生图/图生图/放大），支持排序、编辑、节点查看、下载、删除和拖拽上传*
+
 ## Tech Stack
 
 | Layer | Technology |
