@@ -1409,8 +1409,8 @@ select { cursor: pointer; }
   display: flex; gap: 6px; flex-shrink: 0;
 }
 .wf-mgr-btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  padding: 1px 6px; min-height: 18px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 3px 10px; min-height: 22px;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg); color: var(--dim); font-size: 11px; cursor: pointer;
   transition: all .15s; font-family: inherit; white-space: nowrap;
