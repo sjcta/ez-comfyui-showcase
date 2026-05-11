@@ -427,7 +427,7 @@ a { color: var(--accent); text-decoration: none; }
 
 /* Job cards in masonry: keep fixed aspect ratio */
 .masonry .gi.job-card .gi-img {
-  aspect-ratio: 1 / 1;
+  min-height: 65%;
 }
 
 @media (max-width: 600px) {
