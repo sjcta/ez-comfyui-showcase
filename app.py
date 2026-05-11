@@ -45,11 +45,11 @@ _nodes_cache: list[dict] = []
 _nodes_cache_ts: float = 0
 _nodes_cache_max_age = 5  # seconds
 
-def _load_nodes() -> list[dict]:
-    """Load nodes from JSON file with caching."""
+def _load_nodes(force=False) -> list[dict]:
+    """Load nodes from JSON file with caching. Use force=True to bypass cache."""
     global _nodes_cache, _nodes_cache_ts
     now = time.time()
-    if _nodes_cache and now - _nodes_cache_ts < _nodes_cache_max_age:
+    if not force and _nodes_cache and now - _nodes_cache_ts < _nodes_cache_max_age:
         return _nodes_cache
     if not os.path.isfile(NODES_FILE):
         _nodes_cache = []
@@ -2498,38 +2498,34 @@ class ApplyScanRequest(BaseModel):
 @app.post("/api/nodes/{nid}/apply-scan")
 def api_node_apply_scan(nid: str, req: ApplyScanRequest):
     """Apply scan results: add new instances to node."""
-    node = _get_node_by_id(nid)
-    if not node:
+    nodes = _load_nodes(force=True)
+    found = None
+    for n in nodes:
+        if n["id"] == nid:
+            found = n
+            break
+    if not found:
         raise HTTPException(404, "Node not found")
     added = []
     for sel in req.selected:
         port = sel.get("port")
         if not port:
             continue
-        existing = [inst for inst in node.get("instances", []) if inst.get("port") == port]
+        existing = [inst for inst in found.get("instances", []) if inst.get("port") == port]
         if existing:
             continue
-        idx = len(node.get("instances", [])) + len(added)
+        idx = len(found.get("instances", [])) + len(added)
         name = chr(65 + idx) if idx < 26 else f"inst-{idx}"
         new_inst = {
             "id": uuid.uuid4().hex[:8],
             "name": name,
             "port": port,
             "service": f"comfyui-{name.lower()}",
-            "output_dir": f"/home/sjcta/software/ComfyUI-Project/outputs",
             "enabled": True,
             "workflow_dirs": [],
-            "labels": [],
         }
-        node["instances"].append(new_inst)
+        found["instances"].append(new_inst)
         added.append(new_inst)
-    _save_nodes(_load_nodes())  # re-read and save (ensure fresh)
-    # Actually re-save properly
-    nodes = _load_nodes()
-    for n in nodes:
-        if n["id"] == nid:
-            n["instances"] = node["instances"]
-            break
     _save_nodes(nodes)
     return {"ok": True, "data": {"added": len(added)}}
 

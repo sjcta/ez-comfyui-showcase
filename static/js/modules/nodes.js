@@ -239,7 +239,7 @@
     try {
       var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/apply-scan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ports: ports })
+        body: JSON.stringify({ selected: ports.map(function(p) { return {port: p}; }) })
       });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '应用失败');
