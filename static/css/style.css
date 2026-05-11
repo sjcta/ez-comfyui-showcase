@@ -1749,6 +1749,12 @@ select { cursor: pointer; }
   background: rgba(245, 158, 11, 0.10);
   background-position: 0% 50%, 50% 0%, 100% 50%;
 }
+.gi.job-card.preparing .gi-img.job-placeholder,
+.gi.job-card.dispatching .gi-img.job-placeholder,
+.gi.job-card.starting_comfyui .gi-img.job-placeholder {
+  animation: none;
+  background: rgba(245, 158, 11, 0.08);
+}
 
 /* ═══ Mobile: Workflow Manager (after all base rules) ═══ */
 @media (max-width: 600px) {

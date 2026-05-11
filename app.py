@@ -855,8 +855,17 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     sampling_total = 0
 
     def _overall_pct():
-        """completed_units / total_units → 0-100. Monotonic."""
-        return max(0, min(100, round(completed_units / total_units * 100))) if total_units > 0 else 0
+        """completed_units / total_units → 0-100. Monotonic.
+        During 'step' phase, interpolates within the current sampler group
+        so the bar moves smoothly instead of jumping at phase boundaries."""
+        base = completed_units
+        if phase_step == 'step' and sampling_total > 0 and current_group < len(group_boundaries):
+            enc_s, stp_s, dec_s, _ = group_boundaries[current_group]
+            group_steps = dec_s - stp_s
+            if group_steps > 0:
+                intra = min(sampling_cur / sampling_total, 1.0)
+                base = stp_s + intra * group_steps
+        return max(0, min(100, round(base / total_units * 100))) if total_units > 0 else 0
 
     def _pct_from_units(units):
         return max(0, min(100, round(units / total_units * 100))) if total_units > 0 else 0
