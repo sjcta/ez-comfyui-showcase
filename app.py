@@ -375,11 +375,22 @@ async def pick_best_instance(workflow_name: str = "") -> dict:
     """Pick the best ComfyUI instance using workflow affinity + queue depth.
 
     Priority:
-    0. If no instance is running → auto-start one
-    1. Instance with matching workflow (models already in VRAM) → prefer even if busy
-    2. Idle instance (queue == 0) → prefer for cold start
-    3. Fallback: shortest queue
+    0. T2I → A, I2I → B (hard route, Jeson 2026-05-11)
+    1. If no instance is running → auto-start one
+    2. Instance with matching workflow (models already in VRAM) → prefer even if busy
+    3. Idle instance (queue == 0) → prefer for cold start
+    4. Fallback: shortest queue
     """
+
+    # Phase 0: T2I → A, I2I → B (hard route)
+    if workflow_name:
+        lower = workflow_name.lower()
+        inst_a = next(i for i in COMFYUI_INSTANCES if i["name"] == "A")
+        inst_b = next(i for i in COMFYUI_INSTANCES if i["name"] == "B")
+        if lower.startswith("t2i") or "_t2i" in lower or "-t2i" in lower:
+            return inst_a
+        if lower.startswith("i2i") or "_i2i" in lower or "-i2i" in lower:
+            return inst_b
 
     # Phase 1: try workflow affinity
     if workflow_name:
