@@ -879,18 +879,18 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         jobs[job_id]["last_update"] = time.time()
         save_jobs()
 
+    resp = comfyui_post("/prompt", {"prompt": workflow, "client_id": client_id}, base_url=instance_url)
+    prompt_id = resp.get("prompt_id", "")
+    if not prompt_id:
+        raise RuntimeError(f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}")
+    jobs[job_id]["prompt_id"] = prompt_id
+    save_jobs()
     try:
         async with websockets.connect(ws_url) as ws:
             update_job()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
             # Submit prompt WITH client_id so ComfyUI routes events to us
-            resp = comfyui_post("/prompt", {"prompt": workflow, "client_id": client_id}, base_url=instance_url)
-            prompt_id = resp.get("prompt_id", "")
-            if not prompt_id:
-                raise RuntimeError(f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}")
-            jobs[job_id]["prompt_id"] = prompt_id
-            save_jobs()
 
             # Listen for events
             while time.time() - start < timeout:
