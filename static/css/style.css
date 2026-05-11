@@ -1763,7 +1763,7 @@ select { cursor: pointer; }
 
 /* Workflow version management */
 .wf-edit-versions { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
-.wf-edit-version-upload { display: flex; align-items: center; gap: 8px; }
+.wf-edit-version-upload { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .wf-edit-version-hint { font-size: 10px; color: var(--dim); }
 .wf-edit-version-list { display: flex; flex-direction: column; gap: 3px; max-height: 120px; overflow-y: auto; }
 .wf-version-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; background: var(--bg); font-size: 12px; }
