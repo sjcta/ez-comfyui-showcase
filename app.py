@@ -983,7 +983,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         # Mark encode phase complete for this group
                         if current_group < len(group_boundaries):
                             enc_start, stp_start, dec_start, next_start = group_boundaries[current_group]
-                            completed_units = max(completed_units, stp_start)
+                            completed_units = max(completed_units, enc_start)
                     elif cls in DECODE_NODES:
                         # Determine if this is mid-pipeline decode or final decode
                         more_samplers = sampler_pass < len(sampler_ids)
