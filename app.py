@@ -233,6 +233,7 @@ async def _stuck_job_watcher():
                 j["status"] = "error"
                 j["message"] = "任务超时（10分钟无状态变化）"
                 print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {now-last_up:.0f}s)")
+                add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
                 inst_name = j.get("instance", "")
                 if inst_name:
                     svc = f"comfyui-{inst_name.lower()}"
@@ -879,18 +880,18 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         jobs[job_id]["last_update"] = time.time()
         save_jobs()
 
-    resp = comfyui_post("/prompt", {"prompt": workflow, "client_id": client_id}, base_url=instance_url)
-    prompt_id = resp.get("prompt_id", "")
-    if not prompt_id:
-        raise RuntimeError(f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}")
-    jobs[job_id]["prompt_id"] = prompt_id
-    save_jobs()
     try:
         async with websockets.connect(ws_url) as ws:
             update_job()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
             # Submit prompt WITH client_id so ComfyUI routes events to us
+            resp = comfyui_post("/prompt", {"prompt": workflow, "client_id": client_id}, base_url=instance_url)
+            prompt_id = resp.get("prompt_id", "")
+            if not prompt_id:
+                raise RuntimeError(f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}")
+            jobs[job_id]["prompt_id"] = prompt_id
+            save_jobs()
 
             # Listen for events
             while time.time() - start < timeout:
@@ -1040,6 +1041,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             else:
                 raise TimeoutError(f"ComfyUI #{inst['name']} 启动超时 (180s)")
 
+        add_log("info", "generate", "Starting generation", job_id)
         jobs[job_id]["status"] = "generating"
         jobs[job_id]["message"] = "出图中..."
         jobs[job_id]["generating_at"] = time.time()
@@ -1055,6 +1057,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             ws_ok, pid = await comfyui_ws_track(job_id, wf, client_id, timeout=900, base_url=inst_url)
         except Exception as _ws_err:
             print(f"[WS_TRACK_ERROR] {job_id}: {_ws_err}")
+            add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
             jobs[job_id]["ws_error"] = str(_ws_err)[:300]
 
         if not ws_ok and pid:
@@ -1868,6 +1871,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks):
             prompt_preview = str(v)[:200]
             break
 
+    add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
         "workflow": req.workflow, "seed": str(seed),
