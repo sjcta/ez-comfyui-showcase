@@ -803,63 +803,39 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
 
     # ── Pre-analyze workflow: build work-unit chain ──────────────────────
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
-    ENCODE_NODES = {"CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "ConditioningZeroOut",
-                    "ConditioningSetTimestepRange", "VAEEncode"}
-    DECODE_NODES = {"VAEDecode"}
-    SAVE_NODES = {"SaveImage", "SaveImageWebsocket"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
 
-    # Build node chain in likely execution order
-    sampler_ids = [nid for nid, cls in node_types.items() if cls in SAMPLER_NODES]
-    upscaler_ids = [nid for nid, cls in node_types.items() if cls in UPSCALE_ACT_NODES]
-    all_tracked_nodes = SAMPLER_NODES | UPSCALE_ACT_NODES | DECODE_NODES | ENCODE_NODES | SAVE_NODES
+    # Every node = 1 unit. Progress = completed_nodes / total_nodes.
+    all_node_ids = [nid for nid in node_types]
+    total_units = len(all_node_ids)  # each node contributes 1 unit
+    # Index map: node_id -> unit index for interpolation
+    node_index = {nid: i for i, nid in enumerate(all_node_ids)}
+    # Pre-resolve sampler steps for within-node interpolation
+    SAMPLER_STEPS = {}
+    for nid, cls in node_types.items():
+        if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
+            inp = workflow.get(nid, {}).get("inputs", {})
+            steps_val = inp.get("steps", 8 if cls in SAMPLER_NODES else 1)
+            if isinstance(steps_val, (int, float)):
+                SAMPLER_STEPS[nid] = int(steps_val)
+            elif isinstance(steps_val, list) and len(steps_val) >= 1:
+                link_nid = str(steps_val[0])
+                link_node = workflow.get(link_nid, {})
+                link_inputs = link_node.get("inputs", {})
+                for k in ("value", "INT"):
+                    if k in link_inputs and isinstance(link_inputs[k], (int, float)):
+                        SAMPLER_STEPS[nid] = int(link_inputs[k])
+                        break
+                if nid not in SAMPLER_STEPS:
+                    SAMPLER_STEPS[nid] = 8 if cls in SAMPLER_NODES else 1
+            else:
+                SAMPLER_STEPS[nid] = 8 if cls in SAMPLER_NODES else 1
 
-    # Get steps for each sampler
-    def _resolve_int(val, default):
-        if isinstance(val, (int, float)):
-            return int(val)
-        if isinstance(val, list) and len(val) >= 1:
-            link_nid = str(val[0])
-            link_node = workflow.get(link_nid, {})
-            link_inputs = link_node.get("inputs", {})
-            for out_key in ("value", "INT"):
-                if out_key in link_inputs and isinstance(link_inputs[out_key], (int, float)):
-                    return int(link_inputs[out_key])
-            return default
-        return default
-
-    sampler_steps = []
-    for sid in sampler_ids:
-        inp = workflow.get(sid, {}).get("inputs", {})
-        sampler_steps.append(_resolve_int(inp.get("steps", 8), 8))
-    upscale_steps = []
-    for uid in upscaler_ids:
-        inp = workflow.get(uid, {}).get("inputs", {})
-        upscale_steps.append(_resolve_int(inp.get("steps", 1), 1))
-
-    # Unit system: each sampler/upscaler = (encode, steps, decode)
-    # All OTHER nodes count as 1 unit each (evenly distributed)
-    UNITS_PREPARE = 1
-    UNITS_SAVE = 1
-    UNITS_PER_GROUP = []
-    for steps in sampler_steps:
-        UNITS_PER_GROUP.append((1, steps, 1))
-    for steps in upscale_steps:
-        UNITS_PER_GROUP.append((1, steps, 1))
-
-    # Count non-tracked nodes (model loading, image load, etc.) as individual units
-    non_tracked_ids = [nid for nid, cls in node_types.items() if cls not in all_tracked_nodes]
-    UNITS_OTHER = len(non_tracked_ids)
-
-    total_units = UNITS_PREPARE + UNITS_OTHER + sum(e + s + d for e, s, d in UNITS_PER_GROUP) + UNITS_SAVE
-
-    # Cumulative unit boundaries
-    group_boundaries = []
-    cursor = UNITS_PREPARE + UNITS_OTHER  # after prepare + all non-tracked nodes
-    for enc, stp, dec in UNITS_PER_GROUP:
-        group_boundaries.append((cursor, cursor + enc, cursor + enc + stp, cursor + enc + stp + dec))
-        cursor += enc + stp + dec
-    save_start = cursor
+    # ── State ────────────────────────────────────────────────────────────
+    completed_units = 0.0
+    current_sampler_id = ""
+    sampler_cur = 0
+    sampler_total = 0
 
     # ── State ────────────────────────────────────────────────────────────
     completed_units = 0.0  # monotonic float; never decreases
@@ -871,17 +847,14 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     sampling_total = 0
 
     def _overall_pct():
-        """completed_units / total_units → 0-100. Monotonic.
-        During 'step' phase, interpolates within the current sampler group
-        so the bar moves smoothly instead of jumping at phase boundaries."""
+        """completed_nodes / total_nodes -> 0-100. Interpolates within sampler nodes."""
         base = completed_units
-        if phase_step == 'step' and sampling_total > 0 and current_group < len(group_boundaries):
-            enc_s, stp_s, dec_s, _ = group_boundaries[current_group]
-            group_steps = dec_s - stp_s
-            if group_steps > 0:
-                intra = min(sampling_cur / sampling_total, 1.0)
-                base = stp_s + intra * group_steps
+        if current_sampler_id and sampler_total > 0:
+            idx = node_index.get(current_sampler_id, 0)
+            intra = min(sampler_cur / sampler_total, 1.0)
+            base = idx + intra
         return max(0, min(100, round(base / total_units * 100))) if total_units > 0 else 0
+
 
     def _pct_from_units(units):
         return max(0, min(100, round(units / total_units * 100))) if total_units > 0 else 0
@@ -890,26 +863,16 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         elapsed = round(time.time() - start)
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
-        if phase_step == 'prepare':
-            msg = f"{label}" if label else "加载模型..."
-        elif phase_step == 'encode':
-            msg = f"{label or '编码中'}..."
-        elif phase_step == 'step':
-            if sampling_total > 0:
-                msg = f"{label or '采样中'} {sampling_cur}/{sampling_total}"
-            else:
-                msg = f"{label or '采样中'}..."
-        elif phase_step == 'decode':
-            msg = f"{label or '解码中'}..."
-        elif phase_step == 'save':
-            msg = f"{label or '保存中'}..."
-        elif phase_step == 'done':
-            msg = "完成"
+        if sampler_total > 0:
+            msg = f"{label or chr(39) + chr(39)} {sampler_cur}/{sampler_total}"
+        elif label:
+            msg = label
         else:
             msg = "处理中..."
         jobs[job_id]["message"] = msg
-        jobs[job_id]["progress"] = {"current": sampling_cur, "total": sampling_total, "pct": pct}
+        jobs[job_id]["progress"] = {"current": sampler_cur, "total": sampler_total, "pct": pct}
         save_jobs()
+
 
     try:
         async with websockets.connect(ws_url) as ws:
@@ -952,79 +915,43 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                 if msg_type == "executing":
                     node_id = data.get("node")
                     if node_id is None:
-                        # Done — mark all units complete
                         completed_units = total_units
-                        phase_step = 'done'
                         update_job()
                         await broadcast({"type": "job_update", "job": jobs[job_id]})
                         return True, prompt_id
                     nid = str(node_id)
                     cls = node_types.get(nid, "")
                     current_node_cls = cls
-                    sampling_cur = 0
-                    sampling_total = 0
+                    # Advance to this node's unit position
+                    node_pos = node_index.get(nid, 0)
+                    if completed_units < node_pos:
+                        completed_units = node_pos
+                    completed_units += 1.0
+                    # Track sampler/upscaler for within-node interpolation
                     if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
-                        # Entering a sampler/upscale group — determine which group
-                        if cls in SAMPLER_NODES:
-                            sampler_pass += 1
-                            current_group = sampler_pass - 1
-                        else:
-                            upscale_seen = True
-                            current_group = len(sampler_steps) + upscaler_ids.index(nid) if nid in upscaler_ids else len(sampler_steps)
-                        phase_step = 'step'
-                        # Mark encode phase complete for this group
-                        if current_group < len(group_boundaries):
-                            enc_start, stp_start, dec_start, next_start = group_boundaries[current_group]
-                            completed_units = max(completed_units, enc_start)
-                    elif cls in DECODE_NODES:
-                        # Determine if this is mid-pipeline decode or final decode
-                        more_samplers = sampler_pass < len(sampler_ids)
-                        more_upscale = len(upscaler_ids) > 0 and not upscale_seen
-                        if more_samplers or more_upscale:
-                            phase_step = 'decode'
-                            # Mark current group's steps complete
-                            if current_group < len(group_boundaries):
-                                enc_start, stp_start, dec_start, next_start = group_boundaries[current_group]
-                                completed_units = max(completed_units, dec_start)
-                        else:
-                            phase_step = 'save'
-                            # Mark all sampler groups complete
-                            completed_units = max(completed_units, save_start)
-                    elif cls in SAVE_NODES:
-                        phase_step = 'save'
-                        completed_units = max(completed_units, save_start)
-                    elif cls in ENCODE_NODES:
-                        phase_step = 'encode'
+                        current_sampler_id = nid
+                        sampler_cur = 0
+                        sampler_total = SAMPLER_STEPS.get(nid, 8)
                     else:
-                        phase_step = 'prepare'
-                        completed_units += 1
+                        current_sampler_id = ""
+                        sampler_cur = 0
+                        sampler_total = 0
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
                 elif msg_type == "progress":
                     cur = data.get("value", 0)
                     total = data.get("max", 1)
-                    sampling_cur = cur
-                    sampling_total = total
+                    sampler_cur = cur
+                    sampler_total = total
                     prog_node = data.get("node")
                     if prog_node is not None:
                         cls = node_types.get(str(prog_node), "")
                         if cls:
                             current_node_cls = cls
-                    # Calculate units within current phase from progress
-                    if current_group < len(group_boundaries):
-                        enc_start, stp_start, dec_start, next_start = group_boundaries[current_group]
-                        if phase_step == 'step':
-                            step_units = stp_start + (cur / total * (dec_start - stp_start)) if total > 0 else stp_start
-                            completed_units = max(completed_units, step_units)
-                        elif phase_step == 'decode':
-                            decode_units = dec_start + (cur / total * (next_start - dec_start)) if total > 0 else dec_start
-                            completed_units = max(completed_units, decode_units)
-                    elif phase_step == 'save':
-                        save_units = save_start + (cur / total * UNITS_SAVE) if total > 0 else save_start
-                        completed_units = max(completed_units, save_units)
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
+
 
                 elif msg_type == "executed":
                     enode = data.get("node")
