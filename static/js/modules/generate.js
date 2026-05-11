@@ -229,6 +229,8 @@ async function doGenerate() {
       const fr = await fetch(`${API}/api/workflows/${encodeURIComponent(A.currentWF)}/fields`);
       const fd = await fr.json();
       for (const f of fd.fields || []) {
+        // Pre-set default value for this field (including hidden)
+        fields[f.node_id + '::' + f.field] = f.value;
         const zone = f.zone || 'advanced';
         const key = `${f.node_id}::${f.field}`;
         // Text-encode in user_input zone → main prompt
