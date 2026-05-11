@@ -476,7 +476,7 @@ async function loadWorkflows() {
         .join('');
       grid.innerHTML = cards;
       // Build category tabs
-      const TAB_ORDER = ['文生图', '图生图', '文生视频', '图生视频', '其他'];
+      const TAB_ORDER = ['文生图', '图生图', '放大', '文生视频', '图生视频', '其他'];
       const cats = new Set(
         wfs.map((w) => {
           const t = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags);

@@ -223,6 +223,13 @@ a { color: var(--accent); text-decoration: none; }
   color: var(--dim);
 }
 
+.wf-card-tags {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
 .wf-tag {
   font-size: 9px;
   font-weight: 600;
@@ -235,6 +242,8 @@ a { color: var(--accent); text-decoration: none; }
 .wf-tag-i2i { background: rgba(188,140,255,.15); color: var(--purple); }
 .wf-tag-i2v { background: rgba(240,136,62,.15); color: var(--orange); }
 .wf-tag-t2v { background: rgba(210,153,34,.15); color: var(--yellow); }
+.wf-tag-info { background: rgba(210,153,34,.12); color: var(--yellow); }
+.wf-tag-inst { background: rgba(0,0,0,.8); color: var(--yellow); }
 
 
 
@@ -451,6 +460,11 @@ a { color: var(--accent); text-decoration: none; }
   transition: border-color .15s, box-shadow .15s;
   overflow: hidden;
 }
+.gi-type-t2i { border-color: rgba(88,166,255,.25); }
+.gi-type-i2i { border-color: rgba(188,140,255,.25); }
+.gi-type-t2v { border-color: rgba(210,153,34,.20); }
+.gi-type-i2v { border-color: rgba(240,136,62,.20); }
+.gi-type-info { border-color: rgba(210,153,34,.20); }
 
 .gi:hover {
   border-color: var(--accent);
@@ -494,6 +508,10 @@ a { color: var(--accent); text-decoration: none; }
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
+.gi-wf-badge .wf-tag {
+  margin-left: 4px;
+  vertical-align: middle;
+}
 
 /* 删除按钮 — hover 时出现在图片区右上角 */
 
@@ -527,26 +545,28 @@ a { color: var(--accent); text-decoration: none; }
 
 .gi-zoom {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  top: 6px;
+  right: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
   background: rgba(0, 0, 0, .6);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, .2);
+  color: var(--dim);
+  border: none;
   cursor: pointer;
   display: none;
   align-items: center;
   justify-content: center;
   z-index: 5;
   backdrop-filter: blur(4px);
-  transition: background .15s, transform .15s;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background .15s;
+  pointer-events: auto;
 }
 
 .gi:hover .gi-zoom { display: flex; }
-.gi-zoom:hover { background: var(--accent); transform: translate(-50%, -50%) scale(1.15); }
+.gi-zoom:hover { background: rgba(88,166,255,.8); color: #fff; }
 
 /* 类型角标 — 图片区左上角 */
 
@@ -554,21 +574,47 @@ a { color: var(--accent); text-decoration: none; }
   position: absolute;
   top: 6px;
   left: 6px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
   z-index: 4;
   backdrop-filter: blur(4px);
   pointer-events: none;
-  opacity: 0;
+  opacity: 1;
   transition: opacity .2s;
 }
-.gi:hover .gi-type-badge { opacity: 1; }
 .gi-type-badge.wf-tag-t2i { background: rgba(88,166,255,.8); color: #fff; }
 .gi-type-badge.wf-tag-i2i { background: rgba(188,140,255,.8); color: #fff; }
 .gi-type-badge.wf-tag-t2v { background: rgba(210,153,34,.8); color: #fff; }
 .gi-type-badge.wf-tag-i2v { background: rgba(240,136,62,.8); color: #fff; }
+.gi-type-badge.wf-tag-info { background: rgba(210,153,34,.8); color: #fff; }
+
+/* 信息标签容器 — 图片区左上角，紧跟类型角标 */
+
+.gi-tags-row {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  gap: 3px;
+  z-index: 4;
+  pointer-events: none;
+}
+.gi-tags-row .wf-tag {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+}
+.gi-tags-row .wf-tag-t2i { background: rgba(88,166,255,.8); color: #fff; }
+.gi-tags-row .wf-tag-i2i { background: rgba(188,140,255,.8); color: #fff; }
+.gi-tags-row .wf-tag-t2v { background: rgba(210,153,34,.8); color: #fff; }
+.gi-tags-row .wf-tag-i2v { background: rgba(240,136,62,.8); color: #fff; }
+.gi-tags-row .wf-tag-info { background: rgba(210,153,34,.8); color: #fff; }
+.gi-tags-row .wf-tag-inst { background: rgba(0,0,0,.8); color: var(--yellow); }
 
 /* 图片信息按钮区域 */
 
@@ -1444,7 +1490,7 @@ select { cursor: pointer; }
 .gpu-card-kill:disabled{opacity:.4;cursor:not-allowed}
 .popup-section-title{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin:12px 0 8px;padding-top:12px;border-top:1px solid var(--border)}
 .popup-section-title:first-child{margin-top:0;padding-top:0;border-top:none}
-.wf-tag-inline{font-size:9px}
+
 
 /* Workflow card type accents */
 .wf-card-type-t2i { background: rgba(88,166,255,0.25); }

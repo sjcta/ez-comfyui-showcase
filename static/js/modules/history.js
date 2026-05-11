@@ -62,7 +62,9 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       const hasImage = !!j.image;
       const imgSrc = hasImage ? `${API}/api/images/${j.image}` : '';
 
-      html += `<div class="gi job-card ${j.status}" data-job-id="${j.id}">`;
+      var _jTag = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow] || {}).tags);
+      var _jTypeCls = _jTag ? 'gi-type-' + _jTag.cls.replace('wf-tag-', '') : '';
+      html += `<div class="gi job-card ${j.status} ${_jTypeCls}" data-job-id="${j.id}">`;
 
       if (hasImage) {
         html += `<div class="gi-img" onclick="event.stopPropagation();CW.openJobLB('${escA(j.image)}','${escA(label)}')">
@@ -126,8 +128,9 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
       const wfTag = window.CW.wfTag(h.workflow || '', (A._wfMeta[h.workflow] || {}).tags);
       const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
+      const typeCls = wfTag ? 'gi-type-' + wfTag.cls.replace('wf-tag-', '') : '';
 
-      html += `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
+      html += `<div class="gi ${typeCls}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
       <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
         <img src="${imgSrc}" loading="lazy" alt="">
         ${tagBadge}
@@ -213,7 +216,8 @@ function _histCardHTML(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
     const wfTag = window.CW.wfTag(h.workflow || '', (A._wfMeta[h.workflow] || {}).tags);
     const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-    return `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
+    const typeCls = wfTag ? 'gi-type-' + wfTag.cls.replace('wf-tag-', '') : '';
+    return `<div class="gi ${typeCls}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
       <img src="${imgSrc}" loading="lazy" alt="">
       ${tagBadge}

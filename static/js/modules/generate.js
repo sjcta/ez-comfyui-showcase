@@ -66,6 +66,17 @@ async function fillFormFromHistory(idx) {
       for (const [k, v] of Object.entries(h.field_values)) {
         const el = $(`#advFields [data-key="${k}"]`);
         if (el) el.value = v;
+        // Restore I2I reference image preview
+        if (k.endsWith('::image') && v) {
+          $('#refImageValue').value = v;
+          var prevImg = $('#refImagePreview');
+          if (prevImg) {
+            prevImg.src = API + '/api/input-image/' + encodeURIComponent(v);
+            prevImg.style.display = '';
+          }
+          var ph = $('#refImagePlaceholder');
+          if (ph) ph.style.display = 'none';
+        }
       }
     }
     // Restore seed (covers old items without field_values, and ensures actual seed is used)
