@@ -37,51 +37,65 @@ async def _queue_worker():
             await asyncio.sleep(1)
 
 async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h):
-    """Route to affinity instance, wait for its semaphore, then run."""
+    """Strict model-affinity routing: one job per instance, no cross-model spilling."""
     sem = None
+    sem_acquired = False
+    inst = None
     try:
         workflow_name = os.path.basename(workflow_path)
+        wf_group = extract_model_group(workflow_name) if workflow_name else ""
         jobs[job_id]["status"] = "dispatching"
-        jobs[job_id]["message"] = "选择实例..."
+        jobs[job_id]["message"] = "匹配实例..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
-        await _global_sem.acquire()
+
+        # Phase 1: find the best instance for this model group
         inst = await pick_best_instance(workflow_name)
         sem = _instance_semas[inst["name"]]
-        # If chosen instance is busy (semaphore locked), try to cold-start another
-        if sem.locked():
-            alt = next((i for i in COMFYUI_INSTANCES if i["name"] != inst["name"] and not comfyui_up(i["url"])), None)
-            if alt:
-                svc = f"comfyui-{alt['name'].lower()}"
-                try:
-                    await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "start", svc], capture_output=True, timeout=30,
-                        env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
-                    for _ in range(150):
-                        if await asyncio.to_thread(comfyui_up, alt["url"]):
-                            break
-                        await asyncio.sleep(2)
-                    if await asyncio.to_thread(comfyui_up, alt["url"]):
-                        inst = alt
-                        sem = _instance_semas[inst["name"]]
-                except Exception:
-                    pass
-        jobs[job_id]["message"] = f"等待实例 {inst['name']} 就绪..."
+        await _global_sem.acquire()
+
+        # Ensure instance is up (cold start if needed)
+        if not await asyncio.to_thread(comfyui_up, inst["url"]):
+            svc = f"comfyui-{inst['name'].lower()}"
+            _update_job_msg(job_id, f"启动实例 {inst['name']}...")
+            try:
+                result = await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "start", svc],
+                    capture_output=True, timeout=30,
+                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
+                if result.returncode != 0:
+                    stderr = result.stderr.decode(errors='replace')[:200]
+                    print(f"[cold-start] {svc} start failed: {stderr}")
+                for _ in range(90):
+                    if await asyncio.to_thread(comfyui_up, inst["url"]):
+                        break
+                    await asyncio.sleep(2)
+            except Exception as e:
+                print(f"[cold-start] {svc} error: {e}")
+
+        # Phase 2: wait for this instance's semaphore (strict: 1 job at a time)
+        jobs[job_id]["status"] = "queued"
+        jobs[job_id]["message"] = f"排队等待 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
         try:
-            await asyncio.wait_for(sem.acquire(), timeout=360)
+            await asyncio.wait_for(sem.acquire(), timeout=600)
+            sem_acquired = True
         except asyncio.TimeoutError:
             if job_id in jobs:
                 jobs[job_id]["status"] = "error"
-                jobs[job_id]["message"] = "排队超时（信号量未释放）"
+                jobs[job_id]["message"] = "排队超时（实例繁忙，10分钟未释放）"
                 await broadcast({"type": "job_update", "job": jobs[job_id]})
                 save_jobs()
             return
 
+        if job_id in jobs and jobs[job_id].get("status") not in ("error", "done"):
+            jobs[job_id]["status"] = "preparing"
+            jobs[job_id]["message"] = f"实例 {inst['name']} 就绪，开始出图"
+            await broadcast({"type": "job_update", "job": jobs[job_id]})
+
         jobs[job_id]["instance"] = inst["name"]
         await broadcast({"type": "job_update", "job": jobs[job_id]})
+        _instance_group[inst["name"]] = wf_group
 
-        # Update model group affinity
-        _instance_group[inst["name"]] = extract_model_group(workflow_name)
-
+        # Phase 3: run the generation
         await generate_task(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, instance=inst)
         _instance_last_active[inst["name"]] = time.time()
     except Exception as e:
@@ -93,9 +107,9 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
             await broadcast({"type": "job_update", "job": jobs[job_id]})
             save_jobs()
     finally:
-        if sem is not None:
+        if sem is not None and sem_acquired:
+            _global_sem.release()
             sem.release()
-        _global_sem.release()
         _job_queue.task_done()
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -804,7 +818,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     # ── Pre-analyze workflow: build work-unit chain ──────────────────────
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     ENCODE_NODES = {"CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "ConditioningZeroOut",
-                    "ConditioningSetTimestepRange, VAEEncode}
+                    "ConditioningSetTimestepRange", "VAEEncode"}
     DECODE_NODES = {"VAEDecode"}
     SAVE_NODES = {"SaveImage", "SaveImageWebsocket"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
@@ -994,11 +1008,11 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-                        # Set sampling_total from pre-resolved steps
-                        if current_group < len(sampler_steps):
-                            sampling_total = sampler_steps[current_group]
-                        elif current_group - len(sampler_steps) < len(upscale_steps):
-                            sampling_total = upscale_steps[current_group - len(upscale_steps)]
+                    # Set sampling_total from pre-resolved steps
+                    if current_group < len(sampler_steps):
+                        sampling_total = sampler_steps[current_group]
+                    elif current_group - len(sampler_steps) < len(upscale_steps):
+                        sampling_total = upscale_steps[current_group - len(upscale_steps)]
                 elif msg_type == "progress":
                     cur = data.get("value", 0)
                     total = data.get("max", 1)
