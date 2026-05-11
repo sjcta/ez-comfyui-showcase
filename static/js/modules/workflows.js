@@ -44,11 +44,8 @@ function closeWfDel() {
     $('#wfDelModal').classList.remove('open');
   }
 
-function downloadWf(fname, version) {
-    var url = version
-        ? API + '/api/workflows/' + encodeURIComponent(fname) + '/version-download?version=' + encodeURIComponent(version)
-        : API + '/api/workflows/' + encodeURIComponent(fname) + '/download';
-    window.open(url, '_blank');
+function downloadWf(fname) {
+    window.open(API + "/api/workflows/" + encodeURIComponent(fname) + "/download", "_blank");
 }
 
 function openWfDel(fname) {
@@ -746,7 +743,6 @@ async function loadWfVersions(fname) {
             '<span class="wf-version-filename">' + escH(d.base.filename) + '</span>' +
             '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(d.base.filename) + '\')">'+CW.icon('download')+' 下载</button>' +
             '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>' +
-        html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'" + escA(fname) + "\',\'" + escA(k) + "\')">'+CW.icon('download')+'</button>';
           '</div>';
         }
         list.innerHTML = baseHtml || '<span class="dim-tag">尚无版本</span>';
@@ -760,7 +756,6 @@ async function loadWfVersions(fname) {
         html += '<span class="wf-version-name">' + escH(k) + '</span>';
         if (isActive) html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
         else html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
-        html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'" + escA(fname) + "\',\'" + escA(k) + "\')">'+CW.icon('download')+'</button>';
         html += '</div>';
       }
       list.innerHTML = html;
