@@ -4,8 +4,6 @@ Dual-instance ComfyUI Web Management & Generation Platform.
 
 Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel ComfyUI instances (A:8190 / B:8189) behind an intelligent scheduler.
 
-> Live demo: [https://imdjj.cn:1213/comfy/](https://imdjj.cn:1213/comfy/)
-
 ---
 
 ## Features
