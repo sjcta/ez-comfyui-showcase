@@ -837,7 +837,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     def update_job():
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
-        msg = label if label else "处理中..."
+        msg = label if label else f"{pct:.0f}%..."
         jobs[job_id]["message"] = msg
         jobs[job_id]["progress"] = {"pct": pct}
         save_jobs()
@@ -905,6 +905,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     prog_node = data.get("node")
                     if prog_node is not None:
                         cls = node_types.get(str(prog_node), "")
+                    if not cls:
+                        current_node_cls = ""
                         if cls:
                             current_node_cls = cls
                     update_job()
@@ -924,7 +926,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     raise RuntimeError(f"ComfyUI: {err}")
 
                 elif msg_type == "execution_start":
-                    phase_step = 'prepare'
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
