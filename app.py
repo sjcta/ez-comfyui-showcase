@@ -2314,9 +2314,10 @@ class NodeUpdateRequest(BaseModel):
     sort_order: Optional[int] = None
 
 
-@app.put("/api/nodes/reorder")
 class NodeReorderRequest(BaseModel):
     order: list[dict]
+
+@app.put("/api/nodes/reorder")
 def api_node_reorder(req: NodeReorderRequest):
     """Reorder nodes."""
     nodes = _load_nodes()
