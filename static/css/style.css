@@ -955,9 +955,10 @@ select { cursor: pointer; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
-  gap: 6px; padding: 9px 18px; border: none; border-radius: var(--radius-sm);
+  gap: 5px; padding: 9px 18px; border: none; border-radius: var(--radius-sm);
   font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
+.btn svg { flex-shrink: 0; }
 .btn-primary { background: var(--accent); color: #fff; flex: 1; }
 .btn-primary:hover { background: #79c0ff; }
 .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -1870,7 +1871,7 @@ select { cursor: pointer; }
 .gpu-yellow { background: #f59e0b; opacity: 0.6; min-width: 4px; }
 .gpu-empty { background: var(--border); }
 
-.btn-svg { vertical-align: middle; margin-right: 3px; }
+.btn-svg { vertical-align: middle; margin-right: 5px; }
 
 /* ── Generate Module ───────────────────────────────────────────── */
 .clear-btn {
