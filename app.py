@@ -805,93 +805,47 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
 
-    # Every node = 1 unit. Progress = completed_nodes / total_nodes.
-    all_node_ids = [nid for nid in node_types]
-    non_sampler_ids = [nid for nid, cls in node_types.items() if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES]
-    total_units = len(non_sampler_ids) + sum(SAMPLER_STEPS.values())
-    # Index map: node_id -> unit index for interpolation
-    node_index = {nid: i for i, nid in enumerate(all_node_ids)}
-    # Pre-resolve sampler steps for within-node interpolation
-    SAMPLER_STEPS = {}
+    # Jeson formula: non-sampler nodes=1, sampler steps=1
+    non_sampler_cnt = 0
+    sampler_steps_total = 0
     for nid, cls in node_types.items():
         if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
             inp = workflow.get(nid, {}).get("inputs", {})
-            steps_val = inp.get("steps", 8 if cls in SAMPLER_NODES else 1)
-            if isinstance(steps_val, (int, float)):
-                SAMPLER_STEPS[nid] = int(steps_val)
-            elif isinstance(steps_val, list) and len(steps_val) >= 1:
-                link_nid = str(steps_val[0])
-                link_node = workflow.get(link_nid, {})
-                link_inputs = link_node.get("inputs", {})
+            v = inp.get("steps", 8 if cls in SAMPLER_NODES else 1)
+            if isinstance(v, (int, float)):
+                sampler_steps_total += int(v)
+            elif isinstance(v, list) and len(v) >= 1:
+                ln = workflow.get(str(v[0]), {}).get("inputs", {})
                 for k in ("value", "INT"):
-                    if k in link_inputs and isinstance(link_inputs[k], (int, float)):
-                        SAMPLER_STEPS[nid] = int(link_inputs[k])
+                    if k in ln and isinstance(ln[k], (int, float)):
+                        sampler_steps_total += int(ln[k])
                         break
-                if nid not in SAMPLER_STEPS:
-                    SAMPLER_STEPS[nid] = 8 if cls in SAMPLER_NODES else 1
+                else:
+                    sampler_steps_total += 8 if cls in SAMPLER_NODES else 1
             else:
-                SAMPLER_STEPS[nid] = 8 if cls in SAMPLER_NODES else 1
-
-    # Unit positions: Jesons formula
-    # non-sampler nodes = 1 unit each, sampler nodes = steps units each
-    unit_positions = {}
-    unit_cursor = 0
-    for nid, cls in node_types.items():
-        unit_positions[nid] = unit_cursor
-        if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
-            unit_cursor += SAMPLER_STEPS.get(nid, 1)
+                sampler_steps_total += 8 if cls in SAMPLER_NODES else 1
         else:
-            unit_cursor += 1
+            non_sampler_cnt += 1
 
-
-    # ── State ────────────────────────────────────────────────────────────
+    total_units = non_sampler_cnt + sampler_steps_total
     completed_units = 0.0
-    current_sampler_id = ""
-    sampler_cur = 0
-    sampler_total = 0
-
-    # ── State ────────────────────────────────────────────────────────────
-    completed_units = 0.0  # monotonic float; never decreases
-    current_group = 0
-    phase_step = ''  # 'encode', 'step', 'decode', 'save'
-    sampler_pass = 0
-    upscale_seen = False
-    sampling_cur = 0
-    sampling_total = 0
+    last_prog = 0
 
     def _overall_pct():
-        """Jesons formula: each non-sampler node=1, each sampler step=1. Interpolates within sampler."""
-        base = completed_units
-        if current_sampler_id and sampler_total > 0:
-            pos = unit_positions.get(current_sampler_id, completed_units)
-            intra = min(sampler_cur / sampler_total, 1.0)
-            base = pos + intra
-        return max(0, min(100, round(base / total_units * 100))) if total_units > 0 else 0
-
-
-
-    def _pct_from_units(units):
-        return max(0, min(100, round(units / total_units * 100))) if total_units > 0 else 0
+        return max(0, min(100, round(completed_units / total_units * 100))) if total_units > 0 else 0
 
     def update_job():
-        elapsed = round(time.time() - start)
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
-        if sampler_total > 0:
-            msg = f"{label or chr(39) + chr(39)} {sampler_cur}/{sampler_total}"
-        elif label:
-            msg = label
-        else:
-            msg = "处理中..."
+        msg = label if label else "处理中..."
         jobs[job_id]["message"] = msg
-        jobs[job_id]["progress"] = {"current": sampler_cur, "total": sampler_total, "pct": pct}
+        jobs[job_id]["progress"] = {"pct": pct}
         save_jobs()
-
 
     try:
         async with websockets.connect(ws_url) as ws:
             phase_step = 'prepare'
-            # first executing event will advance completed_units  # mark prepare started
+            completed_units = max(completed_units, UNITS_PREPARE)  # mark prepare started
             update_job()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -936,28 +890,18 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     nid = str(node_id)
                     cls = node_types.get(nid, "")
                     current_node_cls = cls
-                    # Advance to this node's unit position
-                    node_pos = node_index.get(nid, 0)
-                    if completed_units < node_pos:
-                        completed_units = node_pos
-                    completed_units += 1.0 if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES else 0
-                    # Track sampler/upscaler for within-node interpolation
-                    if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
-                        current_sampler_id = nid
-                        sampler_cur = 0
-                        sampler_total = SAMPLER_STEPS.get(nid, 8)
+                    if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES:
+                        completed_units += 1.0
                     else:
-                        current_sampler_id = ""
-                        sampler_cur = 0
-                        sampler_total = 0
+                        last_prog = 0
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
                 elif msg_type == "progress":
                     cur = data.get("value", 0)
-                    total = data.get("max", 1)
-                    sampler_cur = cur
-                    sampler_total = total
+                    if cur > last_prog:
+                        completed_units += cur - last_prog
+                        last_prog = cur
                     prog_node = data.get("node")
                     if prog_node is not None:
                         cls = node_types.get(str(prog_node), "")
@@ -966,21 +910,14 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-
                 elif msg_type == "executed":
                     enode = data.get("node")
                     if enode is not None:
                         cls = node_types.get(str(enode), "")
                         if cls:
                             current_node_cls = cls
-                        if current_sampler_id:
-                            steps = SAMPLER_STEPS.get(current_sampler_id, 1)
-                            completed_units = max(completed_units, unit_positions.get(current_sampler_id, 0) + steps)
-                            current_sampler_id = ""
-                        sampling_cur = 0
-                        sampling_total = 0
-                        update_job()
-                        await broadcast({"type": "job_update", "job": jobs[job_id]})
+                    update_job()
+                    await broadcast({"type": "job_update", "job": jobs[job_id]})
 
                 elif msg_type == "execution_error":
                     err = data.get("exception_message", str(data)[:300])
