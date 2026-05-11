@@ -64,8 +64,8 @@ function _attachSentinel() {
     const wfMeta = A._wfMeta[j.workflow] || {};
     const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
     const wfTag = window.CW.getWFType(j.workflow || '');
-    const tagHtml = wfTag ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:9px;padding:1px 5px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>` : '';
-    const instBadge = j.instance ? ` <span class="wf-tag" style="font-size:9px;padding:1px 5px;vertical-align:middle;margin-left:4px;background:#2d1b69;color:#a78bfa">#${escH(j.instance)}</span>` : '';
+    const tagHtml = wfTag ? ` <span class="${wfTag.cls}">${wfTag.text}</span>` : '';
+    const instBadge = j.instance ? ` <span>#${escH(j.instance)}</span>` : '';
 
     // ── Info area ──
     // Type class for border color

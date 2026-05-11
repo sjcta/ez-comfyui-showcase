@@ -520,6 +520,7 @@ a { color: var(--accent); text-decoration: none; }
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
+.gi-wf-badge > span { font-size: 9px; padding: 1px 5px; vertical-align: middle; margin-left: 4px; }.gi-wf-badge > span:first-child { margin-left: 0; }.gi-wf-badge > span:last-child { background: #2d1b69; color: #a78bfa; }
 
 /* 删除按钮 — hover 时出现在图片区右上角 */
 
