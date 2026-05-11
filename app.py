@@ -2143,9 +2143,6 @@ async def api_upload_workflow_version(name: str, file: UploadFile = File(...)):
     versions[vname] = vpath
     entry["versions"] = versions
     entry["active_version"] = vname
-    if current_path:
-        with open(current_path, "wb") as f:
-            f.write(content)
     meta[name] = entry
     _save_wf_meta(meta)
     return {"ok": True, "version": vname, "versions": versions}
