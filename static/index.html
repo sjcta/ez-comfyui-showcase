@@ -187,7 +187,7 @@
 
 <!-- ═══ 标题栏 ═══ -->
 <header class="titlebar">
-  <div class="logo"><span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-palette"/></svg></span> Ez ComfyUI Showcase</div>
+  <div class="logo"><span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-palette"/></svg></span> Ez ComfyUI Showcase</div>
   <div class="titlebar-right">
     <button class="tb-log-btn" id="tbLogBtn" onclick="CW.toggleLog()" title="日志"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>日志</button>
     <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" onclick="if(window.CW&&CW.openWfMgr)CW.openWfMgr()" title="工作流管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理</button>
@@ -199,7 +199,7 @@
   <div class="wf-overlay-inner">
     <div class="wf-overlay-header">
       <div class="wf-overlay-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理 <span class="wf-overlay-count" id="wfOverlayCount"></span></div>
-      <button class="wf-overlay-close" id="wfOverlayClose" onclick="if(window.CW&&CW.closeWfMgr)CW.closeWfMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
+      <button class="wf-overlay-close" id="wfOverlayClose" onclick="if(window.CW&&CW.closeWfMgr)CW.closeWfMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <!-- ═══ 工具栏：分类筛选 + 排序 ═══ -->
     <div class="wf-mgr-toolbar">
@@ -220,7 +220,7 @@
     <div class="wf-bottom-actions">
       <div class="wf-overlay-upload" id="wfOverlayUpload">
         <div class="wf-upload-zone" id="wfUploadZone">
-          <div class="wf-upload-icon"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-folder-open"/></svg></div>
+          <div class="wf-upload-icon"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-folder-open"/></svg></div>
           <div class="wf-upload-text">拖入 workflow JSON 文件到此处</div>
           <div class="wf-upload-hint">或 <label class="wf-upload-btn" for="wfUploadInput">选择文件</label></div>
           <input type="file" id="wfUploadInput" accept=".json" multiple style="display:none">
@@ -228,7 +228,7 @@
       </div>
       <div class="wf-dirs-section" id="wfDirsSection">
         <div class="wf-dirs-header">
-          <span class="wf-dirs-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-folder"/></svg> 工作流目录</span>
+          <span class="wf-dirs-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-folder"/></svg> 工作流目录</span>
           <button class="wf-dirs-add-btn" onclick="CW.showAddDir()" title="添加目录">＋ 新增目录</button>
         </div>
         <div class="wf-dirs-list" id="wfDirsList"></div>
@@ -247,7 +247,7 @@
   <div class="wf-edit-card">
     <div class="wf-edit-header">
       <span class="wf-edit-title" id="wfEditTitle">编辑工作流</span>
-      <button class="wf-edit-close" id="wfEditClose" onclick="if(window.CW&&CW.closeWfEdit)CW.closeWfEdit()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
+      <button class="wf-edit-close" id="wfEditClose" onclick="if(window.CW&&CW.closeWfEdit)CW.closeWfEdit()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="wf-edit-body">
       <div class="wf-edit-row">
@@ -275,7 +275,7 @@
         <div class="wf-edit-versions">
           <div class="wf-edit-version-upload">
             <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
-            <button class="wf-mgr-btn" id="wfEditVersionBtn" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-upload"/></svg> 上传新版本</button>
+            <button class="wf-mgr-btn" id="wfEditVersionBtn" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传新版本</button>
             <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
           </div>
           <div class="wf-edit-version-list" id="wfEditVersionList"></div>
@@ -285,7 +285,7 @@
         <label>缩略图</label>
         <div class="wf-edit-thumb" id="wfEditThumb" title="点击上传缩略图">
           <img id="wfEditThumbImg" src="" alt="">
-          <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-camera"/></svg></div>
+          <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-camera"/></svg></div>
         </div>
         <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
       </div>
@@ -302,25 +302,25 @@
   <div class="ne-card">
     <div class="ne-header">
       <span class="ne-title" id="nodeEditorTitle">节点编辑</span>
-      <button class="ne-close" id="nodeEditorClose"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
+      <button class="ne-close" id="nodeEditorClose"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="ne-body">
-      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-eye"/></svg> 切换可见性</div>
+      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye"/></svg> 切换可见性</div>
       <div class="ne-zones" id="neZones">
         <div class="ne-zone" data-zone="user_input">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-file-text"/></svg> 用户输入</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 用户输入</div>
           <div class="ne-zone-cards" id="neZoneUserInput"></div>
         </div>
         <div class="ne-zone" data-zone="advanced">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-settings"/></svg> 高级参数</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-settings"/></svg> 高级参数</div>
           <div class="ne-zone-cards" id="neZoneAdvanced"></div>
         </div>
         <div class="ne-zone" data-zone="output">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-send"/></svg> 输出</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-send"/></svg> 输出</div>
           <div class="ne-zone-cards" id="neZoneOutput"></div>
         </div>
         <div class="ne-zone" data-zone="hidden">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-eye-off"/></svg> 隐藏</div>
+          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye-off"/></svg> 隐藏</div>
           <div class="ne-zone-cards" id="neZoneHidden"></div>
         </div>
       </div>
@@ -390,7 +390,7 @@
     <div class="wf-grid" id="wfGrid"></div>
 
 
-    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-zap"/></svg> 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
+    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-zap"/></svg> 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
     <div class="gen-form" id="genForm" style="display:none">
             <div id="quickFormFields"></div>
       <button class="adv-toggle" id="advToggle"><span class="arrow">▶</span> 详细参数</button>
@@ -398,7 +398,7 @@
     </div>
     
 </div><div class="gen-footer" style="display:none">
-      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-play"/></svg> 出图</button>
+      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-play"/></svg> 出图</button>
     </div>
   </div>
 
@@ -408,7 +408,7 @@
   <!-- 右列：出图中 + 历史（瀑布流） -->
   <div class="col-center" id="colCenter">
     <div class="col-header">
-      <span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-image"/></svg> 出图历史</span>
+      <span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
       <span class="ch-count" id="histCount"></span>
       <input class="gf-search" id="gfStyle" type="text" placeholder="搜索..." oninput="CW.applyFilters()">
     </div>
@@ -428,7 +428,7 @@
       <select id="gfWF" onchange="CW.applyFilters()">
         <option value="">全部工作流</option>
       </select>
-      <button class="gf-clear" onclick="CW.clearFilters()" title="清除"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
+      <button class="gf-clear" onclick="CW.clearFilters()" title="清除"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="masonry" id="gallery"></div>
       </div>
@@ -451,7 +451,7 @@
   <div class="inst-popup">
     <div class="inst-popup-header">
       <h3 id="instPopupTitle">ComfyUI 实例管理</h3>
-      <button class="inst-popup-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-x"/></svg></button>
+      <button class="inst-popup-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div id="instCards"></div>
   </div>

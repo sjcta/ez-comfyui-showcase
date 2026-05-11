@@ -1401,13 +1401,14 @@ select { cursor: pointer; }
   display: flex; gap: 6px; flex-shrink: 0;
 }
 .wf-mgr-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 10px; min-height: 24px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  padding: 2px 8px; min-height: 20px;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg); color: var(--dim); font-size: 11px; cursor: pointer;
-  transition: all .15s; font-family: inherit; text-align: center; white-space: nowrap;
+  transition: all .15s; font-family: inherit; white-space: nowrap;
   line-height: 1;
 }
+.wf-mgr-btn svg { display: block; flex-shrink: 0; vertical-align: middle; }
 .wf-mgr-btn:hover { border-color: var(--accent); color: var(--accent); }
 .wf-mgr-btn.danger { color: #ef4444; border-color: rgba(239,68,68,.3); }
 .wf-mgr-btn.danger:hover { border-color: var(--red); color: var(--red); background: rgba(239,68,68,.08); }
@@ -1905,6 +1906,7 @@ select { cursor: pointer; }
 .hint-sub { font-size:11px; margin-top:4px; }
 
 /* ── Icons Module ─────────────────────────────────────────────── */
+.cw-icon { vertical-align: middle; display: inline-block; flex-shrink: 0; }
 .cw-icon-svg { vertical-align:middle; display:inline-block; flex-shrink:0; }
 
 
