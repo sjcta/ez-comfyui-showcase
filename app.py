@@ -2104,6 +2104,20 @@ def api_workflow_versions(name: str):
     return {"versions": versions, "active_version": entry.get("active_version", ""),
             "base": {"filename": name, "path": _resolve_workflow(name) or ""}}
 
+@app.get("/api/workflows/{name}/version-download")
+def api_workflow_version_download(name: str, version: str = "v1"):
+    meta = _load_wf_meta()
+    entry = meta.get(name, {})
+    versions = entry.get("versions", {})
+    if version == "v1" or version == "base":
+        path = _resolve_workflow(name)
+        if path: return FileResponse(path, media_type="application/json", filename=f"{name}")
+        raise HTTPException(404)
+    vpath = versions.get(version, "")
+    if not vpath or not os.path.isfile(vpath):
+        raise HTTPException(404, f"Version {version} not found")
+    base_name = name.replace(".json", "")
+    return FileResponse(vpath, media_type="application/json", filename=f"{base_name}_{version}.json")
 
 @app.post("/api/workflows/{name}/upload-version")
 async def api_upload_workflow_version(name: str, file: UploadFile = File(...)):
