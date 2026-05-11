@@ -804,7 +804,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     # ── Pre-analyze workflow: build work-unit chain ──────────────────────
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     ENCODE_NODES = {"CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "ConditioningZeroOut",
-                    "ConditioningSetTimestepRange"}
+                    "ConditioningSetTimestepRange, VAEEncode}
     DECODE_NODES = {"VAEDecode"}
     SAVE_NODES = {"SaveImage", "SaveImageWebsocket"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
@@ -994,6 +994,11 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
+                        # Set sampling_total from pre-resolved steps
+                        if current_group < len(sampler_steps):
+                            sampling_total = sampler_steps[current_group]
+                        elif current_group - len(sampler_steps) < len(upscale_steps):
+                            sampling_total = upscale_steps[current_group - len(upscale_steps)]
                 elif msg_type == "progress":
                     cur = data.get("value", 0)
                     total = data.get("max", 1)
