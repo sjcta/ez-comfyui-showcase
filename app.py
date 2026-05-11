@@ -879,7 +879,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             else:
                 sampler_steps_total += 8 if cls in SAMPLER_NODES else 1
         else:
-            non_sampler_cnt += 1
+            if cls != "VAEDecode":
+                non_sampler_cnt += 1
 
     total_units = non_sampler_cnt + sampler_steps_total
     print(f"[DEBUG] total_units={total_units} non_sampler={non_sampler_cnt} sampler_steps={sampler_steps_total}")
@@ -947,7 +948,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     nid = str(node_id)
                     cls = node_types.get(nid, "")
                     current_node_cls = cls
-                    if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES:
+                    if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES and cls != "VAEDecode":
                         completed_units += 1.0
                     else:
                         last_prog = 0
