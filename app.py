@@ -237,6 +237,34 @@ async def _idle_instance_watcher():
                 except Exception:
                     pass
 
+
+async def _dead_instance_watcher():
+    while True:
+        await asyncio.sleep(60)
+        for inst in COMFYUI_INSTANCES:
+            name = inst["name"]
+            svc = "comfyui-" + name.lower()
+            try:
+                r = subprocess.run(["systemctl", "--user", "is-active", svc],
+                    capture_output=True, text=True, timeout=5,
+                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                         "XDG_RUNTIME_DIR": "/run/user/1000"})
+                is_active = r.stdout.strip() == "active"
+            except Exception:
+                is_active = False
+            if is_active and not comfyui_up(inst["url"]):
+                print(f"[dead-watcher] Instance {name} active but unresponsive. Restarting...")
+                subprocess.run(["systemctl", "--user", "restart", svc],
+                    capture_output=True, timeout=30,
+                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                         "XDG_RUNTIME_DIR": "/run/user/1000"})
+                add_log("warn", "dead", f"Instance {name} restarted")
+                for _ in range(90):
+                    if comfyui_up(inst["url"]):
+                        print(f"[dead-watcher] Instance {name} recovered")
+                        break
+                    await asyncio.sleep(2)
+
 async def _stuck_job_watcher():
     """Kill jobs stuck >10min without status change. Stop its instance."""
     while True:
@@ -274,6 +302,7 @@ async def lifespan(app: FastAPI):
     os.makedirs(HISTORY_DIR, exist_ok=True)
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
+    _background_tasks.append(asyncio.create_task(_dead_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
     yield
