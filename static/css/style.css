@@ -1727,6 +1727,7 @@ select { cursor: pointer; }
   background-image: none !important;
 }
 .gi.job-card.error {
+.gi.job-card.error .job-spinner { display: none !important; }
   border-color: var(--red);
   box-shadow: none !important;
   animation: none !important;
