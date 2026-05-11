@@ -650,6 +650,7 @@ a { color: var(--accent); text-decoration: none; }
   padding: 6px 8px 7px;
   border-top: 1px solid var(--border);
   position: relative;
+  min-height: 80px;
 }
 
 .gi-progress-top {
