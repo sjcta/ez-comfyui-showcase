@@ -710,6 +710,7 @@ a { color: var(--accent); text-decoration: none; }
 .gi.job-card.error       { border-style: solid; border-color: var(--red); }
 .gi.job-card.done        { border-style: solid; border-color: var(--green); }
 .gi.job-card.preparing   { border-color: var(--yellow); }
+.gi.job-card.dispatching  { border-color: var(--yellow); }
 .gi.job-card.starting_comfyui { border-color: var(--yellow); }
 
 .gi-detail {
