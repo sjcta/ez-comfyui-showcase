@@ -750,12 +750,27 @@ async function loadWfVersions(fname) {
         return;
       }
       var html = '';
+      // Show base version first
+      if (d.base && d.base.filename) {
+        var isBaseActive = !active;
+        html += '<div class="wf-version-item' + (isBaseActive ? ' active' : '') + '">';
+        html += '<span class="wf-version-name">基础版本</span>';
+        html += '<span class="wf-version-filename">' + escH(d.base.filename) + '</span>';
+        if (isBaseActive) html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
+        html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(d.base.filename) + '\')">'+CW.icon('download')+' 下载</button>';
+        html += '</div>';
+      }
       for (var k of keys) {
         var isActive = k === active;
         html += '<div class="wf-version-item' + (isActive ? ' active' : '') + '">';
         html += '<span class="wf-version-name">' + escH(k) + '</span>';
-        if (isActive) html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
-        else html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
+        if (isActive) {
+          html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
+          html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+'</button>';
+        } else {
+          html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
+          html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+'</button>';
+        }
         html += '</div>';
       }
       list.innerHTML = html;
