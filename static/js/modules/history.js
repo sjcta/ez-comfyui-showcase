@@ -237,7 +237,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     }
 
     if (!jobCards.length && !historyItems.length) {
-      html = `<div class="empty-hint"><div class="eh-icon">${CW.icon("image", 32)}</div><p>暂无历史</p><p style="font-size:11px;margin-top:4px">出图后自动出现在这里</p></div>`;
+      html = `<div class="empty-hint"><div class="eh-icon">${CW.icon("image", 32)}</div><p>暂无历史</p><p class="hint-sub">出图后自动出现在这里</p></div>`;
     }
 
     try { gallery.innerHTML = html; } catch(e) { console.error("[GALLERY ERROR]", e); var ediv = document.getElementById("gallery"); if(ediv) ediv.innerHTML = "<div style=color:red;padding:20px>Render error: " + e.message + "</div>"; }

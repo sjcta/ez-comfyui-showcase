@@ -11,7 +11,7 @@
   function icon(name, size, color) {
     size = size || 16;
     color = color || 'currentColor';
-    return '<svg class="cw-icon" width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;flex-shrink:0"><use href="#icon-' + name + '"/></svg>';
+    return '<svg class="cw-icon" width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="cw-icon-svg"><use href="#icon-' + name + '"/></svg>';
   }
 
   window.CW = window.CW || {};

@@ -610,7 +610,7 @@ async function loadWorkflows() {
       const grid = $('#wfGrid');
       if (!wfs.length) {
         grid.innerHTML =
-          '<div style="padding:12px;color:var(--dim);text-align:center;font-size:12px">无 workflow</div>';
+          '<div class="wf-empty">无 workflow</div>';
         return;
       }
       // Count history items per workflow + find latest thumb per workflow
@@ -655,7 +655,7 @@ async function loadWorkflows() {
             : `<div class="wf-card-icon">${CW.icon('settings-2')}</div>`;
           const catText = wfTagMap[w.name] || '其他';
           const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
-            `<span class="wf-tag ${_tagColor(t)}" style="font-size:8px;padding:0 3px;margin-left:2px">${escH(t)}</span>`
+            `<span class="wf-tag ${_tagColor(t)}" class="wf-tag-sm">${escH(t)}</span>`
           ).join('');
           return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onmousedown="CW._wfCardDown(event)" onclick="if(!CW._wfCheckMove(event))CW.selectWF('${escA(w.name)}')">
         <div class="wf-card-preview">${previewImg}</div>
@@ -727,7 +727,7 @@ async function loadWfVersions(fname) {
     var list = $('#wfEditVersionList');
     var hint = $('#wfEditVersionHint');
     if (!list) return;
-    list.innerHTML = '<span style="color:var(--dim);font-size:11px">加载中...</span>';
+    list.innerHTML = '<span class="dim-tag">加载中...</span>';
     try {
       var r = await fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/versions');
       var d = await r.json();
@@ -745,7 +745,7 @@ async function loadWfVersions(fname) {
             '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>' +
           '</div>';
         }
-        list.innerHTML = baseHtml || '<span style="color:var(--dim);font-size:11px">尚无版本</span>';
+        list.innerHTML = baseHtml || '<span class="dim-tag">尚无版本</span>';
         if (hint) hint.textContent = '上传将保留当前版本';
         return;
       }
@@ -761,7 +761,7 @@ async function loadWfVersions(fname) {
       list.innerHTML = html;
       if (hint) hint.textContent = keys.length + ' 个版本';
     } catch (e) {
-      list.innerHTML = '<span style="color:var(--red);font-size:11px">加载失败</span>';
+      list.innerHTML = '<span class="wf-err-tag">加载失败</span>';
     }
   }
 

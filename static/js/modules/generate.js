@@ -333,15 +333,15 @@ function renderQuickForm(fields) {
       if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
-        html += '<div class="fg"><label>' + escH(labelText + nodeInfo) + '</label><div style="position:relative"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea><button id="clearPromptBtn" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer" onclick="CW.clearPrompt()">X Clear</button></div></div>';
+        html += '<div class="fg"><label>' + escH(labelText + nodeInfo) + '</label><div style="position:relative"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea><button id="clearPromptBtn" class="clear-btn" onclick="CW.clearPrompt()">X Clear</button></div></div>';
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
-        html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" style="display:none"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" style="display:none"></div></div>';
+        html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
       } else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'width') { hasLatentW = true; latentW = f.value || 1024; }
       else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'height') { hasLatentH = true; latentH = f.value || 1024; }
     }
     if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage) {
-      html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" style="display:none"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" style="display:none"></div></div>';
+      html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
     }
     // Restore saved prompt text after DOM rebuild
     if (_savedPrompt) {
@@ -356,7 +356,7 @@ function renderQuickForm(fields) {
         var p = presets[pi];
         html += '<button class="ratio-btn' + (p[0]===sw&&p[1]===sh?' active':'') + '" data-w="' + p[0] + '" data-h="' + p[1] + '" title="' + p[0] + 'x' + p[1] + '"><span class="ratio-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label">' + p[2] + '</span></button>';
       }
-      html += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="64" min="256" max="2048"><span style="margin:0 4px;color:var(--dim)">x</span><input type="number" id="heightInput" value="' + sh + '" step="64" min="256" max="2048"></div></div>';
+      html += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="64" min="256" max="2048"><span class="sep-dim">x</span><input type="number" id="heightInput" value="' + sh + '" step="64" min="256" max="2048"></div></div>';
       container.innerHTML = html;
       window.CW.initRatioGrid && window.CW.initRatioGrid();
       window.CW.highlightRatio && CW.highlightRatio(sw, sh);
@@ -425,7 +425,7 @@ function renderAdvFields(fields) {
     });
 
     if (!advFields.length) {
-      box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:6px 0">无可编辑参数</div>';
+      box.innerHTML = '<div class="gen-empty">无可编辑参数</div>';
       return;
     }
     let html = '';

@@ -1859,3 +1859,38 @@ select { cursor: pointer; }
   /* Overlay grid container */
   .wf-overlay-grid { max-height: none; border: none; border-radius: 0; }
 }
+
+
+/* ── Status Module ─────────────────────────────────────────────── */
+.dim-tag { color: var(--dim); font-size: 11px; }
+.st-empty { color: var(--dim); font-size: 12px; padding: 8px; }
+.st-error { color: #ef4444; font-size: 12px; padding: 8px; }
+
+.gpu-bar { flex: 1; height: 8px; border-radius: 2px; }
+.gpu-green { background: var(--green); min-width: 4px; }
+.gpu-yellow { background: #f59e0b; opacity: 0.6; min-width: 4px; }
+.gpu-empty { background: var(--border); }
+
+.btn-svg { vertical-align: middle; margin-right: 3px; }
+
+/* ── Generate Module ───────────────────────────────────────────── */
+.clear-btn {
+  position: absolute; top: 4px; right: 4px;
+  background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.15);
+  color: #fff; font-size: 11px; padding: 3px 10px;
+  border-radius: 4px; cursor: pointer;
+}
+.hidden { display: none !important; }
+.sep-dim { margin: 0 4px; color: var(--dim); }
+.gen-empty { color: var(--dim); font-size: 12px; padding: 6px 0; }
+
+/* ── Workflow Module ──────────────────────────────────────────── */
+.wf-empty { padding:12px; color:var(--dim); text-align:center; font-size:12px; }
+.wf-tag-sm { font-size:8px; padding:0 3px; margin-left:2px; }
+.wf-err-tag { color:var(--red); font-size:11px; }
+
+/* ── History Module ───────────────────────────────────────────── */
+.hint-sub { font-size:11px; margin-top:4px; }
+
+/* ── Icons Module ─────────────────────────────────────────────── */
+.cw-icon-svg { vertical-align:middle; display:inline-block; flex-shrink:0; }

@@ -92,24 +92,24 @@ function closeInstPopup() {
 
 function _queueBarHtml(running, pending) {
     var total = running + pending;
-    if (total === 0) return '<span style="color:var(--dim);font-size:11px">\u65e0</span>';
+    if (total === 0) return '<span class="dim-tag">\u65e0</span>';
     var html = '';
     // Running segment(s) — green
     for (var i = 0; i < running; i++) {
-      html += '<div style="flex:1;height:8px;background:var(--green);border-radius:2px;min-width:4px"></div>';
+      html += '<div class="gpu-bar gpu-green"></div>';
     }
     // Pending segment(s) — yellow dashed
     for (var i = 0; i < pending; i++) {
-      html += '<div style="flex:1;height:8px;background:#f59e0b;border-radius:2px;opacity:0.6;min-width:4px"></div>';
+      html += '<div class="gpu-bar gpu-yellow"></div>';
     }
-    if (!html) html = '<div style="flex:1;height:8px;background:var(--border);border-radius:2px"></div>';
+    if (!html) html = '<div class="gpu-bar gpu-empty"></div>';
     return html;
   }
 
 async function _refreshInstCards() {
     var box = $('#instCards');
     if (!box) return;
-    box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:8px">\u52a0\u8f7d\u4e2d...</div>';
+    box.innerHTML = '<div class="st-empty">\u52a0\u8f7d\u4e2d...</div>';
     try {
       var r = await fetch(API + '/api/comfyui/status');
       var d = await r.json();
@@ -118,7 +118,7 @@ async function _refreshInstCards() {
       for (var idx = 0; idx < (d.instances || []).length; idx++) {
         var inst = d.instances[idx];
         var statusCls = inst.up ? 'on' : 'off';
-        var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
+        var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
         var btnCls = inst.up ? 'stop' : 'start';
         var groupLabel = groupMap[inst.loaded_group] || inst.loaded_group || '';
         var stateText = !inst.up
@@ -135,7 +135,7 @@ async function _refreshInstCards() {
           statusCls +
           '"></span> \u5b9e\u4f8b ' +
           inst.name +
-          ' <span style="color:var(--dim);font-size:11px">:' +
+          ' <span class="dim-tag">:' +
           inst.port +
           '</span></div>' +
           '<button class="inst-card-btn ' +
@@ -175,14 +175,14 @@ async function _refreshInstCards() {
       box.innerHTML = html;
     } catch (e) {
       box.innerHTML =
-        '<div style="color:#ef4444;font-size:12px;padding:8px">\u52a0\u8f7d\u5931\u8d25: ' + escH(e.message) + '</div>';
+        '<div class="st-error">\u52a0\u8f7d\u5931\u8d25: ' + escH(e.message) + '</div>';
     }
   }
 
 async function _refreshGpuCards() {
     var box = $('#instCards');
     if (!box) return;
-    box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:8px">\u52a0\u8f7d\u4e2d...</div>';
+    box.innerHTML = '<div class="st-empty">\u52a0\u8f7d\u4e2d...</div>';
     try {
       var r = await fetch(API + '/api/gpu-processes');
       var d = await r.json();
@@ -190,7 +190,7 @@ async function _refreshGpuCards() {
       var html = '<div class="popup-section-title">\u5360\u7528 GPU \u663e\u5b58\u7684\u8fdb\u7a0b</div>';
       if (procs.length === 0)
         html +=
-          '<div style="color:var(--dim);font-size:12px;padding:8px">\u65e0\u5176\u4ed6\u663e\u5b58\u5360\u7528\u8fdb\u7a0b</div>';
+          '<div class="st-empty">\u65e0\u5176\u4ed6\u663e\u5b58\u5360\u7528\u8fdb\u7a0b</div>';
       for (var i = 0; i < procs.length; i++) {
         var p = procs[i];
         html +=
@@ -220,7 +220,7 @@ async function _refreshGpuCards() {
       box.innerHTML = html;
     } catch (e) {
       box.innerHTML =
-        '<div style="color:#ef4444;font-size:12px;padding:8px">\u52a0\u8f7d\u5931\u8d25: ' + escH(e.message) + '</div>';
+        '<div class="st-error">\u52a0\u8f7d\u5931\u8d25: ' + escH(e.message) + '</div>';
     }
   }
 
