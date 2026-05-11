@@ -71,6 +71,14 @@
     if (n.startsWith('t2i') || n.includes('-t2i') || n.includes('_t2i')) return { text: '文生图', cls: 'wf-tag-t2i' };
     return '';
   }
+  /** Prefer metadata tags[0] over filename guess, keep CSS class from filename. */
+  function wfTag(name, metaTags) {
+    const fallback = getWFType(name);
+    if (metaTags && metaTags.length > 0) {
+      return { text: metaTags[0], cls: fallback ? fallback.cls : 'wf-tag-res' };
+    }
+    return fallback;
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   //  WebSocket
@@ -806,7 +814,7 @@ function init() {
     retryJob,
     rndSeed,
     wfUploadOverlay,
-    getWFType,
+    getWFType, wfTag,
     formatElapsed,
     shortSeed,
     onJobUpdate,
