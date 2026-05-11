@@ -1728,6 +1728,7 @@ select { cursor: pointer; }
 }
 .gi.job-card.error {
 .gi.job-card.error .job-spinner { display: none !important; }
+.gi.job-card.error .gi-img.job-placeholder::before { content: ""; position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; transform: translate(-50%, -50%); background: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%23ef4444%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%2710%27/%3E%3Cline x1=%2715%27 y1=%279%27 x2=%279%27 y2=%2715%27/%3E%3Cline x1=%279%27 y1=%279%27 x2=%2715%27 y2=%2715%27/%3E%3C/svg%3E") no-repeat center; background-size: contain; z-index: 2; }
   border-color: var(--red);
   box-shadow: none !important;
   animation: none !important;
