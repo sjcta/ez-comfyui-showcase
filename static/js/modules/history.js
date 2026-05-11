@@ -326,9 +326,13 @@ function _histCardHTML(h, i) {
 function _populateFilterOptions() {
     var wfs = new Set();
     var styles = new Set();
+    var typeOpts = new Set();
     for(var k = 0; k < historyItems.length; k++) {
       var j = historyItems[k];
       if(j.workflow) wfs.add(j.workflow.replace(".json", ""));
+      // Collect unique main tags for type filter
+      var _tag = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow || ''] || {}).tags);
+      if(_tag && _tag.text) typeOpts.add(_tag.text);
       try {
         var pObj = JSON.parse(j.prompt || '{}');
         if(pObj.style && typeof pObj.style === 'string') {
@@ -336,6 +340,17 @@ function _populateFilterOptions() {
           if(s.length > 0) styles.add(s);
         }
       } catch(e) {}
+    }
+    var typeSel = document.getElementById("gfType");
+    if(typeSel) {
+      var curType = typeSel.value;
+      var sortedTypes = Array.from(typeOpts).sort();
+      var ht = '<option value="">全部类型</option>';
+      for(var ti = 0; ti < sortedTypes.length; ti++) {
+        ht += '<option value="' + sortedTypes[ti] + '">' + sortedTypes[ti] + '</option>';
+      }
+      typeSel.innerHTML = ht;
+      if(curType && typeOpts.has(curType)) typeSel.value = curType;
     }
     var sizeSel = document.getElementById("gfSize");
     if(sizeSel) {
@@ -373,7 +388,7 @@ function _populateFilterOptions() {
 function _filterHistory(arr) {
     return arr.filter(function(j) {
       if(_galleryFilters.type) {
-        var t = window.CW.getWFType(j.workflow || "");
+        var t = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow || ''] || {}).tags);
         if(!t || t.text !== _galleryFilters.type) return false;
       }
       if(_galleryFilters.size) {
