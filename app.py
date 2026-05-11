@@ -2314,6 +2314,18 @@ class NodeUpdateRequest(BaseModel):
     sort_order: Optional[int] = None
 
 
+@app.put("/api/nodes/reorder")
+def api_node_reorder(req: NodeReorderRequest):
+    """Reorder nodes."""
+    nodes = _load_nodes()
+    order_map = {item["id"]: item.get("sort_order", 0) for item in req.order}
+    for node in nodes:
+        if node["id"] in order_map:
+            node["sort_order"] = order_map[node["id"]]
+    # Sort nodes list by sort_order
+    nodes.sort(key=lambda n: n.get("sort_order", 0))
+    _save_nodes(nodes)
+    return {"ok": True}
 @app.put("/api/nodes/{nid}")
 def api_node_update(nid: str, req: NodeUpdateRequest):
     """Update a node (partial merge)."""
@@ -2457,18 +2469,6 @@ class NodeReorderRequest(BaseModel):
     order: list[dict]
 
 
-@app.put("/api/nodes/reorder")
-def api_node_reorder(req: NodeReorderRequest):
-    """Reorder nodes."""
-    nodes = _load_nodes()
-    order_map = {item["id"]: item.get("sort_order", 0) for item in req.order}
-    for node in nodes:
-        if node["id"] in order_map:
-            node["sort_order"] = order_map[node["id"]]
-    # Sort nodes list by sort_order
-    nodes.sort(key=lambda n: n.get("sort_order", 0))
-    _save_nodes(nodes)
-    return {"ok": True}
 
 
 @app.post("/api/nodes/{nid}/test")
