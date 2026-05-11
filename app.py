@@ -862,7 +862,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             # Listen for events
             while time.time() - start < timeout:
                 try:
-                    async with asyncio.timeout(120):
+                    async with asyncio.timeout(300):
                         raw = await ws.recv()
                 except asyncio.TimeoutError:
                     break
@@ -943,6 +943,9 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     if prompt_id:
         while time.time() - start < timeout:
             await asyncio.sleep(3)
+            job_data = jobs.get(job_id, {})
+            if job_data and job_data.get("status") == "generating":
+                await broadcast({"type": "job_update", "job": job_data})
             try:
                 hist = comfyui_get(f"/history/{prompt_id}", base_url=instance_url)
                 if prompt_id in hist:
