@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 ComfyUI Web v3 — 三段式布局，GPU 监控，服务管理。
+节点管理支持从 config/nodes.json 动态读取。
 """
-import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re
+import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket
 # Ensure D-Bus session is available for systemctl --user calls in nohup context
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -11,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
 from io import BytesIO
+from typing import Optional
 
 from fastapi import (
     FastAPI, HTTPException, BackgroundTasks, WebSocket,
@@ -36,6 +38,106 @@ def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = "
     except Exception:
         pass
 
+NODES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "nodes.json")
+
+# ── Node & Instance Loading ──
+_nodes_cache: list[dict] = []
+_nodes_cache_ts: float = 0
+_nodes_cache_max_age = 5  # seconds
+
+def _load_nodes() -> list[dict]:
+    """Load nodes from JSON file with caching."""
+    global _nodes_cache, _nodes_cache_ts
+    now = time.time()
+    if _nodes_cache and now - _nodes_cache_ts < _nodes_cache_max_age:
+        return _nodes_cache
+    if not os.path.isfile(NODES_FILE):
+        _nodes_cache = []
+        _nodes_cache_ts = now
+        return _nodes_cache
+    try:
+        with open(NODES_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            _nodes_cache = data
+            _nodes_cache_ts = now
+            return _nodes_cache
+    except Exception as e:
+        print(f"[nodes] Error loading nodes: {e}")
+    _nodes_cache = []
+    _nodes_cache_ts = now
+    return _nodes_cache
+
+def _save_nodes(nodes: list[dict]):
+    """Save nodes to JSON file and invalidate cache."""
+    global _nodes_cache_ts
+    os.makedirs(os.path.dirname(NODES_FILE), exist_ok=True)
+    with open(NODES_FILE, "w") as f:
+        json.dump(nodes, f, ensure_ascii=False, indent=2)
+    _nodes_cache_ts = 0  # invalidate cache
+
+def _get_enabled_instances() -> list[dict]:
+    """Return flat list of all enabled instances across all enabled nodes."""
+    instances = []
+    for node in _load_nodes():
+        if not node.get("enabled", True):
+            continue
+        for inst in node.get("instances", []):
+            if not inst.get("enabled", True):
+                continue
+            full = dict(inst)
+            full["_node_id"] = node["id"]
+            full["_node_name"] = node["name"]
+            full["_node_host"] = node["host"]
+            full["_node_connection"] = node.get("connection", "local")
+            full["_node_ssh"] = node.get("ssh_config", {})
+            full["url"] = f"http://{node['host']}:{inst['port']}"
+            instances.append(full)
+    return instances
+
+def _get_node_by_id(nid: str) -> Optional[dict]:
+    for node in _load_nodes():
+        if node["id"] == nid:
+            return node
+    return None
+
+def _get_instance_by_id(iid: str) -> Optional[dict]:
+    for node in _load_nodes():
+        for inst in node.get("instances", []):
+            if inst["id"] == iid:
+                return inst, node
+    return None, None
+
+def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
+    """Start/stop/restart ComfyUI instance. action = 'start'/'stop'/'restart'."""
+    svc = instance.get("service", f"comfyui-{instance['name'].lower()}")
+    conn = node.get("connection", "local")
+    if conn == "local":
+        try:
+            subprocess.run(["systemctl", "--user", action, svc],
+                capture_output=True, timeout=30,
+                env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                     "XDG_RUNTIME_DIR": "/run/user/1000"})
+            return True
+        except Exception:
+            return False
+    elif conn == "remote-ssh":
+        ssh = node.get("ssh_config", {})
+        cmd = []
+        if ssh.get("auth") == "password" and ssh.get("password"):
+            cmd = ["sshpass", "-p", ssh["password"], "ssh",
+                   f"{ssh.get('user', 'root')}@{node['host']}"]
+        else:
+            cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
+        cmd += ["-p", str(ssh.get("port", 22)),
+                "systemctl", "--user", action, svc]
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=30)
+            return True
+        except Exception:
+            return False
+    # remote-http: cannot control via systemctl
+    return False
 
 
 # ── 任务队列：per-instance semaphores for parallel routing ──
@@ -68,7 +170,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
 
         # Phase 1: find the best instance
         inst = await pick_best_instance(workflow_name)
-        sem = _instance_semas[inst["name"]]
+        sem = _instance_semas.get(inst["name"]) or _instance_semas.get(inst["id"]) or asyncio.Semaphore(1)
         await _global_sem.acquire()
         global_held = True
         jobs[job_id]["message"] = f"匹配实例 {inst['name']}..."
@@ -76,17 +178,11 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
 
         # Ensure instance is up (cold start if needed)
         if not await asyncio.to_thread(comfyui_up, inst["url"]):
-            svc = f"comfyui-{inst['name'].lower()}"
-            try:
-                await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "start", svc],
-                    capture_output=True, timeout=30,
-                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
-                for _ in range(90):
-                    if await asyncio.to_thread(comfyui_up, inst["url"]):
-                        break
-                    await asyncio.sleep(2)
-            except Exception as e:
-                print(f"[cold-start] {svc} error: {e}")
+            _run_instance_action(inst.get("_node_obj", {}), inst, "start")
+            for _ in range(90):
+                if await asyncio.to_thread(comfyui_up, inst["url"]):
+                    break
+                await asyncio.sleep(2)
 
         # Phase 2: wait for instance semaphore
         jobs[job_id]["status"] = "queued"
@@ -130,11 +226,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         _job_queue.task_done()
 
 # ── Config ──────────────────────────────────────────────────────────────
-COMFYUI_INSTANCES = [
-    {"name": "A", "url": "http://127.0.0.1:8190", "output_dir": "/home/sjcta/software/ComfyUI-Project/outputs"},
-    {"name": "B", "url": "http://127.0.0.1:8189", "output_dir": "/home/sjcta/software/ComfyUI-Project/outputs2"},
-]
-COMFYUI_URL = COMFYUI_INSTANCES[0]["url"]  # backward compat fallback
+COMFYUI_URL = "http://127.0.0.1:8190"  # backward compat fallback
 WORKFLOW_DIR  = "/home/sjcta/software/ComfyUI-Project/workflow/api"  # legacy default, kept for compat
 OUTPUT_DIR    = "/home/sjcta/software/ComfyUI-Project/outputs"
 COMFYUI_DIR   = "/home/sjcta/software/ComfyUI-Project"
@@ -159,8 +251,30 @@ gpu_cache: dict = {"ts": 0, "data": None}
 
 # ── Model Affinity Routing ──────────────────────────────────────────────
 # Per-instance semaphores: one concurrent job per ComfyUI instance
-_instance_semas: dict[str, asyncio.Semaphore] = {inst["name"]: asyncio.Semaphore(1) for inst in COMFYUI_INSTANCES}
-_instance_last_active: dict[str, float] = {inst["name"]: 0 for inst in COMFYUI_INSTANCES}
+def _build_instance_semas():
+    return {inst["name"]: asyncio.Semaphore(1) for inst in _get_enabled_instances()}
+def _build_instance_last_active():
+    return {inst["name"]: 0 for inst in _get_enabled_instances()}
+def _build_instance_group():
+    return {inst["name"]: "" for inst in _get_enabled_instances()}
+
+_instance_semas: dict[str, asyncio.Semaphore] = {}
+_instance_last_active: dict[str, float] = {}
+_instance_group: dict[str, str] = {}
+
+def _refresh_instance_state():
+    """Refresh per-instance semaphores and state dicts from current nodes."""
+    global _instance_semas, _instance_last_active, _instance_group
+    current = {inst["name"] for inst in _get_enabled_instances()}
+    # Add new
+    for inst in _get_enabled_instances():
+        if inst["name"] not in _instance_semas:
+            _instance_semas[inst["name"]] = asyncio.Semaphore(1)
+        if inst["name"] not in _instance_last_active:
+            _instance_last_active[inst["name"]] = 0
+        if inst["name"] not in _instance_group:
+            _instance_group[inst["name"]] = ""
+
 # Sequential execution semaphore: one job at a time across ALL instances
 _global_sem: asyncio.Semaphore = asyncio.Semaphore(1)
 
@@ -176,15 +290,7 @@ MODEL_GROUPS = [
 ]
 
 def extract_model_group(workflow_name: str) -> str:
-    """Extract the model group from a workflow filename.
-
-    Examples:
-      t2i-nunchaku-z-image-turbo-highSD.json → "nunchaku"  (nunchaku checked first)
-      t2i-z-image-seedvr4k.json              → "z-image-turbo"
-      t2i-z-xxx.json                         → "z-image-turbo"
-      t2i_nunchaku_seedvr4k.json             → "nunchaku"
-      upscale-seedvr-only.json               → "seedvr"
-    """
+    """Extract the model group from a workflow filename."""
     lower = workflow_name.lower()
     for group, keywords in MODEL_GROUPS:
         for kw in keywords:
@@ -192,16 +298,12 @@ def extract_model_group(workflow_name: str) -> str:
                 return group
     return workflow_name  # unknown → exact match fallback
 
-# Tracks which MODEL GROUP each instance currently has loaded.
-# Key = instance name ("A"/"B"), value = model group ("nunchaku", "z-image-turbo", etc.) or "".
-_instance_group: dict[str, str] = {inst["name"]: "" for inst in COMFYUI_INSTANCES}
-
 def pick_affinity_instance(workflow_name: str) -> dict | None:
     """Return the instance whose loaded model group matches this workflow's group."""
     if not workflow_name:
         return None
     wf_group = extract_model_group(workflow_name)
-    for inst in COMFYUI_INSTANCES:
+    for inst in _get_enabled_instances():
         if _instance_group.get(inst["name"]) == wf_group:
             return inst
     return None
@@ -217,7 +319,7 @@ async def _idle_instance_watcher():
     while True:
         await asyncio.sleep(60)
         now = time.time()
-        for inst in COMFYUI_INSTANCES:
+        for inst in _get_enabled_instances():
             name = inst["name"]
             last = _instance_last_active.get(name, 0)
             if last == 0:
@@ -226,44 +328,58 @@ async def _idle_instance_watcher():
             if active_jobs:
                 continue
             if now - last > IDLE_TIMEOUT:
-                svc = f"comfyui-{name.lower()}"
-                try:
-                    proc = await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "is-active", svc], capture_output=True, text=True, timeout=5,
-                        env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
-                    if proc.stdout.strip() == "active":
-                        await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "stop", svc], capture_output=True, timeout=10,
-                            env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
-                        print(f"[idle-watcher] Stopped idle instance {name} (idle {now - last:.0f}s)")
-                except Exception:
-                    pass
+                node = _get_node_by_id(inst.get("_node_id", ""))
+                if node:
+                    _run_instance_action(node, inst, "stop")
+                    print(f"[idle-watcher] Stopped idle instance {name} (idle {now - last:.0f}s)")
 
 
 async def _dead_instance_watcher():
     while True:
         await asyncio.sleep(60)
-        for inst in COMFYUI_INSTANCES:
+        for inst in _get_enabled_instances():
             name = inst["name"]
-            svc = "comfyui-" + name.lower()
-            try:
-                r = subprocess.run(["systemctl", "--user", "is-active", svc],
-                    capture_output=True, text=True, timeout=5,
-                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                         "XDG_RUNTIME_DIR": "/run/user/1000"})
-                is_active = r.stdout.strip() == "active"
-            except Exception:
-                is_active = False
-            if is_active and not comfyui_up(inst["url"]):
+            node = _get_node_by_id(inst.get("_node_id", ""))
+            if not node:
+                continue
+            conn = node.get("connection", "local")
+            if conn not in ("local", "remote-ssh"):
+                continue
+            # Check systemd status via SSH or local
+            active = _check_service_active(node, inst)
+            if active and not comfyui_up(inst["url"]):
                 print(f"[dead-watcher] Instance {name} active but unresponsive. Restarting...")
-                subprocess.run(["systemctl", "--user", "restart", svc],
-                    capture_output=True, timeout=30,
-                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                         "XDG_RUNTIME_DIR": "/run/user/1000"})
+                _run_instance_action(node, inst, "restart")
                 add_log("warn", "dead", f"Instance {name} restarted")
                 for _ in range(90):
                     if comfyui_up(inst["url"]):
                         print(f"[dead-watcher] Instance {name} recovered")
                         break
                     await asyncio.sleep(2)
+
+def _check_service_active(node: dict, instance: dict) -> bool:
+    svc = instance.get("service", f"comfyui-{instance['name'].lower()}")
+    conn = node.get("connection", "local")
+    try:
+        if conn == "local":
+            r = subprocess.run(["systemctl", "--user", "is-active", svc],
+                capture_output=True, text=True, timeout=5,
+                env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                     "XDG_RUNTIME_DIR": "/run/user/1000"})
+            return r.stdout.strip() == "active"
+        elif conn == "remote-ssh":
+            ssh = node.get("ssh_config", {})
+            cmd = []
+            if ssh.get("auth") == "password" and ssh.get("password"):
+                cmd = ["sshpass", "-p", ssh["password"], "ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
+            else:
+                cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
+            cmd += ["-p", str(ssh.get("port", 22)), "systemctl", "--user", "is-active", svc]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return r.stdout.strip() == "active"
+    except Exception:
+        pass
+    return False
 
 async def _stuck_job_watcher():
     """Kill jobs stuck >10min without status change. Stop its instance."""
@@ -279,18 +395,14 @@ async def _stuck_job_watcher():
                 j["message"] = "任务超时（10分钟无状态变化）"
                 print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {now-last_up:.0f}s)")
                 add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
-                add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
                 inst_name = j.get("instance", "")
                 if inst_name:
-                    svc = f"comfyui-{inst_name.lower()}"
-                    try:
-                        import subprocess
-                        subprocess.run(["systemctl", "--user", "stop", svc],
-                            capture_output=True, timeout=10,
-                            env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                                 "XDG_RUNTIME_DIR": "/run/user/1000"})
-                    except Exception:
-                        pass
+                    for inst in _get_enabled_instances():
+                        if inst["name"] == inst_name:
+                            node = _get_node_by_id(inst.get("_node_id", ""))
+                            if node:
+                                _run_instance_action(node, inst, "stop")
+                            break
                 asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
 
 
@@ -300,6 +412,7 @@ async def lifespan(app: FastAPI):
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
+    _refresh_instance_state()
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
     _background_tasks.append(asyncio.create_task(_dead_instance_watcher()))
@@ -338,7 +451,6 @@ def get_gpu_stats() -> dict:
             text=True, timeout=5,
         ).strip()
         parts = [x.strip() for x in out.split(",")]
-        # GB10 returns [N/A] for memory; still has temp + util
         raw_used, raw_total = parts[0], parts[1]
         temp = int(float(parts[2])) if parts[2] not in ('[N/A]','[N/A ]','N/A') else 0
         util = int(float(parts[3])) if parts[3] not in ('[N/A]','[N/A ]','N/A') else 0
@@ -465,25 +577,22 @@ def _get_instance_queue_size(base_url: str) -> int:
 
 
 async def pick_best_instance(workflow_name: str = "") -> dict:
-    """Pick the best ComfyUI instance using workflow affinity + queue depth.
-
-    Priority:
-    0. T2I → A, I2I → B (hard route, Jeson 2026-05-11)
-    1. If no instance is running → auto-start one
-    2. Instance with matching workflow (models already in VRAM) → prefer even if busy
-    3. Idle instance (queue == 0) → prefer for cold start
-    4. Fallback: shortest queue
-    """
+    """Pick the best ComfyUI instance using workflow affinity + queue depth."""
+    instances = _get_enabled_instances()
+    if not instances:
+        raise RuntimeError("No enabled instances available")
 
     # Phase 0: T2I → A, I2I → B (hard route)
     if workflow_name:
         lower = workflow_name.lower()
-        inst_a = next(i for i in COMFYUI_INSTANCES if i["name"] == "A")
-        inst_b = next(i for i in COMFYUI_INSTANCES if i["name"] == "B")
+        inst_a = next((i for i in instances if i["name"] == "A"), None)
+        inst_b = next((i for i in instances if i["name"] == "B"), None)
         if lower.startswith("t2i") or "_t2i" in lower or "-t2i" in lower:
-            return inst_a
+            if inst_a:
+                return inst_a
         if lower.startswith("i2i") or "_i2i" in lower or "-i2i" in lower:
-            return inst_b
+            if inst_b:
+                return inst_b
 
     # Phase 1: try workflow affinity
     if workflow_name:
@@ -491,48 +600,43 @@ async def pick_best_instance(workflow_name: str = "") -> dict:
         if affinity:
             return affinity
 
-    # Phase 2: prefer idle instance with same or no model group (avoid conflicting models)
+    # Phase 2: prefer idle instance with same or no model group
     wf_group = extract_model_group(workflow_name) if workflow_name else ""
-    sizes = await asyncio.gather(*[asyncio.to_thread(_get_instance_queue_size, inst["url"]) for inst in COMFYUI_INSTANCES])
+    sizes = await asyncio.gather(*[asyncio.to_thread(_get_instance_queue_size, inst["url"]) for inst in instances])
 
-    # Best: idle instance with matching group (models already in VRAM)
-    for inst, sz in zip(COMFYUI_INSTANCES, sizes):
+    # Best: idle instance with matching group
+    for inst, sz in zip(instances, sizes):
         if sz == 0 and _instance_group.get(inst["name"]) == wf_group:
             return inst
-    # Good: idle instance with no loaded group (fresh start)
-    for inst, sz in zip(COMFYUI_INSTANCES, sizes):
+    # Good: idle instance with no loaded group
+    for inst, sz in zip(instances, sizes):
         if sz == 0 and not _instance_group.get(inst["name"]):
             return inst
 
-    # Phase 3: shortest queue (prefer same group, then no group, avoid conflicting)
+    # Phase 3: shortest queue
     best, best_load = None, 999
-    for inst, load in zip(COMFYUI_INSTANCES, sizes):
+    for inst, load in zip(instances, sizes):
         if load >= best_load:
             continue
         ig = _instance_group.get(inst["name"], "")
-        # Strongly prefer: same group or no loaded group
         if ig in (wf_group, ""):
             best, best_load = inst, load
-    # Fallback: any instance (might evict models)
     if not best:
-        for inst, load in zip(COMFYUI_INSTANCES, sizes):
+        for inst, load in zip(instances, sizes):
             if load < best_load:
                 best, best_load = inst, load
-    chosen = best or COMFYUI_INSTANCES[0]
+    chosen = best or instances[0]
 
-    # Cold-start: ensure ALL instances are running (VRAM warm, no load delay)
-    for cold_inst in COMFYUI_INSTANCES:
+    # Cold-start: ensure ALL instances are running
+    for cold_inst in instances:
         if not await asyncio.to_thread(comfyui_up, cold_inst["url"]):
-            svc = f"comfyui-{cold_inst['name'].lower()}"
-            try:
-                await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "start", svc], capture_output=True, timeout=30,
-                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
+            node = _get_node_by_id(cold_inst.get("_node_id", ""))
+            if node:
+                _run_instance_action(node, cold_inst, "start")
                 for _ in range(150):
                     if await asyncio.to_thread(comfyui_up, cold_inst["url"]):
                         break
                     await asyncio.sleep(2)
-            except Exception:
-                pass
     return chosen
 
 
@@ -583,10 +687,7 @@ EDITABLE_FIELDS = {
 
 
 def _resolve_link(wf: dict, value, depth: int = 0):
-    """Follow ComfyUI link references to get actual value.
-    Link format: ["node_id", output_slot] — connected to another node's output.
-    Resolves through ComfySwitchNode → PrimitiveInt/PrimitiveFloat chains.
-    """
+    """Follow ComfyUI link references to get actual value."""
     if depth > 10 or not isinstance(value, list) or len(value) < 2:
         return value
     node_id = str(value[0])
@@ -595,10 +696,8 @@ def _resolve_link(wf: dict, value, depth: int = 0):
         return value
     ct = node.get("class_type", "")
     inputs = node.get("inputs", {})
-    # Primitive nodes have the actual value
     if ct in ("PrimitiveInt", "PrimitiveFloat"):
         return inputs.get("value", value)
-    # ComfySwitchNode: try on_true first, then on_false
     if ct in ("ComfySwitchNode",):
         for branch in ("on_true", "on_false"):
             if branch in inputs:
@@ -606,7 +705,6 @@ def _resolve_link(wf: dict, value, depth: int = 0):
                 if not isinstance(resolved, list):
                     return resolved
     return value
-
 
 
 # ── Workflow Editor: auto-classify + config persistence ────────────────
@@ -771,7 +869,6 @@ def _parse_with_config(path: str, config: dict) -> dict:
             val = _resolve_link(wf, val)
         ftype = field_cfg.get("type", "")
         fextra = {}
-        # Always check EDITABLE_FIELDS for type + extra props (fill gaps)
         if ct in EDITABLE_FIELDS and fname in EDITABLE_FIELDS[ct]:
             ef = EDITABLE_FIELDS[ct][fname]
             if not ftype:
@@ -781,7 +878,6 @@ def _parse_with_config(path: str, config: dict) -> dict:
                     fextra[k] = ef[k]
         if not ftype:
             ftype = "text"
-        # Config overrides EDITABLE_FIELDS for extra props
         for k in ("options", "step", "min", "max"):
             if k in field_cfg:
                 fextra[k] = field_cfg[k]
@@ -821,7 +917,6 @@ async def broadcast(data: dict):
 
 # ── ComfyUI node → human-readable status ────────────────────────────────
 NODE_STATUS_MAP = {
-    # Model loading
     "NunchakuZImageDiTLoader": "加载 DiT 模型...",
     "UNETLoader": "加载 UNet 模型...",
     "SeedVR2LoadDiTModel": "加载 SeedVR2 模型...",
@@ -832,47 +927,31 @@ NODE_STATUS_MAP = {
     "UpscaleModelLoader": "加载超分模型...",
     "UNETLoaderGGUF": "加载 GGUF 模型...",
     "LoraLoader": "加载 LoRA...",
-    # Sampling config
     "ModelSamplingAuraFlow": "配置采样策略...",
     "ModelSamplingFlux": "配置 Flux 采样...",
-    # Text encoding
     "CLIPTextEncode": "编码提示词...",
     "TextEncodeQwenImageEditPlus": "编码提示词...",
     "CLIPTextEncodeFlux": "编码 Flux 提示词...",
     "ConditioningZeroOut": "处理条件...",
     "ConditioningSetTimestepRange": "设置时间步范围...",
-    # Latent
     "EmptySD3LatentImage": "准备潜空间...",
     "EmptyLatentImage": "准备潜空间...",
-    # Sampling
     "KSampler": "采样中...",
     "KSamplerAdvanced": "高级采样中...",
     "SamplerCustom": "自定义采样中...",
-    # VAE decode / encode
     "VAEDecode": "解码图像...",
     "VAEEncode": "编码图像...",
-    # Upscale
     "ImageUpscaleWithModel": "超分辨率放大...",
     "SeedVR2VideoUpscaler": "超分辨率放大...",
     "ImageScaleBy": "图像缩放...",
     "ImageScale": "图像缩放...",
-    # Composite / mask
     "ImageCompositeMasked": "合成图像...",
-    # Save
     "SaveImage": "保存图像...",
 }
 
 
 async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout: int = 600, base_url: str = None):
-    """Connect to ComfyUI WS, submit prompt, track execution.
-
-    Returns (True, prompt_id) on success, raises on error/timeout.
-    WS connects BEFORE prompt submission to catch all executing events.
-
-    Progress model:
-      Prepare + [Encode + Step*N + Decode] * sampler_groups + Save = 100%
-    All work units are pre-counted; pct = completed_units / total_units.
-    """
+    """Connect to ComfyUI WS, submit prompt, track execution."""
     instance_url = base_url or COMFYUI_URL
     ws_url = instance_url.replace("http://", "ws://") + f"/ws?clientId={client_id}"
     start = time.time()
@@ -884,11 +963,9 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         if isinstance(v, dict) and "class_type" in v:
             node_types[str(nid)] = v["class_type"]
 
-    # ── Pre-analyze workflow: build work-unit chain ──────────────────────
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
 
-    # Jeson formula: non-sampler nodes=1, sampler steps=1
     non_sampler_cnt = 0
     sampler_steps_total = 0
     for nid, cls in node_types.items():
@@ -912,7 +989,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                 non_sampler_cnt += 1
 
     total_units = non_sampler_cnt + sampler_steps_total
-    print(f"[DEBUG] total_units={total_units} non_sampler={non_sampler_cnt} sampler_steps={sampler_steps_total}")
     completed_units = 0.0
     last_prog = 0
     sampler_cur = 0
@@ -924,7 +1000,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     def update_job():
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
-        print(f"[DEBUG] completed={completed_units}/{total_units} pct={pct}% label={label}")
         msg = "准备中..." if not current_node_cls and completed_units == 0 else (f"{label} {sampler_cur}/{sampler_total}" if label and sampler_total > 0 else ("采样准备中" if label and "采样" in label else ("超分准备中" if label and "超分" in label else (label if label else f"{pct:.0f}%..."))))
         jobs[job_id]["message"] = msg
         jobs[job_id]["progress"] = {"pct": pct}
@@ -936,7 +1011,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             update_job()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-            # Submit prompt WITH client_id so ComfyUI routes events to us
             resp = comfyui_post("/prompt", {"prompt": workflow, "client_id": client_id}, base_url=instance_url)
             prompt_id = resp.get("prompt_id", "")
             if not prompt_id:
@@ -944,7 +1018,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             jobs[job_id]["prompt_id"] = prompt_id
             save_jobs()
 
-            # Listen for events
             while time.time() - start < timeout:
                 try:
                     async with asyncio.timeout(300):
@@ -962,7 +1035,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                 msg_type = msg.get("type", "")
                 data = msg.get("data", {})
 
-                # Filter by prompt_id
                 msg_pid = data.get("prompt_id", "")
                 if msg_pid and prompt_id and msg_pid != prompt_id:
                     continue
@@ -981,7 +1053,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         completed_units += 1.0
                     else:
                         last_prog = 0
-                        completed_units += 1.0  # sampler prep step
+                        completed_units += 1.0
                         sampler_cur = 0
                         sampler_total = 0
                     update_job()
@@ -1025,7 +1097,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     except (ConnectionRefusedError, OSError, websockets.exceptions.WebSocketException):
         pass
 
-    # Fallback: HTTP polling
     if prompt_id:
         while time.time() - start < timeout:
             await asyncio.sleep(3)
@@ -1050,9 +1121,9 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     raise TimeoutError("出图超时 (600s)")
 
 async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_running, img_width=0, img_height=0, instance=None):
-    inst = instance or COMFYUI_INSTANCES[0]
+    inst = instance or _get_enabled_instances()[0] if _get_enabled_instances() else {"url": COMFYUI_URL, "output_dir": OUTPUT_DIR, "name": "default"}
     inst_url = inst["url"]
-    inst_output = inst["output_dir"]
+    inst_output = inst.get("output_dir", OUTPUT_DIR)
     try:
         jobs[job_id]["status"] = "preparing"
         jobs[job_id]["message"] = "准备 workflow..."
@@ -1084,8 +1155,12 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             jobs[job_id]["status"] = "starting_comfyui"
             jobs[job_id]["message"] = f"启动 ComfyUI #{inst['name']}..."
             await broadcast({"type": "job_update", "job": jobs[job_id]})
-            svc = f"comfyui-{inst['name'].lower()}"
-            subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
+            node = _get_node_by_id(inst.get("_node_id", ""))
+            if node:
+                _run_instance_action(node, inst, "start")
+            else:
+                svc = f"comfyui-{inst['name'].lower()}"
+                subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
             for _ in range(90):
                 await asyncio.sleep(2)
                 if comfyui_up(base_url=inst_url):
@@ -1100,7 +1175,6 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         save_jobs()
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-        # Track progress via ComfyUI WS (connects first, then submits prompt)
         elapsed_start = time.time()
         client_id = uuid.uuid4().hex[:12]
         ws_ok = False
@@ -1110,11 +1184,9 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         except Exception as _ws_err:
             print(f"[WS_TRACK_ERROR] {job_id}: {_ws_err}")
             add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
-            add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
             jobs[job_id]["ws_error"] = str(_ws_err)[:300]
 
         if not ws_ok and pid:
-            # WS didn't confirm — check ComfyUI history directly
             for _ in range(60):
                 await asyncio.sleep(5)
                 try:
@@ -1126,11 +1198,9 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                             break
                         if st.get("status_str") == "error":
                             raise RuntimeError("ComfyUI 执行出错")
-                    # Also check if prompt is still in ComfyUI queue (still running)
                     q = comfyui_get("/queue", base_url=inst_url)
                     running_ids = [item[1] if isinstance(item, list) and len(item) > 1 else None for item in q.get("queue_running", [])]
                     if pid not in running_ids and pid not in check:
-                        # Not in queue and not in history — truly lost
                         break
                 except RuntimeError:
                     raise
@@ -1139,7 +1209,6 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         elapsed = time.time() - elapsed_start
 
-        # If job was cancelled (removed from jobs dict), stop here
         if job_id not in jobs:
             return False, prompt_id or ""
 
@@ -1147,7 +1216,6 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             _extra = jobs[job_id].get("ws_error", "") if job_id in jobs else ""
             raise TimeoutError(f"出图失败{' ('+_extra[:100]+')' if _extra else ''}")
 
-        # Post-processing: find the output image
         hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
         filename = None
         if pid in hist:
@@ -1157,7 +1225,6 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                     break
                 if filename:
                     break
-        # If job was cancelled during generation, skip output
         if job_id not in jobs or jobs[job_id].get("status") == "error":
             return False, prompt_id or ""
         if not filename:
@@ -1165,22 +1232,21 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         src = os.path.join(inst_output, filename)
         if not os.path.isfile(src):
-            # ComfyUI may save into subdirectories (e.g. workflow_name/filename)
             matches = glob.glob(os.path.join(inst_output, "**", filename), recursive=True)
             if matches:
                 src = matches[0]
+
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = uuid.uuid4().hex[:6]
         hist_name = f"{ts}_{uid}.png"
         shutil.copy2(src, os.path.join(HISTORY_DIR, hist_name))
 
-        # Read actual image dimensions from output file
         actual_w, actual_h = get_image_size(hist_name)
 
         prompt_text = ""
         for k, v in field_values.items():
             if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_text = str(v)  # store full prompt, no truncation
+                prompt_text = str(v)
                 break
 
         record = {
@@ -1192,7 +1258,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             "elapsed": round(elapsed, 1),
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "thumb": make_thumbnail(hist_name) or "",
-            "field_values": field_values,  # preserve all fields for full restore
+            "field_values": field_values,
         }
         history.insert(0, record)
         save_history()
@@ -1223,7 +1289,6 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 # ══════════════════════════════════════════════════════════════════════════
 
 def save_jobs():
-    """Persist active (queued/preparing/generating) jobs to disk."""
     active = {k: v for k, v in jobs.items() if v.get("status") not in ("done", "error")}
     try:
         with open(JOBS_FILE, "w") as f:
@@ -1233,7 +1298,6 @@ def save_jobs():
 
 
 def load_jobs():
-    """Discard persisted active jobs on startup (service was restarted, they're dead)."""
     if os.path.isfile(JOBS_FILE):
         try:
             os.remove(JOBS_FILE)
@@ -1247,11 +1311,10 @@ def load_jobs():
 
 HISTORY_FILE = os.path.join(HISTORY_DIR, "history.json")
 THUMB_DIR = os.path.join(HISTORY_DIR, "thumbs")
-THUMB_SIZE = 400  # max width for thumbnails
+THUMB_SIZE = 400
 
 
 def make_thumbnail(filename: str) -> str | None:
-    """Create JPEG thumbnail via ffmpeg. Returns thumb filename or None."""
     src = os.path.join(HISTORY_DIR, filename)
     if not os.path.isfile(src):
         return None
@@ -1273,7 +1336,6 @@ def make_thumbnail(filename: str) -> str | None:
     return None
 
 def get_image_size(filename: str) -> tuple[int, int]:
-    """Read image dimensions from file. Returns (width, height) or (0, 0)."""
     path = os.path.join(HISTORY_DIR, filename)
     if not os.path.isfile(path):
         return 0, 0
@@ -1297,21 +1359,17 @@ def load_history():
                 history = json.load(f)
         except Exception:
             history = []
-    # Backfill: ensure seed is string, and width/height are populated
     changed = False
     for h in history:
-        # seed → string
         if "seed" in h and not isinstance(h["seed"], str):
             h["seed"] = str(h["seed"])
             changed = True
-        # width/height backfill from image file
         if not h.get("width") or not h.get("height"):
             w, ht = get_image_size(h.get("filename", ""))
             if w > 0:
                 h["width"] = w
                 h["height"] = ht
                 changed = True
-        # thumbnail backfill
         if not h.get("thumb"):
             thumb = make_thumbnail(h.get("filename", ""))
             if thumb:
@@ -1354,10 +1412,9 @@ async def index():
 @app.get("/api/status")
 def api_status():
     instances = []
-    for inst in COMFYUI_INSTANCES:
+    for inst in _get_enabled_instances():
         q_size = _get_instance_queue_size(inst["url"])
         grp = _instance_group.get(inst["name"], "")
-        # Count webapp jobs for this instance
         name = inst["name"]
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
         q_run = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching")])
@@ -1394,19 +1451,26 @@ def api_gpu():
 def api_comfyui(action: str):
     if action == "start":
         results = []
-        for inst in COMFYUI_INSTANCES:
-            svc = f"comfyui-{inst['name'].lower()}"
-            subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
+        for inst in _get_enabled_instances():
+            node = _get_node_by_id(inst.get("_node_id", ""))
+            if node:
+                _run_instance_action(node, inst, "start")
+            else:
+                svc = f"comfyui-{inst['name'].lower()}"
+                subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
             results.append(f"{inst['name']} 启动中")
         return {"ok": True, "msg": "; ".join(results)}
     elif action == "stop":
         results = []
-        for inst in COMFYUI_INSTANCES:
-            svc = f"comfyui-{inst['name'].lower()}"
-            subprocess.run(["systemctl", "--user", "stop", svc], capture_output=True, timeout=5)
-            _instance_group[inst["name"]] = ""  # models unloaded
+        for inst in _get_enabled_instances():
+            node = _get_node_by_id(inst.get("_node_id", ""))
+            if node:
+                _run_instance_action(node, inst, "stop")
+            else:
+                svc = f"comfyui-{inst['name'].lower()}"
+                subprocess.run(["systemctl", "--user", "stop", svc], capture_output=True, timeout=5)
+            _instance_group[inst["name"]] = ""
             results.append(f"{inst['name']} 已停止")
-            # Mark all active jobs on this instance as error
             for jid, jb in list(jobs.items()):
                 if jb.get("instance") == inst["name"] and jb.get("status") in ("generating", "dispatching", "preparing"):
                     jb["status"] = "error"
@@ -1418,7 +1482,6 @@ def api_comfyui(action: str):
 
 @app.get("/api/gpu-processes")
 def api_gpu_processes():
-    """List GPU-consuming processes (excluding ComfyUI/vLLM)."""
     import subprocess as _sp
     result = []
     try:
@@ -1434,17 +1497,18 @@ def api_gpu_processes():
     except Exception as e:
         return {"error": str(e), "processes": []}
     known_pids = set()
-    for inst in COMFYUI_INSTANCES:
-        try:
-            svc = "comfyui-" + inst["name"].lower()
-            r2 = _sp.run(["systemctl", "--user", "show", svc, "--property=MainPID"],
-                         capture_output=True, text=True, timeout=3)
-            pid_val = r2.stdout.strip().split("=")[-1]
-            if pid_val and pid_val != "0":
-                known_pids.add(int(pid_val))
-        except Exception:
-            pass
-    # vLLM included in list (no separate button)
+    for inst in _get_enabled_instances():
+        node = _get_node_by_id(inst.get("_node_id", ""))
+        if node and node.get("connection") == "local":
+            try:
+                svc = f"comfyui-{inst['name'].lower()}"
+                r2 = _sp.run(["systemctl", "--user", "show", svc, "--property=MainPID"],
+                             capture_output=True, text=True, timeout=3)
+                pid_val = r2.stdout.strip().split("=")[-1]
+                if pid_val and pid_val != "0":
+                    known_pids.add(int(pid_val))
+            except Exception:
+                pass
     skip = {"Xorg", "gnome-shell", "Xwayland"}
     filtered = []
     for p in result:
@@ -1469,15 +1533,11 @@ def api_gpu_kill(req: dict):
 
 @app.get("/api/comfyui/status")
 def api_comfyui_status():
-    """Detailed per-instance status including queue and current job."""
     result = []
-    # Count webapp jobs per instance (not ComfyUI internal queue)
-    active_statuses = {"dispatching", "generating", "preparing", "queued"}
-    for inst in COMFYUI_INSTANCES:
+    for inst in _get_enabled_instances():
         name = inst["name"]
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
-        # Count webapp jobs assigned to this instance
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
         queue_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching")])
         queue_pending = len([j for j in inst_jobs if j["status"] == "preparing"])
@@ -1494,7 +1554,6 @@ def api_comfyui_status():
             current_label = prompt_preview[:60] if prompt_preview else workflow_name
             prog = current_job.get("progress", {}) or {}
             current_progress = prog.get("pct", 0) if isinstance(prog, dict) else 0
-        # Collect queued/pending jobs for this instance
         for j in jobs.values():
             if j.get("instance") == name and j.get("status") in ("queued", "preparing"):
                 wf = (j.get("workflow") or "").replace(".json", "")
@@ -1514,17 +1573,24 @@ def api_comfyui_status():
 @app.post("/api/comfyui/{instance}/{action}")
 def api_comfyui_instance(instance: str, action: str):
     """Start/stop a single ComfyUI instance (A or B)."""
-    inst = next((i for i in COMFYUI_INSTANCES if i["name"].upper() == instance.upper()), None)
+    inst = next((i for i in _get_enabled_instances() if i["name"].upper() == instance.upper()), None)
     if not inst:
         raise HTTPException(404, f"Instance {instance} not found")
-    svc = f"comfyui-{inst['name'].lower()}"
+    node = _get_node_by_id(inst.get("_node_id", ""))
     if action == "start":
-        subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
+        if node:
+            _run_instance_action(node, inst, "start")
+        else:
+            svc = f"comfyui-{inst['name'].lower()}"
+            subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
         return {"ok": True, "msg": f"{inst['name']} 启动中"}
     elif action == "stop":
-        subprocess.run(["systemctl", "--user", "stop", svc], capture_output=True, timeout=5)
+        if node:
+            _run_instance_action(node, inst, "stop")
+        else:
+            svc = f"comfyui-{inst['name'].lower()}"
+            subprocess.run(["systemctl", "--user", "stop", svc], capture_output=True, timeout=5)
         _instance_group[inst["name"]] = ""
-        # Mark all active jobs on this instance as error
         for jid, jb in list(jobs.items()):
             if jb.get("instance") == inst["name"] and jb.get("status") in ("generating", "dispatching", "preparing"):
                 jb["status"] = "error"
@@ -1548,10 +1614,22 @@ def api_vllm(action: str):
 #  API: Workflows
 # ══════════════════════════════════════════════════════════════════════════
 
+def _get_workflow_dirs() -> list[str]:
+    """Collect workflow directories from all enabled nodes' instances + legacy dirs."""
+    dirs = set()
+    for inst in _get_enabled_instances():
+        for wd in inst.get("workflow_dirs", []):
+            dirs.add(wd)
+    # Also include legacy WF_DIRS_FILE dirs
+    legacy = _load_wf_dirs()
+    for d in legacy:
+        dirs.add(d)
+    return list(dirs)
+
 @app.get("/api/workflows")
 def api_workflows():
-    seen = {}  # name → first path found (dedup across dirs)
-    for d in _load_wf_dirs():
+    seen = {}
+    for d in _get_workflow_dirs():
         for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
             name = os.path.basename(f)
             if name not in seen:
@@ -1578,7 +1656,6 @@ def api_workflow_fields(name: str):
 
 @app.get("/api/workflows/{name}/analyze")
 def api_workflow_analyze(name: str):
-    """Analyze workflow: scan all nodes with auto-classification."""
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
@@ -1595,7 +1672,6 @@ def api_workflow_download(name: str):
 
 @app.get("/api/workflows/{name}/config")
 def api_workflow_config_get(name: str):
-    """Get saved workflow config. Returns 404 if not configured."""
     config = load_wf_config(name)
     if not config:
         raise HTTPException(404)
@@ -1604,14 +1680,12 @@ def api_workflow_config_get(name: str):
 
 @app.put("/api/workflows/{name}/config")
 def api_workflow_config_put(name: str, req: dict):
-    """Save workflow config (zone/visible/label/order per field)."""
     save_wf_config(name, req)
     return {"ok": True}
 
 
 @app.delete("/api/workflows/{name}/config")
 def api_workflow_config_delete(name: str):
-    """Delete workflow config (revert to auto-classify)."""
     p = os.path.join(WF_CONFIG_DIR, name)
     if os.path.isfile(p):
         os.remove(p)
@@ -1625,14 +1699,13 @@ async def api_workflow_upload(file: UploadFile = File(...)):
         raise HTTPException(400, "需要 .json 文件")
     content = await file.read()
     try:
-        json.loads(content)  # validate
+        json.loads(content)
     except json.JSONDecodeError as e:
         raise HTTPException(400, f"无效 JSON: {e}")
     upload_dir = _load_wf_dirs()[0]
     dest = os.path.join(upload_dir, name)
     with open(dest, "wb") as f:
         f.write(content)
-    # Auto-detect and save metadata
     meta = _load_wf_meta()
     if name not in meta:
         meta[name] = {
@@ -1647,7 +1720,6 @@ async def api_workflow_upload(file: UploadFile = File(...)):
 
 @app.get("/api/workflow-dirs")
 def api_workflow_dirs():
-    """List configured workflow search directories."""
     dirs = _load_wf_dirs()
     result = []
     for d in dirs:
@@ -1658,7 +1730,6 @@ def api_workflow_dirs():
 
 @app.post("/api/workflow-dirs")
 def api_workflow_dir_add(req: dict):
-    """Add a workflow search directory."""
     d = req.get("path", "").strip()
     if not d:
         raise HTTPException(400, "path is required")
@@ -1667,7 +1738,6 @@ def api_workflow_dir_add(req: dict):
     dirs = _load_wf_dirs()
     if d in dirs:
         raise HTTPException(409, "Directory already added")
-    # Auto-create if doesn't exist
     os.makedirs(d, exist_ok=True)
     dirs.append(d)
     _save_wf_dirs(dirs)
@@ -1676,7 +1746,6 @@ def api_workflow_dir_add(req: dict):
 
 @app.delete("/api/workflow-dirs")
 def api_workflow_dir_remove(path: str):
-    """Remove a workflow search directory. Pass path as query param."""
     d = path.strip()
     if not d:
         raise HTTPException(400, "path is required")
@@ -1694,11 +1763,9 @@ def api_workflow_dir_remove(path: str):
 
 @app.post("/api/upload-image")
 async def api_upload_image(file: UploadFile = File(...)):
-    """Upload an image to ComfyUI's input directory. Returns the saved filename."""
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file")
-    # Generate unique filename, keep original extension
     ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
         raise HTTPException(400, f"Unsupported image format: {ext}")
@@ -1712,8 +1779,6 @@ async def api_upload_image(file: UploadFile = File(...)):
 
 @app.get("/api/input-image/{filename}")
 def api_input_image(filename: str):
-    """Serve an image from ComfyUI's input directory."""
-    # Security: only allow basename, no path traversal
     safe = os.path.basename(filename)
     path = os.path.join(COMFYUI_INPUT, safe)
     if not os.path.isfile(path):
@@ -1737,13 +1802,11 @@ def _save_wf_meta(meta: dict):
 
 
 def _load_wf_dirs() -> list[str]:
-    """Return list of workflow search directories. Initializes with default if missing."""
     if os.path.isfile(WF_DIRS_FILE):
         with open(WF_DIRS_FILE) as f:
             dirs = json.load(f)
         if isinstance(dirs, list) and dirs:
             return dirs
-    # First run: seed with the legacy default
     dirs = [WORKFLOW_DIR]
     os.makedirs(os.path.dirname(WF_DIRS_FILE), exist_ok=True)
     with open(WF_DIRS_FILE, "w") as f:
@@ -1758,13 +1821,10 @@ def _save_wf_dirs(dirs: list[str]):
 
 
 def _resolve_workflow(name: str) -> str | None:
-    """Find a workflow file across all configured directories (recursive). Returns path or None."""
-    for d in _load_wf_dirs():
-        # Try direct path first (fast path)
+    for d in _get_workflow_dirs():
         p = os.path.join(d, name)
         if os.path.isfile(p):
             return p
-        # Search recursively in subdirectories
         matches = glob.glob(os.path.join(d, "**", name), recursive=True)
         if matches:
             return matches[0]
@@ -1772,7 +1832,6 @@ def _resolve_workflow(name: str) -> str | None:
 
 
 def _auto_detect_tags(workflow_path: str) -> list[str]:
-    """Auto-detect tags from workflow JSON content."""
     tags = []
     try:
         with open(workflow_path) as f:
@@ -1811,10 +1870,9 @@ def _auto_detect_tags(workflow_path: str) -> list[str]:
 
 @app.get("/api/workflows/meta")
 def api_workflows_meta():
-    """Return metadata for all workflows, auto-detecting tags if needed."""
     meta = _load_wf_meta()
     seen = {}
-    for d in _load_wf_dirs():
+    for d in _get_workflow_dirs():
         for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
             name = os.path.basename(f)
             if name not in seen:
@@ -1836,7 +1894,6 @@ def api_workflows_meta():
 
 @app.put("/api/workflows/meta/{filename}")
 def api_update_wf_meta(filename: str, body: dict):
-    """Update metadata for a single workflow."""
     meta = _load_wf_meta()
     if filename not in meta:
         meta[filename] = {}
@@ -1850,7 +1907,6 @@ def api_update_wf_meta(filename: str, body: dict):
 
 @app.delete("/api/workflows/meta/{filename}")
 def api_delete_wf_meta(filename: str):
-    """Remove metadata entry for a workflow."""
     meta = _load_wf_meta()
     if filename in meta:
         del meta[filename]
@@ -1860,7 +1916,6 @@ def api_delete_wf_meta(filename: str):
 
 @app.post("/api/workflows/meta/thumbnail")
 async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = File(...)):
-    """Upload a thumbnail for a workflow."""
     os.makedirs(WF_THUMB_DIR, exist_ok=True)
     ext = os.path.splitext(file.filename)[1] or ".jpg"
     thumb_name = f"{os.path.splitext(filename)[0]}{ext}"
@@ -1878,7 +1933,6 @@ async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = 
 
 @app.get("/api/workflows/thumbnail/{name}")
 def api_get_wf_thumbnail(name: str):
-    """Serve a workflow thumbnail."""
     path = os.path.join(WF_THUMB_DIR, name)
     if not os.path.isfile(path):
         raise HTTPException(404)
@@ -1887,7 +1941,6 @@ def api_get_wf_thumbnail(name: str):
 
 @app.put("/api/workflows/{filename}/rename")
 def api_rename_workflow(filename: str, body: dict):
-    """Rename the display name of a workflow."""
     meta = _load_wf_meta()
     if filename not in meta:
         meta[filename] = {}
@@ -1904,7 +1957,6 @@ def api_workflow_delete(name: str):
     if not path:
         raise HTTPException(404)
     os.remove(path)
-    # Also delete metadata
     meta = _load_wf_meta()
     if name in meta:
         del meta[name]
@@ -1963,26 +2015,22 @@ async def api_cancel_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(404)
     job = jobs[job_id]
-    # If generating, try to interrupt ComfyUI
     if job.get("status") == "generating":
         try:
             comfyui_post("/interrupt", {})
         except Exception:
             pass
-    # Cancel background task if still running
     task = _job_tasks.get(job_id)
     if task and not task.done():
         task.cancel()
     _job_tasks.pop(job_id, None)
-    # Release semaphore if the task was holding it
     inst_name = job.get("instance", "")
     if inst_name and inst_name in _instance_semas:
         sem = _instance_semas[inst_name]
-        # Try to release — if semaphore is at max, this is a no-op
         try:
             sem.release()
         except ValueError:
-            pass  # already at max value
+            pass
     try: _global_sem.release()
     except ValueError: pass
     del jobs[job_id]
@@ -1999,7 +2047,6 @@ def api_retry_job(job_id: str, bg: BackgroundTasks):
     if old["status"] not in ("error",):
         raise HTTPException(400, "只能重试失败的任务")
 
-    # Reuse original params
     wf = old.get("workflow", "")
     fields = old.get("fields", {})
     seed = random.randint(0, 2**63)
@@ -2010,10 +2057,8 @@ def api_retry_job(job_id: str, bg: BackgroundTasks):
     if not path:
         raise HTTPException(404, "Workflow not found")
 
-    # Remove old job
     del jobs[job_id]
 
-    # Create new job with same params
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     vllm_was = vllm_running()
 
@@ -2070,11 +2115,9 @@ def api_image(filename: str):
 
 @app.get("/api/thumbs/{filename}")
 def api_thumb(filename: str):
-    """Serve thumbnail. Falls back to original if thumb missing."""
     path = os.path.join(THUMB_DIR, filename)
     if os.path.isfile(path):
         return FileResponse(path, media_type="image/jpeg")
-    # fallback: try original
     orig = os.path.join(HISTORY_DIR, filename.replace("_thumb.jpg", ".png"))
     if os.path.isfile(orig):
         return FileResponse(orig, media_type="image/png")
@@ -2102,18 +2145,403 @@ async def ws_endpoint(ws: WebSocket):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  Main
+#  API: NODES
 # ══════════════════════════════════════════════════════════════════════════
 
+def _check_node_http(node: dict) -> bool:
+    """Check if any instance on the node is reachable via HTTP."""
+    for inst in node.get("instances", []):
+        url = f"http://{node['host']}:{inst['port']}"
+        if comfyui_up(base_url=url):
+            return True
+    return False
 
 
-MAX_WORKFLOW_SIZE = 1 * 1024 * 1024   # 1 MB
+def _check_node_ssh(node: dict) -> bool:
+    """Check SSH connectivity."""
+    if node.get("connection") not in ("local", "remote-ssh"):
+        return False
+    if node.get("connection") == "local":
+        return True
+    try:
+        ssh = node.get("ssh_config", {})
+        if ssh.get("auth") == "password" and ssh.get("password"):
+            cmd = ["sshpass", "-p", ssh["password"], "ssh",
+                   f"{ssh.get('user', 'root')}@{node['host']}",
+                   "-p", str(ssh.get("port", 22)),
+                   "-o", "ConnectTimeout=5", "echo", "ok"]
+        else:
+            cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}",
+                   "-p", str(ssh.get("port", 22)),
+                   "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
+                   "echo", "ok"]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() == "ok"
+    except Exception:
+        return False
 
-# ── Workflow Version Management ──────────────────────────────────────
+
+def _check_node_systemd(node: dict) -> bool:
+    """Check if systemd services for node instances are active."""
+    for inst in node.get("instances", []):
+        if _check_service_active(node, inst):
+            return True
+    return False
+
+
+def _get_instance_status(node: dict, instance: dict) -> dict:
+    """Get status for a single instance."""
+    url = f"http://{node['host']}:{instance['port']}"
+    http_up = comfyui_up(base_url=url)
+    q_size = _get_instance_queue_size(url)
+    conn = node.get("connection", "local")
+
+    if http_up and q_size > 0:
+        status = "running"
+    elif http_up and q_size == 0:
+        status = "idle"
+    elif conn in ("local", "remote-ssh") and _check_service_active(node, instance) and not http_up:
+        status = "dead"
+    elif conn in ("local", "remote-ssh") and not _check_service_active(node, instance) and not http_up:
+        status = "offline"
+    elif conn == "remote-http" and not http_up:
+        status = "unreachable"
+    else:
+        status = "unknown"
+
+    return {
+        "id": instance.get("id", ""),
+        "name": instance["name"],
+        "port": instance["port"],
+        "status": status,
+        "http_up": http_up,
+        "queue": q_size,
+        "service": instance.get("service", f"comfyui-{instance['name'].lower()}"),
+    }
+
+
+@app.get("/api/nodes")
+def api_nodes_list():
+    """List all enabled nodes with real-time status."""
+    nodes = [n for n in _load_nodes() if n.get("enabled", True)]
+    result = []
+    for node in nodes:
+        inst_statuses = [_get_instance_status(node, inst) for inst in node.get("instances", [])]
+        http_up = any(s["http_up"] for s in inst_statuses)
+        ssh_ok = _check_node_ssh(node)
+
+        # Overall node status
+        running = sum(1 for s in inst_statuses if s["status"] == "running")
+        idle = sum(1 for s in inst_statuses if s["status"] == "idle")
+        dead = sum(1 for s in inst_statuses if s["status"] == "dead")
+        offline = sum(1 for s in inst_statuses if s["status"] == "offline")
+
+        result.append({
+            "id": node["id"],
+            "name": node["name"],
+            "host": node["host"],
+            "connection": node.get("connection", "local"),
+            "labels": node.get("labels", []),
+            "sort_order": node.get("sort_order", 0),
+            "http_up": http_up,
+            "ssh_ok": ssh_ok,
+            "instances": inst_statuses,
+            "stats": {
+                "total": len(inst_statuses),
+                "running": running,
+                "idle": idle,
+                "dead": dead,
+                "offline": offline,
+            },
+        })
+    return {"ok": True, "data": result}
+
+
+@app.get("/api/nodes/{nid}")
+def api_node_get(nid: str):
+    """Get single node detail with password mask."""
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    # Mask password
+    result = dict(node)
+    if "ssh_config" in result and result["ssh_config"].get("password"):
+        result["ssh_config"]["password"] = "__MASKED__"
+    return {"ok": True, "data": result}
+
+
+class NodeCreateRequest(BaseModel):
+    name: str
+    host: str = "127.0.0.1"
+    connection: str = "local"
+    labels: list[str] = []
+    ssh_config: dict = {}
+    scan_ports: dict = {}
+    instances: list[dict] = []
+    sort_order: int = 0
+
+
+@app.post("/api/nodes")
+def api_node_create(req: NodeCreateRequest):
+    """Create a new node."""
+    nodes = _load_nodes()
+    new_node = {
+        "id": uuid.uuid4().hex[:12],
+        "name": req.name,
+        "host": req.host,
+        "connection": req.connection,
+        "enabled": True,
+        "labels": req.labels,
+        "ssh_config": req.ssh_config or {"auth": "password", "user": "", "port": 22, "password": ""},
+        "scan_ports": req.scan_ports or {"range": "8188-8195", "extra": []},
+        "instances": req.instances or [],
+        "sort_order": req.sort_order or len(nodes),
+    }
+    nodes.append(new_node)
+    _save_nodes(nodes)
+    return {"ok": True, "data": new_node}
+
+
+class NodeUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    host: Optional[str] = None
+    connection: Optional[str] = None
+    enabled: Optional[bool] = None
+    labels: Optional[list[str]] = None
+    ssh_config: Optional[dict] = None
+    scan_ports: Optional[dict] = None
+    instances: Optional[list[dict]] = None
+    sort_order: Optional[int] = None
+
+
+@app.put("/api/nodes/{nid}")
+def api_node_update(nid: str, req: NodeUpdateRequest):
+    """Update a node (partial merge)."""
+    nodes = _load_nodes()
+    node = next((n for n in nodes if n["id"] == nid), None)
+    if not node:
+        raise HTTPException(404, "Node not found")
+
+    update_data = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
+    # Password: __MASKED__ means skip
+    if "ssh_config" in update_data and isinstance(update_data["ssh_config"], dict):
+        if update_data["ssh_config"].get("password") == "__MASKED__":
+            del update_data["ssh_config"]["password"]
+            if not update_data["ssh_config"]:
+                del update_data["ssh_config"]
+    node.update(update_data)
+    _save_nodes(nodes)
+    return {"ok": True, "data": node}
+
+
+@app.delete("/api/nodes/{nid}")
+def api_node_delete(nid: str):
+    """Delete a node. Must keep at least 1 node."""
+    nodes = _load_nodes()
+    if len(nodes) <= 1:
+        raise HTTPException(400, "Cannot delete the last node")
+    node = next((n for n in nodes if n["id"] == nid), None)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    nodes.remove(node)
+    _save_nodes(nodes)
+    return {"ok": True}
+
+
+@app.post("/api/nodes/{nid}/instances/{iid}/start")
+def api_node_instance_start(nid: str, iid: str):
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
+    if not inst:
+        raise HTTPException(404, "Instance not found")
+    if node.get("connection") == "remote-http":
+        raise HTTPException(400, "Cannot start instance via remote-http")
+    if _run_instance_action(node, inst, "start"):
+        return {"ok": True}
+    raise HTTPException(500, "Failed to start instance")
+
+
+@app.post("/api/nodes/{nid}/instances/{iid}/stop")
+def api_node_instance_stop(nid: str, iid: str):
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
+    if not inst:
+        raise HTTPException(404, "Instance not found")
+    if node.get("connection") == "remote-http":
+        raise HTTPException(400, "Cannot stop instance via remote-http")
+    if _run_instance_action(node, inst, "stop"):
+        _instance_group[inst["name"]] = ""
+        return {"ok": True}
+    raise HTTPException(500, "Failed to stop instance")
+
+
+@app.post("/api/nodes/{nid}/instances/{iid}/restart")
+def api_node_instance_restart(nid: str, iid: str):
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
+    if not inst:
+        raise HTTPException(404, "Instance not found")
+    if node.get("connection") == "remote-http":
+        raise HTTPException(400, "Cannot restart instance via remote-http")
+    if _run_instance_action(node, inst, "restart"):
+        return {"ok": True}
+    raise HTTPException(500, "Failed to restart instance")
+
+
+@app.post("/api/nodes/{nid}/discover")
+def api_node_discover(nid: str):
+    """Port scan to discover ComfyUI instances on a node."""
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+
+    scan_ports = node.get("scan_ports", {})
+    port_range = scan_ports.get("range", "8188-8195")
+    extra = scan_ports.get("extra", [])
+
+    # Parse port range
+    ports = set()
+    try:
+        if "-" in port_range:
+            lo, hi = map(int, port_range.split("-", 1))
+            ports.update(range(lo, hi + 1))
+        else:
+            ports.add(int(port_range))
+    except (ValueError, TypeError):
+        pass
+    for p in extra:
+        try:
+            ports.add(int(p))
+        except (ValueError, TypeError):
+            pass
+
+    detected = []
+    for port in sorted(ports):
+        url = f"http://{node['host']}:{port}"
+        try:
+            with urllib.request.urlopen(url + "/system_stats", timeout=3) as r:
+                is_comfyui = r.status == 200
+                q_size = 0
+                if is_comfyui:
+                    try:
+                        q = comfyui_get("/queue", base_url=url)
+                        q_size = len(q.get("queue_running", [])) + len(q.get("queue_pending", []))
+                    except Exception:
+                        pass
+                detected.append({"port": port, "comfyui": is_comfyui, "queue": q_size})
+        except Exception:
+            detected.append({"port": port, "comfyui": False, "queue": 0})
+
+    # Compare with registered instances
+    registered_ports = {inst.get("port") for inst in node.get("instances", []) if inst.get("port")}
+    new_ports = [d for d in detected if d["comfyui"] and d["port"] not in registered_ports]
+    missing_ports = [d for d in detected if d["comfyui"] and d["port"] in registered_ports]
+
+    return {
+        "ok": True,
+        "data": {
+            "detected": detected,
+            "new": new_ports,
+            "missing": missing_ports,
+        }
+    }
+
+
+class NodeReorderRequest(BaseModel):
+    order: list[dict]
+
+
+@app.put("/api/nodes/reorder")
+def api_node_reorder(req: NodeReorderRequest):
+    """Reorder nodes."""
+    nodes = _load_nodes()
+    order_map = {item["id"]: item.get("sort_order", 0) for item in req.order}
+    for node in nodes:
+        if node["id"] in order_map:
+            node["sort_order"] = order_map[node["id"]]
+    # Sort nodes list by sort_order
+    nodes.sort(key=lambda n: n.get("sort_order", 0))
+    _save_nodes(nodes)
+    return {"ok": True}
+
+
+@app.post("/api/nodes/{nid}/test")
+def api_node_test(nid: str):
+    """Test connectivity for a node."""
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    return {
+        "ok": True,
+        "data": {
+            "http": _check_node_http(node),
+            "ssh": _check_node_ssh(node),
+            "systemd": _check_node_systemd(node),
+        }
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  API: Nodes - Apply Scan Results
+# ══════════════════════════════════════════════════════════════════════════
+
+class ApplyScanRequest(BaseModel):
+    selected: list[dict]
+
+
+@app.post("/api/nodes/{nid}/apply-scan")
+def api_node_apply_scan(nid: str, req: ApplyScanRequest):
+    """Apply scan results: add new instances to node."""
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    added = []
+    for sel in req.selected:
+        port = sel.get("port")
+        if not port:
+            continue
+        existing = [inst for inst in node.get("instances", []) if inst.get("port") == port]
+        if existing:
+            continue
+        idx = len(node.get("instances", [])) + len(added)
+        name = chr(65 + idx) if idx < 26 else f"inst-{idx}"
+        new_inst = {
+            "id": uuid.uuid4().hex[:8],
+            "name": name,
+            "port": port,
+            "service": f"comfyui-{name.lower()}",
+            "output_dir": f"/home/sjcta/software/ComfyUI-Project/outputs",
+            "enabled": True,
+            "workflow_dirs": [],
+            "labels": [],
+        }
+        node["instances"].append(new_inst)
+        added.append(new_inst)
+    _save_nodes(_load_nodes())  # re-read and save (ensure fresh)
+    # Actually re-save properly
+    nodes = _load_nodes()
+    for n in nodes:
+        if n["id"] == nid:
+            n["instances"] = node["instances"]
+            break
+    _save_nodes(nodes)
+    return {"ok": True, "data": {"added": len(added)}}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Workflow Version Management
+# ══════════════════════════════════════════════════════════════════════════
+
+MAX_WORKFLOW_SIZE = 1 * 1024 * 1024
 
 @app.get("/api/workflows/{name}/versions")
 def api_workflow_versions(name: str):
-    """List all versions of a workflow."""
     meta = _load_wf_meta()
     entry = meta.get(name, {})
     versions = entry.get("versions", {})
@@ -2216,7 +2644,6 @@ def api_activate_workflow_version(name: str, body: dict):
 
 @app.delete("/api/workflows/{name}/versions/{version}")
 def api_delete_workflow_version(name: str, version: str):
-    """Delete a workflow version. v1 cannot be deleted."""
     if version == "v1" or version == "base":
         raise HTTPException(400, "Cannot delete base version")
     meta = _load_wf_meta()

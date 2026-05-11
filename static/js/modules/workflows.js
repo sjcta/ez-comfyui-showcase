@@ -443,12 +443,8 @@ function closeWfMgr() {
 
 function openWfMgr() {
     $('#wfOverlay').classList.add('open');
-    loadWfMeta();
-    loadWfDirs();
-    // Init sort select
-    var sel = $('#wfMgrSortBy');
-    if (sel) sel.value = _mgrSortBy;
-    if (sel) sel.onchange = function() { _mgrSortBy = this.value; renderWfGrid(); };
+    if (window.CW && CW.showWfTab) CW.showWfTab();
+    else { loadWfMeta(); loadWfDirs(); }
   }
 
 async function delWF(name) {
