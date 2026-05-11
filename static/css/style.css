@@ -606,16 +606,6 @@ a { color: var(--accent); text-decoration: none; }
 
 
 /* ── History card color-coded full borders (by workflow type) ── */
-.gi[data-wf*="i2i"] { border: 1px solid rgba(188,140,255,.35); }
-.gi[data-wf*="i2i"]:hover { border-color: var(--purple); box-shadow: 0 0 0 1px rgba(188,140,255,.25); }
-.gi[data-wf*="t2i"] { border: 1px solid rgba(88,166,255,.35); }
-.gi[data-wf*="t2i"]:hover { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(88,166,255,.25); }
-.gi[data-wf*="t2v"], .gi[data-wf*="seedance"] { border: 1px solid rgba(240,136,62,.35); }
-.gi[data-wf*="t2v"]:hover, .gi[data-wf*="seedance"]:hover { border-color: #f0883e; box-shadow: 0 0 0 1px rgba(240,136,62,.25); }
-.gi[data-wf*="i2v"] { border: 1px solid rgba(210,153,34,.35); }
-.gi[data-wf*="i2v"]:hover { border-color: var(--yellow); box-shadow: 0 0 0 1px rgba(210,153,34,.25); }
-.gi[data-wf*="upscale"], .gi[data-wf*="SeedVR"] { border: 1px solid rgba(63,185,80,.35); }
-.gi[data-wf*="upscale"]:hover, .gi[data-wf*="SeedVR"]:hover { border-color: var(--green); box-shadow: 0 0 0 1px rgba(63,185,80,.25); }
 
 /* gi-type-badge 在 gi-tags-row 内部时取消绝对定位 */
 .gi-tags-row .gi-type-badge {
