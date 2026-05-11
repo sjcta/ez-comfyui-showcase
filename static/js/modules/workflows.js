@@ -526,6 +526,9 @@ async function selectWF(name) {
       localStorage.setItem('cw:lastWF', name);
     } catch {}
     highlightWF();
+    // Switch tab to match this workflow category
+    var _tag = window.CW.wfTag(name, (A._wfMeta[name] || {}).tags);
+    if (_tag && window.CW.switchTab) window.CW.switchTab(_tag.text);
     // Scroll active card into view
     var ac = $$('.wf-card.active')[0];
     if (ac) ac.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
@@ -548,6 +551,9 @@ async function selectWF(name) {
     const ws = $('#wfSummary');
     if (ws) ws.textContent = name.replace('.json', '');
     try {
+      // Preserve uploaded reference image
+      var _savedRefVal = $('#refImageValue')?.value || '';
+      var _savedRefSrc = $('#refImagePreview')?.src || '';
       const r = await fetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
       const fields = d.fields || [];
@@ -569,6 +575,15 @@ async function selectWF(name) {
       if (window.CW.renderAdvFields) window.CW.renderAdvFields(fields);
       // Quick form is dynamically built from workflow fields
       if (window.CW.renderQuickForm) { try { window.CW.renderQuickForm(fields); } catch(e) { console.error('renderQuickForm error:', e); } }
+      // Restore reference image if the new workflow has a LoadImage field
+      var _newRefInput = $('#refImageValue');
+      if (_newRefInput && _savedRefVal) {
+        _newRefInput.value = _savedRefVal;
+        var _preview = $('#refImagePreview');
+        var _ph = $('#refImagePlaceholder');
+        if (_preview) { _preview.src = _savedRefSrc || (API + '/api/input-image/' + encodeURIComponent(_savedRefVal)); _preview.style.display = ''; }
+        if (_ph) _ph.style.display = 'none';
+      }
     } catch (e) {
       console.error('selectWF:', e);
     }
