@@ -766,10 +766,10 @@ async function loadWfVersions(fname) {
         html += '<span class="wf-version-name">' + escH(k) + '</span>';
         if (isActive) {
           html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
-          html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+'</button>';
+          html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+' 下载</button>';
         } else {
           html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
-          html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+'</button>';
+          html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+' 下载</button>';
         }
         html += '</div>';
       }
