@@ -2078,6 +2078,8 @@ async def ws_endpoint(ws: WebSocket):
 
 
 
+MAX_WORKFLOW_SIZE = 1 * 1024 * 1024   # 1 MB
+
 # ── Workflow Version Management ──────────────────────────────────────
 
 @app.get("/api/workflows/{name}/versions")
