@@ -262,7 +262,7 @@ async function doGenerate() {
     }
 
     $$('#advFields [data-key]').forEach((el) => {
-      fields[el.dataset.key] = el.type === 'number' ? parseFloat(el.value) || 0 : el.value;
+      fields[el.dataset.key] = el.type === 'number' ? parseFloat(el.value) || 0 : (el.type === 'checkbox' ? el.checked : el.value);
       snapshot.adv[el.dataset.key] = el.value;
     });
 
@@ -441,6 +441,10 @@ function renderAdvFields(fields) {
           html += `<select data-key="${key}">${opts}</select>`;
           break;
         }
+        case 'toggle':
+        case 'bool':
+          html += `<label class="toggle-label"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === true ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span></label>`;
+          break;
         case 'seed':
           html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"><button type="button" class="btn-dice" onclick="CW.rndSeed(this)">${CW.icon('dice-1')}</button></div>`;
           break;
