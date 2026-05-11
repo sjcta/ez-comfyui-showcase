@@ -655,7 +655,7 @@ async function loadWorkflows() {
             : `<div class="wf-card-icon">${CW.icon('settings-2')}</div>`;
           const catText = wfTagMap[w.name] || '其他';
           const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
-            `<span class="wf-tag ${_tagColor(t)}" class="wf-tag-sm">${escH(t)}</span>`
+            `<span class="wf-tag ${_tagColor(t)} wf-tag-sm">${escH(t)}</span>`
           ).join('');
           return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onmousedown="CW._wfCardDown(event)" onclick="if(!CW._wfCheckMove(event))CW.selectWF('${escA(w.name)}')">
         <div class="wf-card-preview">${previewImg}</div>
