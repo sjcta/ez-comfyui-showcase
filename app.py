@@ -841,7 +841,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
         print(f"[DEBUG] completed={completed_units}/{total_units} pct={pct}% label={label}")
-        msg = "准备中..." if not current_node_cls and completed_units == 0 else (f"{label} {sampler_cur}/{sampler_total}" if label and sampler_total > 0 else (label if label else f"{pct:.0f}%..."))
+        msg = "准备中..." if not current_node_cls and completed_units == 0 else (f"{label} {sampler_cur}/{sampler_total}" if label and sampler_total > 0 else (label + f" {pct:.0f}%" if label else f"{pct:.0f}%..."))
         jobs[job_id]["message"] = msg
         jobs[job_id]["progress"] = {"pct": pct}
         save_jobs()
