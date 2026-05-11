@@ -37,33 +37,30 @@ async def _queue_worker():
             await asyncio.sleep(1)
 
 async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h):
-    """Strict model-affinity routing: one job per instance, no cross-model spilling."""
+    """Serialize: one job at a time globally, per-instance sem for ComfyUI safety."""
     sem = None
-    sem_acquired = False
+    global_held = False
+    inst_held = False
     inst = None
     try:
         workflow_name = os.path.basename(workflow_path)
-        wf_group = extract_model_group(workflow_name) if workflow_name else ""
         jobs[job_id]["status"] = "dispatching"
         jobs[job_id]["message"] = "匹配实例..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-        # Phase 1: find the best instance for this model group
+        # Phase 1: find the best instance
         inst = await pick_best_instance(workflow_name)
         sem = _instance_semas[inst["name"]]
         await _global_sem.acquire()
+        global_held = True
 
         # Ensure instance is up (cold start if needed)
         if not await asyncio.to_thread(comfyui_up, inst["url"]):
             svc = f"comfyui-{inst['name'].lower()}"
-            _update_job_msg(job_id, f"启动实例 {inst['name']}...")
             try:
-                result = await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "start", svc],
+                await asyncio.to_thread(subprocess.run, ["systemctl", "--user", "start", svc],
                     capture_output=True, timeout=30,
                     env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
-                if result.returncode != 0:
-                    stderr = result.stderr.decode(errors='replace')[:200]
-                    print(f"[cold-start] {svc} start failed: {stderr}")
                 for _ in range(90):
                     if await asyncio.to_thread(comfyui_up, inst["url"]):
                         break
@@ -71,13 +68,13 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
             except Exception as e:
                 print(f"[cold-start] {svc} error: {e}")
 
-        # Phase 2: wait for this instance's semaphore (strict: 1 job at a time)
+        # Phase 2: wait for instance semaphore
         jobs[job_id]["status"] = "queued"
         jobs[job_id]["message"] = f"排队等待 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
         try:
             await asyncio.wait_for(sem.acquire(), timeout=600)
-            sem_acquired = True
+            inst_held = True
         except asyncio.TimeoutError:
             if job_id in jobs:
                 jobs[job_id]["status"] = "error"
@@ -86,16 +83,14 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
                 save_jobs()
             return
 
-        if job_id in jobs and jobs[job_id].get("status") not in ("error", "done"):
-            jobs[job_id]["status"] = "preparing"
-            jobs[job_id]["message"] = f"实例 {inst['name']} 就绪，开始出图"
-            await broadcast({"type": "job_update", "job": jobs[job_id]})
+        jobs[job_id]["status"] = "preparing"
+        jobs[job_id]["message"] = f"实例 {inst['name']} 就绪，开始出图"
+        await broadcast({"type": "job_update", "job": jobs[job_id]})
 
         jobs[job_id]["instance"] = inst["name"]
         await broadcast({"type": "job_update", "job": jobs[job_id]})
-        _instance_group[inst["name"]] = wf_group
+        _instance_group[inst["name"]] = extract_model_group(workflow_name)
 
-        # Phase 3: run the generation
         await generate_task(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, instance=inst)
         _instance_last_active[inst["name"]] = time.time()
     except Exception as e:
@@ -107,9 +102,10 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
             await broadcast({"type": "job_update", "job": jobs[job_id]})
             save_jobs()
     finally:
-        if sem is not None and sem_acquired:
-            _global_sem.release()
+        if inst_held:
             sem.release()
+        if global_held:
+            _global_sem.release()
         _job_queue.task_done()
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -383,16 +379,6 @@ def _get_instance_queue_size(base_url: str) -> int:
         return running + pending
     except Exception:
         return 999  # unreachable → lowest priority
-
-
-async def _update_job_msg(job_id, msg):
-    """Update job message and broadcast. Safe to call from any context."""
-    if job_id and job_id in jobs:
-        jobs[job_id]["message"] = msg
-        try:
-            asyncio.ensure_future(broadcast({"type": "job_update", "job": jobs[job_id]}))
-        except Exception:
-            pass
 
 
 async def pick_best_instance(workflow_name: str = "") -> dict:
@@ -818,8 +804,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     # ── Pre-analyze workflow: build work-unit chain ──────────────────────
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     ENCODE_NODES = {"CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "ConditioningZeroOut",
-                    "ConditioningSetTimestepRange", "VAEEncode"}
-    DECODE_NODES = {"VAEDecode"}
+                    "ConditioningSetTimestepRange"}
+    DECODE_NODES = {"VAEDecode", "VAEEncode"}
     SAVE_NODES = {"SaveImage", "SaveImageWebsocket"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
 
@@ -983,7 +969,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         # Mark encode phase complete for this group
                         if current_group < len(group_boundaries):
                             enc_start, stp_start, dec_start, next_start = group_boundaries[current_group]
-                            completed_units = max(completed_units, enc_start)
+                            completed_units = max(completed_units, stp_start)
                     elif cls in DECODE_NODES:
                         # Determine if this is mid-pipeline decode or final decode
                         more_samplers = sampler_pass < len(sampler_ids)
@@ -1008,11 +994,6 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-                    # Set sampling_total from pre-resolved steps
-                    if current_group < len(sampler_steps):
-                        sampling_total = sampler_steps[current_group]
-                    elif current_group - len(sampler_steps) < len(upscale_steps):
-                        sampling_total = upscale_steps[current_group - len(upscale_steps)]
                 elif msg_type == "progress":
                     cur = data.get("value", 0)
                     total = data.get("max", 1)
