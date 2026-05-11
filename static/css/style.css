@@ -1410,13 +1410,13 @@ select { cursor: pointer; }
 }
 .wf-mgr-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  padding: 2px 8px; min-height: 20px;
+  padding: 1px 6px; min-height: 18px;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg); color: var(--dim); font-size: 11px; cursor: pointer;
   transition: all .15s; font-family: inherit; white-space: nowrap;
   line-height: 1;
 }
-.wf-mgr-btn svg { display: block; flex-shrink: 0; vertical-align: middle; }
+.wf-mgr-btn svg { display: block; flex-shrink: 0; }
 .wf-mgr-btn:hover { border-color: var(--accent); color: var(--accent); }
 .wf-mgr-btn.danger { color: #ef4444; border-color: rgba(239,68,68,.3); }
 .wf-mgr-btn.danger:hover { border-color: var(--red); color: var(--red); background: rgba(239,68,68,.08); }

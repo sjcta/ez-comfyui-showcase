@@ -741,9 +741,10 @@ async function loadWfVersions(fname) {
           baseHtml = '<div class="wf-version-item active">' +
             '<span class="wf-version-name">基础版本</span>' +
             '<span class="wf-version-filename">' + escH(d.base.filename) + '</span>' +
-            '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(d.base.filename) + '\')">'+CW.icon('download')+' 下载</button>' +
-            '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>' +
-          '</div>';
+            '<div class="wf-version-actions">' +
+              '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>' +
+              '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(d.base.filename) + '\')">'+CW.icon('download')+' 下载</button>' +
+            '</div></div>';
         }
         list.innerHTML = baseHtml || '<span class="dim-tag">尚无版本</span>';
         if (hint) hint.textContent = '上传将保留当前版本';
