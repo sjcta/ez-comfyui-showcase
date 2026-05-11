@@ -1556,6 +1556,14 @@ def api_workflow_analyze(name: str):
     return analyze_workflow(path)
 
 
+
+@app.get("/api/workflows/{name}/download")
+def api_workflow_download(name: str):
+    path = _resolve_workflow(name)
+    if not path:
+        raise HTTPException(404)
+    return FileResponse(path, media_type="application/json", filename=name)
+
 @app.get("/api/workflows/{name}/config")
 def api_workflow_config_get(name: str):
     """Get saved workflow config. Returns 404 if not configured."""
@@ -2067,6 +2075,102 @@ async def ws_endpoint(ws: WebSocket):
 # ══════════════════════════════════════════════════════════════════════════
 #  Main
 # ══════════════════════════════════════════════════════════════════════════
+
+
+
+# ── Workflow Version Management ──────────────────────────────────────
+
+@app.get("/api/workflows/{name}/versions")
+def api_workflow_versions(name: str):
+    """List all versions of a workflow."""
+    meta = _load_wf_meta()
+    entry = meta.get(name, {})
+    versions = entry.get("versions", {})
+    upload_dir = _load_wf_dirs()[0]
+    base = name.replace(".json", "")
+    vdir = os.path.join(upload_dir, "__versions", base)
+    if os.path.isdir(vdir):
+        for vf in sorted(os.listdir(vdir)):
+            if vf.endswith(".json"):
+                vname = vf.replace(".json", "")
+                if vname not in versions:
+                    versions[vname] = os.path.join(vdir, vf)
+        if versions != entry.get("versions", {}):
+            entry["versions"] = versions
+            meta[name] = entry
+            _save_wf_meta(meta)
+    return {"versions": versions, "active_version": entry.get("active_version", ""),
+            "base": {"filename": name, "path": _resolve_workflow(name) or ""}}
+
+
+@app.post("/api/workflows/{name}/upload-version")
+async def api_upload_workflow_version(name: str, file: UploadFile = File(...)):
+    content = await file.read(MAX_WORKFLOW_SIZE + 1)
+    if len(content) > MAX_WORKFLOW_SIZE:
+        raise HTTPException(413, "File too large")
+    try:
+        json.loads(content)
+    except json.JSONDecodeError as e:
+        raise HTTPException(400, f"Invalid JSON: {e}")
+    meta = _load_wf_meta()
+    if name not in meta:
+        raise HTTPException(404, f"Workflow {name} not found")
+    entry = meta[name]
+    versions = entry.get("versions", {})
+    existing_vnums = []
+    for k in versions:
+        m = re.match(r'v(\d+)', k)
+        if m:
+            existing_vnums.append(int(m.group(1)))
+    next_v = max(existing_vnums, default=0) + 1
+    vname = f"v{next_v}"
+    upload_dir = _load_wf_dirs()[0]
+    base = name.replace(".json", "")
+    vdir = os.path.join(upload_dir, "__versions", base)
+    os.makedirs(vdir, exist_ok=True)
+    vpath = os.path.join(vdir, f"{vname}.json")
+    with open(vpath, "wb") as f:
+        f.write(content)
+    current_path = _resolve_workflow(name)
+    if current_path and not versions:
+        v1_path = os.path.join(vdir, "v1.json")
+        if not os.path.isfile(v1_path):
+            import shutil
+            shutil.copy2(current_path, v1_path)
+            versions["v1"] = v1_path
+    versions[vname] = vpath
+    entry["versions"] = versions
+    entry["active_version"] = vname
+    if current_path:
+        with open(current_path, "wb") as f:
+            f.write(content)
+    meta[name] = entry
+    _save_wf_meta(meta)
+    return {"ok": True, "version": vname, "versions": versions}
+
+
+@app.post("/api/workflows/{name}/activate-version")
+def api_activate_workflow_version(name: str, body: dict):
+    version = body.get("version", "")
+    if not version:
+        raise HTTPException(400, "version required")
+    meta = _load_wf_meta()
+    entry = meta.get(name, {})
+    versions = entry.get("versions", {})
+    if version not in versions:
+        raise HTTPException(404, f"Version {version} not found")
+    vpath = versions[version]
+    if not os.path.isfile(vpath):
+        raise HTTPException(404, f"Version file not found")
+    current_path = _resolve_workflow(name)
+    if current_path:
+        import shutil
+        shutil.copy2(vpath, current_path)
+    entry["active_version"] = version
+    meta[name] = entry
+    _save_wf_meta(meta)
+    return {"ok": True, "version": version}
+
 
 if __name__ == "__main__":
     load_history()
