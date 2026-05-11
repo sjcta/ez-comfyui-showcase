@@ -958,7 +958,7 @@ select { cursor: pointer; }
   gap: 5px; padding: 9px 18px; border: none; border-radius: var(--radius-sm);
   font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
-.btn svg { flex-shrink: 0; }
+.btn svg, button svg { display: block; flex-shrink: 0; }
 .btn-primary { background: var(--accent); color: #fff; flex: 1; }
 .btn-primary:hover { background: #79c0ff; }
 .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -1157,6 +1157,14 @@ select { cursor: pointer; }
 }
 
 /* ═══ Workflow Management Overlay ═══ */
+
+.tb-log-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg-alt); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 12px; border-radius: var(--radius-sm); font-size: 12px;
+  cursor: pointer; transition: all .15s; white-space: nowrap; font-family: inherit;
+}
+.tb-log-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 .tb-wf-mgr-btn {
   background: var(--bg-alt); border: 1px solid var(--border); color: var(--text);
