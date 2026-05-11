@@ -756,14 +756,16 @@ async function loadWfVersions(fname) {
         html += '<div class="wf-version-item' + (isBaseActive ? ' active' : '') + '">';
         html += '<span class="wf-version-name">基础版本</span>';
         html += '<span class="wf-version-filename">' + escH(d.base.filename) + '</span>';
+        html += '<div class="wf-version-actions">';
         if (isBaseActive) html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
         html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(d.base.filename) + '\')">'+CW.icon('download')+' 下载</button>';
-        html += '</div>';
+        html += '</div></div>';
       }
       for (var k of keys) {
         var isActive = k === active;
         html += '<div class="wf-version-item' + (isActive ? ' active' : '') + '">';
         html += '<span class="wf-version-name">' + escH(k) + '</span>';
+        html += '<div class="wf-version-actions">';
         if (isActive) {
           html += '<span class="wf-version-badge">'+CW.icon('check-circle')+' 当前</span>';
           html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+' 下载</button>';
@@ -771,9 +773,8 @@ async function loadWfVersions(fname) {
           html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
           html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+' 下载</button>';
         }
-        html += '</div>';
+        html += '</div></div>';
       }
-      list.innerHTML = html;
       if (hint) hint.textContent = keys.length + ' 个版本';
     } catch (e) {
       list.innerHTML = '<span class="wf-err-tag">加载失败</span>';
