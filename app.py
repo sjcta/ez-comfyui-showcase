@@ -831,6 +831,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     print(f"[DEBUG] total_units={total_units} non_sampler={non_sampler_cnt} sampler_steps={sampler_steps_total}")
     completed_units = 0.0
     last_prog = 0
+    sampler_cur = 0
+    sampler_total = 0
 
     def _overall_pct():
         return max(0, min(100, round(completed_units / total_units * 100))) if total_units > 0 else 0
@@ -839,7 +841,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         label = NODE_STATUS_MAP.get(current_node_cls, current_node_cls) if current_node_cls else ""
         pct = _overall_pct()
         print(f"[DEBUG] completed={completed_units}/{total_units} pct={pct}% label={label}")
-        msg = "准备中..." if not current_node_cls and completed_units == 0 else (label if label else f"{pct:.0f}%...")
+        msg = "准备中..." if not current_node_cls and completed_units == 0 else (f"{label} {sampler_cur}/{sampler_total}" if label and sampler_total > 0 else (label if label else f"{pct:.0f}%..."))
         jobs[job_id]["message"] = msg
         jobs[job_id]["progress"] = {"pct": pct}
         save_jobs()
@@ -894,11 +896,16 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         completed_units += 1.0
                     else:
                         last_prog = 0
+                        sampler_cur = 0
+                        sampler_total = 0
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
                 elif msg_type == "progress":
                     cur = data.get("value", 0)
+                    total = data.get("max", 1)
+                    sampler_cur = cur
+                    sampler_total = total
                     if cur > last_prog:
                         completed_units += cur - last_prog
                         last_prog = cur
