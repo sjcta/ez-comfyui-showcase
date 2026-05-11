@@ -465,8 +465,10 @@
     }
     jobs[job.id] = job;
     // ── Done: immediate image swap + background history refresh ──
-    if (job.status === 'done' && job.image && (!prev || prev.status !== 'done' || !prev.image)) {
-      window.CW._onJobDone(job);
+    if (job.status === 'done' && job.image) {
+      if (!prev || prev.status !== 'done' || !prev.image) {
+        window.CW._onJobDone(job);
+      }
       return;
     }
     // ── Error: remove from active + re-render ──
@@ -524,7 +526,8 @@
           jobs[id] = sj;
           onJobUpdate(sj);
           // onJobUpdate handles loadHistory for done/error itself
-          if (sj.status === 'done' || sj.status === 'error') alreadyRefreshed = true;
+          if (sj.status === 'done' && sj.image) { alreadyRefreshed = true; }
+          else if (sj.status === 'error') { alreadyRefreshed = true; }
           else needRerender = true;
         } else if (sj.status === 'generating' && sj.progress && prev.progress?.pct !== sj.progress.pct) {
           jobs[id] = sj;
