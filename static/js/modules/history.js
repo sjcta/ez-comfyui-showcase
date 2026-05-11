@@ -75,13 +75,13 @@ function _attachSentinel() {
     return `<div class="gi job-card ${escH(j.status)} ${jTypeCls}" data-job-id="${escA(j.id)}">
       <div class="gi-img ${hasImage ? '' : 'job-placeholder'}">
         ${imgHtml}
+        ${j.status === "error" ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ""}
         <button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${escA(j.id)}')" title="${j.status === 'generating' ? '取消' : '删除'}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
         ${wfLabel ? `<div class="gi-wf-badge">${escH(wfLabel)}${tagHtml}${instBadge}</div>` : ''}
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
         ${j.status === 'generating' ? `<div class="gi-progress-top"><div class="gi-progress-fill" style="width:${j.progress?.pct || 0}%"></div></div>` : ''}
         <div class="gi-prompt" title="${escA(j.prompt_preview || label)}">${escH(j.prompt_preview || label)}</div>
-        ${j.status === 'error' ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ''}
         ${j.status !== 'generating' ? `<div class="gi-meta">
           ${j.queued_at ? `<span>${CW.icon("clock")} ${j.queued_at}</span>` : ''}
           <div class="gi-meta-row">
