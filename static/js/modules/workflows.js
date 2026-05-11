@@ -12,6 +12,21 @@
   var _mgrSortBy = 'manual';
   var _mgrSortAsc = true;
   var _mgrDragIdx = -1;
+  // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
+  var _wfCardDownX = 0, _wfCardDownY = 0, _wfCardMoved = false;
+  window.CW._wfCardDown = function(e) {
+    _wfCardDownX = e.clientX;
+    _wfCardDownY = e.clientY;
+    _wfCardMoved = false;
+  };
+  window.CW._wfCheckMove = function(e) {
+    if (!_wfCardMoved && _wfCardDownX && _wfCardDownY) {
+      var dx = Math.abs(e.clientX - _wfCardDownX);
+      var dy = Math.abs(e.clientY - _wfCardDownY);
+      if (dx > 5 || dy > 5) _wfCardMoved = true;
+    }
+    return _wfCardMoved;
+  };
 
 async function confirmWfDel() {
     if (!A._wfDelFilename) return;
@@ -627,7 +642,7 @@ async function loadWorkflows() {
           const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
             `<span class="wf-tag ${_tagColor(t)}" style="font-size:8px;padding:0 3px;margin-left:2px">${escH(t)}</span>`
           ).join('');
-          return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onclick="CW.selectWF('${escA(w.name)}')">
+          return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onmousedown="CW._wfCardDown(event)" onclick="if(!CW._wfCheckMove(event))CW.selectWF('${escA(w.name)}')">
         <div class="wf-card-preview">${previewImg}</div>
         <div class="wf-card-body">
           <div class="wf-card-name" title="${escA(w.name)}">
