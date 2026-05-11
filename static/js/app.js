@@ -811,6 +811,7 @@ function init() {
 
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
+  if (!window.CW) window.CW = {};
   window.CW._logEntries = [];
   window.CW._onLog = function(entry) {
     window.CW._logEntries.push(entry);
@@ -848,7 +849,6 @@ function init() {
     var panel = document.getElementById('logPanel');
     if (panel) panel.style.display = 'none';
   };
-  if (!window.CW) window.CW = {};
   Object.assign(window.CW, {
     cancelJob,
     retryJob,

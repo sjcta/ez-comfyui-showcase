@@ -49,7 +49,7 @@ function downloadWf(fname, version) {
         ? API + '/api/workflows/' + encodeURIComponent(fname) + '/version-download?version=' + encodeURIComponent(version)
         : API + '/api/workflows/' + encodeURIComponent(fname) + '/download';
     window.open(url, '_blank');
-}  }
+}
 
 function openWfDel(fname) {
     A._wfDelFilename = fname;
