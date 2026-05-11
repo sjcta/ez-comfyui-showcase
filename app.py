@@ -807,7 +807,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
 
     # Every node = 1 unit. Progress = completed_nodes / total_nodes.
     all_node_ids = [nid for nid in node_types]
-    total_units = len(all_node_ids)  # each node contributes 1 unit
+    non_sampler_ids = [nid for nid, cls in node_types.items() if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES]
+    total_units = len(non_sampler_ids) + sum(SAMPLER_STEPS.values())
     # Index map: node_id -> unit index for interpolation
     node_index = {nid: i for i, nid in enumerate(all_node_ids)}
     # Pre-resolve sampler steps for within-node interpolation
@@ -831,6 +832,18 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
             else:
                 SAMPLER_STEPS[nid] = 8 if cls in SAMPLER_NODES else 1
 
+    # Unit positions: Jesons formula
+    # non-sampler nodes = 1 unit each, sampler nodes = steps units each
+    unit_positions = {}
+    unit_cursor = 0
+    for nid, cls in node_types.items():
+        unit_positions[nid] = unit_cursor
+        if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
+            unit_cursor += SAMPLER_STEPS.get(nid, 1)
+        else:
+            unit_cursor += 1
+
+
     # ── State ────────────────────────────────────────────────────────────
     completed_units = 0.0
     current_sampler_id = ""
@@ -847,13 +860,14 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     sampling_total = 0
 
     def _overall_pct():
-        """completed_nodes / total_nodes -> 0-100. Interpolates within sampler nodes."""
+        """Jesons formula: each non-sampler node=1, each sampler step=1. Interpolates within sampler."""
         base = completed_units
         if current_sampler_id and sampler_total > 0:
-            idx = node_index.get(current_sampler_id, 0)
+            pos = unit_positions.get(current_sampler_id, completed_units)
             intra = min(sampler_cur / sampler_total, 1.0)
-            base = idx + intra
+            base = pos + intra
         return max(0, min(100, round(base / total_units * 100))) if total_units > 0 else 0
+
 
 
     def _pct_from_units(units):
@@ -877,7 +891,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     try:
         async with websockets.connect(ws_url) as ws:
             phase_step = 'prepare'
-            completed_units = max(completed_units, UNITS_PREPARE)  # mark prepare started
+            # first executing event will advance completed_units  # mark prepare started
             update_job()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -926,7 +940,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     node_pos = node_index.get(nid, 0)
                     if completed_units < node_pos:
                         completed_units = node_pos
-                    completed_units += 1.0
+                    completed_units += 1.0 if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES else 0
                     # Track sampler/upscaler for within-node interpolation
                     if cls in SAMPLER_NODES or cls in UPSCALE_ACT_NODES:
                         current_sampler_id = nid
@@ -959,6 +973,10 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         cls = node_types.get(str(enode), "")
                         if cls:
                             current_node_cls = cls
+                        if current_sampler_id:
+                            steps = SAMPLER_STEPS.get(current_sampler_id, 1)
+                            completed_units = max(completed_units, unit_positions.get(current_sampler_id, 0) + steps)
+                            current_sampler_id = ""
                         sampling_cur = 0
                         sampling_total = 0
                         update_job()
