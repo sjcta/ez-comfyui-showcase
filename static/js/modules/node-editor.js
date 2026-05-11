@@ -198,7 +198,8 @@ function closeNodeEditor() {
   }
 function openNodeEditor(fname) {
     _nodeEditorFname = fname;
-    $('#nodeEditorTitle').textContent = '节点编辑: ' + fname.replace('.json', '');
+    var _neMeta = (A._wfMeta[fname] || {});
+    $('#nodeEditorTitle').textContent = '节点编辑: ' + (_neMeta.name || fname.replace('.json', ''));
     Promise.all([
       fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/analyze').then(function (r) {
         return r.json();

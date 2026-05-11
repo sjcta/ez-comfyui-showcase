@@ -49,7 +49,7 @@ async function fillFormFromHistory(idx) {
     // Switch to correct workflow first (so advanced fields exist in DOM)
     if (h.workflow && h.workflow.replace('.json', '') !== A.currentWF.replace('.json', '')) {
       // Auto-switch tab to match this workflow's category
-      const tag = window.CW.getWFType(h.workflow);
+      const tag = window.CW.wfTag(h.workflow, (A._wfMeta[h.workflow] || {}).tags);
       window.CW.switchTab(tag ? tag.text : '其他');
       await window.CW.selectWF(h.workflow);
     }
@@ -94,7 +94,7 @@ async function restoreJob(jobId) {
     if (!j) return;
     // Switch to correct workflow first
     if (j.workflow && (!A.currentWF || j.workflow.replace('.json','') !== A.currentWF.replace('.json',''))) {
-      const tag = window.CW.getWFType(j.workflow);
+      const tag = window.CW.wfTag(j.workflow, (A._wfMeta[j.workflow] || {}).tags);
       if (tag) window.CW.switchTab(tag.text);
       await window.CW.selectWF(j.workflow);
     }

@@ -89,7 +89,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       const wfMeta = A._wfMeta[j.workflow] || {};
       const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
       if (wfLabel) {
-        const wfTag = window.CW.getWFType(j.workflow || '');
+        const wfTag = window.CW.wfTag(j.workflow || '', wfMeta.tags);
         const tagHtml = wfTag
           ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>`
           : '';
@@ -124,7 +124,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     for (let i = 0; i < visibleItems.length; i++) {
       const h = visibleItems[i];
       const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-      const wfTag = window.CW.getWFType(h.workflow || '');
+      const wfTag = window.CW.wfTag(h.workflow || '', (A._wfMeta[h.workflow] || {}).tags);
       const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
 
       html += `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
@@ -211,7 +211,7 @@ function _appendNewHistoryCards() {
   }
 function _histCardHTML(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfTag = window.CW.getWFType(h.workflow || '');
+    const wfTag = window.CW.wfTag(h.workflow || '', (A._wfMeta[h.workflow] || {}).tags);
     const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
     return `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
@@ -285,7 +285,7 @@ function _populateFilterOptions() {
 function _filterHistory(arr) {
     return arr.filter(function(j) {
       if(_galleryFilters.type) {
-        var t = window.CW.getWFType(j.workflow || "");
+        var t = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow] || {}).tags);
         if(!t || t.text !== _galleryFilters.type) return false;
       }
       if(_galleryFilters.size) {

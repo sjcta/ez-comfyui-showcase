@@ -460,7 +460,7 @@ async function loadWorkflows() {
           const previewImg = previewSrc
             ? `<img src="${previewSrc}" loading="lazy" alt="">`
             : `<div class="wf-card-icon">⚙</div>`;
-          const typeTag = window.CW.getWFType(w.name);
+          const typeTag = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags);
           const catText = typeTag ? typeTag.text : '其他';
           const typeClass = typeTag ? `wf-card-type-${typeTag.cls.replace('wf-tag-', '')}` : '';
           return `<div class="wf-card ${typeClass}" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onclick="CW.selectWF('${escA(w.name)}')">
@@ -479,7 +479,7 @@ async function loadWorkflows() {
       const TAB_ORDER = ['文生图', '图生图', '文生视频', '图生视频', '其他'];
       const cats = new Set(
         wfs.map((w) => {
-          const t = window.CW.getWFType(w.name);
+          const t = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags);
           return t ? t.text : '其他';
         }),
       );
@@ -488,7 +488,7 @@ async function loadWorkflows() {
         let tabHtml = '';
         for (const t of TAB_ORDER) {
           if (cats.has(t)) {
-            const catWfs = wfs.filter(w => { const tag = window.CW.getWFType(w.name); return tag ? tag.text === t : t === '其他'; });
+            const catWfs = wfs.filter(w => { const tag = window.CW.wfTag(w.name, (A._wfMeta[w.name] || {}).tags); return tag ? tag.text === t : t === '其他'; });
             tabHtml += `<button class="wf-tab ${A._currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
           }
         }

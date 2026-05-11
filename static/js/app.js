@@ -71,6 +71,14 @@
     if (n.startsWith('t2i') || n.includes('-t2i') || n.includes('_t2i')) return { text: '文生图', cls: 'wf-tag-t2i' };
     return '';
   }
+  /** Prefer metadata tags[0] over filename-based guess, keep CSS class from filename. */
+  function wfTag(name, metaTags) {
+    const fallback = getWFType(name);
+    if (metaTags && metaTags.length > 0) {
+      return { text: metaTags[0], cls: fallback ? fallback.cls : 'wf-tag-info' };
+    }
+    return fallback;
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   //  WebSocket
@@ -448,8 +456,8 @@
     if (prev && prev.status !== job.status) {
       var wf = (job.workflow || '').replace('.json', '');
       var shortId = job.id.slice(-6);
-      var wfTag = getWFType(job.workflow);
-      var typeLabel = wfTag ? wfTag.text : '';
+      var jobTag = wfTag(job.workflow, (A._wfMeta && A._wfMeta[job.workflow] || {}).tags);
+      var typeLabel = jobTag ? jobTag.text : '';
       if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + '任务 排队中', 'queued');
       else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + '任务 出图开始', 'generating');
       else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + '任务 出图完成', 'done');
@@ -794,7 +802,7 @@ function init() {
     retryJob,
     rndSeed,
     wfUploadOverlay,
-    getWFType,
+    getWFType, wfTag,
     formatElapsed,
     shortSeed,
   });
