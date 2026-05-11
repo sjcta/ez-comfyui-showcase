@@ -804,18 +804,18 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     # ── Pre-analyze workflow: build work-unit chain ──────────────────────
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     ENCODE_NODES = {"CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "ConditioningZeroOut",
-                    "ConditioningSetTimestepRange"}
-    DECODE_NODES = {"VAEDecode", "VAEEncode"}
+                    "ConditioningSetTimestepRange", "VAEEncode"}
+    DECODE_NODES = {"VAEDecode"}
     SAVE_NODES = {"SaveImage", "SaveImageWebsocket"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
 
     # Build node chain in likely execution order
     sampler_ids = [nid for nid, cls in node_types.items() if cls in SAMPLER_NODES]
     upscaler_ids = [nid for nid, cls in node_types.items() if cls in UPSCALE_ACT_NODES]
+    all_tracked_nodes = SAMPLER_NODES | UPSCALE_ACT_NODES | DECODE_NODES | ENCODE_NODES | SAVE_NODES
 
     # Get steps for each sampler
     def _resolve_int(val, default):
-        # Resolve a value: direct int/float or linked list [node_id, output_index]
         if isinstance(val, (int, float)):
             return int(val)
         if isinstance(val, list) and len(val) >= 1:
@@ -837,19 +837,25 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
         inp = workflow.get(uid, {}).get("inputs", {})
         upscale_steps.append(_resolve_int(inp.get("steps", 1), 1))
 
+    # Unit system: each sampler/upscaler = (encode, steps, decode)
+    # All OTHER nodes count as 1 unit each (evenly distributed)
     UNITS_PREPARE = 1
     UNITS_SAVE = 1
-    UNITS_PER_GROUP = []  # [(encode=1, steps=N, decode=1), ...] for each sampler
+    UNITS_PER_GROUP = []
     for steps in sampler_steps:
         UNITS_PER_GROUP.append((1, steps, 1))
     for steps in upscale_steps:
         UNITS_PER_GROUP.append((1, steps, 1))
 
-    total_units = UNITS_PREPARE + sum(e + s + d for e, s, d in UNITS_PER_GROUP) + UNITS_SAVE
+    # Count non-tracked nodes (model loading, image load, etc.) as individual units
+    non_tracked_ids = [nid for nid, cls in node_types.items() if cls not in all_tracked_nodes]
+    UNITS_OTHER = len(non_tracked_ids)
 
-    # Cumulative unit boundaries: prepare=0..1, group0=1..1+N+2, ...
-    group_boundaries = []  # [(encode_start, steps_start, decode_start, next_start), ...]
-    cursor = UNITS_PREPARE
+    total_units = UNITS_PREPARE + UNITS_OTHER + sum(e + s + d for e, s, d in UNITS_PER_GROUP) + UNITS_SAVE
+
+    # Cumulative unit boundaries
+    group_boundaries = []
+    cursor = UNITS_PREPARE + UNITS_OTHER  # after prepare + all non-tracked nodes
     for enc, stp, dec in UNITS_PER_GROUP:
         group_boundaries.append((cursor, cursor + enc, cursor + enc + stp, cursor + enc + stp + dec))
         cursor += enc + stp + dec
@@ -991,7 +997,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         phase_step = 'encode'
                     else:
                         phase_step = 'prepare'
-                        completed_units += 0.5
+                        completed_units += 1
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
