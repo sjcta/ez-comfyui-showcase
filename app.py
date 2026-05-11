@@ -45,7 +45,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
     try:
         workflow_name = os.path.basename(workflow_path)
         jobs[job_id]["status"] = "dispatching"
-        jobs[job_id]["message"] = "匹配实例..."
+        jobs[job_id]["message"] = "排队等待..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
         # Phase 1: find the best instance
@@ -53,6 +53,8 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         sem = _instance_semas[inst["name"]]
         await _global_sem.acquire()
         global_held = True
+        jobs[job_id]["message"] = f"匹配实例 {inst['name']}..."
+        await broadcast({"type": "job_update", "job": jobs[job_id]})
 
         # Ensure instance is up (cold start if needed)
         if not await asyncio.to_thread(comfyui_up, inst["url"]):
