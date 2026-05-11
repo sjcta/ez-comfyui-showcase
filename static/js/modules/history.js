@@ -57,8 +57,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
 
     // ── Job cards ──
     for (const j of jobCards) {
-      const _jMeta = j.workflow ? (A._wfMeta[j.workflow] || {}) : {};
-      const label = j.prompt_preview || _jMeta.name || j.workflow?.replace('.json', '') || '...';
+      const label = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
       const statusMsg = j.message || j.status;
       const hasImage = !!j.image;
       const imgSrc = hasImage ? `${API}/api/images/${j.image}` : '';
@@ -90,17 +89,14 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       const wfMeta = A._wfMeta[j.workflow] || {};
       const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
       if (wfLabel) {
-        const wfTag = window.CW.getWFType(j.workflow || '', wfMeta.tags);
+        const wfTag = window.CW.getWFType(j.workflow || '');
         const tagHtml = wfTag
-          ? ` <span class="wf-tag ${wfTag.cls}">${wfTag.text}</span>`
+          ? ` <span class="wf-tag ${wfTag.cls}" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px">${wfTag.text}</span>`
           : '';
         const instBadge = j.instance
-          ? ` <span class="wf-tag wf-tag-inst">#${escH(j.instance)}</span>`
+          ? ` <span class="wf-tag" style="font-size:8px;padding:0 3px;vertical-align:middle;margin-left:4px;background:#2d1b69;color:#a78bfa">#${escH(j.instance)}</span>`
           : '';
-        // Info tags from metadata (skip first = main category)
-        const infoTags = (wfMeta.tags || []).slice(1);
-        const infoTagHtml = infoTags.map(t => `<span class="wf-tag wf-tag-info">${escH(t)}</span>`).join('');
-        html += `<div class="gi-wf-badge">${escH(wfLabel)}${tagHtml}${infoTagHtml}${instBadge}</div>`;
+        html += `<div class="gi-wf-badge">${escH(wfLabel)}${tagHtml}${instBadge}</div>`;
       }
 
       const phaseMsg = j.message || (j.status === 'generating' ? '出图中' : j.status === 'error' ? '失败' : '排队中');
@@ -128,12 +124,8 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     for (let i = 0; i < visibleItems.length; i++) {
       const h = visibleItems[i];
       const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-      const wfMeta2 = A._wfMeta[h.workflow] || {};
-      const wfTag = window.CW.getWFType(h.workflow || '', wfMeta2.tags);
-      const mainTagHtml = wfTag ? `<span class="wf-tag ${wfTag.cls}">${wfTag.text}</span>` : '';
-      const infoTags2 = (wfMeta2.tags || []).slice(1);
-      const infoTagHtml2 = infoTags2.map(t => `<span class="wf-tag wf-tag-info">${escH(t)}</span>`).join('');
-      const tagBadge = (mainTagHtml || infoTagHtml2) ? `<div class="gi-tags-row">${mainTagHtml}${infoTagHtml2}</div>` : '';
+      const wfTag = window.CW.getWFType(h.workflow || '');
+      const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
 
       html += `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
       <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
@@ -219,12 +211,8 @@ function _appendNewHistoryCards() {
   }
 function _histCardHTML(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfMeta3 = A._wfMeta[h.workflow] || {};
-    const wfTag = window.CW.getWFType(h.workflow || '', wfMeta3.tags);
-    const mainTagHtml3 = wfTag ? `<span class="wf-tag ${wfTag.cls}">${wfTag.text}</span>` : '';
-    const infoTags3 = (wfMeta3.tags || []).slice(1);
-    const infoTagHtml3 = infoTags3.map(t => `<span class="wf-tag wf-tag-info">${escH(t)}</span>`).join('');
-    const tagBadge = (mainTagHtml3 || infoTagHtml3) ? `<div class="gi-tags-row">${mainTagHtml3}${infoTagHtml3}</div>` : '';
+    const wfTag = window.CW.getWFType(h.workflow || '');
+    const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
     return `<div class="gi" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
       <img src="${imgSrc}" loading="lazy" alt="">
@@ -275,8 +263,7 @@ function _populateFilterOptions() {
       var arr2 = Array.from(wfs).sort();
       var h2 = '<option value="">全部工作流</option>';
       for(var m = 0; m < arr2.length; m++) {
-        var _wfM = (A._wfMeta[arr2[m]] || {}).name || arr2[m].replace('.json', '');
-        h2 += '<option value="' + arr2[m] + '">' + escH(_wfM) + '</option>';
+        h2 += '<option value="' + arr2[m] + '">' + arr2[m] + '</option>';
       }
       wfSel.innerHTML = h2;
       if(cur2 && wfs.has(cur2)) wfSel.value = cur2;
@@ -298,8 +285,7 @@ function _populateFilterOptions() {
 function _filterHistory(arr) {
     return arr.filter(function(j) {
       if(_galleryFilters.type) {
-        var _meta = A._wfMeta && A._wfMeta[j.workflow || ''];
-        var t = window.CW.getWFType(j.workflow || '', _meta && _meta.tags);
+        var t = window.CW.getWFType(j.workflow || "");
         if(!t || t.text !== _galleryFilters.type) return false;
       }
       if(_galleryFilters.size) {

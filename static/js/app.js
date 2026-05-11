@@ -62,19 +62,7 @@
     s = String(s);
     return s.length > 10 ? s.slice(0, 4) + '…' + s.slice(-4) : s;
   }
-  function tagCls(text) {
-    if (text === '图生图') return 'wf-tag-i2i';
-    if (text === '文生图') return 'wf-tag-t2i';
-    if (text === '文生视频') return 'wf-tag-t2v';
-    if (text === '图生视频') return 'wf-tag-i2v';
-    return 'wf-tag-info';
-  }
-  function getWFType(name, metaTags) {
-    // Priority 1: metadata tags[0] (后端解析 workflow JSON 得出的准确分类)
-    if (metaTags && metaTags.length > 0) {
-      return { text: metaTags[0], cls: tagCls(metaTags[0]) };
-    }
-    // Fallback: filename-based detection
+  function getWFType(name) {
     if (!name) return '';
     const n = name.toLowerCase();
     if (n.startsWith('i2v') || n.includes('-i2v') || n.includes('_i2v')) return { text: '图生视频', cls: 'wf-tag-i2v' };
@@ -460,7 +448,7 @@
     if (prev && prev.status !== job.status) {
       var wf = (job.workflow || '').replace('.json', '');
       var shortId = job.id.slice(-6);
-      var wfTag = getWFType(job.workflow, (A._wfMeta && A._wfMeta[job.workflow] || {}).tags);
+      var wfTag = getWFType(job.workflow);
       var typeLabel = wfTag ? wfTag.text : '';
       if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + '任务 排队中', 'queued');
       else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + '任务 出图开始', 'generating');
