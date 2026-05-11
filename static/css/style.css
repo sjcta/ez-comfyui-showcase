@@ -1753,7 +1753,7 @@ select { cursor: pointer; }
 .wf-edit-version-upload { display: flex; align-items: center; gap: 8px; }
 .wf-edit-version-hint { font-size: 10px; color: var(--dim); }
 .wf-edit-version-list { display: flex; flex-direction: column; gap: 3px; max-height: 120px; overflow-y: auto; }
-.wf-version-item { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border-radius: 4px; background: var(--bg); font-size: 12px; }
+.wf-version-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 8px; border-radius: 4px; background: var(--bg); font-size: 12px; }
 .wf-version-item.active { background: rgba(88,166,255,.12); }
 .wf-version-name { font-weight: 500; color: var(--text); }
 .wf-version-badge { font-size: 10px; color: var(--accent); }
