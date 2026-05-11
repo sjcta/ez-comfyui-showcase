@@ -991,6 +991,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         phase_step = 'encode'
                     else:
                         phase_step = 'prepare'
+                        completed_units += 0.5
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
