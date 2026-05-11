@@ -462,14 +462,14 @@ a { color: var(--accent); text-decoration: none; }
   cursor: pointer;
   transition: border-color .15s, box-shadow .15s;
   overflow: hidden;
+}
+
 .gi-type-t2i { border-color: var(--accent); }
 .gi-type-i2i { border-color: var(--purple); }
 .gi-type-t2v { border-color: #f0883e; }
 .gi-type-i2v { border-color: var(--yellow); }
 .gi-type-cat { border-color: #3fb950; }
 .gi-type-res { border-color: var(--dim); }
-
-}
 
 .gi:hover {
   border-color: var(--accent);
