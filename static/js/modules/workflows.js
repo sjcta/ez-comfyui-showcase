@@ -773,8 +773,13 @@ async function loadWfVersions(fname) {
           html += '<button class="wf-mgr-btn wf-version-activate" onclick="CW.activateWfVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')">激活</button>';
           html += '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\',\'' + escA(k) + '\')">'+CW.icon('download')+' 下载</button>';
         }
+        // Delete (v1 cannot be deleted)
+        if (k !== 'v1') {
+          html += '<button class="wf-mgr-btn danger" onclick="CW.delVersion(\'' + escA(fname) + '\',\'' + escA(k) + '\')" title="删除版本">'+CW.icon('trash-2')+' 删除</button>';
+        }
         html += '</div></div>';
       }
+      list.innerHTML = html;
       if (hint) hint.textContent = keys.length + ' 个版本';
     } catch (e) {
       list.innerHTML = '<span class="wf-err-tag">加载失败</span>';
@@ -795,10 +800,20 @@ async function loadWfVersions(fname) {
     } catch (e) { alert('激活失败: ' + e.message); }
   }
 
+  async function delVersion(fname, version) {
+    if (!confirm('确定删除版本 ' + version + ' 吗？')) return;
+    try {
+      var r = await fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/versions/' + encodeURIComponent(version), { method: 'DELETE' });
+      if (!r.ok) { var d = await r.json(); throw new Error(d.detail || '删除失败'); }
+      if (window.CW && window.CW.loadWfVersions) CW.loadWfVersions(fname);
+    } catch(e) { alert('删除失败: ' + e.message); }
+  }
+
   if (!window.CW) window.CW = {};
   window.CW.selectWF = selectWF;
   window.CW.loadWfVersions = loadWfVersions;
   window.CW.activateWfVersion = activateWfVersion;
+window.CW.delVersion = delVersion;
   window.CW.clearWF = clearWF;
   window.CW.delWF = delWF;
   window.CW.uploadWF = uploadWF;
