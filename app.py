@@ -371,6 +371,16 @@ def _get_instance_queue_size(base_url: str) -> int:
         return 999  # unreachable → lowest priority
 
 
+async def _update_job_msg(job_id, msg):
+    """Update job message and broadcast. Safe to call from any context."""
+    if job_id and job_id in jobs:
+        jobs[job_id]["message"] = msg
+        try:
+            asyncio.ensure_future(broadcast({"type": "job_update", "job": jobs[job_id]}))
+        except Exception:
+            pass
+
+
 async def pick_best_instance(workflow_name: str = "") -> dict:
     """Pick the best ComfyUI instance using workflow affinity + queue depth.
 
@@ -795,7 +805,7 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     ENCODE_NODES = {"CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "ConditioningZeroOut",
                     "ConditioningSetTimestepRange"}
-    DECODE_NODES = {"VAEDecode", "VAEEncode"}
+    DECODE_NODES = {"VAEDecode"}
     SAVE_NODES = {"SaveImage", "SaveImageWebsocket"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
 

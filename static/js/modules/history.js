@@ -98,7 +98,9 @@ function _attachSentinel() {
     const card = document.querySelector(`[data-job-id="${job.id}"]`);
     if (!card) return;
     // CSS class
-    card.className = `gi job-card ${job.status}`;
+    var _tag2 = window.CW.wfTag(job.workflow || '', (A._wfMeta[job.workflow] || {}).tags);
+    var _typeCls = _tag2 ? 'gi-type-' + _tag2.cls.replace('wf-tag-', '') : '';
+    card.className = `gi job-card ${job.status}` + (_typeCls ? ' ' + _typeCls : '');
     // Status text — update in image area
     const st = card.querySelector('.job-status-text');
     if (st) {
