@@ -36,7 +36,7 @@
       var statusText = sshOk ? '在线' : '离线';
       var connLabel = { local: '本地', 'remote-ssh': 'SSH', 'remote-http': 'HTTP' }[n.connection] || n.connection;
       var connColor = { local: 'conn-local', 'remote-ssh': 'conn-ssh', 'remote-http': 'conn-http' }[n.connection] || '';
-      html += '<div class="device-card">';
+      html += '<div class="device-card" data-nid="' + escA(n.id) + '">';
       // Header
       html += '<div class="device-card-header">';
       html += '<span class="device-card-title">🖥 ' + escH(n.name) + '</span>';
@@ -64,7 +64,7 @@
           var dotColor = { running: 'dot-green', idle: 'dot-yellow', dead: 'dot-red', offline: 'dot-gray' }[inst.status] || 'dot-gray';
           var statusLabel = { running: '运行中', idle: '空闲', dead: '已死', offline: '已停止' }[inst.status] || inst.status;
           var instUrl = (n.access && n.access.url || 'http://' + n.host + ':{port}').replace('{port}', inst.port);
-          html += '<div class="device-instance-row">';
+          html += '<div class="device-instance-row" data-iid="' + escA(inst.id) + '">';
           html += '<span class="dih-col dih-name"><span class="node-status-dot ' + dotColor + '"></span>' + escH(inst.name || inst.id) + '</span>';
           html += '<span class="dih-col dih-port">' + inst.port + '</span>';
           html += '<span class="dih-col dih-status">' + escH(statusLabel) + '</span>';
@@ -338,8 +338,70 @@
       var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/instances/' + encodeURIComponent(iid) + '/' + action, { method: 'POST' });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || action + '失败');
-      setTimeout(loadNodes, 3000); // wait for state change
+      updateInstanceRow(nid, iid);
     } catch (e) { alert(action + '失败: ' + e.message); }
+  }
+
+  // ─── 局部更新实例行（避免全屏闪烁）───
+  async function updateInstanceRow(nid, iid) {
+    try {
+      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid));
+      var d = await r.json();
+      if (!d.ok) throw new Error(d.error || '获取节点失败');
+      var nodeData = d.data;
+      var inst = null;
+      if (nodeData.instances) {
+        for (var _i = 0; _i < nodeData.instances.length; _i++) {
+          if (nodeData.instances[_i].id === iid) { inst = nodeData.instances[_i]; break; }
+        }
+      }
+      if (!inst) { loadNodes(); return; }
+      // Locate the device card by data-nid
+      var card = document.querySelector('.device-card[data-nid="' + escA(nid) + '"]');
+      if (!card) { loadNodes(); return; }
+      // Locate the instance row by data-iid
+      var row = card.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
+      if (!row) { loadNodes(); return; }
+      // Update status dot
+      var dotColors = { running: 'dot-green', idle: 'dot-yellow', dead: 'dot-red', offline: 'dot-gray' };
+      var statusLabels = { running: '运行中', idle: '空闲', dead: '已死', offline: '已停止' };
+      var dot = row.querySelector('.node-status-dot');
+      if (dot) {
+        dot.className = 'node-status-dot ' + (dotColors[inst.status] || 'dot-gray');
+      }
+      // Update status text (the dih-status span)
+      var statusCell = row.querySelector('.dih-status');
+      if (statusCell) {
+        statusCell.textContent = statusLabels[inst.status] || inst.status;
+      }
+      // Update queue display
+      var queueCell = row.querySelector('.dih-queue');
+      if (queueCell) {
+        queueCell.textContent = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
+      }
+      // Update action buttons: rebuild only the dih-actions span
+      var actionsCell = row.querySelector('.dih-actions');
+      if (actionsCell) {
+        var instUrl = (nodeData.access && nodeData.access.url || 'http://' + nodeData.host + ':{port}').replace('{port}', inst.port);
+        var html = '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">🔗 打开</a>';
+        if (inst.status === 'running' || inst.status === 'idle') {
+          html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
+        } else {
+          html += '<button class="wf-mgr-btn" onclick="CW.startInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">▶ 启动</button>';
+        }
+        actionsCell.innerHTML = html;
+      }
+      // Also update the device online/offline status in the header
+      // (the node-level status may have changed too)
+      var statusTag = card.querySelector('.device-status-tag');
+      if (statusTag) {
+        var sshOk = nodeData.ssh_ok || nodeData.http_up;
+        statusTag.innerHTML = (sshOk ? '🟢' : '🔴') + ' ' + (sshOk ? '在线' : '离线');
+      }
+    } catch (e) {
+      // Fall back to full refresh on error
+      loadNodes();
+    }
   }
 
   function startInstance(nid, iid) { return _instAction(nid, iid, 'start'); }
@@ -427,6 +489,7 @@
     startInstance: startInstance,
     stopInstance: stopInstance,
     restartInstance: restartInstance,
+    updateInstanceRow: updateInstanceRow,
     openDeviceMgr: openDeviceMgr,
     closeDeviceMgr: closeDeviceMgr,
     showSshInfo: showSshInfo,
