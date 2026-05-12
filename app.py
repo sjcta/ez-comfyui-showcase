@@ -40,6 +40,12 @@ def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = "
 
 NODES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "nodes.json")
 
+# ── Runtime connection state ──
+_connected_nodes: dict[str, bool] = {}  # node_id -> connected (default True if missing)
+
+def _is_node_connected(nid: str) -> bool:
+    return _connected_nodes.get(nid, True)
+
 # ── Node & Instance Loading ──
 _nodes_cache: list[dict] = []
 _nodes_cache_ts: float = 0
@@ -81,6 +87,8 @@ def _get_enabled_instances() -> list[dict]:
     instances = []
     for node in _load_nodes():
         if not node.get("enabled", True):
+            continue
+        if not _is_node_connected(node["id"]):
             continue
         for inst in node.get("instances", []):
             if not inst.get("enabled", True):
@@ -712,6 +720,17 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
+
+@app.post("/api/nodes/{nid}/connect")
+def _api_node_connect(nid: str):
+    _connected_nodes[nid] = True
+    return {"ok": True}
+
+@app.post("/api/nodes/{nid}/disconnect")
+def _api_node_disconnect(nid: str):
+    _connected_nodes[nid] = False
+    return {"ok": True}
+
 @app.get("/api/logs")
 def api_logs(limit: int = 200):
     return list(_log_buffer[-limit:])
@@ -2694,6 +2713,7 @@ def api_nodes_list():
             "sort_order": node.get("sort_order", 0),
             "http_up": http_up,
             "ssh_ok": ssh_ok,
+            "connected": _is_node_connected(node["id"]),
             "instances": inst_statuses,
             "stats": {
                 "total": len(inst_statuses),

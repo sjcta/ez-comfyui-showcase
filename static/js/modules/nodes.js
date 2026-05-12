@@ -38,10 +38,14 @@
       var connColor = { local: 'conn-local', 'remote-ssh': 'conn-ssh', 'remote-http': 'conn-http' }[n.connection] || '';
       html += '<div class="device-card" data-nid="' + escA(n.id) + '">';
       // Header
+      var connected = (n.connected !== false);
+      statusIcon = connected ? (sshOk ? '🟢' : '🟡') : '⚪';
+      statusText = connected ? (sshOk ? '在线' : '待机') : '已断开';
       html += '<div class="device-card-header">';
       html += '<span class="device-card-title">🖥 ' + escH(n.name) + '</span>';
       html += '<span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span>';
       html += '<span class="device-status-tag">' + statusIcon + ' ' + statusText + '</span>';
+      html += '<button class="wf-mgr-btn" onclick="CW.toggleDeviceConnection(\'' + n.id + '\',' + connected + ')">' + (connected ? '断开' : '连接') + '</button>';
       html += '</div>';
       // Address + SSH info
       html += '<div class="device-card-meta">';
@@ -420,6 +424,14 @@
     if (overlay) overlay.classList.remove('open');
   }
 
+  async function toggleDeviceConnection(nid, wasConnected) {
+    var action = wasConnected ? 'disconnect' : 'connect';
+    try {
+      await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/' + action, { method: 'POST' });
+      loadNodes();
+    } catch (e) { alert('操作失败: ' + e.message); }
+  }
+
   function showSshInfo(nid) {
     var cont = $('#deviceListContainer');
     if (!cont) return;
@@ -493,6 +505,7 @@
     openDeviceMgr: openDeviceMgr,
     closeDeviceMgr: closeDeviceMgr,
     showSshInfo: showSshInfo,
+    toggleDeviceConnection: toggleDeviceConnection,
     showNodeTab: showNodeTab,
     showWfTab: showWfTab,
     onDevConnChange: onDevConnChange,
