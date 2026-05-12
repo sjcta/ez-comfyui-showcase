@@ -360,7 +360,7 @@
       for (var retry = 0; retry < 12 && !done; retry++) {
         await new Promise(function(resolve) { setTimeout(resolve, 5000); });
         try {
-          var sr = await fetch(API + '/api/nodes');
+          console.log("retry check", retry); var sr = await fetch(API + ./api.nodes.);
           var sd = await sr.json();
           if (sd.ok && sd.data) {
             var foundNode = null;
@@ -395,10 +395,16 @@
   // ─── 局部更新实例行（避免全屏闪烁）───
   async function updateInstanceRow(nid, iid) {
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid));
+      // 使用列表接口获取实时状态（详情接口不返回 status/http_up）
+      var r = await fetch(API + '/api/nodes');
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '获取节点失败');
-      var nodeData = d.data;
+      var foundNode = null;
+      for (var ni = 0; ni < (d.data || []).length; ni++) {
+        if (d.data[ni].id === nid) { foundNode = d.data[ni]; break; }
+      }
+      if (!foundNode) { loadNodes(); return; }
+      var nodeData = foundNode;
       var inst = null;
       if (nodeData.instances) {
         for (var _i = 0; _i < nodeData.instances.length; _i++) {
