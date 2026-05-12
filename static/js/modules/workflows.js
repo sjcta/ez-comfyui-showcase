@@ -10,7 +10,6 @@
   // ── Manager toolbar state ──
   var _mgrFilter = '';  // '' = all
   var _mgrSortBy = 'manual';
-  var _mgrSortAsc = true;
   var _mgrDragIdx = -1;
   // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
   var _wfCardDownX = 0, _wfCardDownY = 0, _wfCardMoved = false;
@@ -205,30 +204,11 @@ function _tagCls(t) {
   }
 
   function _mgrSortEntries(entries) {
-    if (_mgrSortBy === 'manual') {
-      entries.sort(function(a, b) {
-        var oa = (a[1].sort_order != null) ? a[1].sort_order : 9999;
-        var ob = (b[1].sort_order != null) ? b[1].sort_order : 9999;
-        if (oa !== ob) return oa - ob;
-        return a[0].localeCompare(b[0]);
-      });
-      return entries;
-    }
-    var dir = _mgrSortAsc ? 1 : -1;
     entries.sort(function(a, b) {
-      if (_mgrSortBy === 'name') {
-        var na = (a[1].name || a[0]).toLowerCase();
-        var nb = (b[1].name || b[0]).toLowerCase();
-        return na.localeCompare(nb, 'zh') * dir;
-      }
-      if (_mgrSortBy === 'tag') {
-        var ta = _getPrimaryTag(a[0], a[1]);
-        var tb = _getPrimaryTag(b[0], b[1]);
-        var cmp = ta.localeCompare(tb, 'zh');
-        if (cmp !== 0) return cmp * dir;
-        return a[0].localeCompare(b[0]);
-      }
-      return a[0].localeCompare(b[0]) * dir;
+      var oa = (a[1].sort_order != null) ? a[1].sort_order : 9999;
+      var ob = (b[1].sort_order != null) ? b[1].sort_order : 9999;
+      if (oa !== ob) return oa - ob;
+      return a[0].localeCompare(b[0]);
     });
     return entries;
   }
@@ -277,12 +257,7 @@ function _tagCls(t) {
     renderWfGrid();
   }
 
-  function toggleMgrSortDir() {
-    _mgrSortAsc = !_mgrSortAsc;
-    var btn = $('#wfMgrSortDir');
-    if (btn) btn.textContent = _mgrSortAsc ? '↓' : '↑';
-    renderWfGrid();
-  }
+  function toggleMgrSortDir() {}
 
   function renderWfGrid() {
     const grid = $('#wfOverlayGrid');
@@ -957,6 +932,6 @@ window.CW.delVersion = delVersion;
   window.CW.loadWorkflows = loadWorkflows;
   window.CW.loadWfMeta = loadWfMeta;
   window.CW.mgrFilterTag = mgrFilterTag;
-  window.CW.toggleMgrSortDir = toggleMgrSortDir;
   window.CW.renderMgrFilterTabs = renderMgrFilterTabs;
+  window.CW.getMgrSortBy = function() { return 'manual'; };
 })();

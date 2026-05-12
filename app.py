@@ -112,32 +112,35 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
     """Start/stop/restart ComfyUI instance. action = 'start'/'stop'/'restart'."""
     svc = instance.get("service", f"comfyui-{instance['name'].lower()}")
     conn = node.get("connection", "local")
-    if conn == "local":
-        try:
-            subprocess.run(["systemctl", "--user", action, svc],
+    node_name = node.get("name", node.get("host", "?"))
+    inst_name = instance.get("name", svc)
+    ok = False
+    try:
+        if conn == "local":
+            r = subprocess.run(["systemctl", "--user", action, svc],
                 capture_output=True, timeout=30,
                 env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
                      "XDG_RUNTIME_DIR": "/run/user/1000"})
-            return True
-        except Exception:
-            return False
-    elif conn == "remote-ssh":
-        ssh = node.get("ssh_config", {})
-        cmd = []
-        if ssh.get("auth") == "password" and ssh.get("password"):
-            cmd = ["sshpass", "-p", ssh["password"], "ssh",
-                   f"{ssh.get('user', 'root')}@{node['host']}"]
-        else:
-            cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
-        cmd += ["-p", str(ssh.get("port", 22)),
-                "systemctl", "--user", action, svc]
-        try:
-            subprocess.run(cmd, capture_output=True, timeout=30)
-            return True
-        except Exception:
-            return False
-    # remote-http: cannot control via systemctl
-    return False
+            ok = r.returncode == 0
+        elif conn == "remote-ssh":
+            ssh = node.get("ssh_config", {})
+            cmd = []
+            if ssh.get("auth") == "password" and ssh.get("password"):
+                cmd = ["sshpass", "-p", ssh["password"], "ssh",
+                       f"{ssh.get('user', 'root')}@{node['host']}"]
+            else:
+                cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
+            cmd += ["-p", str(ssh.get("port", 22)),
+                    "systemctl", "--user", action, svc]
+            r = subprocess.run(cmd, capture_output=True, timeout=30)
+            ok = r.returncode == 0
+    except Exception:
+        ok = False
+    if ok:
+        add_log("info", "instance", f"[{node_name}] {inst_name} {action}ed", details=action)
+    else:
+        add_log("warn", "instance", f"[{node_name}] {inst_name} {action} FAILED", details=action)
+    return ok
 
 
 # ── 任务队列：per-instance semaphores for parallel routing ──
@@ -330,8 +333,8 @@ async def _idle_instance_watcher():
             if now - last > IDLE_TIMEOUT:
                 node = _get_node_by_id(inst.get("_node_id", ""))
                 if node:
+                    add_log("warn", "idle", f"Stopping idle {name} ({now - last:.0f}s idle)")
                     _run_instance_action(node, inst, "stop")
-                    print(f"[idle-watcher] Stopped idle instance {name} (idle {now - last:.0f}s)")
 
 
 async def _dead_instance_watcher():
@@ -348,12 +351,11 @@ async def _dead_instance_watcher():
             # Check systemd status via SSH or local
             active = _check_service_active(node, inst)
             if active and not comfyui_up(inst["url"]):
-                print(f"[dead-watcher] Instance {name} active but unresponsive. Restarting...")
+                add_log("warn", "dead", f"Instance {name} unresponsive, restarting...")
                 _run_instance_action(node, inst, "restart")
-                add_log("warn", "dead", f"Instance {name} restarted")
                 for _ in range(90):
                     if comfyui_up(inst["url"]):
-                        print(f"[dead-watcher] Instance {name} recovered")
+                        add_log("info", "dead", f"Instance {name} recovered")
                         break
                     await asyncio.sleep(2)
 
@@ -959,9 +961,13 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
     prompt_id = ""
 
     node_types = {}
+    node_titles = {}
     for nid, v in workflow.items():
         if isinstance(v, dict) and "class_type" in v:
             node_types[str(nid)] = v["class_type"]
+            title = v.get("_meta", {}).get("title", "")
+            if title:
+                node_titles[str(nid)] = title
 
     SAMPLER_NODES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
     UPSCALE_ACT_NODES = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}
@@ -1045,10 +1051,13 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         completed_units = total_units
                         update_job()
                         await broadcast({"type": "job_update", "job": jobs[job_id]})
+                        add_log("info", "complete", f"Workflow finished", job_id)
                         return True, prompt_id
                     nid = str(node_id)
                     cls = node_types.get(nid, "")
                     current_node_cls = cls
+                    title = node_titles.get(nid, cls or nid)
+                    add_log("info", "node", f"[{cls}] {title}", job_id)
                     if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES and cls != "VAEDecode":
                         completed_units += 1.0
                     else:
@@ -1056,6 +1065,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         completed_units += 1.0
                         sampler_cur = 0
                         sampler_total = 0
+                        if cls in SAMPLER_NODES:
+                            add_log("info", "sampler", f"[{cls}] Starting sampling", job_id)
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -1067,6 +1078,8 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                     if cur > last_prog:
                         completed_units += cur - last_prog
                         last_prog = cur
+                        if total > 0 and (cur == 1 or cur == total or cur % max(1, total // 4) == 0):
+                            add_log("info", "step", f"Sampling {cur}/{total}", job_id)
                     prog_node = data.get("node")
                     if prog_node is not None:
                         cls = node_types.get(str(prog_node), "")
@@ -1083,14 +1096,17 @@ async def comfyui_ws_track(job_id: str, workflow: dict, client_id: str, timeout:
                         cls = node_types.get(str(enode), "")
                         if cls:
                             current_node_cls = cls
+                            add_log("info", "done", f"[{cls}] Completed", job_id)
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 
                 elif msg_type == "execution_error":
                     err = data.get("exception_message", str(data)[:300])
+                    add_log("error", "error", f"ComfyUI execution error: {err[:100]}", job_id)
                     raise RuntimeError(f"ComfyUI: {err}")
 
                 elif msg_type == "execution_start":
+                    add_log("info", "start", "Workflow execution started", job_id)
                     update_job()
                     await broadcast({"type": "job_update", "job": jobs[job_id]})
 

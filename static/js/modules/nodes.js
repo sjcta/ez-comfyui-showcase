@@ -2,7 +2,10 @@
 // 用于管理 ComfyUI 运行节点（本地/SSH/HTTP）
 
 (function () {
-  var API = window._API || '';
+  'use strict';
+  var A = window.__APP__ || {};
+  var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
+  var API = A.API;
 
   // ─── 加载节点列表 ───
   async function loadNodes() {
@@ -36,7 +39,7 @@
       html += '<span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span>';
       html += '<div class="node-card-actions">';
       html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">测试</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.openNodeEditor(\'' + n.id + '\')">编辑</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.openServerNode(\'' + n.id + '\')">编辑</button>';
       html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">删除</button>';
       html += '</div></div>';
       html += '<div class="node-card-addr">' + escH(n.host) + (n.instances && n.instances.length ? ' · ' + n.instances.length + ' 个实例' : '') + '</div>';
@@ -75,7 +78,7 @@
   }
 
   // ─── 节点编辑器 ───
-  function openNodeEditor(nid) {
+  function openServerNode(nid) {
     var modal = $('#nodeEditorModal');
     var title = $('#nodeEditorTitle');
     var form = $('#nodeEditorForm');
@@ -266,6 +269,12 @@
   function restartInstance(nid, iid) { return _instAction(nid, iid, 'restart'); }
 
   // ─── Tab切换 ───
+  function openNodeTab() {
+    var overlay = $('#wfOverlay');
+    if (overlay) overlay.classList.add('open');
+    showNodeTab();
+  }
+
   function showNodeTab() {
     var nodePane = $('#nodePane');
     var wfPane = $('#wfOverlay');
@@ -273,8 +282,10 @@
     if (wfPane) wfPane.style.display = 'none';
     var tabs = $$('.wf-overlay-header .tab-btn');
     for (var t of tabs) t.classList.remove('active');
-    var btn = $('#nodeTabBtn');
+    var btn = $('#nodeOverlayTabBtn');
     if (btn) btn.classList.add('active');
+    var tbBtn = $('#nodeTabBtn');
+    if (tbBtn) tbBtn.classList.add('active');
     loadNodes();
   }
 
@@ -287,11 +298,12 @@
     for (var t of tabs) t.classList.remove('active');
     var btn = $('#wfTabBtn');
     if (btn) btn.classList.add('active');
-    loadWfMeta();
-    loadWfDirs();
+    if (window.CW && CW.loadWfMeta) CW.loadWfMeta();
+    if (window.CW && CW.loadWfDirs) CW.loadWfDirs();
     var sel = $('#wfMgrSortBy');
-    if (sel) sel.value = _mgrSortBy;
-    if (sel) sel.onchange = function() { _mgrSortBy = this.value; renderWfGrid(); };
+    var sortBy = (window.CW && CW.getMgrSortBy) ? CW.getMgrSortBy() : 'manual';
+    if (sel) sel.value = sortBy;
+    if (sel) sel.onchange = function() { if (window.CW && CW.setMgrSortBy) CW.setMgrSortBy(this.value); if (window.CW && CW.renderWfGrid) CW.renderWfGrid(); };
     if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
   }
 
@@ -299,7 +311,7 @@
   if (!window.CW) window.CW = {};
   var exports = {
     loadNodes: loadNodes,
-    openNodeEditor: openNodeEditor,
+    openServerNode: openServerNode,
     saveNode: saveNode,
     closeNodeEditor: closeNodeEditor,
     testNode: testNode,
@@ -310,6 +322,7 @@
     startInstance: startInstance,
     stopInstance: stopInstance,
     restartInstance: restartInstance,
+    openNodeTab: openNodeTab,
     showNodeTab: showNodeTab,
     showWfTab: showWfTab,
     onNodeConnChange: onNodeConnChange,

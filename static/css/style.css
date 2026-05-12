@@ -990,7 +990,8 @@ select { cursor: pointer; }
 .conn-local { background: #374151; color: #d1d5db; }
 .conn-ssh { background: rgba(59,130,246,.15); color: #60a5fa; }
 .conn-http { background: rgba(234,179,8,.15); color: #eab308; }
-.ne-field { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.ne-field { margin-bottom: 6px; font-size: 12px; }
+#nodeEditModal .ne-field { display: flex; align-items: center; gap: 8px; }
 .ne-field label { width: 80px; flex-shrink: 0; color: var(--dim); text-align: right; }
 .ne-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
 .scan-result-row { padding: 4px 0; font-size: 12px; }
@@ -1574,7 +1575,7 @@ select { cursor: pointer; }
 .ne-zone.drag-over{border-color:#5b8def;background:rgba(91,141,239,.08)}
 .ne-zone-title{font-size:13px;font-weight:600;padding:10px 12px 6px;color:#eee;border-bottom:1px solid #333;position:sticky;top:0;background:inherit;z-index:1}
 .ne-zone-cards{padding:8px;display:flex;flex-direction:column;gap:6px;min-height:100px;min-width:0}
-.ne-field{background:#222244;border-radius:6px;padding:8px 10px;cursor:grab;user-select:none;border:1px solid #333;transition:opacity .2s;overflow:hidden}
+.ne-field{display:block;background:#222244;border-radius:6px;padding:8px 10px;cursor:grab;user-select:none;border:1px solid #333;transition:opacity .2s;overflow:hidden}
 .ne-field:active{cursor:grabbing}
 .ne-field[draggable="true"]:hover{border-color:#5b8def}
 .ne-field.hidden-field{opacity:.5}
