@@ -205,6 +205,22 @@
       } else if (ports.length === 1) {
         data.scan_ports = { range: ports[0] + '-' + (ports[0] + 10), extra: [] };
       }
+      // Create instances from preset ports (only when adding new device)
+      if (!data.instances || !data.instances.length) {
+        data.instances = [];
+        var names = ['A','B','C','D','E','F','G','H'];
+        for (var pi = 0; pi < ports.length && pi < names.length; pi++) {
+          data.instances.push({
+            id: 'inst-' + names[pi].toLowerCase(),
+            name: names[pi],
+            port: ports[pi],
+            service: 'comfyui-' + names[pi].toLowerCase(),
+            enabled: true,
+            max_concurrent: 1,
+            sort_order: pi + 1
+          });
+        }
+      }
     }
     delete data.preset_ports;
     if (data.connection === 'remote-ssh') {
