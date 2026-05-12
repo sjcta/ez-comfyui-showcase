@@ -31,7 +31,6 @@
     }
     var html = '';
     for (var n of nodes) {
-      if (!n.enabled) continue;
       var sshOk = n.ssh_ok || n.http_up;
       var statusIcon = sshOk ? '🟢' : '🔴';
       var statusText = sshOk ? '在线' : '离线';
