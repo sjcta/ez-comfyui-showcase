@@ -356,9 +356,9 @@
       }
 
       // 延迟后轮询真实状态（不覆盖乐观状态，仅检测后台变化）
-      for (var retry = 0; retry < 5; retry++) {
-        await new Promise(function(resolve) { setTimeout(resolve, retry < 2 ? 10000 : 3000); });
-        // 静默查询 API，不 updateInstanceRow 以免覆盖乐观状态
+      var done = false;
+      for (var retry = 0; retry < 8 && !done; retry++) {
+        await new Promise(function(resolve) { setTimeout(resolve, retry < 2 ? 8000 : 4000); });
         try {
           var sr = await fetch(API + '/api/nodes/' + encodeURIComponent(nid));
           var sd = await sr.json();
@@ -367,15 +367,22 @@
             for (var si = 0; si < sd.data.instances.length; si++) {
               if (sd.data.instances[si].id === iid) { found = sd.data.instances[si]; break; }
             }
-            if (found && (found.status === 'idle' || found.status === 'running')) {
-              await updateInstanceRow(nid, iid);
-              break;
+            if (found) {
+              if (found.status === 'idle' || found.status === 'running') {
+                // 实例已正常启动，更新 DOM
+                await updateInstanceRow(nid, iid);
+                done = true;
+              } else if (found.status === 'dead') {
+                // 启动失败，更新 DOM 显示错误
+                await updateInstanceRow(nid, iid);
+                done = true;
+              }
+              // 其他状态（offline）继续等待
             }
           }
         } catch (_) {}
       }
-      // 最后一次尝试刷新（可能超时但最终状态变化了）
-      await updateInstanceRow(nid, iid);
+      // 如果轮询完仍未完成，保持乐观状态不变（不覆盖为灰色）
     } catch (e) { alert(action + '失败: ' + e.message); }
   }
 
