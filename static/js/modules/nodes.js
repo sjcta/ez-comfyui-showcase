@@ -65,8 +65,8 @@
         html += '</div>';
         for (var inst of n.instances) {
           if (!inst.enabled && inst.enabled !== undefined) continue;
-          var dotColor = { running: 'dot-green', idle: 'dot-yellow', dead: 'dot-red', offline: 'dot-gray' }[inst.status] || 'dot-gray';
-          var statusLabel = { running: '运行中', idle: '空闲', dead: '已死', offline: '已停止' }[inst.status] || inst.status;
+          var dotColor = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' }[inst.status] || 'dot-gray';
+          var statusLabel = { running: '忙碌', idle: '待机', dead: '死机', offline: '没启动' }[inst.status] || inst.status;
           var instUrl = (n.access && n.access.url || 'http://' + n.host + ':{port}').replace('{port}', inst.port);
           html += '<div class="device-instance-row" data-iid="' + escA(inst.id) + '">';
           html += '<span class="dih-col dih-name"><span class="node-status-dot ' + dotColor + '"></span>' + escH(inst.name || inst.id) + '</span>';
@@ -346,8 +346,9 @@
       // 乐观更新 DOM
       var row = document.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
       if (row) {
-        row.querySelector('.node-status-dot').className = 'node-status-dot dot-yellow';
-        row.querySelector('.dih-status').textContent = action === 'start' ? '启动中...' : '停止中...';
+        var isStart = action === 'start';
+        row.querySelector('.node-status-dot').className = 'node-status-dot' + (isStart ? ' dot-green dot-blink' : ' dot-red dot-blink');
+        row.querySelector('.dih-status').textContent = isStart ? '启动中' : '停止中';
         var actionBtns = row.querySelector('.dih-actions');
         if (actionBtns) actionBtns.innerHTML = '<span class="dim-tag">处理中...</span>';
       }
@@ -387,8 +388,8 @@
       var row = card.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
       if (!row) { loadNodes(); return; }
       // Update status dot
-      var dotColors = { running: 'dot-green', idle: 'dot-yellow', dead: 'dot-red', offline: 'dot-gray' };
-      var statusLabels = { running: '运行中', idle: '空闲', dead: '已死', offline: '已停止' };
+      var dotColors = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' };
+      var statusLabels = { running: '忙碌', idle: '待机', dead: '死机', offline: '没启动' };
       var dot = row.querySelector('.node-status-dot');
       if (dot) {
         dot.className = 'node-status-dot ' + (dotColors[inst.status] || 'dot-gray');
