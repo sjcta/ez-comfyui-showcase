@@ -397,8 +397,8 @@
               if (found.status === 'idle' || found.status === 'running') {
                 await updateInstanceRow(nid, iid);
                 done = true;
-              } else if (found.status === 'dead' && action === 'stop') {
-                // 停止时 dead 是预期结果
+              } else if (action === 'stop' && (found.status === 'dead' || found.status === 'offline')) {
+                // 停止时 dead 或 offline 都是预期结果
                 await updateInstanceRow(nid, iid);
                 done = true;
               }
