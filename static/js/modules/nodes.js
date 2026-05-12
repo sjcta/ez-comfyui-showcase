@@ -353,17 +353,27 @@
         if (actionBtns) actionBtns.innerHTML = '<span class="dim-tag">处理中...</span>';
       }
 
-      // 延迟后轮询真实状态（最多重试 3 次）
-      for (var retry = 0; retry < 3; retry++) {
-        await new Promise(function(resolve) { setTimeout(resolve, retry === 0 ? 10000 : 5000); });
-        await updateInstanceRow(nid, iid);
-        // 检查是否已从 dead 变为正常
-        var checkRow = document.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
-        if (checkRow) {
-          var statusText = checkRow.querySelector('.dih-status');
-          if (statusText && statusText.textContent !== '已死' && statusText.textContent !== '已停止') break;
-        }
+      // 延迟后轮询真实状态（不覆盖乐观状态，仅检测后台变化）
+      for (var retry = 0; retry < 5; retry++) {
+        await new Promise(function(resolve) { setTimeout(resolve, retry < 2 ? 10000 : 3000); });
+        // 静默查询 API，不 updateInstanceRow 以免覆盖乐观状态
+        try {
+          var sr = await fetch(API + '/api/nodes/' + encodeURIComponent(nid));
+          var sd = await sr.json();
+          if (sd.ok && sd.data && sd.data.instances) {
+            var found = null;
+            for (var si = 0; si < sd.data.instances.length; si++) {
+              if (sd.data.instances[si].id === iid) { found = sd.data.instances[si]; break; }
+            }
+            if (found && (found.status === 'idle' || found.status === 'running')) {
+              await updateInstanceRow(nid, iid);
+              break;
+            }
+          }
+        } catch (_) {}
       }
+      // 最后一次尝试刷新（可能超时但最终状态变化了）
+      await updateInstanceRow(nid, iid);
     } catch (e) { alert(action + '失败: ' + e.message); }
   }
 
