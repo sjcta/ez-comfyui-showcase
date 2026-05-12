@@ -2264,6 +2264,7 @@ def api_nodes_list():
             "host": node["host"],
             "connection": node.get("connection", "local"),
             "enabled": node.get("enabled", True),
+            "access": node.get("access"),
             "labels": node.get("labels", []),
             "sort_order": node.get("sort_order", 0),
             "http_up": http_up,

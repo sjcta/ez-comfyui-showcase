@@ -68,7 +68,8 @@
           html += '<span class="dih-col dih-name"><span class="node-status-dot ' + dotColor + '"></span>' + escH(inst.name || inst.id) + '</span>';
           html += '<span class="dih-col dih-port">' + inst.port + '</span>';
           html += '<span class="dih-col dih-status">' + escH(statusLabel) + '</span>';
-          html += '<span class="dih-col dih-queue">' + (inst.queue || 0) + '</span>';
+          var qVal = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
+          html += '<span class="dih-col dih-queue">' + qVal + '</span>';
           html += '<span class="dih-col dih-actions">';
           html += '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">🔗 打开</a>';
           if (inst.status === 'running' || inst.status === 'idle') {
