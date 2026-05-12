@@ -117,36 +117,49 @@ def _get_instance_by_id(iid: str) -> Optional[dict]:
     return None, None
 
 def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
-    """Start/stop/restart ComfyUI instance. action = 'start'/'stop'/'restart'."""
+    """Start/stop/restart/force-restart ComfyUI instance."""
     svc = instance.get("service", f"comfyui-{instance['name'].lower()}")
     conn = node.get("connection", "local")
     node_name = node.get("name", node.get("host", "?"))
     inst_name = instance.get("name", svc)
     ok = False
-    try:
-        if conn == "local":
-            r = subprocess.run(["systemctl", "--user", action, svc],
-                capture_output=True, timeout=30,
-                env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                     "XDG_RUNTIME_DIR": "/run/user/1000"})
-            ok = r.returncode == 0
-        elif conn == "remote-ssh":
-            ssh = node.get("ssh_config", {})
-            cmd = []
-            if ssh.get("auth") == "password" and ssh.get("password"):
-                cmd = ["sshpass", "-p", ssh["password"], "ssh",
-                       f"{ssh.get('user', 'root')}@{node['host']}"]
-            else:
-                cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
-            cmd += ["-p", str(ssh.get("port", 22)),
-                    "systemctl", "--user", action, svc]
-            r = subprocess.run(cmd, capture_output=True, timeout=30)
-            ok = r.returncode == 0
-    except Exception:
-        ok = False
+
+    # Build systemctl commands
+    def _run_cmd(cmd_list: list[str]) -> bool:
+        try:
+            if conn == "local":
+                r = subprocess.run(cmd_list, capture_output=True, timeout=30,
+                    env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                         "XDG_RUNTIME_DIR": "/run/user/1000"})
+                return r.returncode == 0
+            elif conn == "remote-ssh":
+                ssh = node.get("ssh_config", {})
+                prefix = []
+                if ssh.get("auth") == "password" and ssh.get("password"):
+                    prefix = ["sshpass", "-p", ssh["password"], "ssh",
+                              f"{ssh.get('user', 'root')}@{node['host']}",
+                              "-p", str(ssh.get("port", 22))]
+                else:
+                    prefix = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}",
+                              "-p", str(ssh.get("port", 22))]
+                r = subprocess.run(prefix + cmd_list, capture_output=True, timeout=30)
+                return r.returncode == 0
+        except Exception:
+            return False
+
+    if action == "force-restart":
+        # Kill -9 then start fresh
+        add_log("warn", "instance", f"[{node_name}] {inst_name} force-restarting (kill + start)")
+        _run_cmd(["systemctl", "--user", "kill", "-s", "KILL", svc])
+        import time as _time
+        _time.sleep(2)
+        ok = _run_cmd(["systemctl", "--user", "start", svc])
+    else:
+        ok = _run_cmd(["systemctl", "--user", action, svc])
+
     if ok:
         add_log("info", "instance", f"[{node_name}] {inst_name} {action}ed", details=action)
-        if action in ("start", "restart"):
+        if action in ("start", "restart", "force-restart"):
             _instance_start_grace[inst_name] = time.time()
     else:
         add_log("warn", "instance", f"[{node_name}] {inst_name} {action} FAILED", details=action)
@@ -2884,6 +2897,20 @@ def api_node_instance_restart(nid: str, iid: str):
     if _run_instance_action(node, inst, "restart"):
         return {"ok": True}
     raise HTTPException(500, "Failed to restart instance")
+
+@app.post("/api/nodes/{nid}/instances/{iid}/force-restart")
+def api_node_instance_force_restart(nid: str, iid: str):
+    node = _get_node_by_id(nid)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
+    if not inst:
+        raise HTTPException(404, "Instance not found")
+    if node.get("connection") == "remote-http":
+        raise HTTPException(400, "Cannot force-restart instance via remote-http")
+    if _run_instance_action(node, inst, "force-restart"):
+        return {"ok": True}
+    raise HTTPException(500, "Failed to force-restart instance")
 
 
 @app.post("/api/nodes/{nid}/discover")

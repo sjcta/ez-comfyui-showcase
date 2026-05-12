@@ -81,7 +81,7 @@
           if (inst.status === 'running' || inst.status === 'idle') {
             html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
           } else {
-            html += '<button class="wf-mgr-btn btn-start" onclick="CW.startInstance(\'' + n.id + '\',\'' + inst.id + '\')">▶ 启动</button>';
+            html += '<button class="wf-mgr-btn btn-start" onclick="CW.' + (inst.status === 'dead' ? 'forceRestartInstance' : 'startInstance') + '(\'' + n.id + '\',\'' + inst.id + '\')">' + (inst.status === 'dead' ? '🔄 强制重启' : '▶ 启动') + '</button>';
           }
           html += '</span></div>';
         }
@@ -440,7 +440,7 @@
         if (inst.status === 'running' || inst.status === 'idle') {
           html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
         } else {
-          html += '<button class="wf-mgr-btn btn-start" onclick="CW.startInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">▶ 启动</button>';
+          html += '<button class="wf-mgr-btn btn-start" onclick="CW.' + (inst.status === 'dead' ? 'forceRestartInstance' : 'startInstance') + '(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">' + (inst.status === 'dead' ? '🔄 强制重启' : '▶ 启动') + '</button>';
         }
         actionsCell.innerHTML = html;
       }
@@ -454,6 +454,7 @@
   function startInstance(nid, iid) { return _instAction(nid, iid, 'start'); }
   function stopInstance(nid, iid) { return _instAction(nid, iid, 'stop'); }
   function restartInstance(nid, iid) { return _instAction(nid, iid, 'restart'); }
+  function forceRestartInstance(nid, iid) { return _instAction(nid, iid, 'force-restart'); }
 
   // ─── Tab切换 ───
   function openDeviceMgr() {
@@ -562,6 +563,7 @@
     startInstance: startInstance,
     stopInstance: stopInstance,
     restartInstance: restartInstance,
+    forceRestartInstance: forceRestartInstance,
     updateInstanceRow: updateInstanceRow,
     openDeviceMgr: openDeviceMgr,
     closeDeviceMgr: closeDeviceMgr,
