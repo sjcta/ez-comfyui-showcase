@@ -109,6 +109,17 @@
         })
         .catch(function (e) { alert('加载设备失败: ' + e.message); });
     }
+    // Auto-fill access_url when host changes
+    if (!nid) {
+      var hostEl = form.elements['host'];
+      var urlEl = form.elements['access_url'];
+      if (hostEl && urlEl) {
+        hostEl.oninput = function() {
+          var h = hostEl.value.trim();
+          urlEl.value = h ? 'http://' + h + ':{port}' : 'http://{host}:{port}';
+        };
+      }
+    }
     onDevConnChange();
     modal.classList.add('open');
   }
@@ -120,7 +131,7 @@
     setFormVal(f, 'host', data.host || '');
     setFormVal(f, 'connection', data.connection || 'remote-ssh');
     setFormVal(f, 'labels', (data.labels || []).join(','));
-    setFormVal(f, 'access_url', (data.access && data.access.url) || 'http://{host}:{port}');
+    setFormVal(f, 'access_url', (data.access && data.access.url) || ('http://' + (data.host || '{host}') + ':{port}'));
     var ssh = data.ssh_config || {};
     setFormVal(f, 'ssh_user', ssh.user || 'root');
     setFormVal(f, 'ssh_port', ssh.port || 22);
@@ -206,14 +217,14 @@
       if (data.ssh_auth === 'password') data.ssh_config.password = data.ssh_password || '';
       else data.ssh_config.key_path = data.ssh_key_path || '';
     }
-    data.access = { url: data.access_url || 'http://{host}:{port}', type: 'direct' };
+    data.access = { url: data.access_url || ('http://' + (data.host || '{host}') + ':{port}'), type: 'direct' };
     for (var k of ['ssh_user','ssh_port','ssh_auth','ssh_password','ssh_key_path','access_url']) delete data[k];
     if (!data.labels || !data.labels.length) delete data.labels;
     if (!data.instances) data.instances = [];
     if (!data.sort_order) data.sort_order = 99;
     try {
       var url = API + '/api/nodes' + (nid ? '/' + encodeURIComponent(nid) : '');
-      r = await fetch(url, { method: nid ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      var r = await fetch(url, { method: nid ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '保存失败');
       modal.classList.remove('open');
