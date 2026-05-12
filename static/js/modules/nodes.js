@@ -140,6 +140,7 @@
     setFormVal(f, 'ssh_key_path', ssh.key_path || '');
     var scanRange = data.scan_ports && data.scan_ports.range;
     setFormVal(f, 'preset_ports', scanRange || '8190,8189');
+    setFormVal(f, 'preset_wf_dirs', (data.workflow_dirs || []).join(','));
     var instList = $('#deviceEditInstances');
     var instSection = $('#devInstSection');
     if (instSection && data.instances && data.instances.length) {
@@ -233,8 +234,13 @@
       if (data.ssh_auth === 'password') data.ssh_config.password = data.ssh_password || '';
       else data.ssh_config.key_path = data.ssh_key_path || '';
     }
+    // Parse workflow_dirs from comma-separated field
+    if (data.preset_wf_dirs) {
+      data.workflow_dirs = data.preset_wf_dirs.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+      if (data.workflow_dirs.length === 0) delete data.workflow_dirs;
+    }
     data.access = { url: data.access_url || ('http://' + (data.host || '{host}') + ':{port}'), type: 'direct' };
-    for (var k of ['ssh_user','ssh_port','ssh_auth','ssh_password','ssh_key_path','access_url']) delete data[k];
+    for (var k of ['ssh_user','ssh_port','ssh_auth','ssh_password','ssh_key_path','access_url','preset_wf_dirs']) delete data[k];
     if (!data.labels || !data.labels.length) delete data.labels;
     if (!data.instances) data.instances = [];
     if (!data.sort_order) data.sort_order = 99;

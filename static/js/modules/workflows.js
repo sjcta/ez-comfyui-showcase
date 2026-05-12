@@ -928,10 +928,56 @@ window.CW.delVersion = delVersion;
   // Expose as window.WF_MGR too
   window.WF_MGR = WF_MGR;
 
+  // ── Remote Workflow Sync ──
+  var _syncing = false;
+
+  async function syncRemoteWorkflows() {
+    if (_syncing) return;
+    _syncing = true;
+    var btn = $('#wfSyncBtn');
+    var label = $('#wfSyncLabel');
+    if (btn) { btn.disabled = true; btn.textContent = '同步中...'; }
+    if (label) { label.textContent = '同步远程工作流中...'; label.className = ''; }
+    try {
+      var r = await fetch(API + '/api/workflows/sync', { method: 'POST' });
+      var d = await r.json();
+      if (d.ok && d.data) {
+        var data = d.data;
+        var msg = '';
+        if (data.synced > 0) msg += '✅ 同步了 ' + data.synced + ' 个工作流';
+        else msg += '✅ 已是最新';
+        if (data.errors > 0) msg += ' ⚠️ ' + data.errors + ' 个错误';
+        msg += '（共扫描 ' + data.total + ' 个）';
+        if (label) { label.textContent = msg; label.className = 'wf-sync-ok'; }
+        if (data.synced > 0) {
+          // Refresh workflow lists
+          loadWorkflows();
+          loadWfMeta();
+        }
+      } else {
+        if (label) { label.textContent = '❌ 同步失败: ' + (d.detail || JSON.stringify(d)); label.className = 'wf-sync-err'; }
+      }
+    } catch (e) {
+      if (label) { label.textContent = '❌ 同步出错: ' + e.message; label.className = 'wf-sync-err'; }
+    } finally {
+      _syncing = false;
+      if (btn) { btn.disabled = false; btn.textContent = '⟳ 同步'; }
+      // Auto-clear status after 10 seconds
+      setTimeout(function() {
+        var lbl = $('#wfSyncLabel');
+        if (lbl && lbl.className !== 'wf-sync-err') {
+          lbl.textContent = '点击同步从远程设备拉取工作流';
+          lbl.className = 'dim-tag';
+        }
+      }, 10000);
+    }
+  }
+
   window.CW.switchTab = switchTab;
   window.CW.loadWorkflows = loadWorkflows;
   window.CW.loadWfMeta = loadWfMeta;
   window.CW.mgrFilterTag = mgrFilterTag;
   window.CW.renderMgrFilterTabs = renderMgrFilterTabs;
   window.CW.getMgrSortBy = function() { return 'manual'; };
+  window.CW.syncRemoteWorkflows = syncRemoteWorkflows;
 })();
