@@ -7,7 +7,7 @@
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ez ComfyUI Showcase</title>
-<link rel="stylesheet" href="static/css/style.css?v=1778500923">
+<link rel="stylesheet" href="static/css/style.css?v=1778600001">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
 <script src="static/js/app.js?v=1778500923"></script>
 <script src="static/js/modules/icons.js"></script>
@@ -225,22 +225,13 @@
       <div class="wf-sync-section" id="wfSyncSection">
         <div class="wf-sync-header">
           <span class="wf-sync-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg> 远程同步</span>
+          <select id="wfSyncDevice" class="wf-sync-select">
+            <option value="">选择设备...</option>
+          </select>
           <button class="wf-sync-btn" id="wfSyncBtn" onclick="CW.syncRemoteWorkflows()" title="同步远程工作流">⟳ 同步</button>
         </div>
         <div class="wf-sync-status" id="wfSyncStatus">
-          <span class="dim-tag" id="wfSyncLabel">点击同步从远程设备拉取工作流</span>
-        </div>
-      </div>
-      <div class="wf-dirs-section" id="wfDirsSection">
-        <div class="wf-dirs-header">
-          <span class="wf-dirs-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-folder"/></svg> 工作流目录</span>
-          <button class="wf-dirs-add-btn" onclick="CW.showAddDir()" title="添加目录">＋ 新增目录</button>
-        </div>
-        <div class="wf-dirs-list" id="wfDirsList"></div>
-        <div class="wf-dirs-add" id="wfDirsAdd" style="display:none">
-          <input type="text" id="wfDirInput" placeholder="/path/to/workflows" class="wf-dir-input">
-          <button class="wf-dir-add-confirm" onclick="CW.addWfDir()">添加</button>
-          <button class="wf-dir-add-cancel" onclick="CW.hideAddDir()">取消</button>
+          <span class="dim-tag" id="wfSyncLabel">选择设备后点击同步拉取工作流</span>
         </div>
       </div>
     </div>

@@ -419,7 +419,27 @@ function closeWfMgr() {
 function openWfMgr() {
     $('#wfOverlay').classList.add('open');
     if (window.CW && CW.showWfTab) CW.showWfTab();
-    else { loadWfMeta(); loadWfDirs(); }
+    else { loadWfMeta(); }
+    // Populate device select for sync
+    _populateSyncDevice();
+  }
+
+  async function _populateSyncDevice() {
+    var sel = $('#wfSyncDevice');
+    if (!sel) return;
+    try {
+      var r = await fetch(API + '/api/nodes');
+      var d = await r.json();
+      if (!d.ok) return;
+      sel.innerHTML = '<option value="">选择设备...</option>';
+      for (var n of d.data) {
+        if (n.connection === 'local') continue;
+        var opt = document.createElement('option');
+        opt.value = n.id;
+        opt.textContent = n.name + ' (' + n.connection + ')';
+        sel.appendChild(opt);
+      }
+    } catch (e) { /* ignore */ }
   }
 
 async function delWF(name) {
@@ -933,13 +953,19 @@ window.CW.delVersion = delVersion;
 
   async function syncRemoteWorkflows() {
     if (_syncing) return;
+    var sel = $('#wfSyncDevice');
+    var deviceId = sel ? sel.value : '';
+    if (!deviceId) {
+      if (label) { label.textContent = '⚠️ 请先选择要同步的设备'; label.className = 'wf-sync-err'; }
+      return;
+    }
     _syncing = true;
     var btn = $('#wfSyncBtn');
     var label = $('#wfSyncLabel');
     if (btn) { btn.disabled = true; btn.textContent = '同步中...'; }
     if (label) { label.textContent = '同步远程工作流中...'; label.className = ''; }
     try {
-      var r = await fetch(API + '/api/workflows/sync', { method: 'POST' });
+      var r = await fetch(API + '/api/workflows/sync?device=' + encodeURIComponent(deviceId), { method: 'POST' });
       var d = await r.json();
       if (d.ok && d.data) {
         var data = d.data;
