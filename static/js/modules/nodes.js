@@ -7,6 +7,48 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API;
 
+  // ─── 模块级常量 ───
+  var STATUS_LABELS = { running: '忙碌中', idle: '待机中', dead: '宕机', offline: '未启动' };
+  var DOT_COLORS = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' };
+  var QUEUE_VAL = function(inst) { return (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0); };
+
+  // ─── 共享工具函数 ───
+  async function _fetchNodeStatus(nid) {
+    var r = await fetch(API + '/api/nodes');
+    var d = await r.json();
+    if (!d.ok) return null;
+    for (var ni = 0; ni < (d.data || []).length; ni++) {
+      if (d.data[ni].id === nid) return d.data[ni];
+    }
+    return null;
+  }
+
+  function _buildInstanceActions(inst, nid, iid, instUrl) {
+    var html = '';
+    if (inst.status !== 'offline' && inst.http_up) {
+      html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank">' + CW.icon('send') + ' 打开</a>';
+    }
+    if (inst.status === 'running' || inst.status === 'idle') {
+      html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
+    } else {
+      var isDead = inst.status === 'dead';
+      var fnName = isDead ? 'forceRestartInstance' : 'startInstance';
+      var btnText = isDead ? '🔄 强制重启' : '▶ 启动';
+      html += '<button class="wf-mgr-btn btn-start" onclick="CW.' + fnName + '(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">' + btnText + '</button>';
+    }
+    return html;
+  }
+
+  function _buildInstanceRow(inst, nid, instUrl) {
+    var qVal = QUEUE_VAL(inst);
+    return '<div class="device-instance-row" data-iid="' + escA(inst.id) + '">'
+      + '<span class="dih-col dih-name"><span class="node-status-dot ' + DOT_COLORS[inst.status] + '"></span>' + escH(inst.name || inst.id) + '</span>'
+      + '<span class="dih-col dih-port">' + inst.port + '</span>'
+      + '<span class="dih-col dih-status">' + STATUS_LABELS[inst.status] + '</span>'
+      + '<span class="dih-col dih-queue">' + qVal + '</span>'
+      + '<span class="dih-col dih-actions">' + _buildInstanceActions(inst, nid, inst.id, instUrl) + '</span></div>';
+  }
+
   // ─── 加载节点列表 ───
   async function loadNodes() {
     var cont = $('#deviceListContainer');
@@ -65,25 +107,8 @@
         html += '</div>';
         for (var inst of n.instances) {
           if (!inst.enabled && inst.enabled !== undefined) continue;
-          var dotColor = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' }[inst.status] || 'dot-gray';
-          var statusLabel = { running: '忙碌中', idle: '待机中', dead: '宕机', offline: '未启动' }[inst.status] || inst.status;
           var instUrl = (n.access && n.access.url || 'http://' + n.host + ':{port}').replace('{port}', inst.port);
-          html += '<div class="device-instance-row" data-iid="' + escA(inst.id) + '">';
-          html += '<span class="dih-col dih-name"><span class="node-status-dot ' + dotColor + '"></span>' + escH(inst.name || inst.id) + '</span>';
-          html += '<span class="dih-col dih-port">' + inst.port + '</span>';
-          html += '<span class="dih-col dih-status">' + escH(statusLabel) + '</span>';
-          var qVal = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
-          html += '<span class="dih-col dih-queue">' + qVal + '</span>';
-          html += '<span class="dih-col dih-actions">';
-          if (inst.status !== 'offline' && inst.http_up) {
-            html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
-          }
-          if (inst.status === 'running' || inst.status === 'idle') {
-            html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
-          } else {
-            html += '<button class="wf-mgr-btn btn-start" onclick="CW.' + (inst.status === 'dead' ? 'forceRestartInstance' : 'startInstance') + '(\'' + n.id + '\',\'' + inst.id + '\')">' + (inst.status === 'dead' ? '🔄 强制重启' : '▶ 启动') + '</button>';
-          }
-          html += '</span></div>';
+          html += _buildInstanceRow(inst, n.id, instUrl);
         }
       }
       // Footer actions
@@ -360,30 +385,19 @@
       for (var retry = 0; retry < 12 && !done; retry++) {
         await new Promise(function(resolve) { setTimeout(resolve, 5000); });
         try {
-          console.log("retry check", retry); var sr = await fetch(API + ./api.nodes.);
-          var sd = await sr.json();
-          if (sd.ok && sd.data) {
-            var foundNode = null;
-            for (var ni = 0; ni < sd.data.length; ni++) {
-              if (sd.data[ni].id === nid) { foundNode = sd.data[ni]; break; }
-            }
+          var foundNode = await _fetchNodeStatus(nid);
+          if (foundNode) {
             var found = null;
-            if (foundNode && foundNode.instances) {
+            if (foundNode.instances) {
               for (var si = 0; si < foundNode.instances.length; si++) {
                 if (foundNode.instances[si].id === iid) { found = foundNode.instances[si]; break; }
               }
             }
             if (found) {
-              if (found.status === 'idle' || found.status === 'running') {
-                // 实例已正常启动，更新 DOM
-                await updateInstanceRow(nid, iid);
-                done = true;
-              } else if (found.status === 'dead') {
-                // 启动失败，更新 DOM 显示错误
+              if (found.status === 'idle' || found.status === 'running' || found.status === 'dead') {
                 await updateInstanceRow(nid, iid);
                 done = true;
               }
-              // 其他状态（offline）继续等待
             }
           }
         } catch (_) {}
@@ -395,16 +409,8 @@
   // ─── 局部更新实例行（避免全屏闪烁）───
   async function updateInstanceRow(nid, iid) {
     try {
-      // 使用列表接口获取实时状态（详情接口不返回 status/http_up）
-      var r = await fetch(API + '/api/nodes');
-      var d = await r.json();
-      if (!d.ok) throw new Error(d.error || '获取节点失败');
-      var foundNode = null;
-      for (var ni = 0; ni < (d.data || []).length; ni++) {
-        if (d.data[ni].id === nid) { foundNode = d.data[ni]; break; }
-      }
-      if (!foundNode) { loadNodes(); return; }
-      var nodeData = foundNode;
+      var nodeData = await _fetchNodeStatus(nid);
+      if (!nodeData) { loadNodes(); return; }
       var inst = null;
       if (nodeData.instances) {
         for (var _i = 0; _i < nodeData.instances.length; _i++) {
@@ -419,38 +425,26 @@
       var row = card.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
       if (!row) { loadNodes(); return; }
       // Update status dot
-      var dotColors = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' };
-      var statusLabels = { running: '忙碌中', idle: '待机中', dead: '宕机', offline: '未启动' };
       var dot = row.querySelector('.node-status-dot');
       if (dot) {
-        dot.className = 'node-status-dot ' + (dotColors[inst.status] || 'dot-gray');
+        dot.className = 'node-status-dot ' + (DOT_COLORS[inst.status] || 'dot-gray');
       }
       // Update status text (the dih-status span)
       var statusCell = row.querySelector('.dih-status');
       if (statusCell) {
-        statusCell.textContent = statusLabels[inst.status] || inst.status;
+        statusCell.textContent = STATUS_LABELS[inst.status] || inst.status;
       }
       // Update queue display
       var queueCell = row.querySelector('.dih-queue');
       if (queueCell) {
-        queueCell.textContent = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
+        queueCell.textContent = QUEUE_VAL(inst);
       }
       // Update action buttons: rebuild only the dih-actions span
       var actionsCell = row.querySelector('.dih-actions');
       if (actionsCell) {
         var instUrl = (nodeData.access && nodeData.access.url || 'http://' + nodeData.host + ':{port}').replace('{port}', inst.port);
-        var html = '';
-        if (inst.status !== 'offline' && inst.http_up) {
-          html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
-        }
-        if (inst.status === 'running' || inst.status === 'idle') {
-          html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
-        } else {
-          html += '<button class="wf-mgr-btn btn-start" onclick="CW.' + (inst.status === 'dead' ? 'forceRestartInstance' : 'startInstance') + '(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">' + (inst.status === 'dead' ? '🔄 强制重启' : '▶ 启动') + '</button>';
-        }
-        actionsCell.innerHTML = html;
+        actionsCell.innerHTML = _buildInstanceActions(inst, nid, iid, instUrl);
       }
-
     } catch (e) {
       // Fall back to full refresh on error
       loadNodes();
