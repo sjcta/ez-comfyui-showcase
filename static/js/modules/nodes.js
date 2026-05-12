@@ -34,7 +34,7 @@
       var sshOk = n.ssh_ok || n.http_up;
       var statusIcon = sshOk ? '🟢' : '🔴';
       var statusText = sshOk ? '在线' : '离线';
-      var connLabel = { local: '本地', 'remote-ssh': 'SSH', 'remote-http': 'HTTP' }[n.connection] || n.connection;
+      var connLabel = { local: '本机', 'remote-ssh': '本地网络', 'remote-http': '远端' }[n.connection] || n.connection;
       var connColor = { local: 'conn-local', 'remote-ssh': 'conn-ssh', 'remote-http': 'conn-http' }[n.connection] || '';
       html += '<div class="device-card" data-nid="' + escA(n.id) + '">';
       // Header
