@@ -146,6 +146,8 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
         ok = False
     if ok:
         add_log("info", "instance", f"[{node_name}] {inst_name} {action}ed", details=action)
+        if action in ("start", "restart"):
+            _instance_start_grace[inst_name] = time.time()
     else:
         add_log("warn", "instance", f"[{node_name}] {inst_name} {action} FAILED", details=action)
     return ok
@@ -551,6 +553,8 @@ def _build_instance_group():
 _instance_semas: dict[str, asyncio.Semaphore] = {}
 _instance_last_active: dict[str, float] = {}
 _instance_group: dict[str, str] = {}
+_instance_start_grace: dict[str, float] = {}  # instance name -> ts of last start action
+START_GRACE_PERIOD = 90  # seconds to skip dead watcher check after intentional start
 
 def _refresh_instance_state():
     """Refresh per-instance semaphores and state dicts from current nodes."""
@@ -634,6 +638,10 @@ async def _dead_instance_watcher():
                 continue
             conn = node.get("connection", "local")
             if conn not in ("local", "remote-ssh"):
+                continue
+            # Skip instances in grace period (recently started, still booting)
+            grace_ts = _instance_start_grace.get(name, 0)
+            if grace_ts and time.time() - grace_ts < START_GRACE_PERIOD:
                 continue
             # Check systemd status via SSH or local
             active = _check_service_active(node, inst)
