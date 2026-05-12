@@ -355,17 +355,23 @@
         if (actionBtns) actionBtns.innerHTML = '<span class="dim-tag">处理中...</span>';
       }
 
-      // 延迟后轮询真实状态（不覆盖乐观状态，仅检测后台变化）
+      // 延迟后立即轮询真实状态（每5秒检测一次）
       var done = false;
-      for (var retry = 0; retry < 8 && !done; retry++) {
-        await new Promise(function(resolve) { setTimeout(resolve, retry < 2 ? 8000 : 4000); });
+      for (var retry = 0; retry < 12 && !done; retry++) {
+        await new Promise(function(resolve) { setTimeout(resolve, 5000); });
         try {
-          var sr = await fetch(API + '/api/nodes/' + encodeURIComponent(nid));
+          var sr = await fetch(API + '/api/nodes');
           var sd = await sr.json();
-          if (sd.ok && sd.data && sd.data.instances) {
+          if (sd.ok && sd.data) {
+            var foundNode = null;
+            for (var ni = 0; ni < sd.data.length; ni++) {
+              if (sd.data[ni].id === nid) { foundNode = sd.data[ni]; break; }
+            }
             var found = null;
-            for (var si = 0; si < sd.data.instances.length; si++) {
-              if (sd.data.instances[si].id === iid) { found = sd.data.instances[si]; break; }
+            if (foundNode && foundNode.instances) {
+              for (var si = 0; si < foundNode.instances.length; si++) {
+                if (foundNode.instances[si].id === iid) { found = foundNode.instances[si]; break; }
+              }
             }
             if (found) {
               if (found.status === 'idle' || found.status === 'running') {
