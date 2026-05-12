@@ -229,21 +229,27 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         _job_queue.task_done()
 
 # ── Config ──────────────────────────────────────────────────────────────
-COMFYUI_URL = "http://127.0.0.1:8190"  # backward compat fallback
-WORKFLOW_DIR  = "/home/sjcta/software/ComfyUI-Project/workflow/api"  # legacy default, kept for compat
-OUTPUT_DIR    = "/home/sjcta/software/ComfyUI-Project/outputs"
+import os, platform
+
+_BASE = os.environ.get("EZ_COMFYUI_HOME", os.path.dirname(os.path.abspath(__file__)))
+
+COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8190")
+WORKFLOW_DIR = os.environ.get("WORKFLOW_DIR", os.path.join(_BASE, "data", "workflows"))
+OUTPUT_DIR   = os.environ.get("OUTPUT_DIR", os.path.join(_BASE, "data", "outputs"))
+HISTORY_DIR  = os.environ.get("HISTORY_DIR", os.path.join(_BASE, "data", "history"))
+WF_META_FILE = os.environ.get("WF_META_FILE", os.path.join(_BASE, "data", "wf_meta.json"))
+WF_DIRS_FILE = os.environ.get("WF_DIRS_FILE", os.path.join(_BASE, "data", "wf_dirs.json"))
+WF_CONFIG_DIR = os.environ.get("WF_CONFIG_DIR", os.path.join(_BASE, "data", "wf_configs"))
+os.makedirs(WF_CONFIG_DIR, exist_ok=True)
+WF_THUMB_DIR = os.environ.get("WF_THUMB_DIR", os.path.join(_BASE, "data", "thumbs", "wf"))
+JOBS_FILE    = os.environ.get("JOBS_FILE", os.path.join(_BASE, "data", "jobs.json"))
+PORT = int(os.environ.get("EZ_COMFYUI_PORT", "9091"))
+MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
+
+# Legacy DGX paths (kept for backward compat when running on Spark)
 COMFYUI_DIR   = "/home/sjcta/software/ComfyUI-Project"
 COMFYUI_INPUT = "/home/sjcta/software/ComfyUI-Project/ComfyUI/input"
-HISTORY_DIR   = "/home/sjcta/comfyui-web/history"
-WF_META_FILE  = "/home/sjcta/comfyui-web/wf_meta.json"
-WF_DIRS_FILE  = "/home/sjcta/comfyui-web/wf_dirs.json"   # persisted workflow search directories
-WF_CONFIG_DIR = "/home/sjcta/comfyui-web/wf_configs"
-os.makedirs(WF_CONFIG_DIR, exist_ok=True)
-WF_THUMB_DIR  = "/home/sjcta/comfyui-web/thumbs/wf"
 VLLM_CONTAINER = "qwen36-vllm"
-JOBS_FILE     = "/home/sjcta/comfyui-web/jobs.json"
-PORT = 9091
-MAX_HISTORY = 200
 
 # ── State ───────────────────────────────────────────────────────────────
 jobs: dict[str, dict] = {}

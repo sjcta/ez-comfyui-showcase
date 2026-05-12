@@ -23,55 +23,69 @@
   }
 
   function renderNodes(nodes) {
-    var cont = $('#nodeListContainer');
+    var cont = $('#deviceListContainer');
     if (!cont) return;
     if (!nodes || !nodes.length) {
-      cont.innerHTML = '<div class="dim-tag">暂无节点</div>';
+      cont.innerHTML = '<div class="dim-tag">暂无设备，点击上方 "+ 添加设备" 开始</div>';
       return;
     }
     var html = '';
     for (var n of nodes) {
-      html += '<div class="node-card">';
-      html += '<div class="node-card-header">';
-      html += '<span class="node-card-title">🖥 ' + escH(n.name) + '</span>';
+      if (!n.enabled) continue;
+      var sshOk = n.ssh_ok || n.http_up;
+      var statusIcon = sshOk ? '🟢' : '🔴';
+      var statusText = sshOk ? '在线' : '离线';
       var connLabel = { local: '本地', 'remote-ssh': 'SSH', 'remote-http': 'HTTP' }[n.connection] || n.connection;
       var connColor = { local: 'conn-local', 'remote-ssh': 'conn-ssh', 'remote-http': 'conn-http' }[n.connection] || '';
+      html += '<div class="device-card">';
+      // Header
+      html += '<div class="device-card-header">';
+      html += '<span class="device-card-title">🖥 ' + escH(n.name) + '</span>';
       html += '<span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span>';
-      html += '<div class="node-card-actions">';
-      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">测试</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.openServerNode(\'' + n.id + '\')">编辑</button>';
-      html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">删除</button>';
-      html += '</div></div>';
-      html += '<div class="node-card-addr">' + escH(n.host) + (n.instances && n.instances.length ? ' · ' + n.instances.length + ' 个实例' : '') + '</div>';
-      if (n.labels && n.labels.length) {
-        html += '<div class="node-card-labels">';
-        for (var lb of n.labels) html += '<span class="wf-mgr-tag">' + escH(lb) + '</span>';
-        html += '</div>';
+      html += '<span class="device-status-tag">' + statusIcon + ' ' + statusText + '</span>';
+      html += '</div>';
+      // Address + SSH info
+      html += '<div class="device-card-meta">';
+      html += '<span class="device-card-addr">' + escH(n.host || '') + (n.instances ? ' · ' + n.instances.length + ' 个实例' : '') + '</span>';
+      if (n.connection === 'remote-ssh') {
+        html += '<button class="wf-mgr-btn" onclick="CW.showSshInfo(\'' + n.id + '\')" title="SSH 连接信息">🔑 SSH</button>';
       }
-      // Instances
+      html += '</div>';
+      // Instances table
       if (n.instances && n.instances.length) {
+        html += '<div class="device-instance-header">';
+        html += '<span class="dih-col dih-name">实例</span>';
+        html += '<span class="dih-col dih-port">端口</span>';
+        html += '<span class="dih-col dih-status">状态</span>';
+        html += '<span class="dih-col dih-queue">队列</span>';
+        html += '<span class="dih-col dih-actions">操作</span>';
+        html += '</div>';
         for (var inst of n.instances) {
-          var dotColor = { running: 'dot-green', idle: 'dot-yellow', dead: 'dot-red', offline: 'dot-gray', unreachable: 'dot-gray' }[inst.status] || 'dot-gray';
-          var statusLabel = { running: '运行中', idle: '空闲', dead: '已死', offline: '已停止', unreachable: '不可达' }[inst.status] || inst.status;
-          html += '<div class="node-instance-row">';
-          html += '<span class="node-status-dot ' + dotColor + '"></span>';
-          html += '<span class="node-instance-name">' + escH(inst.name || inst.id) + '</span>';
-          html += '<span class="node-instance-port">:' + inst.port + '</span>';
-          html += '<span class="node-instance-status">' + escH(statusLabel) + '</span>';
-          if (inst.queue > 0) html += '<span class="node-instance-queue">队列' + inst.queue + '</span>';
-          html += '<div class="node-instance-actions">';
+          if (!inst.enabled && inst.enabled !== undefined) continue;
+          var dotColor = { running: 'dot-green', idle: 'dot-yellow', dead: 'dot-red', offline: 'dot-gray' }[inst.status] || 'dot-gray';
+          var statusLabel = { running: '运行中', idle: '空闲', dead: '已死', offline: '已停止' }[inst.status] || inst.status;
+          var instUrl = (n.access && n.access.url || 'http://' + n.host + ':{port}').replace('{port}', inst.port);
+          html += '<div class="device-instance-row">';
+          html += '<span class="dih-col dih-name"><span class="node-status-dot ' + dotColor + '"></span>' + escH(inst.name || inst.id) + '</span>';
+          html += '<span class="dih-col dih-port">' + inst.port + '</span>';
+          html += '<span class="dih-col dih-status">' + escH(statusLabel) + '</span>';
+          html += '<span class="dih-col dih-queue">' + (inst.queue || 0) + '</span>';
+          html += '<span class="dih-col dih-actions">';
+          html += '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">🔗 打开</a>';
           if (inst.status === 'running' || inst.status === 'idle') {
-            html += '<button class="wf-mgr-btn" onclick="CW.restartInstance(\'' + n.id + '\',\'' + inst.id + '\')">重启</button>';
-            html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">停止</button>';
-          } else if (inst.status === 'dead' || inst.status === 'offline') {
-            html += '<button class="wf-mgr-btn" onclick="CW.startInstance(\'' + n.id + '\',\'' + inst.id + '\')">启动</button>';
+            html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
+          } else {
+            html += '<button class="wf-mgr-btn" onclick="CW.startInstance(\'' + n.id + '\',\'' + inst.id + '\')">▶ 启动</button>';
           }
-          html += '</div></div>';
+          html += '</span></div>';
         }
       }
-      // Scan
-      html += '<div class="node-card-footer">';
-      html += '<button class="wf-mgr-btn" onclick="CW.scanNode(\'' + n.id + '\')">🔄 扫描端口</button>';
+      // Footer actions
+      html += '<div class="device-card-footer">';
+      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">🔍 测连通</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.scanNode(\'' + n.id + '\')">🔎 扫端口</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.openServerNode(\'' + n.id + '\')">✏️ 编辑</button>';
+      html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">🗑 删除</button>';
       html += '</div></div>';
     }
     cont.innerHTML = html;
@@ -269,10 +283,36 @@
   function restartInstance(nid, iid) { return _instAction(nid, iid, 'restart'); }
 
   // ─── Tab切换 ───
-  function openNodeTab() {
-    var overlay = $('#wfOverlay');
+  function openDeviceMgr() {
+    var overlay = $('#deviceOverlay');
     if (overlay) overlay.classList.add('open');
-    showNodeTab();
+    loadNodes();
+  }
+
+  function closeDeviceMgr() {
+    var overlay = $('#deviceOverlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function showSshInfo(nid) {
+    var cont = $('#deviceListContainer');
+    if (!cont) return;
+    var nodesEl = cont.querySelectorAll('.device-card');
+    // We don't have the raw data easily, so fetch from API
+    fetch(API + '/api/nodes/' + encodeURIComponent(nid))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d.ok) { alert(d.error); return; }
+        var n = d.data;
+        var ssh = n.ssh_config || {};
+        var cmd = 'ssh ' + (ssh.user || 'root') + '@' + n.host + ' -p ' + (ssh.port || 22);
+        if (ssh.auth === 'password' && ssh.password) {
+          cmd = 'sshpass -p \"***\" ' + cmd;
+        }
+        var info = '主机: ' + n.host + ':' + (ssh.port || 22) + '\\n用户: ' + (ssh.user || 'root') + '\\n认证: ' + (ssh.auth || 'password') + '\\n\\n登录命令:\\n' + cmd;
+        prompt('SSH 连接信息 (复制即可)', cmd);
+      })
+      .catch(function(e) { alert('获取失败: ' + e.message); });
   }
 
   function showNodeTab() {
@@ -322,7 +362,9 @@
     startInstance: startInstance,
     stopInstance: stopInstance,
     restartInstance: restartInstance,
-    openNodeTab: openNodeTab,
+    openDeviceMgr: openDeviceMgr,
+    closeDeviceMgr: closeDeviceMgr,
+    showSshInfo: showSshInfo,
     showNodeTab: showNodeTab,
     showWfTab: showWfTab,
     onNodeConnChange: onNodeConnChange,

@@ -1558,6 +1558,39 @@ select { cursor: pointer; }
   .wf-edit-card { width: 95vw; }
 }
 
+/* ═══ Device Cards ═══ */
+.device-pane { padding: 8px 16px 16px; }
+.device-pane-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.device-pane-title { font-weight: 600; font-size: 14px; color: var(--text); }
+.device-list { display: flex; flex-direction: column; gap: 12px; }
+
+.device-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.device-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.device-card-title { font-weight: 600; font-size: 15px; color: var(--text); flex: 1; }
+.device-status-tag { font-size: 12px; color: var(--dim); }
+
+.device-card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.device-card-addr { font-size: 12px; color: var(--dim); font-family: monospace; flex: 1; }
+
+.device-instance-header { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 11px; color: var(--dim); font-weight: 600; border-bottom: 1px solid var(--border); }
+.device-instance-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
+.device-instance-row:last-child { border-bottom: none; }
+
+.dih-col { flex-shrink: 0; }
+.dih-name { flex: 2; display: flex; align-items: center; gap: 6px; }
+.dih-port { flex: 1; color: var(--dim); font-family: monospace; }
+.dih-status { flex: 1; }
+.dih-queue { flex: 0.6; color: var(--dim); }
+.dih-actions { flex: 3; display: flex; gap: 4px; justify-content: flex-end; }
+.dih-actions .wf-mgr-btn { font-size: 11px; padding: 2px 8px; }
+
+.device-card-footer { display: flex; gap: 6px; padding-top: 8px; margin-top: 8px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+
+@media(max-width:600px) {
+  .device-instance-header, .device-instance-row { font-size: 11px; gap: 3px; }
+  .dih-queue { display: none; }
+}
+
 /* ═══ Node Editor ═══ */
 .ne-modal{position:fixed;inset:0;z-index:1200;display:none;place-items:center;background:rgba(0,0,0,.65);backdrop-filter:blur(4px)}
 .ne-modal.open{display:grid}
