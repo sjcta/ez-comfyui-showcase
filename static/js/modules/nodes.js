@@ -410,6 +410,11 @@
   function openDeviceMgr() {
     var overlay = $('#deviceOverlay');
     if (overlay) overlay.classList.add('open');
+    // Set SVG icon for toolbar button and overlay title
+    var tbBtn = $('#tbDeviceBtn');
+    if (tbBtn) tbBtn.innerHTML = CW.icon('settings-2') + ' 设备';
+    var title = $('#deviceOverlayTitle');
+    if (title) title.innerHTML = CW.icon('settings-2') + ' 设备管理';
     loadNodes();
   }
 
