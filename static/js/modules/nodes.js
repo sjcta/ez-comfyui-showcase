@@ -394,7 +394,11 @@
               }
             }
             if (found) {
-              if (found.status === 'idle' || found.status === 'running' || found.status === 'dead') {
+              if (found.status === 'idle' || found.status === 'running') {
+                await updateInstanceRow(nid, iid);
+                done = true;
+              } else if (found.status === 'dead' && action === 'stop') {
+                // 停止时 dead 是预期结果
                 await updateInstanceRow(nid, iid);
                 done = true;
               }
