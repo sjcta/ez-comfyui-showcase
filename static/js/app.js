@@ -459,6 +459,7 @@
       try {
         if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + ' 排队中', 'queued');
         else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + ' 出图中', 'generating');
+        else if (job.status === 'downloading') showToast(shortId + ' ' + typeLabel + ' 拉取图片', 'queued');
         else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 完成', 'done');
         else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + ' 失败', 'error');
       } catch(e) {}
@@ -507,6 +508,30 @@
   let _pollTimer = null;
   function _hasActiveJobs() {
     return Object.values(jobs).some(j => j.status !== 'done' && j.status !== 'error');
+  }
+
+  // Track timer for downloading state (rebroadcast download message)
+  let _fetcherActive = false;
+  async function _fetcherTick() {
+    if (!_hasActiveJobs()) { _fetcherActive = false; return; }
+    // Check for downloading jobs that might need re-broadcast of download message
+    const downloading = Object.values(jobs).filter(j => j.status === 'downloading');
+    if (downloading.length > 0) {
+      // Refresh from server to pick up status changes
+      try {
+        const r = await fetch(API + '/api/jobs');
+        const serverJobs = await r.json();
+        for (const sj of serverJobs) {
+          const prev = jobs[sj.id];
+          if (!prev) jobs[sj.id] = sj;
+          else if (prev.status !== sj.status) {
+            jobs[sj.id] = sj;
+            onJobUpdate(sj);
+          }
+        }
+      } catch {}
+    }
+    _fetcherActive = false;
   }
   async function _pollActiveJobs() {
     if (!_hasActiveJobs()) { _pollTimer = null; return; }
@@ -570,6 +595,10 @@
     }
     if (job.status !== 'done' && job.status !== 'error') _startJobPoll();
   };
+
+  // Also: onJobUpdate needs to force re-render when downloading → done (image swap)
+  const _origOnJobUpdate2 = window.CW.onJobUpdate;
+  // (already handled by the done + image branch in _origOnJobUpdate)
 
   // ══════════════════════════════════════════════════════════════════════════
   //  Gallery Filters

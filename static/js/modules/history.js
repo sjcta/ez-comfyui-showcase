@@ -44,7 +44,7 @@ function _attachSentinel() {
     if (hasImage) {
       imgHtml = `<img src="${imgSrc}" loading="lazy" alt="">`;
     } else {
-      if (j.status === 'generating' || j.status === 'preparing') {
+      if (j.status === 'generating' || j.status === 'preparing' || j.status === 'downloading') {
         imgHtml = `<div class="job-spinner"></div>`;
       }
       // Status text ABOVE timer (always shown for non-image states)
@@ -55,6 +55,8 @@ function _attachSentinel() {
         if (j.generating_at) {
           imgHtml += `<div class="gi-timer-row"><span class="gi-timer" data-ts="${j.generating_at}">${window.CW.formatElapsed(j.generating_at)}</span></div>`;
         }
+      } else if (j.status === 'downloading') {
+        imgHtml += `<div class="job-status-text downloading">${escH(statusMsg || '正在拉取图片...')}</div>`;
       } else {
         imgHtml += `<div class="job-status-text ${escH(j.status)}">${escH(statusMsg)}</div>`;
       }
@@ -110,6 +112,14 @@ function _attachSentinel() {
       const label = job.message || (job.status === 'generating' ? '出图中' : job.status);
       st.textContent = label;
       st.className = `job-status-text ${job.status}`;
+    }
+    // For downloading state, show specific message without progress bar
+    if (job.status === 'downloading') {
+      const bar = card.querySelector('.gi-progress-top');
+      if (bar) bar.style.display = 'none';
+    } else {
+      const bar = card.querySelector('.gi-progress-top');
+      if (bar) bar.style.display = '';
     }
     // Progress bar
     const bar = card.querySelector('.gi-progress-fill');

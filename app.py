@@ -228,6 +228,198 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
             _global_sem.release()
         _job_queue.task_done()
 
+# ── Remote Workflow Sync ────────────────────────────────────────────────
+
+def sync_remote_workflows():
+    """Sync workflows from all enabled remote devices via SSH."""
+    results = {"synced": 0, "errors": 0, "total": 0, "details": [], "timestamp": datetime.now().isoformat()}
+    meta = _load_wf_meta()
+    changed = False
+    all_dirs_to_add = set()
+
+    for node in _load_nodes():
+        if not node.get("enabled", True):
+            continue
+        conn = node.get("connection", "local")
+        if conn == "local":
+            continue  # local is already handled by normal file scanning
+
+        # Collect workflow_dirs from node level or instances
+        wf_dirs = node.get("workflow_dirs", [])
+        if not wf_dirs:
+            for inst in node.get("instances", []):
+                for wd in inst.get("workflow_dirs", []):
+                    if wd not in wf_dirs:
+                        wf_dirs.append(wd)
+
+        if not wf_dirs:
+            results["details"].append(f"[{node['name']}] 未配置 workflow_dirs，跳过")
+            continue
+
+        if conn == "remote-ssh":
+            node_result = _sync_ssh_workflows(node, wf_dirs, meta)
+            results["synced"] += node_result["synced"]
+            results["errors"] += node_result["errors"]
+            results["total"] += node_result["total"]
+            for detail in node_result["details"]:
+                results["details"].append(detail)
+            if node_result["synced"] > 0:
+                changed = True
+        elif conn == "remote-http":
+            results["details"].append(f"[{node['name']}] HTTP 同步暂不支持（Phase 1 简化）")
+
+    if changed:
+        _save_wf_meta(meta)
+        # Also add the local cache dir to wf_dirs if not already present
+        wf_dirs_list = _load_wf_dirs()
+        if WORKFLOW_DIR not in wf_dirs_list:
+            wf_dirs_list.append(WORKFLOW_DIR)
+            _save_wf_dirs(wf_dirs_list)
+
+    return results
+
+
+def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
+    """Sync workflows from a remote SSH node."""
+    result = {"synced": 0, "errors": 0, "total": 0, "details": []}
+    ssh = node.get("ssh_config", {})
+    host = node["host"]
+    user = ssh.get("user", "root")
+    port = str(ssh.get("port", 22))
+    password = ssh.get("password", "")
+
+    for wf_dir in wf_dirs:
+        result["details"].append(f"[{node['name']}] 扫描 {wf_dir}...")
+        try:
+            # SSH find to list .json files
+            find_cmd = []
+            if password:
+                find_cmd = ["sshpass", "-p", password, "ssh",
+                            "-o", "StrictHostKeyChecking=no",
+                            f"{user}@{host}", "-p", port,
+                            f'find "{wf_dir}" -name "*.json" -maxdepth 2']
+            else:
+                find_cmd = ["ssh",
+                            "-o", "StrictHostKeyChecking=no",
+                            f"{user}@{host}", "-p", port,
+                            f'find "{wf_dir}" -name "*.json" -maxdepth 2']
+
+            r = subprocess.run(find_cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                result["errors"] += 1
+                result["details"].append(f"[{node['name']}] find 失败: {r.stderr.strip()[:200]}")
+                continue
+
+            file_paths = [p.strip() for p in r.stdout.splitlines() if p.strip()]
+            if not file_paths:
+                result["details"].append(f"[{node['name']}] {wf_dir} 无 .json 文件")
+                continue
+
+            result["total"] += len(file_paths)
+
+            for remote_path in file_paths:
+                try:
+                    # SSH cat to read file content
+                    cat_cmd = []
+                    if password:
+                        cat_cmd = ["sshpass", "-p", password, "ssh",
+                                   "-o", "StrictHostKeyChecking=no",
+                                   f"{user}@{host}", "-p", port,
+                                   f'cat "{remote_path}"']
+                    else:
+                        cat_cmd = ["ssh",
+                                   "-o", "StrictHostKeyChecking=no",
+                                   f"{user}@{host}", "-p", port,
+                                   f'cat "{remote_path}"']
+
+                    r2 = subprocess.run(cat_cmd, capture_output=True, text=True, timeout=30)
+                    if r2.returncode != 0:
+                        result["errors"] += 1
+                        result["details"].append(f"[{node['name']}] 读取失败: {os.path.basename(remote_path)}: {r2.stderr.strip()[:100]}")
+                        continue
+
+                    content = r2.stdout
+                    try:
+                        wf_json = json.loads(content)
+                    except json.JSONDecodeError as e:
+                        result["errors"] += 1
+                        result["details"].append(f"[{node['name']}] JSON 解析失败: {os.path.basename(remote_path)}: {e}")
+                        continue
+
+                    # Write to local data/workflows/
+                    local_name = os.path.basename(remote_path)
+                    local_path = os.path.join(WORKFLOW_DIR, local_name)
+                    os.makedirs(WORKFLOW_DIR, exist_ok=True)
+                    with open(local_path, "w", encoding="utf-8") as out_f:
+                        json.dump(wf_json, out_f, ensure_ascii=False, indent=2)
+
+                    # Extract metadata for wf_meta.json
+                    model_name = ""
+                    for nid, nv in wf_json.items():
+                        if isinstance(nv, dict) and "model_name" in nv.get("inputs", {}):
+                            model_name = nv["inputs"]["model_name"]
+                            break
+
+                    # Auto-detect tags
+                    tags = _auto_detect_tags(local_path)
+                    tags.append(node.get("name", "remote").replace(" ", ""))
+
+                    # Update meta
+                    if local_name not in meta:
+                        meta[local_name] = {
+                            "name": local_name.replace(".json", ""),
+                            "tags": tags,
+                            "source": node["name"],
+                            "source_path": remote_path,
+                        }
+                        result["synced"] += 1
+                        result["details"].append(f"[{node['name']}] + {local_name}")
+                    else:
+                        # Only update tags and source (don't overwrite user edits)
+                        existing = meta[local_name]
+                        changed = False
+                        if "source" not in existing:
+                            existing["source"] = node["name"]
+                            changed = True
+                        if "source_path" not in existing:
+                            existing["source_path"] = remote_path
+                            changed = True
+                        if changed:
+                            result["synced"] += 1
+                            result["details"].append(f"[{node['name']}] ~ {local_name} (元数据更新)")
+
+                except subprocess.TimeoutExpired:
+                    result["errors"] += 1
+                    result["details"].append(f"[{node['name']}] 超时: {os.path.basename(remote_path)}")
+                except Exception as e:
+                    result["errors"] += 1
+                    result["details"].append(f"[{node['name']}] 错误: {os.path.basename(remote_path)}: {str(e)[:100]}")
+
+        except subprocess.TimeoutExpired:
+            result["errors"] += 1
+            result["details"].append(f"[{node['name']}] SSH find 超时: {wf_dir}")
+        except Exception as e:
+            result["errors"] += 1
+            result["details"].append(f"[{node['name']}] SSH 错误: {str(e)[:200]}")
+
+    return result
+
+
+async def _periodic_sync_worker():
+    """Periodic background task to sync remote workflows every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        try:
+            add_log("info", "sync", "开始定时同步远程工作流...")
+            result = await asyncio.to_thread(sync_remote_workflows)
+            if result["synced"] > 0:
+                add_log("info", "sync", f"同步完成: +{result['synced']} 工作流")
+            elif result["errors"] > 0:
+                add_log("warn", "sync", f"同步完成: {result['errors']} 错误")
+        except Exception as e:
+            add_log("error", "sync", f"同步失败: {e}")
+
+
 # ── Config ──────────────────────────────────────────────────────────────
 import os, platform
 
@@ -420,12 +612,21 @@ async def lifespan(app: FastAPI):
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
+    os.makedirs(WORKFLOW_DIR, exist_ok=True)
     _refresh_instance_state()
+    # Initial remote workflow sync
+    try:
+        add_log("info", "sync", "启动时同步远程工作流...")
+        sync_result = await asyncio.to_thread(sync_remote_workflows)
+        add_log("info", "sync", f"同步完成: +{sync_result['synced']} 新工作流, {sync_result['errors']} 错误")
+    except Exception as e:
+        add_log("error", "sync", f"启动同步失败: {e}")
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
     _background_tasks.append(asyncio.create_task(_dead_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
+    _background_tasks.append(asyncio.create_task(_periodic_sync_worker()))
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
@@ -570,6 +771,51 @@ def comfyui_get(path: str, base_url: str = None) -> dict:
     req = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
+
+
+def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, output_dir: str) -> list:
+    """Download output images from remote ComfyUI after generation.
+    Returns list of local file paths that were downloaded."""
+    try:
+        history = comfyui_get(f"/history/{prompt_id}", base_url=base_url)
+        if not history or prompt_id not in history:
+            print(f"[download] No history entry for {prompt_id}")
+            return []
+        outputs = history[prompt_id].get("outputs", {})
+        images = []
+        for node_id, node_out in outputs.items():
+            for img in node_out.get("images", []):
+                images.append(img)
+        if not images:
+            print(f"[download] No output images in history for {prompt_id}")
+            return []
+        downloaded = []
+        for img in images:
+            filename = img["filename"]
+            subfolder = img.get("subfolder", "")
+            img_type = img.get("type", "output")
+            local_path = os.path.join(output_dir, filename)
+            # Skip if already exists locally
+            if os.path.isfile(local_path):
+                downloaded.append(local_path)
+                continue
+            view_url = f"{base_url}/view?filename={filename}&subfolder={subfolder}&type={img_type}"
+            try:
+                with urllib.request.urlopen(view_url, timeout=120) as resp:
+                    if resp.status == 200:
+                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                        with open(local_path, "wb") as f:
+                            f.write(resp.read())
+                        downloaded.append(local_path)
+                        print(f"[download] Saved {filename} ({len(downloaded)}/{len(images)})")
+            except Exception as e:
+                print(f"[download] Failed to download {filename}: {e}")
+        return downloaded
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[download] Error for {job_id}: {e}")
+        return []
 
 
 # ── Multi-instance routing ──────────────────────────────────────────────
@@ -1231,6 +1477,18 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         elapsed = time.time() - elapsed_start
 
+        # ── Remote image pullback: download output images from remote instance ──
+        if ws_ok and pid:
+            jobs[job_id]["status"] = "downloading"
+            jobs[job_id]["message"] = "正在拉取图片..."
+            await broadcast({"type": "job_update", "job": jobs[job_id]})
+
+            downloaded = await asyncio.to_thread(
+                _download_remote_images_sync, job_id, pid, inst_url, inst_output
+            )
+            if downloaded:
+                print(f"[generate] Downloaded {len(downloaded)} image(s) for {job_id[-12:]}")
+
         if job_id not in jobs:
             return False, prompt_id or ""
 
@@ -1257,6 +1515,12 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             matches = glob.glob(os.path.join(inst_output, "**", filename), recursive=True)
             if matches:
                 src = matches[0]
+            else:
+                # Try the typical subfolder-based search: some ComfyUI outputs go to subfolders
+                for root, dirs, files in os.walk(inst_output):
+                    if filename in files:
+                        src = os.path.join(root, filename)
+                        break
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = uuid.uuid4().hex[:6]
@@ -1637,16 +1901,33 @@ def api_vllm(action: str):
 # ══════════════════════════════════════════════════════════════════════════
 
 def _get_workflow_dirs() -> list[str]:
-    """Collect workflow directories from all enabled nodes' instances + legacy dirs."""
+    """Collect workflow directories from all enabled nodes (node-level + instance-level) + legacy dirs."""
     dirs = set()
-    for inst in _get_enabled_instances():
-        for wd in inst.get("workflow_dirs", []):
+    for node in _load_nodes():
+        if not node.get("enabled", True):
+            continue
+        # Node-level workflow_dirs
+        for wd in node.get("workflow_dirs", []):
             dirs.add(wd)
+        # Instance-level workflow_dirs
+        for inst in node.get("instances", []):
+            for wd in inst.get("workflow_dirs", []):
+                dirs.add(wd)
     # Also include legacy WF_DIRS_FILE dirs
     legacy = _load_wf_dirs()
     for d in legacy:
         dirs.add(d)
     return list(dirs)
+
+@app.post("/api/workflows/sync")
+async def api_sync_workflows():
+    """Manually trigger remote workflow sync."""
+    try:
+        result = await asyncio.to_thread(sync_remote_workflows)
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(500, f"同步失败: {e}")
+
 
 @app.get("/api/workflows")
 def api_workflows():

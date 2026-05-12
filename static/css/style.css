@@ -769,6 +769,7 @@ a { color: var(--accent); text-decoration: none; }
 .job-status-text.starting_comfyui { color: var(--yellow); }
 .job-status-text.generating { color: var(--accent); }
 .job-status-text.error      { color: var(--red); }
+.job-status-text.downloading { color: var(--yellow); }
 
 .job-err-badge {
   position: absolute;
@@ -1325,6 +1326,33 @@ select { cursor: pointer; }
   object-fit: contain;
 }
 
+/* ── Remote Workflow Sync ── */
+
+.wf-sync-section {
+  padding: 0 0 14px;
+}
+.wf-sync-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.wf-sync-title {
+  font-size: 13px; font-weight: 600; color: var(--fg);
+  display: flex; align-items: center; gap: 4px;
+}
+.wf-sync-btn {
+  font-size: 11px; padding: 4px 10px; border-radius: 4px;
+  border: 1px solid var(--accent); background: transparent;
+  color: var(--accent); cursor: pointer; transition: all .15s;
+}
+.wf-sync-btn:hover { background: var(--accent); color: #fff; }
+.wf-sync-btn:disabled { opacity: .5; cursor: not-allowed; }
+.wf-sync-status {
+  font-size: 11px; padding: 6px 8px; background: var(--bg-alt);
+  border-radius: 4px; color: var(--dim);
+}
+.wf-sync-ok { color: var(--green) !important; }
+.wf-sync-err { color: var(--red) !important; }
+
 /* ── Workflow Directory Management ── */
 
 .wf-dirs-section {
@@ -1839,6 +1867,27 @@ select { cursor: pointer; }
 
 .gi.job-card.generating {
   animation: glowShift 6s ease infinite;
+}
+
+/* ═══ downloading state — between generating and done ═══ */
+.gi.job-card.downloading {
+  border-color: var(--yellow);
+  border-style: solid;
+  animation: glowShift 6s ease infinite;
+}
+
+.gi.job-card.downloading .gi-img.job-placeholder {
+  aspect-ratio: unset;
+  background: #0e1218;
+  background-image:
+    radial-gradient(ellipse at 30% 40%, rgba(240,136,62,.5) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 60%, rgba(63,185,80,.4) 0%, transparent 50%);
+  background-size: 250% 250%, 250% 250%;
+  animation: gradShift 12s ease infinite;
+}
+
+.gi.job-card.downloading .job-status-text {
+  color: var(--yellow);
 }
 
 /* Error: solid red background, no animation, no glow */
