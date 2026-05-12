@@ -1,0 +1,205 @@
+{
+  "27": {
+    "inputs": {
+      "seed": [
+        "60",
+        0
+      ],
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "67",
+        0
+      ],
+      "positive": [
+        "68",
+        0
+      ],
+      "negative": [
+        "29",
+        0
+      ],
+      "latent_image": [
+        "30",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "29": {
+    "inputs": {
+      "conditioning": [
+        "68",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "30": {
+    "inputs": {
+      "width": 1024,
+      "height": 1920,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "31": {
+    "inputs": {
+      "samples": [
+        "27",
+        0
+      ],
+      "vae": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "60": {
+    "inputs": {
+      "value": 229037182931955
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "global seed"
+    }
+  },
+  "61": {
+    "inputs": {
+      "filename_prefix": "t2i-z-image-seedvr4k",
+      "images": [
+        "73",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "64": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "65": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "67": {
+    "inputs": {
+      "unet_name": "z_image_turbo_nvfp4.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "68": {
+    "inputs": {
+      "text": "# 角色基因 - 面容\\n鹅蛋脸，下巴圆润微收尖，无棱角；\\n平眉与弯眉之间，眉尾自然微垂，眉色深棕/栗色；\\n眼裂适中，眼尾轻微上挑，灵动温柔，\\n睫毛在瞳孔上有细微投影，眼神光2点；\\n山根中等高度，鼻梁平直，鼻翼窄小精致；\\n唇色自然淡粉/玫瑰粉，上唇有爱神之弓（Cupid's Bow），\\n嘴角微微上扬，饱满而精致；\\n皮肤白皙通透，有光泽感，肤质细腻均匀；\\n\\n# 角色基因 - 发型\\n棕色中长发（栗色，精确色值#8B5A2B），\\n长度及肩，发尾微向内扣；\\n额前空气刘海，约3cm，轻薄透气；\\n耳前有细碎发丝，无颈后披散发。\\n\\n# 角色基因 - 体型\\n身高观感修长，体型纤细但有曲线；\\n头身比约7～7.5头身；\\n肩膀宽度窄于胯部，呈沙漏型比例；\\n腿部修长，膝关节轮廓清晰。\\n\\n# 服装（变更项）\\n浅粉色修身无袖及膝长裙：\\n- 颜色：浅粉色（精确色值#FFB6C1，轻粉/樱花粉，非纯粉）\\n- 材质：哑光厚实针织面料，有轻微弹性\\n- 左肩（画面右侧）：粗金色链条肩带（每节约3mm，扁宽，有微型按扣）\\n- 右肩（画面左侧）：细黑色布质扁肩带，宽约4mm\\n- 腰部：有褶皱设计\\n- 右侧：高开叉，起点在胯骨上方约15cm\\n- 下摆：前短后长弧形\\n\\n# 配饰（不变项）\\n左手腕：宽约3mm光滑细金手镯；\\n双脚：黑色细带高跟凉鞋，带踝带和搭扣。\\n\\n# 姿态（不变项）\\n重心落在左腿，右腿微弯，膝关节向内轻扣；\\n右手自然下垂置于体侧；\\n左手轻触白色圆柱，手指微曲；\\n头部向左侧约15度，双眼视线沿水平线向左约30度；\\n身体呈S型曲线，整体向圆柱方向微倾。\\n\\n# 光影系统（不变项）\\n光源：右侧45度自然光，窗外日光，色温约5500K暖白；\\n光质：柔和均匀，无强烈阴影；\\n眼神光：右眼1个、左眼2个眼神光点；\\n轮廓光：身体右侧有轻微金色轮廓光边；\\n柱子在地面有投影。\\n\\n# 场景（不变项）\\n左侧：巨大白色光滑圆形承重柱，占画面左侧约1/4；\\n地面：米白色大理石，有淡灰纹理，微反射；\\n右侧背景：落地玻璃窗，窗外可见模糊绿色阔叶树种；\\n顶部：百叶帘光影细条纹；\\n整体空间：明亮、干净、极简。\\n\\n# 构图（不变项）\\n景别：竖版全身人像，脚部微切，头顶留白约15%；\\n主体位置：画面中心偏左，约占宽度1/3；\\n焦距：约85mm视角，背景轻微虚化；\\n相机：平视，高度约1.6m。\\n\\n# 否定要求（不变项）\\n不要出现：长发、卷发、波浪发、浓妆、项链、耳环、\\n除左手腕外的其他手饰、彩色裙子（必须保持浅粉色）、正面站立。",
+      "clip": [
+        "65",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "73": {
+    "inputs": {
+      "seed": 2440845786,
+      "resolution": 4096,
+      "max_resolution": 4096,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "lab",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "image": [
+        "31",
+        0
+      ],
+      "dit": [
+        "74",
+        0
+      ],
+      "vae": [
+        "75",
+        0
+      ]
+    },
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "SeedVR2 Video Upscaler (v2.5.22)"
+    }
+  },
+  "74": {
+    "inputs": {
+      "model": "seedvr2_ema_7b-Q4_K_M.gguf",
+      "device": "cuda:0",
+      "blocks_to_swap": 0,
+      "swap_io_components": false,
+      "offload_device": "cpu",
+      "cache_model": false,
+      "attention_mode": "sdpa"
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load DiT Model"
+    }
+  },
+  "75": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": false,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": false,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "cpu",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load VAE Model"
+    }
+  }
+}

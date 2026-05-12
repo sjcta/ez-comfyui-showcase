@@ -6,7 +6,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/i2i-Qwen-SeedVR2.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-Qwen-SeedVR2.json"
   },
   "nunchaku-z-image-turbo-high.json": {
     "name": "nunchaku-z-image-turbo-high",
@@ -51,7 +51,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/t2i-z-image-seedvr4k.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-z-image-seedvr4k.json"
   },
   "image_ernie_image.json": {
     "name": "image_ernie_image",
@@ -78,7 +78,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/i2i-Qwen-Rapid-seedVR2-4k.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-Qwen-Rapid-seedVR2-4k.json"
   },
   "i2i-FireRed-Edit-8step.json": {
     "name": "i2i-FireRed-Edit-8step",
@@ -87,7 +87,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/i2i/i2i-FireRed-Edit-8step.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-FireRed-Edit-8step.json"
   },
   "i2i-Qwen-Edit-v2511.json": {
     "name": "i2i-Qwen-Edit-v2511",
@@ -96,7 +96,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/i2i/i2i-Qwen-Edit-v2511.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-Qwen-Edit-v2511.json"
   },
   "t2i-nunchaku-z-image-turbo-highSD.json": {
     "name": "t2i-nunchaku-z-image-turbo-highSD",
@@ -105,7 +105,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i-nunchaku-z-image-turbo-highSD.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-nunchaku-z-image-turbo-highSD.json"
   },
   "t2i-z-image.json": {
     "name": "t2i-z-image",
@@ -115,7 +115,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i-z-image.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-z-image.json"
   },
   "t2i_Qwen_Image_2512_4steps.json": {
     "name": "t2i_Qwen_Image_2512_4steps",
@@ -124,7 +124,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i_Qwen_Image_2512_4steps.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_Qwen_Image_2512_4steps.json"
   },
   "t2i_nunchaku_seedvr4k.json": {
     "name": "t2i_nunchaku_seedvr4k",
@@ -134,7 +134,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i_nunchaku_seedvr4k.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_nunchaku_seedvr4k.json"
   },
   "SeedVR2_upscale_2k.json": {
     "name": "SeedVR2_upscale_2k",
@@ -143,7 +143,7 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/upscale/SeedVR2_upscale_2k.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_upscale_2k.json"
   },
   "SeedVR2_upscale_4k.json": {
     "name": "SeedVR2_upscale_4k",
@@ -152,6 +152,6 @@
       "DGXSpark"
     ],
     "source": "DGX Spark",
-    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/upscale/SeedVR2_upscale_4k.json"
+    "source_path": "/Users/ai/.openclaw/workspace/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_upscale_4k.json"
   }
 }

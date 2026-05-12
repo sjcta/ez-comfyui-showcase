@@ -3,7 +3,7 @@
 ComfyUI Web v3 — 三段式布局，GPU 监控，服务管理。
 节点管理支持从 config/nodes.json 动态读取。
 """
-import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket
+import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3
 # Ensure D-Bus session is available for systemctl --user calls in nohup context
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -346,10 +346,11 @@ def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
                         result["details"].append(f"[{node['name']}] JSON 解析失败: {os.path.basename(remote_path)}: {e}")
                         continue
 
-                    # Write to local data/workflows/
+                    # Write to local data/workflows/{device_name}/
                     local_name = os.path.basename(remote_path)
-                    local_path = os.path.join(WORKFLOW_DIR, local_name)
-                    os.makedirs(WORKFLOW_DIR, exist_ok=True)
+                    device_dir = os.path.join(WORKFLOW_DIR, node['name'])
+                    local_path = os.path.join(device_dir, local_name)
+                    os.makedirs(device_dir, exist_ok=True)
                     with open(local_path, "w", encoding="utf-8") as out_f:
                         json.dump(wf_json, out_f, ensure_ascii=False, indent=2)
 
@@ -370,19 +371,19 @@ def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
                             "name": local_name.replace(".json", ""),
                             "tags": tags,
                             "source": node["name"],
-                            "source_path": remote_path,
+                            "source_path": local_path,
                         }
                         result["synced"] += 1
                         result["details"].append(f"[{node['name']}] + {local_name}")
                     else:
-                        # Only update tags and source (don't overwrite user edits)
+                        # Update source and source_path
                         existing = meta[local_name]
                         changed = False
-                        if "source" not in existing:
+                        if "source" not in existing or existing["source"] != node["name"]:
                             existing["source"] = node["name"]
                             changed = True
-                        if "source_path" not in existing:
-                            existing["source_path"] = remote_path
+                        if "source_path" not in existing or existing["source_path"] != local_path:
+                            existing["source_path"] = local_path
                             changed = True
                         if changed:
                             result["synced"] += 1
@@ -437,6 +438,86 @@ WF_THUMB_DIR = os.environ.get("WF_THUMB_DIR", os.path.join(_BASE, "data", "thumb
 JOBS_FILE    = os.environ.get("JOBS_FILE", os.path.join(_BASE, "data", "jobs.json"))
 PORT = int(os.environ.get("EZ_COMFYUI_PORT", "9091"))
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
+
+# ── Generation SQLite Database ──
+GEN_DB = os.path.join(_BASE, "data", "generation.db")
+
+def _init_gen_db():
+    conn = sqlite3.connect(GEN_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS generations (
+            id TEXT PRIMARY KEY,
+            workflow TEXT NOT NULL,
+            workflow_name TEXT DEFAULT '',
+            device TEXT DEFAULT '',
+            instance TEXT DEFAULT '',
+            status TEXT DEFAULT 'done',
+            image_path TEXT DEFAULT '',
+            thumb_path TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now','localtime')),
+            completed_at DATETIME,
+            duration_sec INTEGER DEFAULT 0,
+            params TEXT DEFAULT '{}',
+            prompt TEXT DEFAULT '',
+            width INTEGER DEFAULT 0,
+            height INTEGER DEFAULT 0,
+            seed INTEGER DEFAULT 0
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _gen_db_to_record(row: dict) -> dict:
+    """Transform a SQLite generations row to the JSON record format used by the frontend."""
+    seed_val = str(row["seed"]) if row.get("seed") else ""
+    params = {}
+    if row.get("params"):
+        try:
+            params = json.loads(row["params"])
+        except Exception:
+            pass
+    return {
+        "id": row["id"],
+        "filename": row.get("image_path", ""),
+        "thumb": row.get("thumb_path", ""),
+        "workflow": row["workflow"],
+        "prompt": row.get("prompt", ""),
+        "seed": seed_val,
+        "width": row.get("width", 0),
+        "height": row.get("height", 0),
+        "elapsed": row.get("duration_sec", 0),
+        "time": row.get("created_at", ""),
+        "field_values": params,
+    }
+
+
+def _insert_generation(record: dict, elapsed: float):
+    """Insert a generation record into SQLite."""
+    try:
+        conn = sqlite3.connect(GEN_DB)
+        conn.execute(
+            """INSERT OR REPLACE INTO generations
+               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                record["id"],
+                record.get("workflow", ""),
+                record.get("filename", ""),
+                record.get("thumb", ""),
+                record.get("prompt", ""),
+                record.get("width", 0),
+                record.get("height", 0),
+                int(record.get("seed", 0) or 0),
+                round(elapsed),
+                record.get("time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                json.dumps(record.get("field_values", {}), ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        add_log("error", "db", f"SQLite insert failed: {e}", record.get("id", ""))
 
 # Legacy DGX paths (kept for backward compat when running on Spark)
 COMFYUI_DIR   = "/home/sjcta/software/ComfyUI-Project"
@@ -612,6 +693,7 @@ async def lifespan(app: FastAPI):
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
+    _init_gen_db()
     os.makedirs(WORKFLOW_DIR, exist_ok=True)
     _refresh_instance_state()
     # Initial remote workflow sync
@@ -1548,6 +1630,8 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         }
         history.insert(0, record)
         save_history()
+        # Also write to SQLite
+        _insert_generation(record, elapsed)
 
         jobs[job_id].update(
             status="done", message=f"完成 ({elapsed:.1f}s)",
@@ -2005,7 +2089,8 @@ async def api_workflow_upload(file: UploadFile = File(...)):
         json.loads(content)
     except json.JSONDecodeError as e:
         raise HTTPException(400, f"无效 JSON: {e}")
-    upload_dir = _load_wf_dirs()[0]
+    upload_dir = os.path.join(WORKFLOW_DIR, "ez-comfy")
+    os.makedirs(upload_dir, exist_ok=True)
     dest = os.path.join(upload_dir, name)
     with open(dest, "wb") as f:
         f.write(content)
@@ -2014,7 +2099,13 @@ async def api_workflow_upload(file: UploadFile = File(...)):
         meta[name] = {
             "name": name.replace(".json", ""),
             "tags": _auto_detect_tags(dest),
+            "source": "ez-comfy",
+            "source_path": dest,
         }
+        _save_wf_meta(meta)
+    else:
+        meta[name]["source"] = "ez-comfy"
+        meta[name]["source_path"] = dest
         _save_wf_meta(meta)
     return {"ok": True, "name": name}
 
@@ -2389,22 +2480,75 @@ def api_retry_job(job_id: str, bg: BackgroundTasks):
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/history")
-def api_history(limit: int = 0):
-    if limit <= 0:
-        return history
-    return history[:limit]
+def api_history(limit: int = 50, offset: int = 0, status: str = ""):
+    """Query generation history from SQLite with pagination."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    query = "SELECT * FROM generations"
+    params = []
+    if status:
+        query += " WHERE status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    rows = conn.execute(query, params).fetchall()
+    total = conn.execute(
+        "SELECT COUNT(*) FROM generations" + (" WHERE status=?" if status else ""),
+        [status] if status else [],
+    ).fetchone()[0]
+    conn.close()
+    return {"ok": True, "data": [_gen_db_to_record(dict(r)) for r in rows], "total": total}
+
+
+@app.post("/api/history")
+def api_history_create(req: dict):
+    """Insert a generation record into SQLite."""
+    elapsed = req.get("duration_sec", req.get("elapsed", 0))
+    _insert_generation(req, elapsed)
+    return {"ok": True}
 
 
 @app.delete("/api/history/{item_id}")
 def api_history_delete(item_id: str):
+    """Delete a generation record from SQLite and remove its image file."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT image_path FROM generations WHERE id=?", (item_id,)).fetchone()
+    if row and row["image_path"]:
+        img_path = os.path.join(HISTORY_DIR, row["image_path"])
+        if os.path.isfile(img_path):
+            os.remove(img_path)
+    conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+    # Also clean up from in-memory JSON history
     global history
     item = next((h for h in history if h["id"] == item_id), None)
     if item:
-        img_path = os.path.join(HISTORY_DIR, item["filename"])
-        if os.path.isfile(img_path):
-            os.remove(img_path)
         history = [h for h in history if h["id"] != item_id]
         save_history()
+    return {"ok": True}
+
+
+@app.delete("/api/history")
+def api_history_clear():
+    """Clear all generation records from SQLite."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.execute("DELETE FROM generations")
+    conn.commit()
+    conn.close()
+    # Also clean in-memory JSON history
+    global history
+    history = []
+    save_history()
+    # Clean image files
+    for f in os.listdir(HISTORY_DIR):
+        fpath = os.path.join(HISTORY_DIR, f)
+        if os.path.isfile(fpath) and f != "history.json":
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass
     return {"ok": True}
 
 
@@ -2847,9 +2991,8 @@ def api_workflow_versions(name: str):
     meta = _load_wf_meta()
     entry = meta.get(name, {})
     versions = entry.get("versions", {})
-    upload_dir = _load_wf_dirs()[0]
     base = name.replace(".json", "")
-    vdir = os.path.join(upload_dir, "__versions", base)
+    vdir = os.path.join(WORKFLOW_DIR, "__versions", base)
     if os.path.isdir(vdir):
         for vf in sorted(os.listdir(vdir)):
             if vf.endswith(".json"):
@@ -2899,9 +3042,8 @@ async def api_upload_workflow_version(name: str, file: UploadFile = File(...)):
             existing_vnums.append(int(m.group(1)))
     next_v = max(existing_vnums, default=0) + 1
     vname = f"v{next_v}"
-    upload_dir = _load_wf_dirs()[0]
     base = name.replace(".json", "")
-    vdir = os.path.join(upload_dir, "__versions", base)
+    vdir = os.path.join(WORKFLOW_DIR, "__versions", base)
     os.makedirs(vdir, exist_ok=True)
     vpath = os.path.join(vdir, f"{vname}.json")
     with open(vpath, "wb") as f:

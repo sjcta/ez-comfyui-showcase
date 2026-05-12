@@ -518,14 +518,16 @@ async function delHist(id) {
 
 async function loadHistory() {
     try {
-      const r = await fetch(`${API}/api/history`);
-      const newItems = await r.json();
-      historyItems.length = 0;
-      Array.prototype.push.apply(historyItems, newItems);
-      _lastGalleryHash = '';
-      _populateFilterOptions();
-      applyFilters();
-      window.CW.loadWorkflows();
+      const r = await fetch(`${API}/api/history?limit=200`);
+      const d = await r.json();
+      if (d.ok) {
+        historyItems.length = 0;
+        Array.prototype.push.apply(historyItems, d.data);
+        _lastGalleryHash = '';
+        _populateFilterOptions();
+        applyFilters();
+        window.CW.loadWorkflows();
+      }
     } catch (e) {
       console.error('loadHistory:', e);
     }
@@ -587,10 +589,12 @@ function renderGallery() {
   // Data-only refresh (no gallery re-render)
   async function loadHistoryNoRender() {
     try {
-      const r = await fetch(`${API}/api/history`);
-      const newItems = await r.json();
-      historyItems.length = 0;
-      Array.prototype.push.apply(historyItems, newItems);
+      const r = await fetch(`${API}/api/history?limit=200`);
+      const d = await r.json();
+      if (d.ok) {
+        historyItems.length = 0;
+        Array.prototype.push.apply(historyItems, d.data);
+      }
     } catch (e) { console.error("loadHistoryNoRender:", e); }
   }
   window.CW.loadHistoryNoRender = loadHistoryNoRender;
