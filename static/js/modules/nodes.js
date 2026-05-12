@@ -66,7 +66,7 @@
         for (var inst of n.instances) {
           if (!inst.enabled && inst.enabled !== undefined) continue;
           var dotColor = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' }[inst.status] || 'dot-gray';
-          var statusLabel = { running: '忙碌', idle: '待机', dead: '死机', offline: '没启动' }[inst.status] || inst.status;
+          var statusLabel = { running: '忙碌中', idle: '待机中', dead: '宕机', offline: '未启动' }[inst.status] || inst.status;
           var instUrl = (n.access && n.access.url || 'http://' + n.host + ':{port}').replace('{port}', inst.port);
           html += '<div class="device-instance-row" data-iid="' + escA(inst.id) + '">';
           html += '<span class="dih-col dih-name"><span class="node-status-dot ' + dotColor + '"></span>' + escH(inst.name || inst.id) + '</span>';
