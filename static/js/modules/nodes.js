@@ -342,7 +342,27 @@
       var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/instances/' + encodeURIComponent(iid) + '/' + action, { method: 'POST' });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || action + '失败');
-      updateInstanceRow(nid, iid);
+
+      // 乐观更新 DOM
+      var row = document.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
+      if (row) {
+        row.querySelector('.node-status-dot').className = 'node-status-dot dot-yellow';
+        row.querySelector('.dih-status').textContent = action === 'start' ? '启动中...' : '停止中...';
+        var actionBtns = row.querySelector('.dih-actions');
+        if (actionBtns) actionBtns.innerHTML = '<span class="dim-tag">处理中...</span>';
+      }
+
+      // 延迟后轮询真实状态（最多重试 3 次）
+      for (var retry = 0; retry < 3; retry++) {
+        await new Promise(function(resolve) { setTimeout(resolve, retry === 0 ? 10000 : 5000); });
+        await updateInstanceRow(nid, iid);
+        // 检查是否已从 dead 变为正常
+        var checkRow = document.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
+        if (checkRow) {
+          var statusText = checkRow.querySelector('.dih-status');
+          if (statusText && statusText.textContent !== '已死' && statusText.textContent !== '已停止') break;
+        }
+      }
     } catch (e) { alert(action + '失败: ' + e.message); }
   }
 
