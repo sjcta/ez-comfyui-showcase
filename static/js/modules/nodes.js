@@ -45,7 +45,7 @@
       html += '<span class="device-card-title">🖥 ' + escH(n.name) + '</span>';
       html += '<span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span>';
       html += '<span class="device-status-tag">' + statusIcon + ' ' + statusText + '</span>';
-      html += '<button class="wf-mgr-btn" onclick="CW.toggleDeviceConnection(\'' + n.id + '\',' + connected + ')">' + (connected ? '断开' : '连接') + '</button>';
+      html += '<button class="wf-mgr-btn' + (connected ? ' btn-stop' : ' btn-start') + '" onclick="CW.toggleDeviceConnection(\'' + n.id + '\',' + connected + ')">' + (connected ? '断开' : '连接') + '</button>';
       html += '</div>';
       // Address + SSH info
       html += '<div class="device-card-meta">';
@@ -75,11 +75,11 @@
           var qVal = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
           html += '<span class="dih-col dih-queue">' + qVal + '</span>';
           html += '<span class="dih-col dih-actions">';
-          html += '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
+          html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
           if (inst.status === 'running' || inst.status === 'idle') {
-            html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
+            html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
           } else {
-            html += '<button class="wf-mgr-btn" onclick="CW.startInstance(\'' + n.id + '\',\'' + inst.id + '\')">▶ 启动</button>';
+            html += '<button class="wf-mgr-btn btn-start" onclick="CW.startInstance(\'' + n.id + '\',\'' + inst.id + '\')">▶ 启动</button>';
           }
           html += '</span></div>';
         }
@@ -407,11 +407,11 @@
       var actionsCell = row.querySelector('.dih-actions');
       if (actionsCell) {
         var instUrl = (nodeData.access && nodeData.access.url || 'http://' + nodeData.host + ':{port}').replace('{port}', inst.port);
-        var html = '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
+        var html = '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
         if (inst.status === 'running' || inst.status === 'idle') {
-          html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
+          html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
         } else {
-          html += '<button class="wf-mgr-btn" onclick="CW.startInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">▶ 启动</button>';
+          html += '<button class="wf-mgr-btn btn-start" onclick="CW.startInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">▶ 启动</button>';
         }
         actionsCell.innerHTML = html;
       }
@@ -459,6 +459,7 @@
       var toggleBtn = card.querySelector('.device-card-header button');
       if (toggleBtn) {
         toggleBtn.textContent = wasConnected ? '连接' : '断开';
+        toggleBtn.className = 'wf-mgr-btn' + (wasConnected ? ' btn-start' : ' btn-stop');
       }
     } catch (e) { alert('操作失败: ' + e.message); }
   }
