@@ -9,7 +9,7 @@
 
   // ─── 加载节点列表 ───
   async function loadNodes() {
-    var cont = $('#nodeListContainer');
+    var cont = $('#deviceListContainer');
     if (!cont) return;
     cont.innerHTML = '<div class="dim-tag">加载中...</div>';
     try {
@@ -84,20 +84,20 @@
       html += '<div class="device-card-footer">';
       html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">🔍 测连通</button>';
       html += '<button class="wf-mgr-btn" onclick="CW.scanNode(\'' + n.id + '\')">🔎 扫端口</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.openServerNode(\'' + n.id + '\')">✏️ 编辑</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.openDeviceEditor(\'' + n.id + '\')">✏️ 编辑</button>';
       html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">🗑 删除</button>';
       html += '</div></div>';
     }
     cont.innerHTML = html;
   }
 
-  // ─── 节点编辑器 ───
-  function openServerNode(nid) {
-    var modal = $('#nodeEditorModal');
-    var title = $('#nodeEditorTitle');
-    var form = $('#nodeEditorForm');
+  // ─── 设备编辑器 ───
+  function openDeviceEditor(nid) {
+    var modal = $('#deviceEditModal');
+    var title = $('#deviceEditTitle');
+    var form = $('#deviceEditForm');
     if (!modal || !form) return;
-    title.textContent = nid ? '编辑节点' : '添加节点';
+    title.textContent = nid ? '编辑设备' : '添加设备';
     form.dataset.nid = nid || '';
     form.reset();
     if (nid) {
@@ -105,48 +105,78 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d.ok) throw new Error(d.error);
-          fillNodeForm(d.data);
+          fillDeviceForm(d.data);
         })
-        .catch(function (e) { alert('加载节点失败: ' + e.message); });
+        .catch(function (e) { alert('加载设备失败: ' + e.message); });
     }
+    onDevConnChange();
     modal.classList.add('open');
   }
 
-  function fillNodeForm(data) {
-    var f = $('#nodeEditorForm');
+  function fillDeviceForm(data) {
+    var f = $('#deviceEditForm');
     if (!f) return;
-    for (var key in data) {
-      var el = f.elements[key];
-      if (!el) continue;
-      if (el.type === 'checkbox') el.checked = data[key];
-      else el.value = data[key];
-    }
-    // Handle connection change
-    onNodeConnChange();
-    // Instances summary
-    var instList = $('#nodeEditInstances');
-    if (instList && data.instances) {
-      instList.innerHTML = '';
-      for (var inst of data.instances) {
-        var tag = document.createElement('span');
-        tag.className = 'dim-tag';
-        tag.textContent = (inst.name || inst.id) + ':' + inst.port;
-        instList.appendChild(tag);
+    setFormVal(f, 'name', data.name || '');
+    setFormVal(f, 'host', data.host || '');
+    setFormVal(f, 'connection', data.connection || 'remote-ssh');
+    setFormVal(f, 'labels', (data.labels || []).join(','));
+    setFormVal(f, 'access_url', (data.access && data.access.url) || 'http://{host}:{port}');
+    var ssh = data.ssh_config || {};
+    setFormVal(f, 'ssh_user', ssh.user || 'root');
+    setFormVal(f, 'ssh_port', ssh.port || 22);
+    setFormVal(f, 'ssh_auth', ssh.auth || 'password');
+    setFormVal(f, 'ssh_password', ssh.password || '');
+    setFormVal(f, 'ssh_key_path', ssh.key_path || '');
+    var scanRange = data.scan_ports && data.scan_ports.range;
+    setFormVal(f, 'preset_ports', scanRange || '8190,8189');
+    var instList = $('#deviceEditInstances');
+    var instSection = $('#devInstSection');
+    if (instSection && data.instances && data.instances.length) {
+      instSection.style.display = '';
+      if (instList) {
+        instList.innerHTML = '';
+        for (var inst of data.instances) {
+          var tag = document.createElement('span');
+          tag.className = 'de-inst-tag';
+          tag.textContent = (inst.name || inst.id) + ':' + inst.port + ' [' + (inst.status || '?') + ']';
+          instList.appendChild(tag);
+        }
       }
+    } else if (instSection) {
+      instSection.style.display = 'none';
     }
+    onDevConnChange();
+    onDevSshAuthChange();
   }
 
-  function onNodeConnChange() {
-    var f = $('#nodeEditorForm');
+  function setFormVal(form, name, val) {
+    var el = form.elements[name];
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val != null ? val : '';
+  }
+
+  function onDevConnChange() {
+    var f = $('#deviceEditForm');
     if (!f) return;
     var conn = f.elements['connection'] && f.elements['connection'].value;
-    var sshSec = $('#sshConfigSection');
+    var sshSec = $('#devSshSection');
     if (sshSec) sshSec.style.display = (conn === 'remote-ssh') ? '' : 'none';
   }
 
-  async function saveNode() {
-    var modal = $('#nodeEditorModal');
-    var form = $('#nodeEditorForm');
+  function onDevSshAuthChange() {
+    var f = $('#deviceEditForm');
+    if (!f) return;
+    var auth = f.elements['ssh_auth'] && f.elements['ssh_auth'].value;
+    var pwRow = $('#devSshPwRow');
+    var keyRow = $('#devSshKeyRow');
+    if (pwRow) pwRow.style.display = (auth === 'password') ? '' : 'none';
+    if (keyRow) keyRow.style.display = (auth === 'key') ? '' : 'none';
+  }
+
+  async function saveDevice() {
+    var modal = $('#deviceEditModal');
+    var form = $('#deviceEditForm');
     if (!form) return;
     var nid = form.dataset.nid || '';
     var data = {};
@@ -156,34 +186,34 @@
       else if (el.type === 'number') data[el.name] = parseFloat(el.value) || 0;
       else data[el.name] = el.value;
     }
-    // Structure labels
     if (typeof data.labels === 'string') data.labels = data.labels.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-    if (typeof data.scan_range === 'string') {
-      data.scan_ports = { range: data.scan_range, extra: [] };
+    if (data.preset_ports) {
+      var ports = data.preset_ports.split(',').map(function(s) { return parseInt(s.trim()); }).filter(Number);
+      if (ports.length >= 2) {
+        var min = Math.min.apply(null, ports), max = Math.max.apply(null, ports);
+        data.scan_ports = { range: min + '-' + max, extra: [] };
+      } else if (ports.length === 1) {
+        data.scan_ports = { range: ports[0] + '-' + (ports[0] + 10), extra: [] };
+      }
     }
-    delete data.scan_range;
-    // Build ssh_config
+    delete data.preset_ports;
     if (data.connection === 'remote-ssh') {
       data.ssh_config = {
         user: data.ssh_user || '',
         port: parseInt(data.ssh_port) || 22,
         auth: data.ssh_auth || 'password',
       };
-      if (data.ssh_auth === 'password') data.ssh_config.password = data.ssh_password;
-      else data.ssh_config.key_path = data.ssh_key_path;
+      if (data.ssh_auth === 'password') data.ssh_config.password = data.ssh_password || '';
+      else data.ssh_config.key_path = data.ssh_key_path || '';
     }
-    delete data.ssh_user; delete data.ssh_port; delete data.ssh_auth;
-    delete data.ssh_password; delete data.ssh_key_path;
-    // Clean up empty fields
+    data.access = { url: data.access_url || 'http://{host}:{port}', type: 'direct' };
+    for (var k of ['ssh_user','ssh_port','ssh_auth','ssh_password','ssh_key_path','access_url']) delete data[k];
     if (!data.labels || !data.labels.length) delete data.labels;
-    if (!data.scan_ports) data.scan_ports = { range: '8188-8195', extra: [] };
     if (!data.instances) data.instances = [];
     if (!data.sort_order) data.sort_order = 99;
-
     try {
       var url = API + '/api/nodes' + (nid ? '/' + encodeURIComponent(nid) : '');
-      var method = nid ? 'PUT' : 'POST';
-      var r = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      r = await fetch(url, { method: nid ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '保存失败');
       modal.classList.remove('open');
@@ -191,8 +221,9 @@
     } catch (e) { alert('保存失败: ' + e.message); }
   }
 
-  function closeNodeEditor() {
-    $('#nodeEditorModal').classList.remove('open');
+  function closeDeviceEditor() {
+    var modal = $('#deviceEditModal');
+    if (modal) modal.classList.remove('open');
   }
 
   // ─── 操作 ───
@@ -351,9 +382,10 @@
   if (!window.CW) window.CW = {};
   var exports = {
     loadNodes: loadNodes,
-    openServerNode: openServerNode,
-    saveNode: saveNode,
-    closeNodeEditor: closeNodeEditor,
+    openDeviceEditor: openDeviceEditor,
+
+    saveDevice: saveDevice,
+    closeDeviceEditor: closeDeviceEditor,
     testNode: testNode,
     deleteNode: deleteNode,
     scanNode: scanNode,
@@ -367,7 +399,8 @@
     showSshInfo: showSshInfo,
     showNodeTab: showNodeTab,
     showWfTab: showWfTab,
-    onNodeConnChange: onNodeConnChange,
+    onDevConnChange: onDevConnChange,
+    onDevSshAuthChange: onDevSshAuthChange,
   };
   for (var k in exports) window.CW[k] = exports[k];
 })();

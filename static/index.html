@@ -246,7 +246,7 @@
       <button class="wf-overlay-close" onclick="CW.closeDeviceMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="device-pane" id="devicePane">
-      <div class="device-pane-toolbar"><span class="device-pane-title">已注册设备</span><button class="wf-mgr-btn" onclick="CW.openServerNode('')">+ 添加设备</button></div>
+      <div class="device-pane-toolbar"><span class="device-pane-title">已注册设备</span><button class="wf-mgr-btn" onclick="CW.openDeviceEditor('')">+ 添加设备</button></div>
       <div class="device-list" id="deviceListContainer"></div>
     </div>
   </div>
@@ -470,34 +470,96 @@
   <div class="log-header"><span>📋 日志</span><button class="log-close-btn" onclick="CW.closeLog()">&#10005;</button></div>
   <div class="log-body" id="logBody"></div>
 </div>
-<!-- ═══ 节点编辑器弹窗 ═══ -->
-<div class="ne-modal" id="nodeEditModal">
-  <div class="ne-card" style="max-width:520px">
-    <div class="ne-header">
-      <span class="ne-title" id="nodeEditorTitle">编辑节点</span>
-      <button class="ne-close" onclick="CW.closeNodeEditor()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+<!-- ═══ 设备编辑弹窗 ═══ -->
+<div class="de-modal" id="deviceEditModal">
+  <div class="de-card">
+    <div class="de-header">
+      <span class="de-title" id="deviceEditTitle">添加设备</span>
+      <button class="de-close" onclick="CW.closeDeviceEditor()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div class="ne-body">
-      <form id="nodeEditorForm">
-        <div class="ne-field"><label>名称</label><input type="text" name="name" style="flex:1" required></div>
-        <div class="ne-field"><label>主机地址</label><input type="text" name="host" style="flex:1" required></div>
-        <div class="ne-field"><label>连接方式</label><select name="connection" onchange="CW.onNodeConnChange()" style="flex:1"><option value="local">本地</option><option value="remote-ssh">SSH</option><option value="remote-http">HTTP</option></select></div>
-        <div class="ne-field"><label>标签</label><input type="text" name="labels" style="flex:1" placeholder="本地,高性能"></div>
-        <div class="ne-field"><label>扫描端口段</label><input type="text" name="scan_range" value="8188-8195" style="flex:1" placeholder="8188-8195"></div>
-        <div class="ne-field"><label>排序权重</label><input type="number" name="sort_order" value="99" style="width:80px"></div>
-        <div class="ne-field"><label>已登记实例</label><span id="nodeEditInstances" class="dim-tag">暂无</span></div>
-        <div id="sshConfigSection" style="display:none;border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
-          <div class="ne-field"><label>SSH 用户</label><input type="text" name="ssh_user" style="flex:1"></div>
-          <div class="ne-field"><label>SSH 端口</label><input type="number" name="ssh_port" value="22" style="width:80px"></div>
-          <div class="ne-field"><label>认证方式</label><select name="ssh_auth" style="flex:1"><option value="password">密码</option><option value="key">密钥</option></select></div>
-          <div class="ne-field" id="sshPwField"><label>密码</label><input type="password" name="ssh_password" style="flex:1" placeholder="留空不修改"></div>
-          <div class="ne-field" id="sshKeyField" style="display:none"><label>密钥路径</label><input type="text" name="ssh_key_path" style="flex:1" placeholder="~/.ssh/id_rsa"></div>
+    <form id="deviceEditForm" class="de-form">
+      <!-- 基础信息 -->
+      <div class="de-section">
+        <div class="de-section-title">📋 基础信息</div>
+        <div class="de-row">
+          <label class="de-label">设备名称</label>
+          <input type="text" name="name" class="de-input" placeholder="例如：DGX Spark" required>
         </div>
-      </form>
-    </div>
-    <div class="ne-footer">
-      <button class="btn" onclick="CW.closeNodeEditor()">取消</button>
-      <button class="btn btn-primary" onclick="CW.saveNode()">保存</button>
+        <div class="de-row">
+          <label class="de-label">主机地址</label>
+          <input type="text" name="host" class="de-input" placeholder="IP 地址或域名" required>
+        </div>
+        <div class="de-row">
+          <label class="de-label">连接方式</label>
+          <select name="connection" class="de-input" onchange="CW.onDevConnChange()">
+            <option value="remote-ssh">🔐 SSH（推荐，支持自愈）</option>
+            <option value="remote-http">🌐 HTTP（远程只读）</option>
+            <option value="local">💻 本地（同机部署）</option>
+          </select>
+        </div>
+        <div class="de-row">
+          <label class="de-label">标签</label>
+          <input type="text" name="labels" class="de-input" placeholder="GPU,高性能,测试">
+        </div>
+      </div>
+
+      <!-- SSH 配置 -->
+      <div class="de-section" id="devSshSection">
+        <div class="de-section-title">🔑 SSH 连接配置</div>
+        <div class="de-row">
+          <label class="de-label">SSH 用户</label>
+          <input type="text" name="ssh_user" class="de-input" value="root" placeholder="ssh 登录用户名">
+        </div>
+        <div class="de-row">
+          <label class="de-label">SSH 端口</label>
+          <input type="number" name="ssh_port" class="de-input de-input-sm" value="22" min="1" max="65535">
+        </div>
+        <div class="de-row">
+          <label class="de-label">认证方式</label>
+          <select name="ssh_auth" class="de-input" onchange="CW.onDevSshAuthChange()">
+            <option value="password">密码</option>
+            <option value="key">密钥文件</option>
+          </select>
+        </div>
+        <div class="de-row" id="devSshPwRow">
+          <label class="de-label">密码</label>
+          <input type="password" name="ssh_password" class="de-input" placeholder="SSH 登录密码">
+        </div>
+        <div class="de-row" id="devSshKeyRow" style="display:none">
+          <label class="de-label">密钥路径</label>
+          <input type="text" name="ssh_key_path" class="de-input" placeholder="~/.ssh/id_rsa">
+        </div>
+      </div>
+
+      <!-- 访问入口 -->
+      <div class="de-section">
+        <div class="de-section-title">🌐 访问入口</div>
+        <div class="de-row">
+          <label class="de-label">访问 URL 模板</label>
+          <input type="text" name="access_url" class="de-input" placeholder="http://{host}:{port}" value="http://{host}:{port}">
+        </div>
+        <div class="de-hint">使用 <code>{host}</code> 和 <code>{port}</code> 占位符，<code>🔗 打开</code> 按钮会替换为实际值</div>
+      </div>
+
+      <!-- 实例预设 -->
+      <div class="de-section">
+        <div class="de-section-title">⚙️ 实例预设</div>
+        <div class="de-row">
+          <label class="de-label">默认端口列表</label>
+          <input type="text" name="preset_ports" class="de-input" placeholder="8188,8190,8189" value="8190,8189">
+        </div>
+        <div class="de-hint">逗号分隔，添加设备后会自动扫描这些端口</div>
+      </div>
+
+      <!-- 已登记实例（编辑时显示） -->
+      <div class="de-section" id="devInstSection" style="display:none">
+        <div class="de-section-title">📡 已登记实例</div>
+        <div id="deviceEditInstances" class="de-inst-list"></div>
+      </div>
+    </form>
+    <div class="de-footer">
+      <button class="btn" onclick="CW.closeDeviceEditor()">取消</button>
+      <button class="btn btn-primary" onclick="CW.saveDevice()">保存设备</button>
     </div>
   </div>
 </div>
@@ -519,6 +581,6 @@
   </div>
 </div>
 
-<script src="static/js/modules/nodes.js?v=1778600001"></script>
+<script src="static/js/modules/nodes.js?v=1778600003"></script>
 </body>
 </html>

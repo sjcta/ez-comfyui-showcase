@@ -1591,6 +1591,29 @@ select { cursor: pointer; }
   .dih-queue { display: none; }
 }
 
+/* ═══ Device Editor Modal ═══ */
+.de-modal{position:fixed;inset:0;z-index:1200;display:none;place-items:center;background:rgba(0,0,0,.65);backdrop-filter:blur(4px)}
+.de-modal.open{display:grid}
+.de-card{width:90vw;max-width:600px;max-height:85vh;background:var(--bg-card,#1a1a2e);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.de-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #333}
+.de-title{font-size:16px;font-weight:600;color:var(--text,#eee)}
+.de-close{background:none;border:none;font-size:18px;color:#888;cursor:pointer}
+.de-close:hover{color:#eee}
+.de-form{flex:1;overflow-y:auto;padding:0}
+.de-section{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+.de-section-title{font-size:13px;font-weight:600;color:var(--accent,#5b8def);margin-bottom:10px}
+.de-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.de-label{width:90px;flex-shrink:0;font-size:12px;color:var(--dim,#888);text-align:right}
+.de-input{flex:1;padding:7px 10px;border:1px solid var(--border,#333);border-radius:6px;background:rgba(255,255,255,.06);color:var(--text,#eee);font-size:13px;outline:none;font-family:inherit}
+.de-input:focus{border-color:#5b8def}
+.de-input-sm{max-width:100px}
+.de-input::placeholder{color:#555}
+.de-hint{font-size:11px;color:#666;padding:2px 0 0 100px;margin-top:-4px;margin-bottom:4px}
+.de-hint code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-size:11px}
+.de-inst-list{display:flex;flex-wrap:wrap;gap:6px}
+.de-inst-tag{background:rgba(91,141,239,.15);color:#5b8def;padding:3px 8px;border-radius:4px;font-size:11px;font-family:monospace}
+.de-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #333}
+
 /* ═══ Node Editor ═══ */
 .ne-modal{position:fixed;inset:0;z-index:1200;display:none;place-items:center;background:rgba(0,0,0,.65);backdrop-filter:blur(4px)}
 .ne-modal.open{display:grid}
