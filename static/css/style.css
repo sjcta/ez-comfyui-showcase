@@ -993,10 +993,10 @@ select { cursor: pointer; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
-.node-conn-tag { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 500; }
-.conn-local { background: #374151; color: #d1d5db; }
-.conn-ssh { background: rgba(59,130,246,.15); color: #60a5fa; }
-.conn-http { background: rgba(234,179,8,.15); color: #eab308; }
+.node-conn-tag { font-size: 11px; padding: 2px 10px; border-radius: 10px; font-weight: 600; border-width: 1.5px; border-style: solid; background: transparent; }
+.conn-local { border-color: #6b7280; color: #9ca3af; }
+.conn-ssh { border-color: #3b82f6; color: #60a5fa; }
+.conn-http { border-color: #eab308; color: #eab308; }
 .ne-field { margin-bottom: 6px; font-size: 12px; }
 #nodeEditModal .ne-field { display: flex; align-items: center; gap: 8px; }
 .ne-field label { width: 80px; flex-shrink: 0; color: var(--dim); text-align: right; }
