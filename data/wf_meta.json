@@ -1,1 +1,157 @@
-{}
+{
+  "i2i-Qwen-SeedVR2.json": {
+    "name": "i2i-Qwen-SeedVR2",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/i2i-Qwen-SeedVR2.json"
+  },
+  "nunchaku-z-image-turbo-high.json": {
+    "name": "nunchaku-z-image-turbo-high",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/nunchaku-z-image-turbo-high.json"
+  },
+  "nunchaku_T2I_4k.json": {
+    "name": "nunchaku_T2I_4k",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/nunchaku_T2I_4k.json"
+  },
+  "nunchaku-z-image-turbo-highSD.json": {
+    "name": "nunchaku-z-image-turbo-highSD",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/nunchaku-z-image-turbo-highSD.json"
+  },
+  "i2i_Qwen_Edit.json": {
+    "name": "i2i_Qwen_Edit",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/i2i_Qwen_Edit.json"
+  },
+  "t2i-z-image-seedvr4k.json": {
+    "name": "t2i-z-image-seedvr4k",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/t2i-z-image-seedvr4k.json"
+  },
+  "image_ernie_image.json": {
+    "name": "image_ernie_image",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/image_ernie_image.json"
+  },
+  "i2i-FireRed-Edit-1.1.json": {
+    "name": "i2i-FireRed-Edit-1.1",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/i2i-FireRed-Edit-1.1.json"
+  },
+  "i2i-Qwen-Rapid-seedVR2-4k.json": {
+    "name": "i2i-Qwen-Rapid-seedVR2-4k",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/ComfyUI/user/default/workflows/i2i-Qwen-Rapid-seedVR2-4k.json"
+  },
+  "i2i-FireRed-Edit-8step.json": {
+    "name": "i2i-FireRed-Edit-8step",
+    "tags": [
+      "图生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/i2i/i2i-FireRed-Edit-8step.json"
+  },
+  "i2i-Qwen-Edit-v2511.json": {
+    "name": "i2i-Qwen-Edit-v2511",
+    "tags": [
+      "图生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/i2i/i2i-Qwen-Edit-v2511.json"
+  },
+  "t2i-nunchaku-z-image-turbo-highSD.json": {
+    "name": "t2i-nunchaku-z-image-turbo-highSD",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i-nunchaku-z-image-turbo-highSD.json"
+  },
+  "t2i-z-image.json": {
+    "name": "t2i-z-image",
+    "tags": [
+      "文生图",
+      "2K",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i-z-image.json"
+  },
+  "t2i_Qwen_Image_2512_4steps.json": {
+    "name": "t2i_Qwen_Image_2512_4steps",
+    "tags": [
+      "文生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i_Qwen_Image_2512_4steps.json"
+  },
+  "t2i_nunchaku_seedvr4k.json": {
+    "name": "t2i_nunchaku_seedvr4k",
+    "tags": [
+      "文生图",
+      "2K",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/t2i/t2i_nunchaku_seedvr4k.json"
+  },
+  "SeedVR2_upscale_2k.json": {
+    "name": "SeedVR2_upscale_2k",
+    "tags": [
+      "图生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/upscale/SeedVR2_upscale_2k.json"
+  },
+  "SeedVR2_upscale_4k.json": {
+    "name": "SeedVR2_upscale_4k",
+    "tags": [
+      "图生图",
+      "DGXSpark"
+    ],
+    "source": "DGX Spark",
+    "source_path": "/home/sjcta/software/ComfyUI-Project/workflow/api/upscale/SeedVR2_upscale_4k.json"
+  }
+}
