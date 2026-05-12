@@ -75,7 +75,9 @@
           var qVal = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
           html += '<span class="dih-col dih-queue">' + qVal + '</span>';
           html += '<span class="dih-col dih-actions">';
-          html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
+          if (inst.status !== 'offline' && inst.http_up) {
+            html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
+          }
           if (inst.status === 'running' || inst.status === 'idle') {
             html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
           } else {
@@ -418,7 +420,10 @@
       var actionsCell = row.querySelector('.dih-actions');
       if (actionsCell) {
         var instUrl = (nodeData.access && nodeData.access.url || 'http://' + nodeData.host + ':{port}').replace('{port}', inst.port);
-        var html = '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
+        var html = '';
+        if (inst.status !== 'offline' && inst.http_up) {
+          html += '<a class="wf-mgr-btn btn-open" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
+        }
         if (inst.status === 'running' || inst.status === 'idle') {
           html += '<button class="wf-mgr-btn btn-stop" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
         } else {
