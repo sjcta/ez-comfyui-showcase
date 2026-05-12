@@ -345,8 +345,8 @@
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || action + '失败');
 
-      // 乐观更新 DOM
-      var row = document.querySelector('.device-instance-row[data-iid="' + escA(iid) + '"]');
+      // 乐观更新 DOM（按设备卡片 + 实例行定位）
+      var row = document.querySelector('.device-card[data-nid="' + escA(nid) + '"] .device-instance-row[data-iid="' + escA(iid) + '"]');
       if (row) {
         var isStart = action === 'start';
         row.querySelector('.node-status-dot').className = 'node-status-dot' + (isStart ? ' dot-green dot-blink' : ' dot-red dot-blink');
