@@ -389,7 +389,7 @@
       if (!row) { loadNodes(); return; }
       // Update status dot
       var dotColors = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' };
-      var statusLabels = { running: '忙碌', idle: '待机', dead: '死机', offline: '没启动' };
+      var statusLabels = { running: '忙碌中', idle: '待机中', dead: '宕机', offline: '未启动' };
       var dot = row.querySelector('.node-status-dot');
       if (dot) {
         dot.className = 'node-status-dot ' + (dotColors[inst.status] || 'dot-gray');
