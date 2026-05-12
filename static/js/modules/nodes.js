@@ -51,7 +51,7 @@
       html += '<div class="device-card-meta">';
       html += '<span class="device-card-addr">' + escH(n.host || '') + (n.instances ? ' · ' + n.instances.length + ' 个实例' : '') + '</span>';
       if (n.connection === 'remote-ssh') {
-        html += '<button class="wf-mgr-btn" onclick="CW.showSshInfo(\'' + n.id + '\')" title="SSH 连接信息">🔑 SSH</button>';
+        html += '<button class="wf-mgr-btn" onclick="CW.showSshInfo(\'' + n.id + '\')" title="SSH 连接信息">' + CW.icon('settings') + ' SSH</button>';
       }
       html += '</div>';
       // Instances table
@@ -75,7 +75,7 @@
           var qVal = (inst.status === 'offline' || inst.status === 'dead') ? '-' : (inst.queue || 0);
           html += '<span class="dih-col dih-queue">' + qVal + '</span>';
           html += '<span class="dih-col dih-actions">';
-          html += '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">🔗 打开</a>';
+          html += '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
           if (inst.status === 'running' || inst.status === 'idle') {
             html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + n.id + '\',\'' + inst.id + '\')">■ 停止</button>';
           } else {
@@ -86,9 +86,9 @@
       }
       // Footer actions
       html += '<div class="device-card-footer">';
-      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">🔍 测连通</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.scanNode(\'' + n.id + '\')">🔎 扫端口</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.openDeviceEditor(\'' + n.id + '\')">✏️ 编辑</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">' + CW.icon('search') + ' 测连通</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.scanNode(\'' + n.id + '\')">' + CW.icon('sliders') + ' 扫端口</button>';
+      html += '<button class="wf-mgr-btn" onclick="CW.openDeviceEditor(\'' + n.id + '\')">' + CW.icon('pencil') + ' 编辑</button>';
       html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">🗑 删除</button>';
       html += '</div></div>';
     }
@@ -387,7 +387,7 @@
       var actionsCell = row.querySelector('.dih-actions');
       if (actionsCell) {
         var instUrl = (nodeData.access && nodeData.access.url || 'http://' + nodeData.host + ':{port}').replace('{port}', inst.port);
-        var html = '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">🔗 打开</a>';
+        var html = '<a class="wf-mgr-btn" href="' + escA(instUrl) + '" target="_blank" title="打开 ComfyUI">' + CW.icon('send') + ' 打开</a>';
         if (inst.status === 'running' || inst.status === 'idle') {
           html += '<button class="wf-mgr-btn" onclick="CW.stopInstance(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">■ 停止</button>';
         } else {
@@ -395,13 +395,7 @@
         }
         actionsCell.innerHTML = html;
       }
-      // Also update the device online/offline status in the header
-      // (the node-level status may have changed too)
-      var statusTag = card.querySelector('.device-status-tag');
-      if (statusTag) {
-        var sshOk = nodeData.ssh_ok || nodeData.http_up;
-        statusTag.innerHTML = (sshOk ? '🟢' : '🔴') + ' ' + (sshOk ? '在线' : '离线');
-      }
+
     } catch (e) {
       // Fall back to full refresh on error
       loadNodes();
@@ -427,8 +421,20 @@
   async function toggleDeviceConnection(nid, wasConnected) {
     var action = wasConnected ? 'disconnect' : 'connect';
     try {
-      await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/' + action, { method: 'POST' });
-      loadNodes();
+      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/' + action, { method: 'POST' });
+      var d = await r.json();
+      if (!d.ok) throw new Error(d.error || '操作失败');
+      // Local DOM update instead of full refresh
+      var card = document.querySelector('.device-card[data-nid="' + escA(nid) + '"]');
+      if (!card) { loadNodes(); return; }
+      var statusTag = card.querySelector('.device-status-tag');
+      if (statusTag) {
+        statusTag.innerHTML = wasConnected ? '⚪ 已断开' : '🟢 在线';
+      }
+      var toggleBtn = card.querySelector('.device-card-header button');
+      if (toggleBtn) {
+        toggleBtn.textContent = wasConnected ? '连接' : '断开';
+      }
     } catch (e) { alert('操作失败: ' + e.message); }
   }
 
