@@ -504,7 +504,8 @@ async function delHist(id) {
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
     if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
     try {
-      var r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
+      var authHeaders = window.CW.auth.getAuthHeaders();
+      var r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE', headers: Object.assign({}, authHeaders) });
       if (!r.ok) throw new Error('删除失败');
       var idx = historyItems.findIndex(function(h) { return h.id === id; });
       if (idx >= 0) historyItems.splice(idx, 1);
@@ -518,7 +519,8 @@ async function delHist(id) {
 
 async function loadHistory() {
     try {
-      const r = await fetch(`${API}/api/history?limit=200`);
+      var authHeaders = window.CW.auth.getAuthHeaders();
+      const r = await fetch(`${API}/api/history?limit=200`, { headers: Object.assign({}, authHeaders) });
       const d = await r.json();
       if (d.ok) {
         historyItems.length = 0;
@@ -589,7 +591,8 @@ function renderGallery() {
   // Data-only refresh (no gallery re-render)
   async function loadHistoryNoRender() {
     try {
-      const r = await fetch(`${API}/api/history?limit=200`);
+      var authHeaders = window.CW.auth.getAuthHeaders();
+      const r = await fetch(`${API}/api/history?limit=200`, { headers: Object.assign({}, authHeaders) });
       const d = await r.json();
       if (d.ok) {
         historyItems.length = 0;

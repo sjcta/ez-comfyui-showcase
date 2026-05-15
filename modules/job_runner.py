@@ -1,0 +1,692 @@
+"""
+modules/job_runner.py — 出图流程编排。
+
+Ez ComfyUI v4.0 重构。
+串联 instance_picker → instance_manager → step_calculator → ws_tracker，
+管理实例信号量、vLLM 启停、图片下载和历史记录。
+
+依赖: instance_picker, instance_manager, step_calculator, ws_tracker
+不依赖 app.py 的任何内容（所有外部引用通过构造参数注入）。
+"""
+
+import asyncio
+import glob
+import json
+import os
+import random
+import shutil
+import subprocess
+import time
+import urllib.request
+import uuid
+from datetime import datetime
+from typing import Any, Awaitable, Callable
+
+from modules.instance_manager import InstanceManager
+from modules.instance_picker import pick_best_instance
+from modules.step_calculator import StepCalculator
+from modules.ws_tracker import WSTracker, TrackResult
+
+
+class JobRunner:
+    """出图全流程编排器。
+
+    从队列拿到 job 后，串行调用所有下层模块完成一次出图。
+    通过依赖注入获取所有 app.py 级别的外部函数（broadcast/save_jobs/vllm 等）。
+
+    生命周期: 由 _queue_worker 协程创建并运行。
+    每个 job_id 对应一次 run() 调用。
+    """
+
+    def __init__(
+        self,
+        inst_mgr: InstanceManager,
+        jobs: dict,
+        history: list,
+        # ── App 级别外部函数注入 ─────────────────────────────────────
+        broadcast_fn: Callable[[dict], Awaitable[None]],
+        add_log_fn: Callable[[str, str, str, str], None],  # level, phase, msg, job_id
+        save_jobs_fn: Callable[[], None],
+        save_history_fn: Callable[[], None],
+        make_thumbnail_fn: Callable[[str], str | None],
+        get_image_size_fn: Callable[[str], tuple[int, int]],
+        # ── ComfyUI 通信函数 ─────────────────────────────────────────
+        comfyui_up_fn: Callable[[str], bool],                         # url -> bool
+        comfyui_get_fn: Callable[[str, str], dict | list],            # path, url -> json
+        download_images_fn: Callable[[str, str, str, str], list],     # sync: job_id, pid, url, dir -> files
+        # ── vLLM 管理函数 ────────────────────────────────────────────
+        vllm_running_fn: Callable[[], bool],
+        stop_vllm_fn: Callable[[], None],
+        start_vllm_fn: Callable[[], None],
+        # ── 实例操作函数 ─────────────────────────────────────────────
+        get_node_by_id_fn: Callable[[str], dict | None],
+        run_instance_action_fn: Callable[[dict, dict, str], bool],    # node, inst, action -> bool
+        # ── 实例状态容器 ─────────────────────────────────────────────
+        instance_semas: dict[str, asyncio.Semaphore],
+        instance_group: dict[str, str],
+        instance_last_active: dict[str, float],
+        # ── 路径常量 ─────────────────────────────────────────────────
+        output_dir: str = "",
+        history_dir: str = "",
+        # ── 实例列表 ─────────────────────────────────────────────────
+        get_enabled_instances_fn: Callable[[], list[dict]] | None = None,
+        insert_gen_fn: Callable | None = None,
+    ) -> None:
+        """初始化 JobRunner。
+
+        Args:
+            inst_mgr: InstanceManager 实例。
+            jobs: 共享的 jobs 字典引用。
+            history: 共享的 history 列表引用。
+            broadcast_fn: WebSocket 广播函数。
+            add_log_fn: 日志记录函数。
+            save_jobs_fn: 保存活跃 job 的函数。
+            save_history_fn: 保存历史记录的函数。
+            make_thumbnail_fn: 生成缩略图的函数。
+            get_image_size_fn: 获取图片尺寸的函数。
+            comfyui_up_fn: 检查 ComfyUI 是否在线的函数。
+            comfyui_get_fn: 向 ComfyUI 发送 GET 请求的函数。
+            download_images_fn: 下载远程 ComfyUI 输出图片的函数。
+            vllm_running_fn: 检查 vLLM 是否在运行的函数。
+            stop_vllm_fn: 停止 vLLM 的函数。
+            start_vllm_fn: 启动 vLLM 的函数。
+            get_node_by_id_fn: 按 ID 查找节点的函数。
+            run_instance_action_fn: 执行实例 action 的函数。
+            instance_semas: 实例级别的信号量字典。
+            instance_group: 实例模型组字典。
+            instance_last_active: 实例最后活跃时间字典。
+            output_dir: ComfyUI 输出目录。
+            history_dir: 历史图片目录。
+            get_enabled_instances_fn: 获取已启用实例列表的函数。
+        """
+        self._inst_mgr = inst_mgr
+        self._jobs = jobs
+        self._history = history
+        self._broadcast = broadcast_fn
+        self._add_log = add_log_fn
+        self._save_jobs = save_jobs_fn
+        self._save_history = save_history_fn
+        self._insert_gen = insert_gen_fn or (lambda r, e: None)
+        self._make_thumbnail = make_thumbnail_fn
+        self._get_image_size = get_image_size_fn
+        self._comfyui_up = comfyui_up_fn
+        self._comfyui_get = comfyui_get_fn
+        self._download_images = download_images_fn
+        self._vllm_running = vllm_running_fn
+        self._stop_vllm = stop_vllm_fn
+        self._start_vllm = start_vllm_fn
+        self._get_node_by_id = get_node_by_id_fn
+        self._run_instance_action = run_instance_action_fn
+        self._instance_semas = instance_semas
+        self._instance_group = instance_group
+        self._instance_last_active = instance_last_active
+        self._output_dir = output_dir
+        self._history_dir = history_dir
+        self._get_enabled_instances = get_enabled_instances_fn
+
+        # ── 运行态 ──────────────────────────────────────────────────
+        self._running_jobs: dict[str, asyncio.Task] = {}
+        self._step_calculator = StepCalculator()
+
+    # ── 主入口 ─────────────────────────────────────────────────────────
+
+    async def run(
+        self,
+        job_id: str,
+        workflow_path: str,
+        field_values: dict,
+        seed: int,
+        vllm_was_running: bool,
+        img_width: int = 0,
+        img_height: int = 0,
+        user_id: str = "",
+    ) -> None:
+        """执行一次完整的出图流程。
+
+        编排步骤:
+        1. 选择最佳实例
+        2. 如需则停止 vLLM
+        3. 实例冷启动
+        4. 获取实例信号量
+        5. StepCalculator 计算进度信息
+        6. WSTracker 追踪出图
+        7. 下载输出图片
+        8. 释放实例信号量
+        9. 标记实例活跃
+        10. 恢复 vLLM
+
+        Args:
+            job_id: 任务 ID。
+            workflow_path: 工作流 JSON 文件路径。
+            field_values: 字段值映射（nid::field → value）。
+            seed: 随机种子。
+            vllm_was_running: vLLM 是否正在运行（之后需恢复）。
+            img_width: 图片宽度提示。
+            img_height: 图片高度提示。
+            user_id: 用户 ID（用于权限）。
+        """
+        sem: asyncio.Semaphore | None = None
+        inst_held = False
+        instance: dict | None = None
+        inst_sem_key: str = ""
+        prompt_id = ""
+
+        try:
+            workflow_name = os.path.basename(workflow_path)
+            self._jobs[job_id]["status"] = "dispatching"
+            self._jobs[job_id]["last_update"] = time.time()
+            self._jobs[job_id]["message"] = "排队等待..."
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            # ── Phase 1: 选择最佳实例 ──────────────────────────────
+            instances = self._get_enabled_instances() if self._get_enabled_instances else []
+            if not instances:
+                # 降级：从 inst_mgr 获取
+                pass
+
+            def _affinity_getter(wf_name: str) -> str:
+                from modules.config import ModelGroup
+                return ""
+
+            def _health_check(inst: dict) -> bool:
+                try:
+                    return self._comfyui_up(inst.get("url", ""))
+                except Exception:
+                    return True  # 乐观假设
+
+            def _queue_size(inst: dict) -> int:
+                try:
+                    q = self._comfyui_get("/queue", inst.get("url", ""))
+                    if isinstance(q, dict):
+                        running = len(q.get("queue_running", []))
+                        pending = len(q.get("queue_pending", []))
+                        return running + pending
+                    return 999
+                except Exception:
+                    return 999
+
+            def _group_getter(inst_name: str) -> str:
+                return self._instance_group.get(inst_name, "")
+
+            instance = await pick_best_instance(
+                instances=instances,
+                workflow_name=workflow_name,
+                affinity_getter=_affinity_getter,
+                health_check=_health_check,
+                queue_size_getter=_queue_size,
+                group_getter=_group_getter,
+            )
+
+            if not instance:
+                raise RuntimeError("没有可用实例")
+
+            # ── 获取实例信号量 ─────────────────────────────────────
+            inst_sem_key = instance.get("name") or instance.get("id", "")
+            sem = self._instance_semas.get(
+                inst_sem_key,
+                self._instance_semas.get(instance.get("id", ""), asyncio.Semaphore(1)),
+            )
+
+            self._jobs[job_id]["message"] = f"匹配实例 {instance['name']}..."
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            # ── Phase 2: 停止 vLLM（如需） ─────────────────────────
+            if vllm_was_running:
+                self._jobs[job_id]["message"] = "停止 vLLM 释放显存..."
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+                self._stop_vllm()
+                await asyncio.sleep(2)
+
+            # ── Phase 3: 实例冷启动 ────────────────────────────────
+            self._jobs[job_id]["status"] = "starting_comfyui"
+            self._jobs[job_id]["message"] = f"启动 ComfyUI #{instance['name']}..."
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            try:
+                await self._inst_mgr.ensure_running(instance, timeout=300)
+            except (TimeoutError, Exception) as e:
+                self._add_log("warn", "coldstart", f"冷启动失败: {e}", job_id)
+                # 兜底：直接使用 app 级别的启动方法
+                node = self._get_node_by_id(instance.get("_node_id", ""))
+                if node:
+                    self._run_instance_action(node, instance, "start")
+                else:
+                    svc_name = f"comfyui-{instance['name'].lower()}"
+                    subprocess.run(
+                        ["systemctl", "--user", "start", svc_name],
+                        capture_output=True, timeout=5,
+                        env={
+                            **os.environ,
+                            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                            "XDG_RUNTIME_DIR": "/run/user/1000",
+                        },
+                    )
+                for _ in range(90):
+                    await asyncio.sleep(2)
+                    if self._comfyui_up(instance["url"]):
+                        break
+                else:
+                    raise TimeoutError(f"ComfyUI #{instance['name']} 启动超时 (180s)")
+
+            # ── Phase 4: 等待实例信号量 ────────────────────────────
+            self._jobs[job_id]["status"] = "queued"
+            self._jobs[job_id]["last_update"] = time.time()
+            self._jobs[job_id]["message"] = f"排队等待 {instance['name']}..."
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            try:
+                await asyncio.wait_for(sem.acquire(), timeout=600)
+                inst_held = True
+                self._jobs[job_id]["sem_acquired"] = True
+            except asyncio.TimeoutError:
+                if job_id in self._jobs:
+                    self._jobs[job_id]["status"] = "error"
+                    self._jobs[job_id]["message"] = "排队超时（实例繁忙，10分钟未释放）"
+                    await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+                    self._save_jobs()
+                return
+
+            self._jobs[job_id]["status"] = "preparing"
+            self._jobs[job_id]["message"] = f"实例 {instance['name']} 就绪，开始出图"
+            self._jobs[job_id]["instance"] = instance["name"]
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            # ── Phase 5: 加载并准备 workflow ───────────────────────
+            self._jobs[job_id]["status"] = "preparing"
+            self._jobs[job_id]["message"] = "准备 workflow..."
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            with open(workflow_path, "r") as f:
+                wf = json.load(f)
+
+            # 注入字段值
+            for key, val in field_values.items():
+                if "::" not in key:
+                    continue
+                nid, field = key.split("::", 1)
+                if nid in wf and "inputs" in wf[nid]:
+                    wf[nid]["inputs"][field] = val
+
+            # 注入种子
+            for nid, v in wf.items():
+                if isinstance(v, dict) and v.get("class_type") == "KSampler":
+                    if "seed" in v.get("inputs", {}):
+                        v["inputs"]["seed"] = seed
+
+            # ── 记录实例模型组 ─────────────────────────────────────
+            from modules.config import ModelGroup
+            self._instance_group[instance["name"]] = ModelGroup.extract_model_group(workflow_name)
+
+            # ── Step 5: 计算进度信息 ───────────────────────────────
+            step_info = self._step_calculator.calculate(wf)
+
+            # ── 构建 node_types ────────────────────────────────────
+            node_types: dict[str, str] = {}
+            for nid, v in wf.items():
+                if isinstance(v, dict) and "class_type" in v:
+                    node_types[str(nid)] = v["class_type"]
+
+            # ── Phase 6: WS 追踪出图 ───────────────────────────────
+            self._add_log("info", "generate", "Starting generation", job_id)
+            self._jobs[job_id]["status"] = "generating"
+            self._jobs[job_id]["message"] = "出图中..."
+            self._jobs[job_id]["generating_at"] = time.time()
+            self._save_jobs()
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            ws_ok = False
+            elapsed_start = time.time()
+
+            # 创建 progress callback
+            async def _progress_callback(progress: dict) -> None:
+                if job_id not in self._jobs:
+                    return
+                pct = progress.get("pct", 0)
+                msg = progress.get("message", "")
+                pid = progress.get("prompt_id", "")
+                self._jobs[job_id]["message"] = msg
+                self._jobs[job_id]["progress"] = {"pct": int(pct)}
+                self._jobs[job_id]["last_update"] = time.time()
+                if pid:
+                    self._jobs[job_id]["prompt_id"] = pid
+                self._save_jobs()
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            tracker = WSTracker(
+                job_id=job_id,
+                workflow=wf,
+                step_info=step_info,
+                instance_url=instance["url"],
+                node_types=node_types,
+                progress_callback=_progress_callback,
+                log_callback=self._add_log,
+            )
+
+            try:
+                result: TrackResult = await tracker.track(timeout=900)
+                ws_ok = result.ok
+                prompt_id = result.prompt_id
+                if prompt_id:
+                    self._jobs[job_id]["prompt_id"] = prompt_id
+            except Exception as _ws_err:
+                self._add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
+                self._jobs[job_id]["ws_error"] = str(_ws_err)[:300]
+
+            # ── WS 失败时 HTTP polling 兜底 ────────────────────────
+            if not ws_ok and prompt_id:
+                for _ in range(60):
+                    await asyncio.sleep(5)
+                    try:
+                        check = self._comfyui_get(
+                            f"/history/{prompt_id}",
+                            instance["url"],
+                        )
+                        if isinstance(check, dict) and prompt_id in check:
+                            st = check[prompt_id].get("status", {})
+                            if st.get("completed", False):
+                                ws_ok = True
+                                break
+                            if st.get("status_str") == "error":
+                                raise RuntimeError("ComfyUI 执行出错")
+                        q = self._comfyui_get("/queue", instance["url"])
+                        running_ids = []
+                        if isinstance(q, dict):
+                            running_ids = [
+                                item[1] if isinstance(item, list) and len(item) > 1 else None
+                                for item in q.get("queue_running", [])
+                            ]
+                        if prompt_id not in running_ids and (
+                            not isinstance(check, dict) or prompt_id not in check
+                        ):
+                            break
+                    except RuntimeError:
+                        raise
+                    except Exception:
+                        pass
+
+            elapsed = time.time() - elapsed_start
+
+            # ── Phase 7: 下载输出图片_ (由 _save_output 负责下载) ─────
+            if prompt_id:
+                self._jobs[job_id]["status"] = "downloading"
+                self._jobs[job_id]["message"] = "正在拉取图片..."
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            if job_id not in self._jobs:
+                return
+
+            if not ws_ok:
+                extra = self._jobs[job_id].get("ws_error", "")
+                raise TimeoutError(
+                    f"出图失败{' (' + extra[:100] + ')' if extra else ''}"
+                )
+
+            # ── Phase 8: 保存历史记录（带 120s 超时） ────────────────
+            try:
+                await asyncio.wait_for(
+                    self._save_output(
+                        job_id=job_id,
+                        prompt_id=prompt_id,
+                        instance=instance,
+                        workflow_path=workflow_path,
+                        field_values=field_values,
+                        seed=seed,
+                        elapsed=elapsed,
+                        img_width=img_width,
+                        img_height=img_height,
+                        user_id=user_id,
+                    ),
+                    timeout=120,
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError("保存历史超时")
+
+        except Exception as e:
+            import traceback
+            if job_id in self._jobs and self._jobs[job_id].get("status") not in ("done",):
+                self._jobs[job_id]["status"] = "error"
+                self._jobs[job_id]["trace"] = traceback.format_exc()[:500]
+                if isinstance(e, TimeoutError):
+                    self._jobs[job_id]["message"] = "出图失败"
+                else:
+                    self._jobs[job_id]["message"] = str(e)[:200]
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+                self._save_jobs()
+
+        finally:
+            if inst_held and sem:
+                if job_id in self._jobs:
+                    self._jobs[job_id]["sem_acquired"] = False
+                sem.release()
+            if instance:
+                self._instance_last_active[instance["name"]] = time.time()
+            self._save_jobs()
+            if vllm_was_running:
+                self._start_vllm()
+
+    # ── 取消 ────────────────────────────────────────────────────────────
+
+    async def cancel(self, job_id: str) -> bool:
+        """取消指定 job。
+
+        流程:
+        1. POST /interrupt 通知 ComfyUI
+        2. 取消运行中的 task
+        3. 释放信号量
+        4. 删除 jobs 条目
+
+        Args:
+            job_id: 要取消的 job ID。
+
+        Returns:
+            True 表示取消成功。
+        """
+        if job_id not in self._jobs:
+            return False
+
+        job = self._jobs[job_id]
+        if job.get("status") == "generating":
+            # 获取实例 URL 发送 interrupt
+            inst_name = job.get("instance", "")
+            if inst_name:
+                instances = self._get_enabled_instances() if self._get_enabled_instances else []
+                for inst in instances:
+                    if inst["name"] == inst_name:
+                        try:
+                            import urllib.request, urllib.error
+                            req = urllib.request.Request(
+                                f"{inst['url'].rstrip('/')}/interrupt",
+                                data=b"{}",
+                                headers={"Content-Type": "application/json"},
+                            )
+                            urllib.request.urlopen(req, timeout=5)
+                        except Exception:
+                            pass
+                        break
+
+        # 释放信号量
+        inst_name = job.get("instance", "")
+        if inst_name and inst_name in self._instance_semas:
+            sem = self._instance_semas[inst_name]
+            try:
+                sem.release()
+            except ValueError:
+                pass
+
+        del self._jobs[job_id]
+        self._save_jobs()
+        await self._broadcast({"type": "job_cancelled", "job_id": job_id})
+        return True
+
+    # ── 重试 ────────────────────────────────────────────────────────────
+
+    def retry(self, job_id: str) -> str | None:
+        """重试失败 job。
+
+        继承原 job 的参数，生成新 seed 和新 job_id。
+
+        Args:
+            job_id: 要重试的 job ID。
+
+        Returns:
+            新 job_id，或 None（原 job 不存在/状态不是 error）。
+        """
+        if job_id not in self._jobs:
+            return None
+        old = self._jobs[job_id]
+        if old["status"] not in ("error",):
+            return None
+
+        wf = old.get("workflow", "")
+        fields = old.get("fields", {})
+        new_seed = random.randint(0, 2 ** 63)
+        width = old.get("width", 0)
+        height = old.get("height", 0)
+
+        new_id = f"job_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+
+        prompt_preview = ""
+        for k, v in fields.items():
+            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
+                prompt_preview = str(v)[:200]
+                break
+
+        new_vllm_was = self._vllm_running()
+
+        self._jobs[new_id] = {
+            "id": new_id,
+            "status": "queued",
+            "message": "排队中...",
+            "workflow": wf,
+            "seed": str(new_seed),
+            "prompt_preview": prompt_preview,
+            "width": width,
+            "height": height,
+            "fields": fields,
+            "queued_at": datetime.now().strftime("%H:%M:%S"),
+        }
+        return new_id
+
+    # ── 输出保存 ────────────────────────────────────────────────────────
+
+    async def _save_output(
+        self,
+        job_id: str,
+        prompt_id: str,
+        instance: dict,
+        workflow_path: str,
+        field_values: dict,
+        seed: int,
+        elapsed: float,
+        img_width: int,
+        img_height: int,
+        user_id: str,
+    ) -> None:
+        """保存出图输出到历史记录。
+
+        Args:
+            job_id: 任务 ID。
+            prompt_id: ComfyUI prompt_id。
+            instance: 实例字典。
+            workflow_path: 工作流文件路径。
+            field_values: 字段值映射。
+            seed: 种子。
+            elapsed: 耗时秒数。
+            img_width: 图片宽度。
+            img_height: 图片高度。
+            user_id: 用户 ID。
+        """
+        inst_url = instance["url"]
+        inst_output = self._output_dir
+
+        if not prompt_id and job_id in self._jobs:
+            prompt_id = self._jobs[job_id].get("prompt_id", "") or ""
+
+        hist = None
+        filename = None
+        for _wait in range(30):
+            hist = self._comfyui_get(f"/history/{prompt_id}", inst_url)
+            if isinstance(hist, dict) and prompt_id in hist:
+                for node_out in hist[prompt_id].get("outputs", {}).values():
+                    for img in node_out.get("images", []):
+                        filename = img["filename"]
+                        break
+                    if filename:
+                        break
+                if filename:
+                    break
+            import time as _t
+            _t.sleep(1)
+
+        if not filename:
+            raise RuntimeError(f"未找到输出图片 (prompt={prompt_id[:12]})")
+
+        await asyncio.to_thread(self._download_images, job_id, prompt_id, inst_url, self._output_dir)
+
+        src = os.path.join(self._output_dir, filename)
+        if not os.path.isfile(src):
+            for root, _dirs, files in os.walk(self._output_dir):
+                if filename in files:
+                    src = os.path.join(root, filename)
+                    break
+
+        if not os.path.isfile(src):
+            raise RuntimeError(f"输出图片未找到: {filename}")
+
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        owner = user_id or "anonymous"
+        subdir = f"{owner}/{date_str}"
+        wf_basename = os.path.basename(workflow_path).replace(".json", "")
+        existing = glob.glob(os.path.join(self._output_dir, subdir, f"{wf_basename}_*.png"))
+        seq = 1
+        for p in existing:
+            import re
+            m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.png$", os.path.basename(p))
+            if m:
+                seq = max(seq, int(m.group(1)) + 1)
+        hist_name = f"{wf_basename}_{seq:04d}.png"
+        rel_path = f"{subdir}/{hist_name}"
+        dst = os.path.join(self._output_dir, rel_path)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+
+        actual_w, actual_h = self._get_image_size(rel_path)
+
+        prompt_text = ""
+        for k, v in field_values.items():
+            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
+                prompt_text = str(v)
+                break
+
+        record = {
+            "id": job_id,
+            "filename": rel_path,
+            "original": filename,
+            "workflow": os.path.basename(workflow_path),
+            "prompt": prompt_text,
+            "seed": str(seed),
+            "width": actual_w or img_width,
+            "height": actual_h or img_height,
+            "elapsed": round(elapsed, 1),
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "thumb": self._make_thumbnail(rel_path) or "",
+            "field_values": field_values,
+            "user_id": user_id or "",
+            "is_public": False,
+        }
+        self._history.insert(0, record)
+        self._save_history()
+        # 同步写入 SQLite
+        try:
+            self._insert_gen(record, round(elapsed, 1), user_id=user_id or "")
+        except Exception:
+            pass
+
+        if job_id in self._jobs:
+            self._jobs[job_id].update(
+                status="done",
+                message=f"完成 ({elapsed:.1f}s)",
+                image=rel_path,
+                elapsed=round(elapsed, 1),
+            )
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})

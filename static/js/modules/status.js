@@ -39,15 +39,12 @@ function updateServices(d) {
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
       else comfyState.textContent = '待机(' + upCount + ')';
     }
-    var othersBtn = document.querySelector('#svcOthers');
-    var othersState = document.querySelector('#othersState');
-    if (othersBtn) othersBtn.className = 'svc-btn ' + (d.vllm ? 'on' : 'off');
-    if (othersState) othersState.textContent = d.vllm ? 'vLLM' : '-';
   }
 
 function updateGPU(g) {
     if (!g) return;
     const fill = $('#vramFill');
+    if (!fill) return;
     const pct = g.vram_pct || 0;
     const temp = g.temp_c || 0;
     fill.style.width = pct + '%';
@@ -58,11 +55,17 @@ function updateGPU(g) {
     // Also tint the entire statusbar
     const bar = $('#statusbar');
     if (bar) bar.dataset.state = isOverload ? 'overload' : isBusy ? 'busy' : 'idle';
-    $('#vramText').textContent =
-      `${(g.vram_used_mb / 1024).toFixed(1)} / ${(g.vram_total_mb / 1024).toFixed(0)} GB (${pct}%)`;
-    $('#gpuTemp').textContent = `${temp} °C`;
-    $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
-    if (!$('#vramSegments').dataset.done) {
+    var used = Number(g.vram_used_mb || 0);
+    var total = Number(g.vram_total_mb || 0);
+    var vramText = $('#vramText');
+    if (vramText) {
+      vramText.textContent = total > 0
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%)`
+        : '未获取到 VRAM';
+    }
+    if ($('#gpuTemp')) $('#gpuTemp').textContent = `${temp} °C`;
+    if ($('#gpuUtil')) $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
+    if ($('#vramSegments') && !$('#vramSegments').dataset.done) {
       [25, 50, 75].forEach((pct) => {
         const seg = document.createElement('div');
         seg.className = 'sb-vram-seg';
@@ -267,11 +270,6 @@ function initServiceToggles() {
     if (comfyBtn)
       comfyBtn.addEventListener('click', function () {
         openInstPopup('comfyui');
-      });
-    var othersBtn = $('#svcOthers');
-    if (othersBtn)
-      othersBtn.addEventListener('click', function () {
-        openInstPopup('others');
       });
   }
 

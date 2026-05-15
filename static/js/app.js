@@ -3,6 +3,8 @@
  */
 (function () {
   'use strict';
+  try {
+  console.log('[BOOT] app.js IIFE started');
 
   // ── Mobile viewport height fix (100vh includes address bar on iOS) ──
   function setVH() {
@@ -45,17 +47,22 @@
     return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
   // ── Expose shared state for modules ──
+  console.log('[BOOT] before __APP__');
   window.__APP__ = { $, $$, escH, escA, API, jobs, jobFields, historyItems };
+  console.log('[BOOT] after __APP__');
+  console.log('[BOOT] currentWF before def:', typeof currentWF);
   // Expose currentWF via getter/setter so other IIFE modules can read/write it
   Object.defineProperty(window.__APP__, 'currentWF', {
     get: () => currentWF,
     set: (v) => { currentWF = v; }
   });
+  console.log('[BOOT] currentWF after def');
   // Expose advOpen via getter/setter (used by ui.js)
   Object.defineProperty(window.__APP__, 'advOpen', {
     get: () => advOpen,
     set: (v) => { advOpen = v; }
   });
+  console.log('[BOOT] defineProperties done');
 
   function shortSeed(s) {
     if (!s) return '—';
@@ -133,15 +140,12 @@
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
       else comfyState.textContent = '待机(' + upCount + ')';
     }
-    var othersBtn = document.querySelector('#svcOthers');
-    var othersState = document.querySelector('#othersState');
-    if (othersBtn) othersBtn.className = 'svc-btn ' + (d.vllm ? 'on' : 'off');
-    if (othersState) othersState.textContent = d.vllm ? 'vLLM' : '-';
   }
 
   function updateGPU(g) {
     if (!g) return;
     const fill = $('#vramFill');
+    if (!fill) return;
     const pct = g.vram_pct || 0;
     const temp = g.temp_c || 0;
     fill.style.width = pct + '%';
@@ -152,11 +156,16 @@
     // Also tint the entire statusbar
     const bar = $('#statusbar');
     if (bar) bar.dataset.state = isOverload ? 'overload' : isBusy ? 'busy' : 'idle';
-    $('#vramText').textContent =
-      `${(g.vram_used_mb / 1024).toFixed(1)} / ${(g.vram_total_mb / 1024).toFixed(0)} GB (${pct}%)`;
-    $('#gpuTemp').textContent = `${temp} °C`;
-    $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
-    if (!$('#vramSegments').dataset.done) {
+    var used = Number(g.vram_used_mb || 0);
+    var total = Number(g.vram_total_mb || 0);
+    if ($('#vramText')) {
+      $('#vramText').textContent = total > 0
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%)`
+        : '未获取到 VRAM';
+    }
+    if ($('#gpuTemp')) $('#gpuTemp').textContent = `${temp} °C`;
+    if ($('#gpuUtil')) $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
+    if ($('#vramSegments') && !$('#vramSegments').dataset.done) {
       [25, 50, 75].forEach((pct) => {
         const seg = document.createElement('div');
         seg.className = 'sb-vram-seg';
@@ -360,11 +369,6 @@
       comfyBtn.addEventListener('click', function () {
         openInstPopup('comfyui');
       });
-    var othersBtn = $('#svcOthers');
-    if (othersBtn)
-      othersBtn.addEventListener('click', function () {
-        openInstPopup('others');
-      });
   }
   // ══════════════════════════════════════════════════════════════════════════
   //  Workflows
@@ -392,6 +396,7 @@
   
 
   // initDropZone removed — upload card is built into loadWorkflows
+  console.log("[BOOT] mid-1");
 
   
 
@@ -418,15 +423,16 @@
   // ══════════════════════════════════════════════════════════════════════════
 
   async function pollJobs() {
+  console.log("[BOOT] pollJobs");
     try {
-      const r = await fetch(`${API}/api/jobs`);
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs`);
       const arr = await r.json();
       const prevCount = Object.keys(jobs).length;
       // Client-side safety: cancel jobs stuck in generating for >700s
       const now = Date.now() / 1000;
       for (const j of arr) {
         if (j.status === 'generating' && j.generating_at && now - j.generating_at > 700) {
-          fetch(`${API}/api/jobs/${j.id}`, { method: 'DELETE' });
+          window.CW.auth.apiFetch(`${API}/api/jobs/${j.id}`, { method: 'DELETE' });
         }
       }
       let changed = false;
@@ -519,7 +525,7 @@
     if (downloading.length > 0) {
       // Refresh from server to pick up status changes
       try {
-        const r = await fetch(API + '/api/jobs');
+        const r = await window.CW.auth.apiFetch(API + '/api/jobs');
         const serverJobs = await r.json();
         for (const sj of serverJobs) {
           const prev = jobs[sj.id];
@@ -536,7 +542,7 @@
   async function _pollActiveJobs() {
     if (!_hasActiveJobs()) { _pollTimer = null; return; }
     try {
-      const r = await fetch(API + '/api/jobs');
+      const r = await window.CW.auth.apiFetch(API + '/api/jobs');
       const serverJobList = await r.json(); const serverJobs = {}; for (const j of serverJobList) serverJobs[j.id] = j;
       // serverJobs is a dict {id: job_obj}
       let needRerender = false;
@@ -597,6 +603,7 @@
   };
 
   // Also: onJobUpdate needs to force re-render when downloading → done (image swap)
+  if (!window.CW) window.CW = {};
   const _origOnJobUpdate2 = window.CW.onJobUpdate;
   // (already handled by the done + image branch in _origOnJobUpdate)
 
@@ -640,7 +647,7 @@
     var label = j.status === 'generating' ? '终止本次出图？' : '删除这张卡片？';
     if (!confirm(label)) return;
     try {
-      await fetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
+      await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
       delete jobs[jobId];
       window.CW.renderGallery();
     } catch (e) {
@@ -650,7 +657,7 @@
 
   async function retryJob(jobId) {
     try {
-      const r = await fetch(`${API}/api/jobs/${jobId}/retry`, { method: 'POST' });
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/retry`, { method: 'POST' });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         alert('重试失败: ' + (d.detail || r.status));
@@ -703,6 +710,7 @@
 
 
 function init() {
+  console.log("[BOOT] init function");
     pollStatus();
     setInterval(pollStatus, 5000);
     setInterval(() => {
@@ -722,26 +730,26 @@ function init() {
     if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
   // Clear button clears prompt and focuses input
   // (always visible — toggled in HTML)
-  $('#btnGenerate').addEventListener('click', function() { if (window.CW.doGenerate) window.CW.doGenerate(); });
-    $('#lightbox').addEventListener('click', (e) => {
+  (()=>{var el=$('#btnGenerate');if(el)el.addEventListener('click',function(){if(window.CW.doGenerate)window.CW.doGenerate();});})();
+    ($('#lightbox')||{})['addEventListener']('click', (e) => {
       if (e.target === $('#lightbox') || e.target === $('#lbImg')) { if (window.CW.closeLB) window.CW.closeLB(); }
     });
     // Workflow management overlay
-    $('#tbWfMgrBtn').addEventListener('click', function() { if (window.CW.openWfMgr) window.CW.openWfMgr(); });
-    $('#wfOverlayClose').addEventListener('click', function() { if (window.CW.closeWfMgr) window.CW.closeWfMgr(); });
-    $('#wfEditClose').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
-    $('#wfEditTagInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && window.CW.onAddWfTag) { window.CW.onAddWfTag(e.target.value); e.target.value = ''; } });
-    $('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
-    $('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });
-    $('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });
-    $('#wfEditThumbInput').addEventListener('change', function() { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(); });
+    try{$('#tbWfMgrBtn').addEventListener('click', function() { if (window.CW.openWfMgr) window.CW.openWfMgr(); });}catch(e){}
+    try{$('#wfOverlayClose').addEventListener('click', function() { if (window.CW.closeWfMgr) window.CW.closeWfMgr(); });}catch(e){}
+    try{$('#wfEditClose').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });}catch(e){}
+    try{$('#wfEditTagInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && window.CW.onAddWfTag) { window.CW.onAddWfTag(e.target.value); e.target.value = ''; } });}catch(e){}
+    try{$('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });}catch(e){}
+    try{$('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });}catch(e){}
+    try{$('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });}catch(e){}
+    try{$('#wfEditThumbInput').addEventListener('change', function() { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(); });}catch(e){}
 
-    $('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });
-    $('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });
-    $('#nodeEditorClose').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
-    $('#nodeEditorCancel').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
-    $('#nodeEditorSave').addEventListener('click', function() { if (window.CW.saveNodeConfig) window.CW.saveNodeConfig(); });
-    $('#nodeEditorReset').addEventListener('click', function() { if (window.CW.resetNodeConfig) window.CW.resetNodeConfig(); });
+    try{$('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });}catch(e){}
+    try{$('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });}catch(e){}
+    try{$('#nodeEditorClose').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });}catch(e){}
+    try{$('#nodeEditorCancel').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });}catch(e){}
+    try{$('#nodeEditorSave').addEventListener('click', function() { if (window.CW.saveNodeConfig) window.CW.saveNodeConfig(); });}catch(e){}
+    try{$('#nodeEditorReset').addEventListener('click', function() { if (window.CW.resetNodeConfig) window.CW.resetNodeConfig(); });}catch(e){}
   }
 
   // ── Workflow Management ──
@@ -840,7 +848,13 @@ function init() {
 
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
+  console.log('[BOOT] before init, window.CW=', typeof window.CW);
   if (!window.CW) window.CW = {};
+  console.log('[BOOT] after window.CW init');
+  // DEBUG: verify function exists before Object.assign
+  console.log('[DEBUG] getWFType exists:', typeof getWFType !== 'undefined');
+  console.log('[DEBUG] cancelJob exists:', typeof cancelJob !== 'undefined');
+  console.log('[DEBUG] window.CW keys:', Object.keys(window.CW).length);
   window.CW._logEntries = [];
   window.CW._onLog = function(entry) {
     window.CW._logEntries.push(entry);
@@ -860,8 +874,8 @@ function init() {
   window.CW.toggleLog = function() {
     var panel = document.getElementById('logPanel');
     if (!panel) return;
-    if (panel.style.display === 'none') {
-      panel.style.display = 'flex';
+    if (!panel.classList.contains('open')) {
+      panel.classList.add('open');
       fetch(API + '/api/logs').then(function(r) { return r.json(); }).then(function(entries) {
         window.CW._logEntries = entries;
         var body = document.getElementById('logBody');
@@ -871,13 +885,14 @@ function init() {
         }
       }).catch(function(e) {});
     } else {
-      panel.style.display = 'none';
+      panel.classList.remove('open');
     }
   };
   window.CW.closeLog = function() {
     var panel = document.getElementById('logPanel');
-    if (panel) panel.style.display = 'none';
+    if (panel) panel.classList.remove('open');
   };
+  console.log('[BOOT] before Object.assign');
   Object.assign(window.CW, {
     cancelJob,
     retryJob,
@@ -889,6 +904,13 @@ function init() {
     onJobUpdate,
   });
 
+  console.log('[BOOT] after Object.assign');
+  console.log('[BOOT] getWFType=', typeof getWFType);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
+  console.log('[BOOT] init called');
+} catch(e) {
+  console.error('[FATAL] app.js IIFE error:', e.message, e.stack);
+  throw e;
+}
 })();

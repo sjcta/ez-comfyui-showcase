@@ -67,6 +67,8 @@
   function renderNodes(nodes) {
     var cont = $('#deviceListContainer');
     if (!cont) return;
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    var isAdmin = !!(currentUser && currentUser.role === 'admin');
     if (!nodes || !nodes.length) {
       cont.innerHTML = '<div class="dim-tag">暂无设备，点击上方 "+ 添加设备" 开始</div>';
       return;
@@ -84,16 +86,17 @@
       statusIcon = connected ? (sshOk ? '🟢' : '🟡') : '⚪';
       statusText = connected ? (sshOk ? '在线' : '待机') : '已断开';
       html += '<div class="device-card-header">';
-      html += '<span class="device-card-title">🖥 ' + escH(n.name) + '</span>';
-      html += '<span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span>';
-      html += '<span class="device-status-tag">' + statusIcon + ' ' + statusText + '</span>';
-      html += '<button class="wf-mgr-btn' + (connected ? ' btn-stop' : ' btn-start') + '" onclick="CW.toggleDeviceConnection(\'' + n.id + '\',' + connected + ')">' + (connected ? '断开' : '连接') + '</button>';
+      html += '<span class="device-card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> ' + escH(n.name) + ' <span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span></span>';
+      html += '<button class="wf-mgr-btn device-status-toggle' + (connected ? ' btn-start' : ' btn-stop') + '" onclick="CW.toggleDeviceConnection(\'' + n.id + '\',' + connected + ')">' + (connected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> 已连接' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> 已断开') + '</button>';
       html += '</div>';
       // Address + SSH info
       html += '<div class="device-card-meta">';
       html += '<span class="device-card-addr">' + escH(n.host || '') + (n.instances ? ' · ' + n.instances.length + ' 个实例' : '') + '</span>';
+      if (isAdmin || n.shared) {
+        html += '<span class="device-card-addr">' + (n.shared ? '共享设备' : '私有设备') + '</span>';
+      }
       if (n.connection === 'remote-ssh') {
-        html += '<button class="wf-mgr-btn" onclick="CW.showSshInfo(\'' + n.id + '\')" title="SSH 连接信息">' + CW.icon('settings') + ' SSH</button>';
+      // SSH moved to footer
       }
       html += '</div>';
       // Instances table
@@ -113,10 +116,18 @@
       }
       // Footer actions
       html += '<div class="device-card-footer">';
-      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">' + CW.icon('search') + ' 测连通</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.scanNode(\'' + n.id + '\')">' + CW.icon('sliders') + ' 扫端口</button>';
-      html += '<button class="wf-mgr-btn" onclick="CW.openDeviceEditor(\'' + n.id + '\')">' + CW.icon('pencil') + ' 编辑</button>';
-      html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">🗑 删除</button>';
+      if (n.connection === 'remote-ssh') {
+        html += "<button class=\"wf-mgr-btn\" onclick='CW.showSshInfo(\"" + n.id + "\")' title=\"SSH 连接信息\">" + CW.icon('settings') + ' SSH</button>';
+      }
+      if (n.connection === 'remote-ssh') {
+      // SSH moved to footer
+      }
+      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">' + CW.icon('search') + ' 连通测试</button>';
+
+      if (n.can_manage) {
+        html += '<button class="wf-mgr-btn" onclick="CW.openDeviceEditor(\'' + n.id + '\')">' + CW.icon('pencil') + ' 编辑</button>';
+        html += '<button class="wf-mgr-btn danger" onclick="CW.deleteNode(\'' + n.id + '\')">' + CW.icon('trash-2') + ' 删除</button>';
+      }
       html += '</div></div>';
     }
     cont.innerHTML = html;
@@ -125,8 +136,8 @@
   // ─── 设备编辑器 ───
   function openDeviceEditor(nid) {
     var modal = $('#deviceEditModal');
-    var title = $('#deviceEditTitle');
-    var form = $('#deviceEditForm');
+    var title = document.getElementById('v4DeviceEditTitle');
+    var form = document.getElementById('v4DeviceEditForm');
     if (!modal || !form) return;
     title.textContent = nid ? '编辑设备' : '添加设备';
     form.dataset.nid = nid || '';
@@ -156,8 +167,10 @@
   }
 
   function fillDeviceForm(data) {
-    var f = $('#deviceEditForm');
+    var f = document.getElementById('v4DeviceEditForm');
     if (!f) return;
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    var isAdmin = !!(currentUser && currentUser.role === 'admin');
     setFormVal(f, 'name', data.name || '');
     setFormVal(f, 'host', data.host || '');
     setFormVal(f, 'connection', data.connection || 'remote-ssh');
@@ -172,8 +185,10 @@
     var scanRange = data.scan_ports && data.scan_ports.range;
     setFormVal(f, 'preset_ports', scanRange || '8190,8189');
     setFormVal(f, 'preset_wf_dirs', (data.workflow_dirs || []).join(','));
-    var instList = $('#deviceEditInstances');
-    var instSection = $('#devInstSection');
+    setFormVal(f, 'shared', !!data.shared);
+    if (f.elements.shared) f.elements.shared.disabled = !isAdmin;
+    var instList = document.getElementById('deviceEditInstances');
+    var instSection = document.getElementById('devInstSection');
     if (instSection && data.instances && data.instances.length) {
       instSection.style.display = '';
       if (instList) {
@@ -181,7 +196,7 @@
         for (var inst of data.instances) {
           var tag = document.createElement('span');
           tag.className = 'de-inst-tag';
-          tag.textContent = (inst.name || inst.id) + ':' + inst.port + ' [' + (inst.status || '?') + ']';
+          tag.textContent = (inst.name || inst.id) + ':' + inst.port;
           instList.appendChild(tag);
         }
       }
@@ -200,7 +215,7 @@
   }
 
   function onDevConnChange() {
-    var f = $('#deviceEditForm');
+    var f = document.getElementById('v4DeviceEditForm');
     if (!f) return;
     var conn = f.elements['connection'] && f.elements['connection'].value;
     var sshSec = $('#devSshSection');
@@ -208,7 +223,7 @@
   }
 
   function onDevSshAuthChange() {
-    var f = $('#deviceEditForm');
+    var f = document.getElementById('v4DeviceEditForm');
     if (!f) return;
     var auth = f.elements['ssh_auth'] && f.elements['ssh_auth'].value;
     var pwRow = $('#devSshPwRow');
@@ -219,7 +234,7 @@
 
   async function saveDevice() {
     var modal = $('#deviceEditModal');
-    var form = $('#deviceEditForm');
+    var form = document.getElementById('v4DeviceEditForm');
     if (!form) return;
     var nid = form.dataset.nid || '';
     var data = {};
@@ -265,6 +280,8 @@
       if (data.ssh_auth === 'password') data.ssh_config.password = data.ssh_password || '';
       else data.ssh_config.key_path = data.ssh_key_path || '';
     }
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    if (!(currentUser && currentUser.role === 'admin')) delete data.shared;
     // Parse workflow_dirs from comma-separated field
     if (data.preset_wf_dirs) {
       data.workflow_dirs = data.preset_wf_dirs.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
@@ -291,17 +308,88 @@
   }
 
   // ─── 操作 ───
+  function _showToast(msg, duration) {
+    var el = $('#deviceToast');
+    if (!el) { alert(msg); return; }
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, duration || 10000);
+  }
+
+
   async function testNode(nid) {
     try {
       var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/test', { method: 'POST' });
       var d = await r.json();
-      var msg = d.data ? [
-        'HTTP: ' + (d.data.http ? '✅' : '❌'),
-        'SSH: ' + (d.data.ssh ? '✅' : '❌'),
-        'systemd: ' + (d.data.systemd ? '✅' : '❌'),
-      ].join('\n') : '测试完成';
-      alert(msg);
-    } catch (e) { alert('测试失败: ' + e.message); }
+      // Build rich HTML for the test result modal
+      var contentEl = $('#testResultContent');
+      var modalEl = $('#testResultModal');
+      if (!contentEl || !modalEl) {
+        _showToast('测试结果弹窗未找到');
+        return;
+      }
+      if (!d.ok) {
+        contentEl.innerHTML = '<div style="color:var(--red);font-weight:600">❌ 测试失败: ' + escH(d.error || '未知错误') + '</div>';
+        modalEl.style.display = ''; modalEl.classList.add('open');
+        return;
+      }
+      var data = d.data || {};
+      var html = '<div style="display:flex;flex-direction:column;gap:8px">';
+      // Overall status row
+      var allOk = data.http && data.ssh && data.systemd;
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;background:' + (allOk ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)') + ';border:1px solid ' + (allOk ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)') + '">';
+      html += '<span style="font-size:18px">' + (allOk ? '✅' : '⚠️') + '</span>';
+      html += '<span style="font-weight:700;font-size:14px;color:' + (allOk ? 'var(--green)' : 'var(--red)') + '">' + (allOk ? '全部服务正常' : '部分服务异常') + '</span>';
+      html += '</div>';
+      // Detail checks
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
+      var checks = [
+        { label: 'HTTP 服务', ok: data.http, detail: data.http_detail || '' },
+        { label: 'SSH 连接', ok: data.ssh, detail: data.ssh_detail || '' },
+        { label: 'systemd', ok: data.systemd, detail: data.systemd_detail || '' },
+      ];
+      for (var ci = 0; ci < checks.length; ci++) {
+        var c = checks[ci];
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;background:var(--bg-deep);border:1px solid var(--border)">';
+        html += '<span>' + (c.ok ? '✅' : '❌') + '</span>';
+        html += '<div><div style="font-weight:600;font-size:12px;color:var(--text)">' + escH(c.label) + '</div>';
+        if (c.detail) html += '<div style="font-size:10px;color:var(--dim);margin-top:2px">' + escH(c.detail) + '</div>';
+        html += '</div></div>';
+      }
+      html += '</div>';
+      // Instance statuses (if any)
+      if (data.instances && data.instances.length) {
+        html += '<div style="margin-top:4px;font-weight:600;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px">实例状态</div>';
+        for (var _ii = 0; _ii < data.instances.length; _ii++) {
+          var inst = data.instances[_ii];
+          var instOk = inst.status === 'running' || inst.status === 'idle';
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:4px;background:var(--bg-deep);border:1px solid var(--border);font-size:12px">';
+          html += '<span>' + (instOk ? '✅' : '❌') + '</span>';
+          html += '<span style="flex:1">' + escH(inst.name || inst.id) + ' <span style="color:var(--dim)">:' + inst.port + '</span></span>';
+          var statusColor = instOk ? 'var(--green)' : 'var(--red)';
+          html += '<span style="color:' + statusColor + ';font-weight:600">' + escH(inst.status || '?') + '</span>';
+          if (inst.queue != null) html += '<span style="color:var(--dim);font-size:11px">队列: ' + inst.queue + '</span>';
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+      contentEl.innerHTML = html;
+      modalEl.style.display = ''; modalEl.classList.add('open');
+    } catch (e) {
+      var contentEl2 = $('#testResultContent');
+      var modalEl2 = $('#testResultModal');
+      if (contentEl2 && modalEl2) {
+        contentEl2.innerHTML = '<div style="color:var(--red);font-weight:600">❌ 测试失败: ' + escH(e.message) + '</div>';
+        modalEl2.classList.add('open');
+      } else {
+        alert('测试失败: ' + e.message);
+      }
+    }
+  }
+
+  function closeTestResult() {
+    var modal = $('#testResultModal');
+    if (modal) modal.classList.remove('open');
   }
 
   async function deleteNode(nid) {
@@ -462,18 +550,18 @@
 
   // ─── Tab切换 ───
   function openDeviceMgr() {
-    var overlay = $('#deviceOverlay');
+    var overlay = $('#deviceMgr');
     if (overlay) overlay.classList.add('open');
     // Set SVG icon for toolbar button and overlay title
     var tbBtn = $('#tbDeviceBtn');
-    if (tbBtn) tbBtn.innerHTML = CW.icon('settings-2') + ' 设备';
-    var title = $('#deviceOverlayTitle');
+    if (tbBtn) tbBtn.innerHTML = CW.icon('settings-2') + ' 设备管理';
+    var title = $('#deviceMgrTitle');
     if (title) title.innerHTML = CW.icon('settings-2') + ' 设备管理';
     loadNodes();
   }
 
   function closeDeviceMgr() {
-    var overlay = $('#deviceOverlay');
+    var overlay = $('#deviceMgr');
     if (overlay) overlay.classList.remove('open');
   }
 
@@ -492,31 +580,49 @@
       }
       var toggleBtn = card.querySelector('.device-card-header button');
       if (toggleBtn) {
-        toggleBtn.textContent = wasConnected ? '连接' : '断开';
-        toggleBtn.className = 'wf-mgr-btn' + (wasConnected ? ' btn-start' : ' btn-stop');
+        var isNowConnected = !wasConnected;
+        toggleBtn.innerHTML = isNowConnected
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> 已连接'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> 已断开';
+        toggleBtn.className = 'wf-mgr-btn device-status-toggle' + (isNowConnected ? ' btn-start' : ' btn-stop');
       }
     } catch (e) { alert('操作失败: ' + e.message); }
   }
 
+  function refreshAllDevices() {
+    loadNodes();
+  }
+
   function showSshInfo(nid) {
-    var cont = $('#deviceListContainer');
-    if (!cont) return;
-    var nodesEl = cont.querySelectorAll('.device-card');
-    // We don't have the raw data easily, so fetch from API
+    var contentEl = $('#sshInfoContent');
+    var modalEl = $('#sshInfoModal');
+    if (!contentEl || !modalEl) { _showToast('SSH 信息弹窗未找到'); return; }
+    contentEl.innerHTML = '<div style="padding:16px 0;text-align:center;color:var(--text-muted)">加载中…</div>';
+    modalEl.style.display = ''; modalEl.classList.add('open');
     fetch(API + '/api/nodes/' + encodeURIComponent(nid))
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (!d.ok) { alert(d.error); return; }
+        if (!d.ok) { contentEl.innerHTML = '<div class="error-msg" style="padding:12px;color:var(--red)">获取失败: ' + escH(d.error || '未知错误') + '</div>'; return; }
         var n = d.data;
         var ssh = n.ssh_config || {};
-        var cmd = 'ssh ' + (ssh.user || 'root') + '@' + n.host + ' -p ' + (ssh.port || 22);
-        if (ssh.auth === 'password' && ssh.password) {
-          cmd = 'sshpass -p \"***\" ' + cmd;
-        }
-        var info = '主机: ' + n.host + ':' + (ssh.port || 22) + '\\n用户: ' + (ssh.user || 'root') + '\\n认证: ' + (ssh.auth || 'password') + '\\n\\n登录命令:\\n' + cmd;
-        prompt('SSH 连接信息 (复制即可)', cmd);
+        var user = ssh.user || 'root';
+        var host = n.host || '?';
+        var port = ssh.port || 22;
+        var auth = ssh.auth || 'password';
+        var cmd = 'ssh ' + user + '@' + host + ' -p ' + port;
+        contentEl.innerHTML = '<div class="ssh-info" style="padding:8px 0">'
+          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">主机</span><span>' + escH(host + ':' + port) + '</span></div>'
+          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">用户</span><span>' + escH(user) + '</span></div>'
+          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">认证</span><span>' + escH(auth) + '</span></div>'
+          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">命令</span><code style="flex:1;background:var(--bg-subtle);padding:4px 8px;border-radius:4px;font-size:12px;word-break:break-all;cursor:pointer" onclick="var r=document.createRange();r.selectNode(this);getSelection().removeAllRanges();getSelection().addRange(r)">' + escH(cmd) + '</code></div>'
+          + '</div>';
       })
-      .catch(function(e) { alert('获取失败: ' + e.message); });
+      .catch(function(e) { contentEl.innerHTML = '<div class="error-msg" style="padding:12px;color:var(--red)">获取失败: ' + escH(e.message) + '</div>'; });
+  }
+
+  function closeSshInfo() {
+    var modalEl = $('#sshInfoModal');
+    if (modalEl) modalEl.classList.remove('open');
   }
 
   function showNodeTab() {
@@ -560,6 +666,7 @@
     saveDevice: saveDevice,
     closeDeviceEditor: closeDeviceEditor,
     testNode: testNode,
+    closeTestResult: closeTestResult,
     deleteNode: deleteNode,
     scanNode: scanNode,
     applyScanResults: applyScanResults,
@@ -571,7 +678,9 @@
     updateInstanceRow: updateInstanceRow,
     openDeviceMgr: openDeviceMgr,
     closeDeviceMgr: closeDeviceMgr,
+    refreshAllDevices: refreshAllDevices,
     showSshInfo: showSshInfo,
+    closeSshInfo: closeSshInfo,
     toggleDeviceConnection: toggleDeviceConnection,
     showNodeTab: showNodeTab,
     showWfTab: showWfTab,

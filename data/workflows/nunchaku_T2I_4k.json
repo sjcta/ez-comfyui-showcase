@@ -1,1142 +1,448 @@
 {
-  "id": "86036ed0-b880-489c-b8bf-25bf1a316f56",
-  "revision": 0,
-  "last_node_id": 61,
-  "last_link_id": 26,
-  "nodes": [
-    {
-      "id": 9,
-      "type": "SaveImage",
-      "pos": [
-        2301.474972695851,
-        129.99928801789247
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        14,
+        "images"
       ],
-      "size": [
-        270,
-        316
-      ],
-      "flags": {},
-      "order": 12,
-      "mode": 0,
-      "inputs": [
+      "filename_prefix": [
+        null,
         {
-          "localized_name": "图片",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 14
-        },
-        {
-          "localized_name": "文件名前缀",
-          "name": "filename_prefix",
-          "type": "STRING",
-          "widget": {
-            "name": "filename_prefix"
-          },
-          "link": null
+          "name": "filename_prefix"
         }
-      ],
-      "outputs": [],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1"
-      },
-      "widgets_values": [
-        "nunchaku-t2i-4k"
       ]
     },
-    {
-      "id": 39,
-      "type": "CLIPLoader",
-      "pos": [
-        99.99932142072623,
-        129.99928801789247
-      ],
-      "size": [
-        270,
-        117.328125
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "CLIP名称",
-          "name": "clip_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "clip_name"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "类型",
-          "name": "type",
-          "type": "COMBO",
-          "widget": {
-            "name": "type"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "设备",
-          "name": "device",
-          "shape": 7,
-          "type": "COMBO",
-          "widget": {
-            "name": "device"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "CLIP",
-          "name": "CLIP",
-          "type": "CLIP",
-          "links": [
-            22
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "CLIPLoader"
-      },
-      "widgets_values": [
-        "qwen_3_4b.safetensors",
-        "lumina2",
-        "default"
-      ]
-    },
-    {
-      "id": 40,
-      "type": "VAELoader",
-      "pos": [
-        99.99932142072623,
-        365.9990744314466
-      ],
-      "size": [
-        270,
-        82.65625
-      ],
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "vae名称",
-          "name": "vae_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "vae_name"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "VAE",
-          "name": "VAE",
-          "type": "VAE",
-          "links": [
-            17
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "VAELoader"
-      },
-      "widgets_values": [
-        "ae.safetensors"
-      ]
-    },
-    {
-      "id": 41,
-      "type": "EmptySD3LatentImage",
-      "pos": [
-        99.99932142072623,
-        553.9990351205897
-      ],
-      "size": [
-        270,
-        144
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "宽度",
-          "name": "width",
-          "type": "INT",
-          "widget": {
-            "name": "width"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "高度",
-          "name": "height",
-          "type": "INT",
-          "widget": {
-            "name": "height"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "批量大小",
-          "name": "batch_size",
-          "type": "INT",
-          "widget": {
-            "name": "batch_size"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "Latent",
-          "name": "LATENT",
-          "type": "LATENT",
-          "links": [
-            21
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "EmptySD3LatentImage"
-      },
-      "widgets_values": [
-        1024,
-        1920,
-        1
-      ]
-    },
-    {
-      "id": 42,
-      "type": "ConditioningZeroOut",
-      "pos": [
-        1021.806487682646,
-        129.99928801789247
-      ],
-      "size": [
-        225,
-        48
-      ],
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "条件",
-          "name": "conditioning",
-          "type": "CONDITIONING",
-          "link": 15
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "条件",
-          "name": "CONDITIONING",
-          "type": "CONDITIONING",
-          "links": [
-            20
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "ConditioningZeroOut"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 43,
-      "type": "VAEDecode",
-      "pos": [
-        1631.8060010331242,
-        129.99928801789247
-      ],
-      "size": [
-        225,
-        72
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "Latent",
-          "name": "samples",
-          "type": "LATENT",
-          "link": 16
-        },
-        {
-          "localized_name": "vae",
-          "name": "vae",
-          "type": "VAE",
-          "link": 17
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "图像",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            24
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "VAEDecode"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 44,
-      "type": "KSampler",
-      "pos": [
-        1261.8052238018672,
-        129.99876468078082
-      ],
-      "size": [
-        270,
-        565.328125
-      ],
-      "flags": {},
-      "order": 9,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 18
-        },
-        {
-          "localized_name": "正面条件",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 19
-        },
-        {
-          "localized_name": "负面条件",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 20
-        },
-        {
-          "localized_name": "Latent图像",
-          "name": "latent_image",
-          "type": "LATENT",
-          "link": 21
-        },
-        {
-          "localized_name": "种子",
-          "name": "seed",
-          "type": "INT",
-          "widget": {
-            "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "步数",
-          "name": "steps",
-          "type": "INT",
-          "widget": {
-            "name": "steps"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "cfg",
-          "name": "cfg",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cfg"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "采样器名称",
-          "name": "sampler_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "sampler_name"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "调度器",
-          "name": "scheduler",
-          "type": "COMBO",
-          "widget": {
-            "name": "scheduler"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "降噪",
-          "name": "denoise",
-          "type": "FLOAT",
-          "widget": {
-            "name": "denoise"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "Latent",
-          "name": "LATENT",
-          "type": "LATENT",
-          "links": [
-            16
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "KSampler"
-      },
-      "widgets_values": [
-        1035545582313624,
-        "randomize",
-        8,
-        1,
-        "res_multistep",
-        "simple",
-        1
-      ]
-    },
-    {
-      "id": 45,
-      "type": "CLIPTextEncode",
-      "pos": [
-        470.553004310617,
-        141.70869422622877
-      ],
-      "size": [
-        481.25,
-        563.09375
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "clip",
-          "name": "clip",
-          "type": "CLIP",
-          "link": 22
-        },
-        {
-          "localized_name": "文本",
-          "name": "text",
-          "type": "STRING",
-          "widget": {
-            "name": "text"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "条件",
-          "name": "CONDITIONING",
-          "type": "CONDITIONING",
-          "links": [
-            15,
-            19
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "CLIPTextEncode"
-      },
-      "widgets_values": [
-        "Core: masterpiece, 8k, CG realism, a young woman squatting in a flower garden, focus on legs and feet, elegant pose, hand on ankle, dreamy atmosphere\n\nClothing: naked, ultra-sheer white shiny pantyhose, silver high-heeled sandals, transparent PVC straps, slender legs\n\nEnvironment: pink roses and white flowers, floral background, soft bokeh, laptop on floor, smartphone on floor, polished floor\n\nLighting: soft natural sunlight, diffused lighting, ethereal glow, backlighting, pastel colors (pink, white, silver), bright and airy\n\nCombined: masterpiece, high detail, a beautiful woman in squatting pose amidst pink roses, wearing polka-dot blouse, pink shorts, sheer white tights, silver heels, hand touching ankle, dreamy romantic atmosphere, soft natural lighting, glowing skin, pastel tones, 8k, sharp focus"
-      ]
-    },
-    {
-      "id": 47,
-      "type": "ModelSamplingAuraFlow",
-      "pos": [
-        529.8595283358217,
-        832.6119383666287
-      ],
-      "size": [
-        270,
-        80
-      ],
-      "flags": {},
-      "order": 7,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 23
-        },
-        {
-          "localized_name": "移位",
-          "name": "shift",
-          "type": "FLOAT",
-          "widget": {
-            "name": "shift"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "模型",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            18
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.20.1",
-        "Node name for S&R": "ModelSamplingAuraFlow"
-      },
-      "widgets_values": [
-        3
-      ]
-    },
-    {
-      "id": 58,
-      "type": "NunchakuZImageDiTLoader",
-      "pos": [
-        99.99932142072623,
-        789.998559865588
-      ],
-      "size": [
-        303.0625,
-        106.65625
-      ],
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "model_name",
-          "name": "model_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "model_name"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "模型",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            23
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "ComfyUI-nunchaku",
-        "ver": "c71cc259355658e87bc418095c3ef1a65b8f115b",
-        "Node name for S&R": "NunchakuZImageDiTLoader"
-      },
-      "widgets_values": [
-        "svdq-fp4_r128-z-image-turbo.safetensors"
-      ]
-    },
-    {
-      "id": 59,
-      "type": "SeedVR2VideoUpscaler",
-      "pos": [
-        1871.805783826569,
-        129.99928801789247
-      ],
-      "size": [
-        329.65625,
-        501.328125
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "image",
-          "name": "image",
-          "type": "IMAGE",
-          "link": 24
-        },
-        {
-          "localized_name": "dit",
-          "name": "dit",
-          "type": "SEEDVR2_DIT",
-          "link": 25
-        },
-        {
-          "localized_name": "vae",
-          "name": "vae",
-          "type": "SEEDVR2_VAE",
-          "link": 26
-        },
-        {
-          "localized_name": "seed",
-          "name": "seed",
-          "type": "INT",
-          "widget": {
-            "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "resolution",
-          "name": "resolution",
-          "type": "INT",
-          "widget": {
-            "name": "resolution"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "max_resolution",
-          "name": "max_resolution",
-          "type": "INT",
-          "widget": {
-            "name": "max_resolution"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "batch_size",
-          "name": "batch_size",
-          "type": "INT",
-          "widget": {
-            "name": "batch_size"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "uniform_batch_size",
-          "name": "uniform_batch_size",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "uniform_batch_size"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "color_correction",
-          "name": "color_correction",
-          "type": "COMBO",
-          "widget": {
-            "name": "color_correction"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "temporal_overlap",
-          "name": "temporal_overlap",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "temporal_overlap"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "prepend_frames",
-          "name": "prepend_frames",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "prepend_frames"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "input_noise_scale",
-          "name": "input_noise_scale",
-          "shape": 7,
-          "type": "FLOAT",
-          "widget": {
-            "name": "input_noise_scale"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "latent_noise_scale",
-          "name": "latent_noise_scale",
-          "shape": 7,
-          "type": "FLOAT",
-          "widget": {
-            "name": "latent_noise_scale"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "offload_device",
-          "name": "offload_device",
-          "shape": 7,
-          "type": "COMBO",
-          "widget": {
-            "name": "offload_device"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "enable_debug",
-          "name": "enable_debug",
-          "shape": 7,
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "enable_debug"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "图像",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            14
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "seedvr2_videoupscaler",
-        "ver": "2.5.22",
-        "Node name for S&R": "SeedVR2VideoUpscaler"
-      },
-      "widgets_values": [
-        2330939588,
-        "randomize",
-        4096,
-        4096,
-        1,
-        false,
-        "lab",
-        0,
-        0,
-        0,
-        0,
-        "cpu",
-        false
-      ]
-    },
-    {
-      "id": 60,
-      "type": "SeedVR2LoadDiTModel",
-      "pos": [
-        99.99932142072623,
-        977.9983897204531
-      ],
-      "size": [
-        317.5625,
-        298.65625
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "torch_compile_args",
-          "name": "torch_compile_args",
-          "shape": 7,
-          "type": "TORCH_COMPILE_ARGS",
-          "link": null
-        },
-        {
-          "localized_name": "model",
-          "name": "model",
-          "type": "COMBO",
-          "widget": {
-            "name": "model"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "device",
-          "name": "device",
-          "type": "COMBO",
-          "widget": {
-            "name": "device"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "blocks_to_swap",
-          "name": "blocks_to_swap",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "blocks_to_swap"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "swap_io_components",
-          "name": "swap_io_components",
-          "shape": 7,
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "swap_io_components"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "offload_device",
-          "name": "offload_device",
-          "shape": 7,
-          "type": "COMBO",
-          "widget": {
-            "name": "offload_device"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "cache_model",
-          "name": "cache_model",
-          "shape": 7,
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "cache_model"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "attention_mode",
-          "name": "attention_mode",
-          "shape": 7,
-          "type": "COMBO",
-          "widget": {
-            "name": "attention_mode"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "SEEDVR2_DIT",
-          "name": "SEEDVR2_DIT",
-          "type": "SEEDVR2_DIT",
-          "links": [
-            25
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "seedvr2_videoupscaler",
-        "ver": "2.5.22",
-        "Node name for S&R": "SeedVR2LoadDiTModel"
-      },
-      "widgets_values": [
-        "seedvr2_ema_3b_fp16.safetensors",
-        "cuda:0",
-        0,
-        false,
-        "cpu",
-        false,
-        "sdpa"
-      ]
-    },
-    {
-      "id": 61,
-      "type": "SeedVR2LoadVAEModel",
-      "pos": [
-        101.51235442812651,
-        1361.541953897017
-      ],
-      "size": [
-        321.796875,
-        654.65625
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "torch_compile_args",
-          "name": "torch_compile_args",
-          "shape": 7,
-          "type": "TORCH_COMPILE_ARGS",
-          "link": null
-        },
-        {
-          "localized_name": "model",
-          "name": "model",
-          "type": "COMBO",
-          "widget": {
-            "name": "model"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "device",
-          "name": "device",
-          "type": "COMBO",
-          "widget": {
-            "name": "device"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "encode_tiled",
-          "name": "encode_tiled",
-          "shape": 7,
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "encode_tiled"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "encode_tile_size",
-          "name": "encode_tile_size",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "encode_tile_size"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "encode_tile_overlap",
-          "name": "encode_tile_overlap",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "encode_tile_overlap"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "decode_tiled",
-          "name": "decode_tiled",
-          "shape": 7,
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "decode_tiled"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "decode_tile_size",
-          "name": "decode_tile_size",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "decode_tile_size"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "decode_tile_overlap",
-          "name": "decode_tile_overlap",
-          "shape": 7,
-          "type": "INT",
-          "widget": {
-            "name": "decode_tile_overlap"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "tile_debug",
-          "name": "tile_debug",
-          "shape": 7,
-          "type": "COMBO",
-          "widget": {
-            "name": "tile_debug"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "offload_device",
-          "name": "offload_device",
-          "shape": 7,
-          "type": "COMBO",
-          "widget": {
-            "name": "offload_device"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "cache_model",
-          "name": "cache_model",
-          "shape": 7,
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "cache_model"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "SEEDVR2_VAE",
-          "name": "SEEDVR2_VAE",
-          "type": "SEEDVR2_VAE",
-          "links": [
-            26
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "seedvr2_videoupscaler",
-        "ver": "2.5.22",
-        "Node name for S&R": "SeedVR2LoadVAEModel"
-      },
-      "widgets_values": [
-        "ema_vae_fp16.safetensors",
-        "cuda:0",
-        true,
-        1024,
-        128,
-        true,
-        1024,
-        128,
-        "false",
-        "cpu",
-        false
-      ]
-    }
-  ],
-  "links": [
-    [
-      14,
-      59,
-      0,
-      9,
-      0,
-      "IMAGE"
-    ],
-    [
-      15,
-      45,
-      0,
-      42,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      16,
-      44,
-      0,
-      43,
-      0,
-      "LATENT"
-    ],
-    [
-      17,
-      40,
-      0,
-      43,
-      1,
-      "VAE"
-    ],
-    [
-      18,
-      47,
-      0,
-      44,
-      0,
-      "MODEL"
-    ],
-    [
-      19,
-      45,
-      0,
-      44,
-      1,
-      "CONDITIONING"
-    ],
-    [
-      20,
-      42,
-      0,
-      44,
-      2,
-      "CONDITIONING"
-    ],
-    [
-      21,
-      41,
-      0,
-      44,
-      3,
-      "LATENT"
-    ],
-    [
-      22,
-      39,
-      0,
-      45,
-      0,
-      "CLIP"
-    ],
-    [
-      23,
-      58,
-      0,
-      47,
-      0,
-      "MODEL"
-    ],
-    [
-      24,
-      43,
-      0,
-      59,
-      0,
-      "IMAGE"
-    ],
-    [
-      25,
-      60,
-      0,
-      59,
-      1,
-      "SEEDVR2_DIT"
-    ],
-    [
-      26,
-      61,
-      0,
-      59,
-      2,
-      "SEEDVR2_VAE"
-    ]
-  ],
-  "groups": [],
-  "config": {},
-  "extra": {
-    "ds": {
-      "scale": 1.1,
-      "offset": [
-        -1645.6741826042296,
-        180.26658462898544
-      ]
+    "_meta": {
+      "title": "SaveImage"
     }
   },
-  "version": 0.4
+  "39": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": [
+        null,
+        {
+          "name": "clip_name"
+        }
+      ],
+      "type": [
+        null,
+        {
+          "name": "type"
+        }
+      ],
+      "device": [
+        null,
+        {
+          "name": "device"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "CLIPLoader"
+    }
+  },
+  "40": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": [
+        null,
+        {
+          "name": "vae_name"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "VAELoader"
+    }
+  },
+  "41": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": [
+        null,
+        {
+          "name": "width"
+        }
+      ],
+      "height": [
+        null,
+        {
+          "name": "height"
+        }
+      ],
+      "batch_size": [
+        null,
+        {
+          "name": "batch_size"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "42": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        15,
+        "conditioning"
+      ]
+    },
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "43": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        16,
+        "samples"
+      ],
+      "vae": [
+        17,
+        "vae"
+      ]
+    },
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "44": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        18,
+        "model"
+      ],
+      "positive": [
+        19,
+        "positive"
+      ],
+      "negative": [
+        20,
+        "negative"
+      ],
+      "latent_image": [
+        21,
+        "latent_image"
+      ],
+      "seed": [
+        null,
+        {
+          "name": "seed"
+        }
+      ],
+      "steps": [
+        null,
+        {
+          "name": "steps"
+        }
+      ],
+      "cfg": [
+        null,
+        {
+          "name": "cfg"
+        }
+      ],
+      "sampler_name": [
+        null,
+        {
+          "name": "sampler_name"
+        }
+      ],
+      "scheduler": [
+        null,
+        {
+          "name": "scheduler"
+        }
+      ],
+      "denoise": [
+        null,
+        {
+          "name": "denoise"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "45": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        22,
+        "clip"
+      ],
+      "text": [
+        null,
+        {
+          "name": "text"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "CLIPTextEncode"
+    }
+  },
+  "47": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        23,
+        "model"
+      ],
+      "shift": [
+        null,
+        {
+          "name": "shift"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "58": {
+    "class_type": "NunchakuZImageDiTLoader",
+    "inputs": {
+      "model_name": [
+        null,
+        {
+          "name": "model_name"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "NunchakuZImageDiTLoader"
+    }
+  },
+  "59": {
+    "class_type": "SeedVR2VideoUpscaler",
+    "inputs": {
+      "image": [
+        24,
+        "image"
+      ],
+      "dit": [
+        25,
+        "dit"
+      ],
+      "vae": [
+        26,
+        "vae"
+      ],
+      "seed": [
+        null,
+        {
+          "name": "seed"
+        }
+      ],
+      "resolution": [
+        null,
+        {
+          "name": "resolution"
+        }
+      ],
+      "max_resolution": [
+        null,
+        {
+          "name": "max_resolution"
+        }
+      ],
+      "batch_size": [
+        null,
+        {
+          "name": "batch_size"
+        }
+      ],
+      "uniform_batch_size": [
+        null,
+        {
+          "name": "uniform_batch_size"
+        }
+      ],
+      "color_correction": [
+        null,
+        {
+          "name": "color_correction"
+        }
+      ],
+      "temporal_overlap": [
+        null,
+        {
+          "name": "temporal_overlap"
+        }
+      ],
+      "prepend_frames": [
+        null,
+        {
+          "name": "prepend_frames"
+        }
+      ],
+      "input_noise_scale": [
+        null,
+        {
+          "name": "input_noise_scale"
+        }
+      ],
+      "latent_noise_scale": [
+        null,
+        {
+          "name": "latent_noise_scale"
+        }
+      ],
+      "offload_device": [
+        null,
+        {
+          "name": "offload_device"
+        }
+      ],
+      "enable_debug": [
+        null,
+        {
+          "name": "enable_debug"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "SeedVR2VideoUpscaler"
+    }
+  },
+  "60": {
+    "class_type": "SeedVR2LoadDiTModel",
+    "inputs": {
+      "torch_compile_args": [
+        null,
+        "torch_compile_args"
+      ],
+      "model": [
+        null,
+        {
+          "name": "model"
+        }
+      ],
+      "device": [
+        null,
+        {
+          "name": "device"
+        }
+      ],
+      "blocks_to_swap": [
+        null,
+        {
+          "name": "blocks_to_swap"
+        }
+      ],
+      "swap_io_components": [
+        null,
+        {
+          "name": "swap_io_components"
+        }
+      ],
+      "offload_device": [
+        null,
+        {
+          "name": "offload_device"
+        }
+      ],
+      "cache_model": [
+        null,
+        {
+          "name": "cache_model"
+        }
+      ],
+      "attention_mode": [
+        null,
+        {
+          "name": "attention_mode"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "SeedVR2LoadDiTModel"
+    }
+  },
+  "61": {
+    "class_type": "SeedVR2LoadVAEModel",
+    "inputs": {
+      "torch_compile_args": [
+        null,
+        "torch_compile_args"
+      ],
+      "model": [
+        null,
+        {
+          "name": "model"
+        }
+      ],
+      "device": [
+        null,
+        {
+          "name": "device"
+        }
+      ],
+      "encode_tiled": [
+        null,
+        {
+          "name": "encode_tiled"
+        }
+      ],
+      "encode_tile_size": [
+        null,
+        {
+          "name": "encode_tile_size"
+        }
+      ],
+      "encode_tile_overlap": [
+        null,
+        {
+          "name": "encode_tile_overlap"
+        }
+      ],
+      "decode_tiled": [
+        null,
+        {
+          "name": "decode_tiled"
+        }
+      ],
+      "decode_tile_size": [
+        null,
+        {
+          "name": "decode_tile_size"
+        }
+      ],
+      "decode_tile_overlap": [
+        null,
+        {
+          "name": "decode_tile_overlap"
+        }
+      ],
+      "tile_debug": [
+        null,
+        {
+          "name": "tile_debug"
+        }
+      ],
+      "offload_device": [
+        null,
+        {
+          "name": "offload_device"
+        }
+      ],
+      "cache_model": [
+        null,
+        {
+          "name": "cache_model"
+        }
+      ]
+    },
+    "_meta": {
+      "title": "SeedVR2LoadVAEModel"
+    }
+  }
 }

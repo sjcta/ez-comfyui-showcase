@@ -217,6 +217,11 @@ async function doGenerate() {
       alert('请先选择 workflow');
       return;
     }
+    // Check authentication first
+    if (!window.CW.auth.isLoggedIn()) {
+      window.CW.auth.showLogin();
+      return;
+    }
     const btn = $('#btnGenerate');
     btn.disabled = true;
     btn.textContent = '提交中...';
@@ -269,9 +274,10 @@ async function doGenerate() {
     });
 
     try {
+      const authHeaders = window.CW.auth.getAuthHeaders();
       const r = await fetch(`${API}/api/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
         body: JSON.stringify({
           workflow: A.currentWF,
           fields,

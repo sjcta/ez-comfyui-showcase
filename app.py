@@ -3,12 +3,12 @@
 ComfyUI Web v3 — 三段式布局，GPU 监控，服务管理。
 节点管理支持从 config/nodes.json 动态读取。
 """
-import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3
+import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3, secrets, zipfile
 # Ensure D-Bus session is available for systemctl --user calls in nohup context
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
 import websockets.client
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -16,12 +16,32 @@ from typing import Optional
 
 from fastapi import (
     FastAPI, HTTPException, BackgroundTasks, WebSocket,
-    WebSocketDisconnect, UploadFile, File, Form
+    WebSocketDisconnect, UploadFile, File, Form, Request, Depends
 )
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn, urllib.request, urllib.error
+from jose import jwt, JWTError
+import bcrypt
+
+# ── V4 refactored module imports (keep inline implementations for backward compat) ──
+from modules.config import NodeCategory, ModelGroup, NODE_STATUS_MAP
+from modules.instance_manager import InstanceManager, InstanceHealth
+import modules.instance_picker as mod_picker
+from modules.job_runner import JobRunner
+from modules.step_calculator import StepCalculator, StepInfo
+from modules.time_estimator import TimeEstimator as TimeEstimatorModule
+from modules.ws_tracker import WSTracker, TrackResult
+
+# ── Auth config
+AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "auth.db")
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(48)
+    print("[auth] WARNING: JWT_SECRET_KEY is not set; using an ephemeral startup secret.")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_DAYS = 7
 
 # ── Logging ──
 _log_buffer: list[dict] = []
@@ -46,6 +66,20 @@ _connected_nodes: dict[str, bool] = {}  # node_id -> connected (default True if 
 def _is_node_connected(nid: str) -> bool:
     return _connected_nodes.get(nid, True)
 
+def _resolve_secret_value(value: str) -> str:
+    """Resolve config secrets. Use env:NAME in JSON to avoid storing cleartext."""
+    if isinstance(value, str) and value.startswith("env:"):
+        return os.environ.get(value[4:], "")
+    return value
+
+def _resolve_ssh_config(ssh_config: dict) -> dict:
+    ssh = dict(ssh_config or {})
+    if "password" in ssh:
+        ssh["password"] = _resolve_secret_value(ssh.get("password", ""))
+    if "key_path" in ssh:
+        ssh["key_path"] = os.path.expanduser(_resolve_secret_value(ssh.get("key_path", "")))
+    return ssh
+
 # ── Node & Instance Loading ──
 _nodes_cache: list[dict] = []
 _nodes_cache_ts: float = 0
@@ -65,7 +99,7 @@ def _load_nodes(force=False) -> list[dict]:
         with open(NODES_FILE) as f:
             data = json.load(f)
         if isinstance(data, list):
-            _nodes_cache = data
+            _nodes_cache = [_normalize_node(n) for n in data]
             _nodes_cache_ts = now
             return _nodes_cache
     except Exception as e:
@@ -79,7 +113,7 @@ def _save_nodes(nodes: list[dict]):
     global _nodes_cache_ts
     os.makedirs(os.path.dirname(NODES_FILE), exist_ok=True)
     with open(NODES_FILE, "w") as f:
-        json.dump(nodes, f, ensure_ascii=False, indent=2)
+        json.dump([_normalize_node(n) for n in nodes], f, ensure_ascii=False, indent=2)
     _nodes_cache_ts = 0  # invalidate cache
 
 def _get_enabled_instances() -> list[dict]:
@@ -98,7 +132,7 @@ def _get_enabled_instances() -> list[dict]:
             full["_node_name"] = node["name"]
             full["_node_host"] = node["host"]
             full["_node_connection"] = node.get("connection", "local")
-            full["_node_ssh"] = node.get("ssh_config", {})
+            full["_node_ssh"] = _resolve_ssh_config(node.get("ssh_config", {}))
             full["url"] = f"http://{node['host']}:{inst['port']}"
             instances.append(full)
     return instances
@@ -133,7 +167,7 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
                          "XDG_RUNTIME_DIR": "/run/user/1000"})
                 return r.returncode == 0
             elif conn == "remote-ssh":
-                ssh = node.get("ssh_config", {})
+                ssh = _resolve_ssh_config(node.get("ssh_config", {}))
                 prefix = []
                 if ssh.get("auth") == "password" and ssh.get("password"):
                     prefix = ["sshpass", "-p", ssh["password"], "ssh",
@@ -142,7 +176,10 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
                 else:
                     prefix = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}",
                               "-p", str(ssh.get("port", 22))]
-                r = subprocess.run(prefix + cmd_list, capture_output=True, timeout=30)
+                # SSH needs D-Bus env for systemctl --user
+                dbus_cmd = ["DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+                            "XDG_RUNTIME_DIR=/run/user/1000"] + cmd_list
+                r = subprocess.run(prefix + dbus_cmd, capture_output=True, timeout=30)
                 return r.returncode == 0
         except Exception:
             return False
@@ -168,23 +205,34 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
 
 # ── 任务队列：per-instance semaphores for parallel routing ──
 _job_queue: asyncio.Queue = asyncio.Queue()
+_inst_mgr: InstanceManager | None = None
+_job_runner: JobRunner | None = None
 
 async def _queue_worker():
     """Non-blocking dispatcher — spawns a task per job so per-instance semaphore waits don't block the queue."""
     while True:
         try:
-            job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h = await _job_queue.get()
-            task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h))
+            job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id = await _job_queue.get()
+            if _job_runner:
+                task = asyncio.create_task(_run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id))
+            else:
+                task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h))
             _job_tasks[job_id] = task
             task.add_done_callback(lambda _t, jid=job_id: _job_tasks.pop(jid, None))
         except Exception as e:
             print(f"[queue_worker] Error in dispatch loop: {e}")
             await asyncio.sleep(1)
 
+
+async def _run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id):
+    try:
+        await _job_runner.run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id=user_id)
+    finally:
+        _job_queue.task_done()
+
 async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h):
-    """Serialize: one job at a time globally, per-instance sem for ComfyUI safety."""
+    """Dispatch a job and serialize only per selected ComfyUI instance."""
     sem = None
-    global_held = False
     inst_held = False
     inst = None
     try:
@@ -197,18 +245,8 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         # Phase 1: find the best instance
         inst = await pick_best_instance(workflow_name)
         sem = _instance_semas.get(inst["name"]) or _instance_semas.get(inst["id"]) or asyncio.Semaphore(1)
-        await _global_sem.acquire()
-        global_held = True
         jobs[job_id]["message"] = f"匹配实例 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
-
-        # Ensure instance is up (cold start if needed)
-        if not await asyncio.to_thread(comfyui_up, inst["url"]):
-            _run_instance_action(inst.get("_node_obj", {}), inst, "start")
-            for _ in range(90):
-                if await asyncio.to_thread(comfyui_up, inst["url"]):
-                    break
-                await asyncio.sleep(2)
 
         # Phase 2: wait for instance semaphore
         jobs[job_id]["status"] = "queued"
@@ -218,6 +256,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         try:
             await asyncio.wait_for(sem.acquire(), timeout=600)
             inst_held = True
+            jobs[job_id]["sem_acquired"] = True
         except asyncio.TimeoutError:
             if job_id in jobs:
                 jobs[job_id]["status"] = "error"
@@ -246,9 +285,9 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
             save_jobs()
     finally:
         if inst_held:
+            if job_id in jobs:
+                jobs[job_id]["sem_acquired"] = False
             sem.release()
-        if global_held:
-            _global_sem.release()
         _job_queue.task_done()
 
 # ── Remote Workflow Sync ────────────────────────────────────────────────
@@ -305,7 +344,7 @@ def sync_remote_workflows():
 def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
     """Sync workflows from a remote SSH node."""
     result = {"synced": 0, "errors": 0, "total": 0, "details": []}
-    ssh = node.get("ssh_config", {})
+    ssh = _resolve_ssh_config(node.get("ssh_config", {}))
     host = node["host"]
     user = ssh.get("user", "root")
     port = str(ssh.get("port", 22))
@@ -487,6 +526,55 @@ def _init_gen_db():
             seed INTEGER DEFAULT 0
         )
     """)
+    # Add user_id column if not exists (migration for existing databases)
+    try:
+        conn.execute("ALTER TABLE generations ADD COLUMN user_id TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE generations ADD COLUMN is_public INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
+    # Initialize auth DB
+    _init_auth_db()
+
+
+def _init_auth_db():
+    """Create auth tables if needed."""
+    conn = sqlite3.connect(AUTH_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            disabled INTEGER DEFAULT 0,
+            avatar TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    for ddl in (
+        "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
+        "ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+    admin_row = conn.execute("SELECT id FROM users WHERE username='admin' LIMIT 1").fetchone()
+    if not admin_row:
+        admin_hash = bcrypt.hashpw("admin".encode(), bcrypt.gensalt()).decode()
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, disabled) VALUES (?, ?, ?, 'admin', 0)",
+            ("admin", "admin", admin_hash),
+        )
+    has_admin = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+    if not has_admin:
+        first_user = conn.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
+        if first_user:
+            conn.execute("UPDATE users SET role='admin' WHERE id=?", (first_user[0],))
     conn.commit()
     conn.close()
 
@@ -512,17 +600,19 @@ def _gen_db_to_record(row: dict) -> dict:
         "elapsed": row.get("duration_sec", 0),
         "time": row.get("created_at", ""),
         "field_values": params,
+        "user_id": row.get("user_id", ""),
+        "is_public": bool(row.get("is_public", 0)),
     }
 
 
-def _insert_generation(record: dict, elapsed: float):
+def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
     """Insert a generation record into SQLite."""
     try:
         conn = sqlite3.connect(GEN_DB)
         conn.execute(
             """INSERT OR REPLACE INTO generations
-               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record["id"],
                 record.get("workflow", ""),
@@ -535,12 +625,174 @@ def _insert_generation(record: dict, elapsed: float):
                 round(elapsed),
                 record.get("time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
                 json.dumps(record.get("field_values", {}), ensure_ascii=False),
+                user_id,
+                1 if record.get("is_public") else 0,
             ),
         )
         conn.commit()
         conn.close()
     except Exception as e:
         add_log("error", "db", f"SQLite insert failed: {e}", record.get("id", ""))
+
+
+# ── Auth Helpers ──
+
+
+def _create_token(user_id: str, username: str) -> str:
+    """Create a JWT token."""
+    role = _get_user_role(user_id)
+    payload = {
+        "sub": user_id,
+        "username": username,
+        "role": role,
+        "exp": datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _get_user_role(user_id: str) -> str:
+    if not user_id:
+        return "user"
+    try:
+        conn = sqlite3.connect(AUTH_DB)
+        row = conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        conn.close()
+        return (row[0] if row else "user") or "user"
+    except Exception:
+        return "user"
+
+
+def get_current_user(request: Request) -> dict:
+    """Extract current user from Authorization header."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        raise HTTPException(401, "Not authenticated")
+    token = auth.split(" ")[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        conn = sqlite3.connect(AUTH_DB)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT role, disabled FROM users WHERE id=?", (payload.get("sub", ""),)).fetchone()
+        conn.close()
+        if not row:
+            raise HTTPException(401, "User not found")
+        if row["disabled"]:
+            raise HTTPException(403, "User disabled")
+        payload["role"] = row["role"] or "user"
+        return payload
+    except JWTError:
+        raise HTTPException(401, "Invalid token")
+
+
+def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """Require an authenticated administrator for privileged local operations."""
+    if current_user.get("role") != "admin" and _get_user_role(current_user.get("sub", "")) != "admin":
+        raise HTTPException(403, "Admin permission required")
+    return current_user
+
+
+def _user_id(current_user: dict) -> str:
+    return current_user.get("sub", "") if current_user else ""
+
+
+def _is_admin_user(current_user: dict | None) -> bool:
+    if not current_user:
+        return False
+    if current_user.get("role") == "admin":
+        return True
+    return _get_user_role(current_user.get("sub", "")) == "admin"
+
+
+def _bootstrap_admin_user_id() -> str:
+    try:
+        conn = sqlite3.connect(AUTH_DB)
+        row = conn.execute("SELECT id FROM users WHERE username='admin' LIMIT 1").fetchone()
+        conn.close()
+        return row[0] if row else "admin"
+    except Exception:
+        return "admin"
+
+
+def _normalize_node(node: dict) -> dict:
+    normalized = dict(node or {})
+    normalized.setdefault("owner_id", _bootstrap_admin_user_id())
+    normalized["shared"] = bool(normalized.get("shared", False))
+    for inst in normalized.get("instances", []) or []:
+        if isinstance(inst, dict):
+            inst["shared"] = bool(inst.get("shared", normalized["shared"]))
+    return normalized
+
+
+def _can_view_node(node: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    uid = _user_id(current_user)
+    owner_id = node.get("owner_id") or _bootstrap_admin_user_id()
+    return bool(uid and (owner_id == uid or node.get("shared")))
+
+
+def _can_manage_node(node: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    uid = _user_id(current_user)
+    owner_id = node.get("owner_id") or _bootstrap_admin_user_id()
+    return bool(uid and owner_id == uid)
+
+
+def _ensure_node_access(node: dict | None, current_user: dict, require_manage: bool = False) -> dict:
+    if not node:
+        raise HTTPException(404, "Node not found")
+    normalized = _normalize_node(node)
+    allowed = _can_manage_node(normalized, current_user) if require_manage else _can_view_node(normalized, current_user)
+    if not allowed:
+        raise HTTPException(403, "No permission for this device")
+    return normalized
+
+
+def _normalize_wf_meta_entry(filename: str, entry: dict | None) -> dict:
+    item = dict(entry or {})
+    item.setdefault("name", filename.replace(".json", ""))
+    item.setdefault("tags", [])
+    item.setdefault("owner_id", _bootstrap_admin_user_id())
+    item["shared"] = bool(item.get("shared", False))
+    return item
+
+
+def _can_view_workflow(filename: str, entry: dict, current_user: dict | None) -> bool:
+    if current_user and _is_admin_user(current_user):
+        return True
+    owner_id = entry.get("owner_id") or _bootstrap_admin_user_id()
+    if not current_user:
+        return bool(entry.get("shared"))
+    uid = _user_id(current_user)
+    return bool(uid and (owner_id == uid or entry.get("shared")))
+
+
+def _can_manage_workflow(filename: str, entry: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    uid = _user_id(current_user)
+    owner_id = entry.get("owner_id") or _bootstrap_admin_user_id()
+    return bool(uid and owner_id == uid)
+
+
+def _can_access_job(job: dict, current_user: dict) -> bool:
+    owner = job.get("user_id", "")
+    uid = _user_id(current_user)
+    return bool(uid and owner == uid)
+
+
+def get_current_user_id(request: Request) -> str:
+    """Get user_id from Authorization header, returns 'anonymous' if not available."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return "anonymous"
+    try:
+        payload = jwt.decode(auth.split(" ")[1], SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("sub", "anonymous")
+    except JWTError:
+        return "anonymous"
+
 
 # Legacy DGX paths (kept for backward compat when running on Spark)
 COMFYUI_DIR   = "/home/sjcta/software/ComfyUI-Project"
@@ -581,9 +833,6 @@ def _refresh_instance_state():
             _instance_last_active[inst["name"]] = 0
         if inst["name"] not in _instance_group:
             _instance_group[inst["name"]] = ""
-
-# Sequential execution semaphore: one job at a time across ALL instances
-_global_sem: asyncio.Semaphore = asyncio.Semaphore(1)
 
 # Model group definitions — workflows sharing a base model get the same group.
 # Affinity matching is done at the GROUP level, not filename level.
@@ -678,7 +927,7 @@ def _check_service_active(node: dict, instance: dict) -> bool:
                      "XDG_RUNTIME_DIR": "/run/user/1000"})
             return r.stdout.strip() == "active"
         elif conn == "remote-ssh":
-            ssh = node.get("ssh_config", {})
+            ssh = _resolve_ssh_config(node.get("ssh_config", {}))
             cmd = []
             if ssh.get("auth") == "password" and ssh.get("password"):
                 cmd = ["sshpass", "-p", ssh["password"], "ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
@@ -719,12 +968,42 @@ async def _stuck_job_watcher():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _inst_mgr, _job_runner
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
     _init_gen_db()
     os.makedirs(WORKFLOW_DIR, exist_ok=True)
     _refresh_instance_state()
+    _inst_mgr = InstanceManager(_get_enabled_instances)
+    _inst_mgr._get_node_by_id = _get_node_by_id
+    _inst_mgr._run_instance_action = _run_instance_action
+    _job_runner = JobRunner(
+        inst_mgr=_inst_mgr,
+        jobs=jobs,
+        history=history,
+        broadcast_fn=broadcast,
+        add_log_fn=add_log,
+        save_jobs_fn=save_jobs,
+        save_history_fn=save_history,
+        make_thumbnail_fn=make_thumbnail,
+        get_image_size_fn=get_image_size,
+        comfyui_up_fn=comfyui_up,
+        comfyui_get_fn=comfyui_get,
+        download_images_fn=_download_remote_images_sync,
+        vllm_running_fn=vllm_running,
+        stop_vllm_fn=stop_vllm,
+        start_vllm_fn=start_vllm,
+        get_node_by_id_fn=_get_node_by_id,
+        run_instance_action_fn=_run_instance_action,
+        instance_semas=_instance_semas,
+        instance_group=_instance_group,
+        instance_last_active=_instance_last_active,
+        output_dir=OUTPUT_DIR,
+        history_dir=HISTORY_DIR,
+        get_enabled_instances_fn=_get_enabled_instances,
+        insert_gen_fn=_insert_generation,
+    )
     # Initial remote workflow sync
     try:
         add_log("info", "sync", "启动时同步远程工作流...")
@@ -743,17 +1022,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
 
 @app.post("/api/nodes/{nid}/connect")
-def _api_node_connect(nid: str):
+def _api_node_connect(nid: str, current_user: dict = Depends(require_admin)):
     _connected_nodes[nid] = True
     return {"ok": True}
 
 @app.post("/api/nodes/{nid}/disconnect")
-def _api_node_disconnect(nid: str):
+def _api_node_disconnect(nid: str, current_user: dict = Depends(require_admin)):
     _connected_nodes[nid] = False
     return {"ok": True}
 
 @app.get("/api/logs")
-def api_logs(limit: int = 200):
+def api_logs(limit: int = 200, current_user: dict = Depends(require_admin)):
     return list(_log_buffer[-limit:])
 static_dir = Path(__file__).parent / "static"
 if static_dir.is_dir():
@@ -792,6 +1071,24 @@ def get_gpu_stats() -> dict:
     except Exception:
         pass
 
+    if mem_used_mb == 0 and mem_total_mb <= 1:
+        try:
+            out = subprocess.check_output(
+                ["sh", "-lc", "command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=memory.used,memory.total,temperature.gpu,utilization.gpu --format=csv,noheader,nounits | head -n 1"],
+                text=True, timeout=5,
+            ).strip()
+            if out:
+                parts = [x.strip() for x in out.split(",")]
+                raw_used, raw_total = parts[0], parts[1]
+                temp = int(float(parts[2])) if parts[2] not in ('[N/A]','[N/A ]','N/A') else temp
+                util = int(float(parts[3])) if parts[3] not in ('[N/A]','[N/A ]','N/A') else util
+                if raw_used not in ('[N/A]','[N/A ]','N/A'):
+                    mem_used_mb = float(raw_used)
+                if raw_total not in ('[N/A]','[N/A ]','N/A'):
+                    mem_total_mb = float(raw_total)
+        except Exception:
+            pass
+
     # GB10 unified memory: use /proc/meminfo
     try:
         mi = Path("/proc/meminfo").read_text()
@@ -801,6 +1098,15 @@ def get_gpu_stats() -> dict:
         mem_used_mb = (total_kb - avail_kb) / 1024
     except Exception:
         pass
+
+    if mem_used_mb == 0 and mem_total_mb <= 1:
+        try:
+            mem_total_mb = float(os.environ.get("EZ_GPU_TOTAL_MB", "0") or 0)
+            mem_used_mb = float(os.environ.get("EZ_GPU_USED_MB", "0") or 0)
+            temp = temp or int(float(os.environ.get("EZ_GPU_TEMP_C", "0") or 0))
+            util = util or int(float(os.environ.get("EZ_GPU_UTIL_PCT", "0") or 0))
+        except Exception:
+            pass
 
     pct = round(mem_used_mb / mem_total_mb * 100, 1) if mem_total_mb else 0
     data = {
@@ -958,7 +1264,7 @@ async def pick_best_instance(workflow_name: str = "") -> dict:
     if not instances:
         raise RuntimeError("No enabled instances available")
 
-    # Phase 0: T2I → A, I2I → B (hard route)
+    # Phase 0: T2I → A, I2I → B. The selected instance is cold-started later.
     if workflow_name:
         lower = workflow_name.lower()
         inst_a = next((i for i in instances if i["name"] == "A"), None)
@@ -1003,16 +1309,6 @@ async def pick_best_instance(workflow_name: str = "") -> dict:
                 best, best_load = inst, load
     chosen = best or instances[0]
 
-    # Cold-start: ensure ALL instances are running
-    for cold_inst in instances:
-        if not await asyncio.to_thread(comfyui_up, cold_inst["url"]):
-            node = _get_node_by_id(cold_inst.get("_node_id", ""))
-            if node:
-                _run_instance_action(node, cold_inst, "start")
-                for _ in range(150):
-                    if await asyncio.to_thread(comfyui_up, cold_inst["url"]):
-                        break
-                    await asyncio.sleep(2)
     return chosen
 
 
@@ -1606,13 +1902,13 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
             downloaded = await asyncio.to_thread(
-                _download_remote_images_sync, job_id, pid, inst_url, inst_output
+                _download_remote_images_sync, job_id, pid, inst_url, OUTPUT_DIR
             )
             if downloaded:
                 print(f"[generate] Downloaded {len(downloaded)} image(s) for {job_id[-12:]}")
 
         if job_id not in jobs:
-            return False, prompt_id or ""
+            return False, pid or ""
 
         if not ws_ok:
             _extra = jobs[job_id].get("ws_error", "") if job_id in jobs else ""
@@ -1628,28 +1924,38 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 if filename:
                     break
         if job_id not in jobs or jobs[job_id].get("status") == "error":
-            return False, prompt_id or ""
+            return False, pid or ""
         if not filename:
             raise RuntimeError("未找到输出图片")
 
-        src = os.path.join(inst_output, filename)
+        # Prefer local OUTPUT_DIR (files were downloaded there via _download_remote_images_sync)
+        src = os.path.join(OUTPUT_DIR, filename)
         if not os.path.isfile(src):
-            matches = glob.glob(os.path.join(inst_output, "**", filename), recursive=True)
+            matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
             if matches:
                 src = matches[0]
-            else:
-                # Try the typical subfolder-based search: some ComfyUI outputs go to subfolders
-                for root, dirs, files in os.walk(inst_output):
-                    if filename in files:
-                        src = os.path.join(root, filename)
-                        break
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        uid = uuid.uuid4().hex[:6]
-        hist_name = f"{ts}_{uid}.png"
-        shutil.copy2(src, os.path.join(HISTORY_DIR, hist_name))
+        gen_user_id = jobs[job_id].get("user_id", "anonymous") if job_id in jobs else "anonymous"
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        subdir = f"{gen_user_id}/{date_str}"
 
-        actual_w, actual_h = get_image_size(hist_name)
+        wf_basename = os.path.basename(workflow_path).replace('.json', '')
+        # Find next sequential number for this workflow today
+        existing = glob.glob(os.path.join(OUTPUT_DIR, subdir, f"{wf_basename}_*.png"))
+        seq = 1
+        for p in existing:
+            m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.png$", os.path.basename(p))
+            if m:
+                n = int(m.group(1))
+                if n >= seq: seq = n + 1
+        hist_name = f"{wf_basename}_{seq:04d}.png"
+        # Save to OUTPUT_DIR/{user_id}/{YYYY-MM-DD}/
+        output_subdir = os.path.join(OUTPUT_DIR, subdir)
+        os.makedirs(output_subdir, exist_ok=True)
+        shutil.copy2(src, os.path.join(output_subdir, hist_name))
+
+        rel_path = f"{subdir}/{hist_name}"
+        actual_w, actual_h = get_image_size(rel_path)
 
         prompt_text = ""
         for k, v in field_values.items():
@@ -1657,25 +1963,30 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 prompt_text = str(v)
                 break
 
+        thumb_rel = make_thumbnail(rel_path) or ""
         record = {
-            "id": job_id, "filename": hist_name,
+            "id": job_id, "filename": rel_path,
             "original": filename,
             "workflow": os.path.basename(workflow_path),
             "prompt": prompt_text, "seed": str(seed),
             "width": actual_w or img_width, "height": actual_h or img_height,
             "elapsed": round(elapsed, 1),
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "thumb": make_thumbnail(hist_name) or "",
+            "thumb": thumb_rel,
             "field_values": field_values,
+            "user_id": gen_user_id,
         }
         history.insert(0, record)
         save_history()
-        # Also write to SQLite
-        _insert_generation(record, elapsed)
+        # Also write to SQLite with user_id
+        gen_user_id = ""
+        if job_id in jobs:
+            gen_user_id = jobs[job_id].get("user_id", "")
+        _insert_generation(record, elapsed, user_id=gen_user_id)
 
         jobs[job_id].update(
             status="done", message=f"完成 ({elapsed:.1f}s)",
-            image=hist_name, elapsed=round(elapsed, 1),
+            image=rel_path, elapsed=round(elapsed, 1),
         )
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -1724,15 +2035,20 @@ THUMB_DIR = os.path.join(HISTORY_DIR, "thumbs")
 THUMB_SIZE = 400
 
 
-def make_thumbnail(filename: str) -> str | None:
-    src = os.path.join(HISTORY_DIR, filename)
+def make_thumbnail(rel_path: str) -> str | None:
+    """Create a thumbnail for the image at OUTPUT_DIR/{rel_path}.
+    Returns the relative path to the thumbnail, or None on failure."""
+    src = os.path.join(OUTPUT_DIR, rel_path)
     if not os.path.isfile(src):
         return None
-    thumb_name = filename.rsplit(".", 1)[0] + "_thumb.jpg"
-    thumb_path = os.path.join(THUMB_DIR, thumb_name)
+    rel_dir = os.path.dirname(rel_path)
+    basename = os.path.basename(rel_path)
+    thumb_name = basename.rsplit(".", 1)[0] + "_thumb.jpg"
+    thumb_rel = os.path.join(rel_dir, thumb_name) if rel_dir else thumb_name
+    thumb_path = os.path.join(OUTPUT_DIR, thumb_rel)
     if os.path.isfile(thumb_path):
-        return thumb_name
-    os.makedirs(THUMB_DIR, exist_ok=True)
+        return thumb_rel
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
     try:
         subprocess.run([
             "ffmpeg", "-y", "-i", src,
@@ -1740,13 +2056,14 @@ def make_thumbnail(filename: str) -> str | None:
             "-q:v", "3", thumb_path
         ], capture_output=True, timeout=10)
         if os.path.isfile(thumb_path):
-            return thumb_name
+            return thumb_rel
     except Exception:
         pass
     return None
 
-def get_image_size(filename: str) -> tuple[int, int]:
-    path = os.path.join(HISTORY_DIR, filename)
+def get_image_size(rel_path: str) -> tuple[int, int]:
+    """Get PNG image dimensions from OUTPUT_DIR/{rel_path}."""
+    path = os.path.join(OUTPUT_DIR, rel_path)
     if not os.path.isfile(path):
         return 0, 0
     try:
@@ -1858,7 +2175,7 @@ def api_gpu():
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/comfyui/{action}")
-def api_comfyui(action: str):
+def api_comfyui(action: str, current_user: dict = Depends(require_admin)):
     if action == "start":
         results = []
         for inst in _get_enabled_instances():
@@ -1930,7 +2247,7 @@ def api_gpu_processes():
     return {"processes": filtered, "comfyui_pids": list(known_pids)}
 
 @app.post("/api/gpu-processes/kill")
-def api_gpu_kill(req: dict):
+def api_gpu_kill(req: dict, current_user: dict = Depends(require_admin)):
     import subprocess as _sp
     pid = str(req.get("pid", ""))
     if not pid.isdigit():
@@ -1981,7 +2298,7 @@ def api_comfyui_status():
     return {"instances": result}
 
 @app.post("/api/comfyui/{instance}/{action}")
-def api_comfyui_instance(instance: str, action: str):
+def api_comfyui_instance(instance: str, action: str, current_user: dict = Depends(require_admin)):
     """Start/stop a single ComfyUI instance (A or B)."""
     inst = next((i for i in _get_enabled_instances() if i["name"].upper() == instance.upper()), None)
     if not inst:
@@ -2010,7 +2327,7 @@ def api_comfyui_instance(instance: str, action: str):
 
 
 @app.post("/api/vllm/{action}")
-def api_vllm(action: str):
+def api_vllm(action: str, current_user: dict = Depends(require_admin)):
     if action == "start":
         start_vllm()
         return {"ok": True, "msg": "已启动"}
@@ -2044,7 +2361,7 @@ def _get_workflow_dirs() -> list[str]:
     return list(dirs)
 
 @app.post("/api/workflows/sync")
-async def api_sync_workflows():
+async def api_sync_workflows(current_user: dict = Depends(require_admin)):
     """Manually trigger remote workflow sync."""
     try:
         result = await asyncio.to_thread(sync_remote_workflows)
@@ -2054,8 +2371,9 @@ async def api_sync_workflows():
 
 
 @app.get("/api/workflows")
-def api_workflows():
+def api_workflows(current_user: dict = Depends(get_current_user)):
     seen = {}
+    meta = _load_wf_meta()
     for d in _get_workflow_dirs():
         for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
             name = os.path.basename(f)
@@ -2063,6 +2381,9 @@ def api_workflows():
                 seen[name] = f
     result = []
     for name in sorted(seen):
+        entry = _normalize_wf_meta_entry(name, meta.get(name, {}))
+        if not _can_view_workflow(name, entry, current_user):
+            continue
         info = parse_workflow(seen[name])
         result.append({
             "name": name,
@@ -2070,31 +2391,95 @@ def api_workflows():
             "model": info["model"],
             "field_count": len(info["fields"]),
             "dir": os.path.dirname(seen[name]),
+            "owner_id": entry.get("owner_id", ""),
+            "shared": bool(entry.get("shared", False)),
         })
     return result
 
 
+@app.get("/api/workflows/find-closest")
+def api_workflow_find_closest(workflow: str = "", wf_id: str = "", wf_tags: str = ""):
+    """Find the best current workflow for an old history/job record."""
+    meta = _load_wf_meta()
+    candidates = {}
+    for d in _get_workflow_dirs():
+        for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
+            name = os.path.basename(f)
+            if name not in candidates:
+                candidates[name] = f
+
+    if workflow in candidates:
+        return {"filename": workflow, "matched_by": "filename", "score": 100}
+
+    try:
+        requested_tags = set(json.loads(wf_tags)) if wf_tags else set()
+    except Exception:
+        requested_tags = set()
+    requested_stem = os.path.splitext(os.path.basename(workflow or ""))[0].lower()
+
+    best_name = ""
+    best_score = 0
+    best_reason = ""
+    for name in candidates:
+        entry = meta.get(name, {})
+        score = 0
+        reason = ""
+        if wf_id and entry.get("id") == wf_id:
+            return {"filename": name, "matched_by": "wf_id", "score": 100}
+
+        display = str(entry.get("name", "")).lower()
+        stem = os.path.splitext(name)[0].lower()
+        if requested_stem and requested_stem in (stem, display):
+            score += 60
+            reason = "name"
+        elif requested_stem and (requested_stem in stem or requested_stem in display):
+            score += 35
+            reason = "partial_name"
+
+        tags = set(entry.get("tags", []))
+        tag_hits = len(tags & requested_tags)
+        if tag_hits:
+            score += tag_hits * 10
+            reason = reason or "tags"
+
+        if score > best_score:
+            best_name, best_score, best_reason = name, score, reason
+
+    if best_name and best_score >= 20:
+        return {"filename": best_name, "matched_by": best_reason or "score", "score": best_score}
+    raise HTTPException(404, "No matching workflow")
+
+
 @app.get("/api/workflows/{name}/fields")
-def api_workflow_fields(name: str):
+def api_workflow_fields(name: str, current_user: dict = Depends(get_current_user)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
+    entry = _normalize_wf_meta_entry(name, _load_wf_meta().get(name, {}))
+    if not _can_view_workflow(name, entry, current_user):
+        raise HTTPException(403, "No permission for this workflow")
     return parse_workflow(path, wf_name=name)
 
 @app.get("/api/workflows/{name}/analyze")
-def api_workflow_analyze(name: str):
+def api_workflow_analyze(name: str, current_user: dict = Depends(get_current_user)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
+    entry = _normalize_wf_meta_entry(name, _load_wf_meta().get(name, {}))
+    if not _can_view_workflow(name, entry, current_user):
+        raise HTTPException(403, "No permission for this workflow")
     return analyze_workflow(path)
 
 
 
 @app.get("/api/workflows/{name}/download")
-def api_workflow_download(name: str):
+def api_workflow_download(name: str, current_user: dict = Depends(get_current_user)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
+    entry = _normalize_wf_meta_entry(name, _load_wf_meta().get(name, {}))
+    if not _can_view_workflow(name, entry, current_user):
+        raise HTTPException(403, "No permission for this workflow")
     return FileResponse(path, media_type="application/json", filename=name)
 
 @app.get("/api/workflows/{name}/config")
@@ -2106,13 +2491,13 @@ def api_workflow_config_get(name: str):
 
 
 @app.put("/api/workflows/{name}/config")
-def api_workflow_config_put(name: str, req: dict):
+def api_workflow_config_put(name: str, req: dict, current_user: dict = Depends(require_admin)):
     save_wf_config(name, req)
     return {"ok": True}
 
 
 @app.delete("/api/workflows/{name}/config")
-def api_workflow_config_delete(name: str):
+def api_workflow_config_delete(name: str, current_user: dict = Depends(require_admin)):
     p = os.path.join(WF_CONFIG_DIR, name)
     if os.path.isfile(p):
         os.remove(p)
@@ -2120,7 +2505,7 @@ def api_workflow_config_delete(name: str):
 
 
 @app.post("/api/workflows/upload")
-async def api_workflow_upload(file: UploadFile = File(...)):
+async def api_workflow_upload(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     name = file.filename
     if not name.endswith(".json"):
         raise HTTPException(400, "需要 .json 文件")
@@ -2141,11 +2526,14 @@ async def api_workflow_upload(file: UploadFile = File(...)):
             "tags": _auto_detect_tags(dest),
             "source": "ez-comfy",
             "source_path": dest,
+            "owner_id": _user_id(current_user),
+            "shared": False,
         }
         _save_wf_meta(meta)
     else:
         meta[name]["source"] = "ez-comfy"
         meta[name]["source_path"] = dest
+        meta[name]["owner_id"] = meta[name].get("owner_id") or _user_id(current_user)
         _save_wf_meta(meta)
     return {"ok": True, "name": name}
 
@@ -2163,7 +2551,7 @@ def api_workflow_dirs():
 
 
 @app.post("/api/workflow-dirs")
-def api_workflow_dir_add(req: dict):
+def api_workflow_dir_add(req: dict, current_user: dict = Depends(require_admin)):
     d = req.get("path", "").strip()
     if not d:
         raise HTTPException(400, "path is required")
@@ -2179,7 +2567,7 @@ def api_workflow_dir_add(req: dict):
 
 
 @app.delete("/api/workflow-dirs")
-def api_workflow_dir_remove(path: str):
+def api_workflow_dir_remove(path: str, current_user: dict = Depends(require_admin)):
     d = path.strip()
     if not d:
         raise HTTPException(400, "path is required")
@@ -2196,7 +2584,7 @@ def api_workflow_dir_remove(path: str):
 # ── Image Upload ────────────────────────────────────────────────────
 
 @app.post("/api/upload-image")
-async def api_upload_image(file: UploadFile = File(...)):
+async def api_upload_image(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file")
@@ -2227,12 +2615,14 @@ def api_input_image(filename: str):
 def _load_wf_meta() -> dict:
     if os.path.isfile(WF_META_FILE):
         with open(WF_META_FILE) as f:
-            return json.load(f)
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            return {k: _normalize_wf_meta_entry(k, v) for k, v in raw.items()}
     return {}
 
 def _save_wf_meta(meta: dict):
     with open(WF_META_FILE, "w") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+        json.dump({k: _normalize_wf_meta_entry(k, v) for k, v in meta.items()}, f, ensure_ascii=False, indent=2)
 
 
 def _load_wf_dirs() -> list[str]:
@@ -2303,7 +2693,7 @@ def _auto_detect_tags(workflow_path: str) -> list[str]:
 
 
 @app.get("/api/workflows/meta")
-def api_workflows_meta():
+def api_workflows_meta(current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
     seen = {}
     for d in _get_workflow_dirs():
@@ -2314,42 +2704,50 @@ def api_workflows_meta():
     result = {}
     for fname in sorted(seen):
         f = seen[fname]
-        entry = meta.get(fname, {})
+        entry = _normalize_wf_meta_entry(fname, meta.get(fname, {}))
         if "tags" not in entry:
             entry["tags"] = _auto_detect_tags(f)
             meta[fname] = entry
         if "name" not in entry:
             entry["name"] = fname.replace(".json", "")
             meta[fname] = entry
+        if not _can_view_workflow(fname, entry, current_user):
+            continue
         result[fname] = entry
     _save_wf_meta(meta)
     return result
 
 
 @app.put("/api/workflows/meta/{filename}")
-def api_update_wf_meta(filename: str, body: dict):
+def api_update_wf_meta(filename: str, body: dict, current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
-    if filename not in meta:
-        meta[filename] = {}
+    meta[filename] = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+    if not _can_manage_workflow(filename, meta[filename], current_user):
+        raise HTTPException(403, "No permission for this workflow")
     if "name" in body:
         meta[filename]["name"] = body["name"]
     if "tags" in body:
         meta[filename]["tags"] = body["tags"]
+    if _is_admin_user(current_user) and "shared" in body:
+        meta[filename]["shared"] = bool(body["shared"])
     _save_wf_meta(meta)
     return meta[filename]
 
 
 @app.delete("/api/workflows/meta/{filename}")
-def api_delete_wf_meta(filename: str):
+def api_delete_wf_meta(filename: str, current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
-    if filename in meta:
+    entry = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+    if filename in meta and _can_manage_workflow(filename, entry, current_user):
         del meta[filename]
         _save_wf_meta(meta)
+    elif filename in meta:
+        raise HTTPException(403, "No permission for this workflow")
     return {"ok": True}
 
 
 @app.post("/api/workflows/meta/thumbnail")
-async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = File(...)):
+async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     os.makedirs(WF_THUMB_DIR, exist_ok=True)
     ext = os.path.splitext(file.filename)[1] or ".jpg"
     thumb_name = f"{os.path.splitext(filename)[0]}{ext}"
@@ -2358,8 +2756,9 @@ async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = 
     with open(thumb_path, "wb") as f:
         f.write(content)
     meta = _load_wf_meta()
-    if filename not in meta:
-        meta[filename] = {}
+    meta[filename] = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+    if not _can_manage_workflow(filename, meta[filename], current_user):
+        raise HTTPException(403, "No permission for this workflow")
     meta[filename]["thumbnail"] = thumb_name
     _save_wf_meta(meta)
     return {"ok": True, "thumbnail": thumb_name}
@@ -2374,10 +2773,11 @@ def api_get_wf_thumbnail(name: str):
 
 
 @app.put("/api/workflows/{filename}/rename")
-def api_rename_workflow(filename: str, body: dict):
+def api_rename_workflow(filename: str, body: dict, current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
-    if filename not in meta:
-        meta[filename] = {}
+    meta[filename] = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+    if not _can_manage_workflow(filename, meta[filename], current_user):
+        raise HTTPException(403, "No permission for this workflow")
     meta[filename]["name"] = body.get("name", filename.replace(".json", ""))
     _save_wf_meta(meta)
     return meta[filename]
@@ -2386,12 +2786,15 @@ def api_rename_workflow(filename: str, body: dict):
 # ── Catch-all workflow delete (MUST be last) ─────────────────────────
 
 @app.delete("/api/workflows/{name}")
-def api_workflow_delete(name: str):
+def api_workflow_delete(name: str, current_user: dict = Depends(get_current_user)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
-    os.remove(path)
     meta = _load_wf_meta()
+    entry = _normalize_wf_meta_entry(name, meta.get(name, {}))
+    if not _can_manage_workflow(name, entry, current_user):
+        raise HTTPException(403, "No permission for this workflow")
+    os.remove(path)
     if name in meta:
         del meta[name]
         _save_wf_meta(meta)
@@ -2403,11 +2806,12 @@ def api_workflow_delete(name: str):
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/generate")
-def api_generate(req: GenerateRequest, bg: BackgroundTasks):
+def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     path = _resolve_workflow(req.workflow)
     if not path:
         raise HTTPException(404, "Workflow not found")
 
+    user_id = current_user.get("sub", "")
     job_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     seed = req.seed if req.seed is not None else random.randint(0, 2**63)
     vllm_was = vllm_running()
@@ -2426,47 +2830,50 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks):
         "width": req.width, "height": req.height,
         "fields": req.fields,
         "queued_at": datetime.now().strftime("%H:%M:%S"),
+        "user_id": user_id,
     }
 
-    _job_queue.put_nowait((job_id, path, req.fields, seed, vllm_was, req.width, req.height))
+    _job_queue.put_nowait((job_id, path, req.fields, seed, vllm_was, req.width, req.height, user_id))
     return {"job_id": job_id, "seed": seed}
 
 
 @app.get("/api/jobs")
-def api_all_jobs():
-    return list(jobs.values())
+def api_all_jobs(current_user: dict = Depends(get_current_user)):
+    uid = _user_id(current_user)
+    return [j for j in jobs.values() if j.get("user_id") == uid]
 
 
 @app.get("/api/jobs/{job_id}")
-def api_job_status(job_id: str):
+def api_job_status(job_id: str, current_user: dict = Depends(get_current_user)):
     if job_id not in jobs:
         raise HTTPException(404)
+    if not _can_access_job(jobs[job_id], current_user):
+        raise HTTPException(403, "无权访问他人的任务")
     return jobs[job_id]
 
 
 @app.delete("/api/jobs/{job_id}")
-async def api_cancel_job(job_id: str):
+async def api_cancel_job(job_id: str, current_user: dict = Depends(get_current_user)):
     if job_id not in jobs:
         raise HTTPException(404)
     job = jobs[job_id]
+    if not _can_access_job(job, current_user):
+        raise HTTPException(403, "只能取消自己的任务")
     if job.get("status") == "generating":
         try:
-            comfyui_post("/interrupt", {})
+            inst_url = None
+            inst_name = job.get("instance", "")
+            for inst in _get_enabled_instances():
+                if inst.get("name") == inst_name:
+                    inst_url = inst.get("url")
+                    break
+            comfyui_post("/interrupt", {}, base_url=inst_url)
         except Exception:
             pass
     task = _job_tasks.get(job_id)
     if task and not task.done():
         task.cancel()
     _job_tasks.pop(job_id, None)
-    inst_name = job.get("instance", "")
-    if inst_name and inst_name in _instance_semas:
-        sem = _instance_semas[inst_name]
-        try:
-            sem.release()
-        except ValueError:
-            pass
-    try: _global_sem.release()
-    except ValueError: pass
     del jobs[job_id]
     save_jobs()
     await broadcast({"type": "job_cancelled", "job_id": job_id})
@@ -2474,12 +2881,16 @@ async def api_cancel_job(job_id: str):
 
 
 @app.post("/api/jobs/{job_id}/retry")
-def api_retry_job(job_id: str, bg: BackgroundTasks):
+def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if job_id not in jobs:
         raise HTTPException(404)
     old = jobs[job_id]
     if old["status"] not in ("error",):
         raise HTTPException(400, "只能重试失败的任务")
+
+    user_id = current_user.get("sub", "")
+    if old.get("user_id") != user_id:
+        raise HTTPException(403, "只能重试自己的任务")
 
     wf = old.get("workflow", "")
     fields = old.get("fields", {})
@@ -2506,12 +2917,13 @@ def api_retry_job(job_id: str, bg: BackgroundTasks):
         "id": new_id, "status": "queued", "message": "排队中...",
         "workflow": wf, "seed": str(seed),
         "prompt_preview": prompt_preview,
+        "user_id": user_id,
         "width": width, "height": height,
         "fields": fields,
         "queued_at": datetime.now().strftime("%H:%M:%S"),
     }
 
-    _job_queue.put_nowait((new_id, path, fields, seed, vllm_was, width, height))
+    _job_queue.put_nowait((new_id, path, fields, seed, vllm_was, width, height, user_id))
     return {"job_id": new_id, "seed": seed}
 
 
@@ -2520,44 +2932,77 @@ def api_retry_job(job_id: str, bg: BackgroundTasks):
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/history")
-def api_history(limit: int = 50, offset: int = 0, status: str = ""):
+def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict = Depends(get_current_user)):
     """Query generation history from SQLite with pagination."""
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
-    query = "SELECT * FROM generations"
-    params = []
+    uid = _user_id(current_user)
+    if scope == "mine":
+        conditions = ["user_id = ?"]
+        params = [uid]
+    elif scope == "public":
+        conditions = ["is_public = 1"]
+        params = []
+    elif scope == "all" and current_user.get("role") == "admin":
+        conditions = []
+        params = []
+    else:
+        conditions = ["(user_id = ? OR is_public = 1)"]
+        params = [uid]
     if status:
-        query += " WHERE status = ?"
+        conditions.append("status = ?")
         params.append(status)
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    rows = conn.execute(query, params).fetchall()
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    rows = conn.execute(
+        "SELECT * FROM generations" + where_clause + " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
     total = conn.execute(
-        "SELECT COUNT(*) FROM generations" + (" WHERE status=?" if status else ""),
-        [status] if status else [],
+        "SELECT COUNT(*) FROM generations" + where_clause,
+        params,
     ).fetchone()[0]
     conn.close()
     return {"ok": True, "data": [_gen_db_to_record(dict(r)) for r in rows], "total": total}
 
 
 @app.post("/api/history")
-def api_history_create(req: dict):
+def api_history_create(req: dict, current_user: dict = Depends(get_current_user)):
     """Insert a generation record into SQLite."""
     elapsed = req.get("duration_sec", req.get("elapsed", 0))
-    _insert_generation(req, elapsed)
+    _insert_generation(req, elapsed, user_id=_user_id(current_user))
     return {"ok": True}
 
 
 @app.delete("/api/history/{item_id}")
-def api_history_delete(item_id: str):
+def api_history_delete(item_id: str, current_user: dict = Depends(get_current_user)):
     """Delete a generation record from SQLite and remove its image file."""
+    user_id = current_user.get("sub", "")
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT image_path FROM generations WHERE id=?", (item_id,)).fetchone()
-    if row and row["image_path"]:
-        img_path = os.path.join(HISTORY_DIR, row["image_path"])
-        if os.path.isfile(img_path):
-            os.remove(img_path)
+    row = conn.execute("SELECT image_path, user_id FROM generations WHERE id=?", (item_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Record not found")
+    # Allow: own records, anonymous records, or admin user
+    owner_id = row["user_id"] or ""
+    current_uid = user_id or ""
+    can_delete = (
+        not owner_id or
+        owner_id == "anonymous" or
+        owner_id == current_uid
+    )
+    if not can_delete:
+        conn.close()
+        raise HTTPException(403, "无权删除他人的记录")
+    if row["image_path"]:
+        # Try HISTORY_DIR first, then OUTPUT_DIR
+        for img_dir in [HISTORY_DIR, OUTPUT_DIR]:
+            img_path = os.path.join(img_dir, row["image_path"])
+            if os.path.isfile(img_path):
+                os.remove(img_path)
+            thumb_path = os.path.join(img_dir, row["image_path"].rsplit(".", 1)[0] + "_thumb.jpg")
+            if os.path.isfile(thumb_path):
+                os.remove(thumb_path)
     conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
     conn.commit()
     conn.close()
@@ -2570,45 +3015,297 @@ def api_history_delete(item_id: str):
     return {"ok": True}
 
 
-@app.delete("/api/history")
-def api_history_clear():
-    """Clear all generation records from SQLite."""
+def _history_owner_check(conn, item_id: str, current_user: dict):
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT id, image_path, thumb_path, user_id FROM generations WHERE id=?", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Record not found")
+    if current_user.get("role") != "admin" and row["user_id"] != current_user.get("sub"):
+        raise HTTPException(403, "无权操作他人的记录")
+    return row
+
+
+@app.post("/api/history/{item_id}/share")
+def api_history_share(item_id: str, body: dict, current_user: dict = Depends(get_current_user)):
+    is_public = 1 if body.get("is_public", True) else 0
     conn = sqlite3.connect(GEN_DB)
-    conn.execute("DELETE FROM generations")
+    _history_owner_check(conn, item_id, current_user)
+    conn.execute("UPDATE generations SET is_public=? WHERE id=?", (is_public, item_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "is_public": bool(is_public)}
+
+
+@app.post("/api/history/batch-delete")
+def api_history_batch_delete(body: dict, current_user: dict = Depends(get_current_user)):
+    ids = [str(x) for x in body.get("ids", []) if str(x)]
+    if not ids:
+        raise HTTPException(400, "ids required")
+    deleted = 0
+    for item_id in ids:
+        try:
+            api_history_delete(item_id, current_user)
+            deleted += 1
+        except HTTPException as e:
+            if e.status_code in (403, 404):
+                continue
+            raise
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/history/batch-download")
+def api_history_batch_download(body: dict, current_user: dict = Depends(get_current_user)):
+    ids = [str(x) for x in body.get("ids", []) if str(x)]
+    if not ids:
+        raise HTTPException(400, "ids required")
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    rows = []
+    for item_id in ids:
+        try:
+            rows.append(_history_owner_check(conn, item_id, current_user))
+        except HTTPException:
+            pass
+    conn.close()
+    if not rows:
+        raise HTTPException(404, "No downloadable records")
+    zip_name = f"ez_comfyui_history_{int(time.time())}.zip"
+    zip_path = os.path.join("/private/tmp", zip_name)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for row in rows:
+            rel = row["image_path"]
+            for base in (OUTPUT_DIR, HISTORY_DIR):
+                p = os.path.join(base, rel)
+                if os.path.isfile(p):
+                    zf.write(p, arcname=os.path.basename(rel))
+                    break
+    return FileResponse(zip_path, media_type="application/zip", filename=zip_name)
+
+
+@app.delete("/api/history")
+def api_history_clear(current_user: dict = Depends(get_current_user)):
+    """Clear all generation records for the current user."""
+    user_id = current_user.get("sub", "")
+    conn = sqlite3.connect(GEN_DB)
+    conn.execute("DELETE FROM generations WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
     # Also clean in-memory JSON history
     global history
-    history = []
+    history = [h for h in history if h.get("user_id") != user_id]
     save_history()
-    # Clean image files
-    for f in os.listdir(HISTORY_DIR):
-        fpath = os.path.join(HISTORY_DIR, f)
-        if os.path.isfile(fpath) and f != "history.json":
-            try:
-                os.remove(fpath)
-            except Exception:
-                pass
     return {"ok": True}
 
 
-@app.get("/api/images/{filename}")
+@app.get("/api/images/{filename:path}")
 def api_image(filename: str):
-    path = os.path.join(HISTORY_DIR, filename)
-    if not os.path.isfile(path):
-        raise HTTPException(404)
-    return FileResponse(path, media_type="image/png")
+    """Serve generated images."""
+    path = os.path.join(OUTPUT_DIR, filename)
+    if os.path.isfile(path):
+        return FileResponse(path, media_type="image/png")
+    old = os.path.join(HISTORY_DIR, filename)
+    if os.path.isfile(old):
+        return FileResponse(old, media_type="image/png")
+    raise HTTPException(404)
 
 
-@app.get("/api/thumbs/{filename}")
+@app.get("/api/thumbs/{filename:path}")
 def api_thumb(filename: str):
-    path = os.path.join(THUMB_DIR, filename)
+    """Serve thumbnail images."""
+    path = os.path.join(OUTPUT_DIR, filename)
     if os.path.isfile(path):
         return FileResponse(path, media_type="image/jpeg")
-    orig = os.path.join(HISTORY_DIR, filename.replace("_thumb.jpg", ".png"))
-    if os.path.isfile(orig):
-        return FileResponse(orig, media_type="image/png")
+    old_t = os.path.join(HISTORY_DIR, "thumbs", filename)
+    if os.path.isfile(old_t):
+        return FileResponse(old_t, media_type="image/jpeg")
+    old_o = os.path.join(HISTORY_DIR, "thumbs", filename.replace("_thumb.jpg", ".png"))
+    if os.path.isfile(old_o):
+        return FileResponse(old_o, media_type="image/png")
     raise HTTPException(404)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Auth Routes
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AdminUserUpdateRequest(BaseModel):
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    new_password: Optional[str] = None
+
+
+class AdminUserCreateRequest(BaseModel):
+    username: str
+    password: str = "admin"
+    role: str = "user"
+
+
+@app.post("/auth/register")
+def auth_register(req: AuthRequest):
+    username = req.username.strip()
+    password = req.password
+    if len(username) < 2 or len(password) < 6:
+        raise HTTPException(400, "Username (min 2) or password (min 6) too short")
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    user_id = str(uuid.uuid4())[:8]
+    conn = sqlite3.connect(AUTH_DB)
+    try:
+        user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        role = "admin" if user_count == 0 else "user"
+        conn.execute("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+                     (user_id, username, hashed, role))
+        conn.commit()
+        token = _create_token(user_id, username)
+        conn.close()
+        return {"id": user_id, "username": username, "role": role, "token": token}
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(409, "Username already exists")
+
+
+@app.post("/auth/login")
+def auth_login(req: AuthRequest):
+    username = req.username.strip()
+    password = req.password
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    conn.close()
+    if row and row["disabled"]:
+        raise HTTPException(403, "User disabled")
+    if not row or not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+        raise HTTPException(401, "Invalid username or password")
+    token = _create_token(row["id"], row["username"])
+    return {"id": row["id"], "username": row["username"], "role": row["role"], "token": token}
+
+
+@app.get("/auth/me")
+def auth_me(current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT id, username, role, disabled, avatar, created_at FROM users WHERE id=?",
+                       (current_user["sub"],)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "User not found")
+    return {"id": row["id"], "username": row["username"], "role": row["role"],
+            "disabled": bool(row["disabled"]),
+            "avatar": row["avatar"], "created_at": row["created_at"]}
+
+
+@app.post("/auth/change-password")
+def auth_change_password(req: PasswordChangeRequest, current_user: dict = Depends(get_current_user)):
+    if len(req.new_password) < 6:
+        raise HTTPException(400, "New password too short")
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT password_hash FROM users WHERE id=?", (current_user["sub"],)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "User not found")
+    if not bcrypt.checkpw(req.current_password.encode(), row["password_hash"].encode()):
+        conn.close()
+        raise HTTPException(403, "Current password is incorrect")
+    hashed = bcrypt.hashpw(req.new_password.encode(), bcrypt.gensalt()).decode()
+    conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hashed, current_user["sub"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/users")
+def api_users_list(current_user: dict = Depends(require_admin)):
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, username, role, disabled, avatar, created_at FROM users ORDER BY created_at ASC"
+    ).fetchall()
+    conn.close()
+    return {"ok": True, "data": [
+        {"id": r["id"], "username": r["username"], "role": r["role"],
+         "disabled": bool(r["disabled"]), "avatar": r["avatar"], "created_at": r["created_at"]}
+        for r in rows
+    ]}
+
+
+@app.post("/api/users")
+def api_user_create(req: AdminUserCreateRequest, current_user: dict = Depends(require_admin)):
+    username = req.username.strip()
+    password = req.password or "admin"
+    role = req.role if req.role in ("admin", "user") else "user"
+    if len(username) < 2:
+        raise HTTPException(400, "Username too short")
+    if len(password) < 5:
+        raise HTTPException(400, "Password too short")
+    conn = sqlite3.connect(AUTH_DB)
+    try:
+        user_id = uuid.uuid4().hex[:8]
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, disabled) VALUES (?, ?, ?, ?, 0)",
+            (user_id, username, hashed, role),
+        )
+        conn.commit()
+        return {"ok": True, "data": {"id": user_id, "username": username, "role": role, "disabled": False}}
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "Username already exists")
+    finally:
+        conn.close()
+
+
+@app.put("/api/users/{user_id}")
+def api_user_update(user_id: str, req: AdminUserUpdateRequest, current_user: dict = Depends(require_admin)):
+    updates = []
+    params = []
+    if req.role is not None:
+        if req.role not in ("admin", "user"):
+            raise HTTPException(400, "Invalid role")
+        updates.append("role=?")
+        params.append(req.role)
+    if req.disabled is not None:
+        if user_id == current_user.get("sub") and req.disabled:
+            raise HTTPException(400, "Cannot disable yourself")
+        updates.append("disabled=?")
+        params.append(1 if req.disabled else 0)
+    if req.new_password:
+        if len(req.new_password) < 6:
+            raise HTTPException(400, "Password too short")
+        updates.append("password_hash=?")
+        params.append(bcrypt.hashpw(req.new_password.encode(), bcrypt.gensalt()).decode())
+    if not updates:
+        return {"ok": True}
+    params.append(user_id)
+    conn = sqlite3.connect(AUTH_DB)
+    cur = conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", params)
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        raise HTTPException(404, "User not found")
+    return {"ok": True}
+
+
+@app.delete("/api/users/{user_id}")
+def api_user_delete(user_id: str, current_user: dict = Depends(require_admin)):
+    if user_id == current_user.get("sub"):
+        raise HTTPException(400, "Cannot delete yourself")
+    conn = sqlite3.connect(AUTH_DB)
+    cur = conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        raise HTTPException(404, "User not found")
+    return {"ok": True}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2651,7 +3348,7 @@ def _check_node_ssh(node: dict) -> bool:
     if node.get("connection") == "local":
         return True
     try:
-        ssh = node.get("ssh_config", {})
+        ssh = _resolve_ssh_config(node.get("ssh_config", {}))
         if ssh.get("auth") == "password" and ssh.get("password"):
             cmd = ["sshpass", "-p", ssh["password"], "ssh",
                    f"{ssh.get('user', 'root')}@{node['host']}",
@@ -2708,11 +3405,13 @@ def _get_instance_status(node: dict, instance: dict) -> dict:
 
 
 @app.get("/api/nodes")
-def api_nodes_list():
+def api_nodes_list(current_user: dict = Depends(get_current_user)):
     """List all enabled nodes with real-time status."""
-    nodes = [n for n in _load_nodes() if n.get("enabled", True)]
+    nodes = [_normalize_node(n) for n in _load_nodes() if n.get("enabled", True)]
     result = []
     for node in nodes:
+        if not _can_view_node(node, current_user):
+            continue
         inst_statuses = [_get_instance_status(node, inst) for inst in node.get("instances", [])]
         http_up = any(s["http_up"] for s in inst_statuses)
         ssh_ok = _check_node_ssh(node)
@@ -2732,6 +3431,10 @@ def api_nodes_list():
             "access": node.get("access"),
             "labels": node.get("labels", []),
             "sort_order": node.get("sort_order", 0),
+            "owner_id": node.get("owner_id", ""),
+            "shared": bool(node.get("shared", False)),
+            "can_manage": _can_manage_node(node, current_user),
+            "can_share": _is_admin_user(current_user),
             "http_up": http_up,
             "ssh_ok": ssh_ok,
             "connected": _is_node_connected(node["id"]),
@@ -2748,11 +3451,9 @@ def api_nodes_list():
 
 
 @app.get("/api/nodes/{nid}")
-def api_node_get(nid: str):
+def api_node_get(nid: str, current_user: dict = Depends(get_current_user)):
     """Get single node detail with password mask."""
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=True)
     # Mask password
     result = dict(node)
     if "ssh_config" in result and result["ssh_config"].get("password"):
@@ -2769,10 +3470,11 @@ class NodeCreateRequest(BaseModel):
     scan_ports: dict = {}
     instances: list[dict] = []
     sort_order: int = 0
+    shared: bool = False
 
 
 @app.post("/api/nodes")
-def api_node_create(req: NodeCreateRequest):
+def api_node_create(req: NodeCreateRequest, current_user: dict = Depends(get_current_user)):
     """Create a new node."""
     nodes = _load_nodes()
     new_node = {
@@ -2786,6 +3488,8 @@ def api_node_create(req: NodeCreateRequest):
         "scan_ports": req.scan_ports or {"range": "8188-8195", "extra": []},
         "instances": req.instances or [],
         "sort_order": req.sort_order or len(nodes),
+        "owner_id": _user_id(current_user),
+        "shared": bool(req.shared) if _is_admin_user(current_user) else False,
     }
     nodes.append(new_node)
     _save_nodes(nodes)
@@ -2802,13 +3506,14 @@ class NodeUpdateRequest(BaseModel):
     scan_ports: Optional[dict] = None
     instances: Optional[list[dict]] = None
     sort_order: Optional[int] = None
+    shared: Optional[bool] = None
 
 
 class NodeReorderRequest(BaseModel):
     order: list[dict]
 
 @app.put("/api/nodes/reorder")
-def api_node_reorder(req: NodeReorderRequest):
+def api_node_reorder(req: NodeReorderRequest, current_user: dict = Depends(require_admin)):
     """Reorder nodes."""
     nodes = _load_nodes()
     order_map = {item["id"]: item.get("sort_order", 0) for item in req.order}
@@ -2820,44 +3525,44 @@ def api_node_reorder(req: NodeReorderRequest):
     _save_nodes(nodes)
     return {"ok": True}
 @app.put("/api/nodes/{nid}")
-def api_node_update(nid: str, req: NodeUpdateRequest):
+def api_node_update(nid: str, req: NodeUpdateRequest, current_user: dict = Depends(get_current_user)):
     """Update a node (partial merge)."""
     nodes = _load_nodes()
     node = next((n for n in nodes if n["id"] == nid), None)
-    if not node:
-        raise HTTPException(404, "Node not found")
+    node = _ensure_node_access(node, current_user, require_manage=True)
 
     update_data = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
+    if "shared" in update_data and not _is_admin_user(current_user):
+        del update_data["shared"]
     # Password: __MASKED__ means skip
     if "ssh_config" in update_data and isinstance(update_data["ssh_config"], dict):
         if update_data["ssh_config"].get("password") == "__MASKED__":
             del update_data["ssh_config"]["password"]
-            if not update_data["ssh_config"]:
-                del update_data["ssh_config"]
+            merged_ssh = dict(node.get("ssh_config", {}))
+            merged_ssh.update(update_data["ssh_config"])
+            update_data["ssh_config"] = merged_ssh
     node.update(update_data)
     _save_nodes(nodes)
     return {"ok": True, "data": node}
 
 
 @app.delete("/api/nodes/{nid}")
-def api_node_delete(nid: str):
+def api_node_delete(nid: str, current_user: dict = Depends(get_current_user)):
     """Delete a node. Must keep at least 1 node."""
     nodes = _load_nodes()
-    if len(nodes) <= 1:
+    visible_nodes = [n for n in nodes if _can_manage_node(_normalize_node(n), current_user)]
+    if len(nodes) <= 1 or len(visible_nodes) <= 1:
         raise HTTPException(400, "Cannot delete the last node")
     node = next((n for n in nodes if n["id"] == nid), None)
-    if not node:
-        raise HTTPException(404, "Node not found")
+    node = _ensure_node_access(node, current_user, require_manage=True)
     nodes.remove(node)
     _save_nodes(nodes)
     return {"ok": True}
 
 
 @app.post("/api/nodes/{nid}/instances/{iid}/start")
-def api_node_instance_start(nid: str, iid: str):
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+def api_node_instance_start(nid: str, iid: str, current_user: dict = Depends(get_current_user)):
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=False)
     inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
     if not inst:
         raise HTTPException(404, "Instance not found")
@@ -2869,10 +3574,8 @@ def api_node_instance_start(nid: str, iid: str):
 
 
 @app.post("/api/nodes/{nid}/instances/{iid}/stop")
-def api_node_instance_stop(nid: str, iid: str):
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+def api_node_instance_stop(nid: str, iid: str, current_user: dict = Depends(get_current_user)):
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=True)
     inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
     if not inst:
         raise HTTPException(404, "Instance not found")
@@ -2885,10 +3588,8 @@ def api_node_instance_stop(nid: str, iid: str):
 
 
 @app.post("/api/nodes/{nid}/instances/{iid}/restart")
-def api_node_instance_restart(nid: str, iid: str):
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+def api_node_instance_restart(nid: str, iid: str, current_user: dict = Depends(get_current_user)):
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=True)
     inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
     if not inst:
         raise HTTPException(404, "Instance not found")
@@ -2899,10 +3600,8 @@ def api_node_instance_restart(nid: str, iid: str):
     raise HTTPException(500, "Failed to restart instance")
 
 @app.post("/api/nodes/{nid}/instances/{iid}/force-restart")
-def api_node_instance_force_restart(nid: str, iid: str):
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+def api_node_instance_force_restart(nid: str, iid: str, current_user: dict = Depends(get_current_user)):
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=True)
     inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
     if not inst:
         raise HTTPException(404, "Instance not found")
@@ -2914,11 +3613,9 @@ def api_node_instance_force_restart(nid: str, iid: str):
 
 
 @app.post("/api/nodes/{nid}/discover")
-def api_node_discover(nid: str):
+def api_node_discover(nid: str, current_user: dict = Depends(get_current_user)):
     """Port scan to discover ComfyUI instances on a node."""
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=True)
 
     scan_ports = node.get("scan_ports", {})
     port_range = scan_ports.get("range", "8188-8195")
@@ -2977,11 +3674,9 @@ def api_node_discover(nid: str):
 
 
 @app.post("/api/nodes/{nid}/test")
-def api_node_test(nid: str):
+def api_node_test(nid: str, current_user: dict = Depends(get_current_user)):
     """Test connectivity for a node."""
-    node = _get_node_by_id(nid)
-    if not node:
-        raise HTTPException(404, "Node not found")
+    node = _ensure_node_access(_get_node_by_id(nid), current_user, require_manage=False)
     return {
         "ok": True,
         "data": {
@@ -3001,7 +3696,7 @@ class ApplyScanRequest(BaseModel):
 
 
 @app.post("/api/nodes/{nid}/apply-scan")
-def api_node_apply_scan(nid: str, req: ApplyScanRequest):
+def api_node_apply_scan(nid: str, req: ApplyScanRequest, current_user: dict = Depends(get_current_user)):
     """Apply scan results: add new instances to node."""
     nodes = _load_nodes(force=True)
     found = None
@@ -3009,8 +3704,7 @@ def api_node_apply_scan(nid: str, req: ApplyScanRequest):
         if n["id"] == nid:
             found = n
             break
-    if not found:
-        raise HTTPException(404, "Node not found")
+    found = _ensure_node_access(found, current_user, require_manage=True)
     added = []
     for sel in req.selected:
         port = sel.get("port")
@@ -3077,7 +3771,7 @@ def api_workflow_version_download(name: str, version: str = "v1"):
     return FileResponse(vpath, media_type="application/json", filename=f"{base_name}_{version}.json")
 
 @app.post("/api/workflows/{name}/upload-version")
-async def api_upload_workflow_version(name: str, file: UploadFile = File(...)):
+async def api_upload_workflow_version(name: str, file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
     content = await file.read(MAX_WORKFLOW_SIZE + 1)
     if len(content) > MAX_WORKFLOW_SIZE:
         raise HTTPException(413, "File too large")
@@ -3119,7 +3813,7 @@ async def api_upload_workflow_version(name: str, file: UploadFile = File(...)):
 
 
 @app.post("/api/workflows/{name}/activate-version")
-def api_activate_workflow_version(name: str, body: dict):
+def api_activate_workflow_version(name: str, body: dict, current_user: dict = Depends(require_admin)):
     version = body.get("version", "")
     if not version:
         raise HTTPException(400, "version required")
@@ -3142,7 +3836,7 @@ def api_activate_workflow_version(name: str, body: dict):
 
 
 @app.delete("/api/workflows/{name}/versions/{version}")
-def api_delete_workflow_version(name: str, version: str):
+def api_delete_workflow_version(name: str, version: str, current_user: dict = Depends(require_admin)):
     if version == "v1" or version == "base":
         raise HTTPException(400, "Cannot delete base version")
     meta = _load_wf_meta()
