@@ -26,6 +26,23 @@
     return fetch(url, opts);
   }
 
+  function _mapAuthError(detail, fallbackText) {
+    switch (detail) {
+      case 'Username is required': return '请输入用户名';
+      case 'Password is required': return '请输入密码';
+      case 'Username does not exist': return '用户名不存在';
+      case 'Incorrect password': return '密码错误';
+      case 'User disabled': return '账号已被禁用';
+      case 'Username already exists': return '用户名已存在';
+      case 'Username (min 2) or password (min 6) too short': return '用户名至少 2 位，密码至少 6 位';
+      default: return detail || fallbackText;
+    }
+  }
+
+  function _parseJsonSafe(resp) {
+    return resp.json().catch(function() { return {}; });
+  }
+
   function _closeDropdown() {
     _dropdownOpen = false;
     var menu = $('#authDropdownMenu');
@@ -51,13 +68,28 @@
   function _handleAuthResponse(data, okText, failText) {
     if (data && data.token) {
       _setToken(data.token);
-      _currentUser = data;
-      _updateUI();
-      closeModal();
-      CW.toast(okText, 'done');
-      if (window.CW && CW.loadNodes) CW.loadNodes();
-      if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
-      return data;
+      return fetch(API + '/auth/me', {
+        headers: { 'Authorization': 'Bearer ' + data.token }
+      }).then(function(r) {
+        if (!r.ok) throw new Error('auth/me failed');
+        return r.json();
+      }).then(function(user) {
+        _currentUser = user || data;
+        _updateUI();
+        closeModal();
+        CW.toast(okText, 'done');
+        if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
+        if (window.CW && CW.loadHistory) CW.loadHistory();
+        return _currentUser;
+      }).catch(function() {
+        _currentUser = data;
+        _updateUI();
+        closeModal();
+        CW.toast(okText, 'done');
+        if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
+        if (window.CW && CW.loadHistory) CW.loadHistory();
+        return data;
+      });
     }
     CW.toast((data && (data.detail || data.error)) || failText, 'error');
     return data;
@@ -68,7 +100,14 @@
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ username: username, password: password })
-    }).then(function(r) { return r.json(); }).then(function(data) {
+    }).then(function(r) {
+      return _parseJsonSafe(r).then(function(data) {
+        if (!r.ok) {
+          throw new Error(_mapAuthError(data && data.detail, '注册失败'));
+        }
+        return data;
+      });
+    }).then(function(data) {
       return _handleAuthResponse(data, '注册成功', '注册失败');
     });
   }
@@ -78,7 +117,14 @@
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ username: username, password: password })
-    }).then(function(r) { return r.json(); }).then(function(data) {
+    }).then(function(r) {
+      return _parseJsonSafe(r).then(function(data) {
+        if (!r.ok) {
+          throw new Error(_mapAuthError(data && data.detail, '登录失败'));
+        }
+        return data;
+      });
+    }).then(function(data) {
       return _handleAuthResponse(data, '登录成功', '登录失败');
     });
   }
@@ -88,13 +134,15 @@
     _currentUser = null;
     _closeDropdown();
     _updateUI();
+    if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
+    if (window.CW && CW.loadHistory) CW.loadHistory();
     CW.toast('已退出', 'info');
   }
 
   function restoreSession() {
     var token = _getToken();
-    if (!token) { _updateUI(); return; }
-    fetch(API + '/auth/me', {
+    if (!token) { _updateUI(); return Promise.resolve(null); }
+    return fetch(API + '/auth/me', {
       headers: { 'Authorization': 'Bearer ' + token }
     }).then(function(r) {
       if (!r.ok) throw new Error('Session expired');
@@ -102,15 +150,22 @@
     }).then(function(user) {
       _currentUser = user;
       _updateUI();
+      return user;
     }).catch(function() {
       _clearToken();
       _updateUI();
+      return null;
     });
   }
 
   function _updateUI() {
     var container = $('#authContainer');
     if (!container) return;
+    var gatedIds = ['tbDeviceBtn', 'tbWfMgrBtn', 'tbLogBtn'];
+    gatedIds.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = _currentUser ? '' : 'none';
+    });
     if (_currentUser) {
       var roleLabel = _currentUser.role === 'admin' ? '管理员' : '用户';
       container.innerHTML =
@@ -175,9 +230,15 @@
           errEl.style.display = 'block';
           return;
         }
-        register(u, p);
+        register(u, p).catch(function(err) {
+          errEl.textContent = err && err.message ? err.message : '注册失败';
+          errEl.style.display = 'block';
+        });
       } else {
-        login(u, p);
+        login(u, p).catch(function(err) {
+          errEl.textContent = err && err.message ? err.message : '登录失败';
+          errEl.style.display = 'block';
+        });
       }
     };
     $('#authPassword').onkeydown = function(e) {
@@ -426,10 +487,9 @@
     }).catch(function(e) { CW.toast(e.message, 'error'); });
   }
 
-  restoreSession();
+  window.CW = window.CW || {};
+  window.CW.authReady = restoreSession();
   setTimeout(_updateUI, 100);
-
-  if (!window.CW) window.CW = {};
   window.CW.auth = {
     isLoggedIn: isLoggedIn,
     getCurrentUser: getCurrentUser,

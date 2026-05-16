@@ -80,10 +80,17 @@
     if (self._stopped) return;
     if (self.ws && (self.ws.readyState === WebSocket.OPEN || self.ws.readyState === WebSocket.CONNECTING)) return;
 
-    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    var base = location.pathname.replace(/\/+$/, '');
+    var apiBase = window.CW_API_BASE || '';
+    var wsTarget;
+    if (apiBase) {
+      wsTarget = apiBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/ws';
+    } else {
+      var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      var base = location.pathname.replace(/\/+$/, '');
+      wsTarget = proto + '://' + location.host + base + '/ws';
+    }
     try {
-      self.ws = new WebSocket(proto + '://' + location.host + base + '/ws');
+      self.ws = new WebSocket(wsTarget);
     } catch (e) {
       console.error('[PollManager] WS creation failed:', e);
       setTimeout(function () { self._connectWS(); }, 5000);
@@ -315,9 +322,6 @@
     window.CW.pollManager = new PollManager();
   }
 
-  _initPollManager();
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _initPollManager);
-  }
+  window.CW.initPollManager = _initPollManager;
 
 })();

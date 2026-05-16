@@ -14,8 +14,8 @@
   window.addEventListener('orientationchange', setVH);
   setVH();
 
-  const BASE = location.pathname.replace(/\/+$/, '');
-  const API = BASE;
+  const API = window.CW_API_BASE || (location.protocol === 'file:' ? 'http://localhost:18000' : location.pathname.replace(/\/+$/, ''));
+  const BASE = API;
 
   let ws = null;
   let currentWF = null;
@@ -424,8 +424,10 @@
 
   async function pollJobs() {
   console.log("[BOOT] pollJobs");
+    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) return;
     try {
       const r = await window.CW.auth.apiFetch(`${API}/api/jobs`);
+      if (!r.ok) return;
       const arr = await r.json();
       const prevCount = Object.keys(jobs).length;
       // Client-side safety: cancel jobs stuck in generating for >700s
@@ -520,12 +522,14 @@
   let _fetcherActive = false;
   async function _fetcherTick() {
     if (!_hasActiveJobs()) { _fetcherActive = false; return; }
+    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) { _fetcherActive = false; return; }
     // Check for downloading jobs that might need re-broadcast of download message
     const downloading = Object.values(jobs).filter(j => j.status === 'downloading');
     if (downloading.length > 0) {
       // Refresh from server to pick up status changes
       try {
         const r = await window.CW.auth.apiFetch(API + '/api/jobs');
+        if (!r.ok) { _fetcherActive = false; return; }
         const serverJobs = await r.json();
         for (const sj of serverJobs) {
           const prev = jobs[sj.id];
@@ -541,8 +545,10 @@
   }
   async function _pollActiveJobs() {
     if (!_hasActiveJobs()) { _pollTimer = null; return; }
+    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) { _pollTimer = null; return; }
     try {
       const r = await window.CW.auth.apiFetch(API + '/api/jobs');
+      if (!r.ok) { _pollTimer = null; return; }
       const serverJobList = await r.json(); const serverJobs = {}; for (const j of serverJobList) serverJobs[j.id] = j;
       // serverJobs is a dict {id: job_obj}
       let needRerender = false;
@@ -718,8 +724,16 @@ function init() {
     }, 30000);
     window.CW.loadWfMeta && window.CW.loadWfMeta();
     window.CW.loadHistory && window.CW.loadHistory();
-    pollJobs();
-    setInterval(pollJobs, 5000);
+    if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
+      window.CW.authReady.finally(function() {
+        pollJobs();
+      });
+    } else {
+      pollJobs();
+    }
+    setInterval(function() {
+      pollJobs();
+    }, 5000);
     connectWS();
     initServiceToggles();
     window.CW.initAdvToggle && window.CW.initAdvToggle();
@@ -906,9 +920,15 @@ function init() {
 
   console.log('[BOOT] after Object.assign');
   console.log('[BOOT] getWFType=', typeof getWFType);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
-  console.log('[BOOT] init called');
+  window.CW = window.CW || {};
+  window.CW._bootApp = function() {
+    if (window.CW.__appBooted) return;
+    window.CW.__appBooted = true;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+  };
+  if (!window.CW.__skipAutoBoot) window.CW._bootApp();
+  console.log('[BOOT] init queued');
 } catch(e) {
   console.error('[FATAL] app.js IIFE error:', e.message, e.stack);
   throw e;

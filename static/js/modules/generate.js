@@ -217,7 +217,7 @@ async function doGenerate() {
       alert('请先选择 workflow');
       return;
     }
-    // Check authentication first
+    // 未登录可看可选，但提交前再要求登录
     if (!window.CW.auth.isLoggedIn()) {
       window.CW.auth.showLogin();
       return;

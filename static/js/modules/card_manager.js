@@ -119,6 +119,8 @@
    * Render a history card
    */
   CardManager.prototype._renderHistCard = function (h, i) {
+    var user = window.CW.auth && window.CW.auth.getCurrentUser ? window.CW.auth.getCurrentUser() : null;
+    var canEdit = !!user;
     var imgSrc = h.thumb ? API + '/api/thumbs/' + h.thumb : API + '/api/images/' + h.filename;
     var wfTag = window.CW.getWFType ? window.CW.getWFType(h.workflow || '') : '';
     var meta1 = (A._wfMeta || {})[h.workflow] || {};
@@ -131,8 +133,8 @@
       '<div class="gi-img" onclick="event.stopPropagation();CW.openLB(' + i + ')">' +
       '<img src="' + imgSrc + '" loading="lazy" alt="">' +
       tagBadge +
-      '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' +
-      '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ')" title="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + ' 复刻</button>' +
+      (canEdit ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' : '') +
+      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ')" title="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + ' 复刻</button>' : '') +
       '</div>' +
       '<div class="gi-info">' +
       '<div class="gi-prompt" title="' + escA(h.prompt || '') + '">' + escH(h.prompt || '—') + '</div>' +
@@ -416,8 +418,8 @@
       '<div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(' + i + ')">' +
       '<img src="' + imgSrc + '" loading="lazy" alt="">' +
       tagBadge +
-      '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' +
-      '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ')" title="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + ' 复刻</button>' +
+      (canEdit ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' : '') +
+      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ')" title="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + ' 复刻</button>' : '') +
       '</div>' +
       '<div class="gi-info">' +
       '<div class="gi-prompt" title="' + escA(h.prompt || '') + '">' + escH(h.prompt || '—') + '</div>' +
@@ -626,10 +628,6 @@
     }
   }
 
-  // Try immediately and again on DOMContentLoaded
-  _initCardManager();
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _initCardManager);
-  }
+  window.CW.initCardManager = _initCardManager;
 
 })();

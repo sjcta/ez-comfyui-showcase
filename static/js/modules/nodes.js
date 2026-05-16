@@ -7,6 +7,13 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API;
 
+  function authFetch(url, opts) {
+    if (window.CW && CW.auth && typeof CW.auth.apiFetch === 'function') {
+      return CW.auth.apiFetch(url, opts);
+    }
+    return fetch(url, opts);
+  }
+
   // ─── 模块级常量 ───
   var STATUS_LABELS = { running: '忙碌中', idle: '待机中', dead: '宕机', offline: '未启动' };
   var DOT_COLORS = { running: 'dot-orange', idle: 'dot-green', dead: 'dot-red', offline: 'dot-gray' };
@@ -14,7 +21,7 @@
 
   // ─── 共享工具函数 ───
   async function _fetchNodeStatus(nid) {
-    var r = await fetch(API + '/api/nodes');
+    var r = await authFetch(API + '/api/nodes');
     var d = await r.json();
     if (!d.ok) return null;
     for (var ni = 0; ni < (d.data || []).length; ni++) {
@@ -55,7 +62,11 @@
     if (!cont) return;
     cont.innerHTML = '<div class="dim-tag">加载中...</div>';
     try {
-      var r = await fetch(API + '/api/nodes');
+      var r = await authFetch(API + '/api/nodes');
+      if (r.status === 401) {
+        cont.innerHTML = '<div class="dim-tag">请先登录后查看设备</div>';
+        return;
+      }
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '加载失败');
       renderNodes(d.data);
@@ -143,7 +154,7 @@
     form.dataset.nid = nid || '';
     form.reset();
     if (nid) {
-      fetch(API + '/api/nodes/' + encodeURIComponent(nid))
+      authFetch(API + '/api/nodes/' + encodeURIComponent(nid))
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d.ok) throw new Error(d.error);
@@ -294,7 +305,7 @@
     if (!data.sort_order) data.sort_order = 99;
     try {
       var url = API + '/api/nodes' + (nid ? '/' + encodeURIComponent(nid) : '');
-      var r = await fetch(url, { method: nid ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      var r = await authFetch(url, { method: nid ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '保存失败');
       modal.classList.remove('open');
@@ -319,7 +330,7 @@
 
   async function testNode(nid) {
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/test', { method: 'POST' });
+      var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/test', { method: 'POST' });
       var d = await r.json();
       // Build rich HTML for the test result modal
       var contentEl = $('#testResultContent');
@@ -395,7 +406,7 @@
   async function deleteNode(nid) {
     if (!confirm('确定删除此节点吗？')) return;
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid), { method: 'DELETE' });
+      var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid), { method: 'DELETE' });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '删除失败');
       loadNodes();
@@ -404,7 +415,7 @@
 
   async function scanNode(nid) {
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/discover', { method: 'POST' });
+      var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/discover', { method: 'POST' });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '扫描失败');
       // Show scan results
@@ -437,7 +448,7 @@
     var ports = [];
     for (var cb of rows) ports.push(parseInt(cb.dataset.port));
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/apply-scan', {
+      var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/apply-scan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ selected: ports.map(function(p) { return {port: p}; }) })
       });
@@ -454,7 +465,7 @@
 
   async function _instAction(nid, iid, action) {
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/instances/' + encodeURIComponent(iid) + '/' + action, { method: 'POST' });
+      var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/instances/' + encodeURIComponent(iid) + '/' + action, { method: 'POST' });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || action + '失败');
 
@@ -568,7 +579,7 @@
   async function toggleDeviceConnection(nid, wasConnected) {
     var action = wasConnected ? 'disconnect' : 'connect';
     try {
-      var r = await fetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/' + action, { method: 'POST' });
+      var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/' + action, { method: 'POST' });
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || '操作失败');
       // Local DOM update instead of full refresh
@@ -599,7 +610,7 @@
     if (!contentEl || !modalEl) { _showToast('SSH 信息弹窗未找到'); return; }
     contentEl.innerHTML = '<div style="padding:16px 0;text-align:center;color:var(--text-muted)">加载中…</div>';
     modalEl.style.display = ''; modalEl.classList.add('open');
-    fetch(API + '/api/nodes/' + encodeURIComponent(nid))
+    authFetch(API + '/api/nodes/' + encodeURIComponent(nid))
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (!d.ok) { contentEl.innerHTML = '<div class="error-msg" style="padding:12px;color:var(--red)">获取失败: ' + escH(d.error || '未知错误') + '</div>'; return; }

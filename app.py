@@ -36,10 +36,9 @@ from modules.ws_tracker import WSTracker, TrackResult
 
 # ── Auth config
 AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "auth.db")
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    SECRET_KEY = secrets.token_urlsafe(48)
-    print("[auth] WARNING: JWT_SECRET_KEY is not set; using an ephemeral startup secret.")
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or "ez-comfyui-showcase-local-jwt-secret-v1"
+if not os.environ.get("JWT_SECRET_KEY"):
+    print("[auth] JWT_SECRET_KEY is not set; using a stable local development secret.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 
@@ -570,6 +569,8 @@ def _init_auth_db():
             "INSERT INTO users (id, username, password_hash, role, disabled) VALUES (?, ?, ?, 'admin', 0)",
             ("admin", "admin", admin_hash),
         )
+    else:
+        conn.execute("UPDATE users SET role='admin', disabled=0 WHERE username='admin'")
     has_admin = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
     if not has_admin:
         first_user = conn.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
@@ -684,6 +685,24 @@ def get_current_user(request: Request) -> dict:
         raise HTTPException(401, "Invalid token")
 
 
+def get_current_user_optional(request: Request) -> dict | None:
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return None
+    try:
+        payload = jwt.decode(auth.split(" ")[1], SECRET_KEY, algorithms=[ALGORITHM])
+        conn = sqlite3.connect(AUTH_DB)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT role, disabled FROM users WHERE id=?", (payload.get("sub", ""),)).fetchone()
+        conn.close()
+        if not row or row["disabled"]:
+            return None
+        payload["role"] = row["role"] or "user"
+        return payload
+    except Exception:
+        return None
+
+
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     """Require an authenticated administrator for privileged local operations."""
     if current_user.get("role") != "admin" and _get_user_role(current_user.get("sub", "")) != "admin":
@@ -726,7 +745,7 @@ def _normalize_node(node: dict) -> dict:
 def _can_view_node(node: dict, current_user: dict) -> bool:
     if _is_admin_user(current_user):
         return True
-    uid = _user_id(current_user)
+    uid = _user_id(current_user or {})
     owner_id = node.get("owner_id") or _bootstrap_admin_user_id()
     return bool(uid and (owner_id == uid or node.get("shared")))
 
@@ -734,7 +753,7 @@ def _can_view_node(node: dict, current_user: dict) -> bool:
 def _can_manage_node(node: dict, current_user: dict) -> bool:
     if _is_admin_user(current_user):
         return True
-    uid = _user_id(current_user)
+    uid = _user_id(current_user or {})
     owner_id = node.get("owner_id") or _bootstrap_admin_user_id()
     return bool(uid and owner_id == uid)
 
@@ -764,21 +783,21 @@ def _can_view_workflow(filename: str, entry: dict, current_user: dict | None) ->
     owner_id = entry.get("owner_id") or _bootstrap_admin_user_id()
     if not current_user:
         return bool(entry.get("shared"))
-    uid = _user_id(current_user)
+    uid = _user_id(current_user or {})
     return bool(uid and (owner_id == uid or entry.get("shared")))
 
 
 def _can_manage_workflow(filename: str, entry: dict, current_user: dict) -> bool:
     if _is_admin_user(current_user):
         return True
-    uid = _user_id(current_user)
+    uid = _user_id(current_user or {})
     owner_id = entry.get("owner_id") or _bootstrap_admin_user_id()
     return bool(uid and owner_id == uid)
 
 
 def _can_access_job(job: dict, current_user: dict) -> bool:
     owner = job.get("user_id", "")
-    uid = _user_id(current_user)
+    uid = _user_id(current_user or {})
     return bool(uid and owner == uid)
 
 
@@ -2371,7 +2390,7 @@ async def api_sync_workflows(current_user: dict = Depends(require_admin)):
 
 
 @app.get("/api/workflows")
-def api_workflows(current_user: dict = Depends(get_current_user)):
+def api_workflows(current_user: dict | None = Depends(get_current_user_optional)):
     seen = {}
     meta = _load_wf_meta()
     for d in _get_workflow_dirs():
@@ -2451,7 +2470,7 @@ def api_workflow_find_closest(workflow: str = "", wf_id: str = "", wf_tags: str 
 
 
 @app.get("/api/workflows/{name}/fields")
-def api_workflow_fields(name: str, current_user: dict = Depends(get_current_user)):
+def api_workflow_fields(name: str, current_user: dict | None = Depends(get_current_user_optional)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
@@ -2461,7 +2480,7 @@ def api_workflow_fields(name: str, current_user: dict = Depends(get_current_user
     return parse_workflow(path, wf_name=name)
 
 @app.get("/api/workflows/{name}/analyze")
-def api_workflow_analyze(name: str, current_user: dict = Depends(get_current_user)):
+def api_workflow_analyze(name: str, current_user: dict | None = Depends(get_current_user_optional)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
@@ -2473,7 +2492,7 @@ def api_workflow_analyze(name: str, current_user: dict = Depends(get_current_use
 
 
 @app.get("/api/workflows/{name}/download")
-def api_workflow_download(name: str, current_user: dict = Depends(get_current_user)):
+def api_workflow_download(name: str, current_user: dict | None = Depends(get_current_user_optional)):
     path = _resolve_workflow(name)
     if not path:
         raise HTTPException(404)
@@ -2614,10 +2633,13 @@ def api_input_image(filename: str):
 
 def _load_wf_meta() -> dict:
     if os.path.isfile(WF_META_FILE):
-        with open(WF_META_FILE) as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            return {k: _normalize_wf_meta_entry(k, v) for k, v in raw.items()}
+        try:
+            with open(WF_META_FILE) as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                return {k: _normalize_wf_meta_entry(k, v) for k, v in raw.items()}
+        except Exception as e:
+            add_log("warn", "wf_meta", f"Failed to load wf_meta.json: {e}")
     return {}
 
 def _save_wf_meta(meta: dict):
@@ -2693,7 +2715,7 @@ def _auto_detect_tags(workflow_path: str) -> list[str]:
 
 
 @app.get("/api/workflows/meta")
-def api_workflows_meta(current_user: dict = Depends(get_current_user)):
+def api_workflows_meta(current_user: dict | None = Depends(get_current_user_optional)):
     meta = _load_wf_meta()
     seen = {}
     for d in _get_workflow_dirs():
@@ -2839,7 +2861,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
 @app.get("/api/jobs")
 def api_all_jobs(current_user: dict = Depends(get_current_user)):
-    uid = _user_id(current_user)
+    uid = _user_id(current_user or {})
     return [j for j in jobs.values() if j.get("user_id") == uid]
 
 
@@ -2932,23 +2954,24 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/history")
-def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict = Depends(get_current_user)):
+def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict | None = Depends(get_current_user_optional)):
     """Query generation history from SQLite with pagination."""
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
-    uid = _user_id(current_user)
-    if scope == "mine":
-        conditions = ["user_id = ?"]
-        params = [uid]
-    elif scope == "public":
+    uid = _user_id(current_user or {})
+    if current_user and current_user.get("role") == "admin":
+        conditions = [] if scope == "all" else ["(user_id = ? OR is_public = 1)"]
+        params = [] if scope == "all" else [uid]
+    elif current_user:
+        if scope == "mine":
+            conditions = ["user_id = ?"]
+            params = [uid]
+        else:
+            conditions = ["(user_id = ? OR is_public = 1)"]
+            params = [uid]
+    else:
         conditions = ["is_public = 1"]
         params = []
-    elif scope == "all" and current_user.get("role") == "admin":
-        conditions = []
-        params = []
-    else:
-        conditions = ["(user_id = ? OR is_public = 1)"]
-        params = [uid]
     if status:
         conditions.append("status = ?")
         params.append(status)
@@ -3178,14 +3201,20 @@ def auth_register(req: AuthRequest):
 def auth_login(req: AuthRequest):
     username = req.username.strip()
     password = req.password
+    if not username:
+        raise HTTPException(400, "Username is required")
+    if not password:
+        raise HTTPException(400, "Password is required")
     conn = sqlite3.connect(AUTH_DB)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
     conn.close()
+    if not row:
+        raise HTTPException(404, "Username does not exist")
     if row and row["disabled"]:
         raise HTTPException(403, "User disabled")
-    if not row or not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
-        raise HTTPException(401, "Invalid username or password")
+    if not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+        raise HTTPException(401, "Incorrect password")
     token = _create_token(row["id"], row["username"])
     return {"id": row["id"], "username": row["username"], "role": row["role"], "token": token}
 

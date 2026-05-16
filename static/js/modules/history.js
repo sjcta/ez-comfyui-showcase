@@ -246,7 +246,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
       html += `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
     }
 
-    if (!jobCards.length && !historyItems.length) {
+    if (!jobCards.length && !filteredArr.length) {
       html = `<div class="empty-hint"><div class="eh-icon">${CW.icon("image", 32)}</div><p>暂无历史</p><p class="hint-sub">出图后自动出现在这里</p></div>`;
     }
 
@@ -307,6 +307,8 @@ function _appendNewHistoryCards() {
     }
   }
 function _histCardHTML(h, i) {
+    const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
+    const canEdit = !!user;
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
     const wfTag = window.CW.getWFType(h.workflow || '');
     const meta2 = A._wfMeta[h.workflow] || {};
@@ -318,8 +320,8 @@ function _histCardHTML(h, i) {
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
       <img src="${imgSrc}" loading="lazy" alt="">
       ${tagBadge}
-      <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
-      <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">${CW.icon("copy")} 复刻</button>
+      ${canEdit ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>` : ''}
+      ${canEdit ? `<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">${CW.icon("copy")} 复刻</button>` : ''}
     </div>
     <div class="gi-info">
       <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
@@ -499,6 +501,7 @@ function openLB(idx) {
   }
 
 async function delHist(id) {
+    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) return;
     if (!confirm('确认删除这张图片？')) return;
     // Mark card as deleting immediately
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
@@ -519,9 +522,13 @@ async function delHist(id) {
 
 async function loadHistory() {
     try {
+      console.log('[HIST] loadHistory start');
       var authHeaders = window.CW.auth.getAuthHeaders();
-      const r = await fetch(`${API}/api/history?limit=200`, { headers: Object.assign({}, authHeaders) });
+      const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
+      const scope = user && user.role === 'admin' ? 'all' : 'gallery';
+      const r = await fetch(`${API}/api/history?scope=${scope}&limit=200`, { headers: Object.assign({}, authHeaders) });
       const d = await r.json();
+      console.log('[HIST] loadHistory resp', r.status, d && d.total, d && d.data && d.data.length);
       if (d.ok) {
         historyItems.length = 0;
         Array.prototype.push.apply(historyItems, d.data);
@@ -592,7 +599,9 @@ function renderGallery() {
   async function loadHistoryNoRender() {
     try {
       var authHeaders = window.CW.auth.getAuthHeaders();
-      const r = await fetch(`${API}/api/history?limit=200`, { headers: Object.assign({}, authHeaders) });
+      const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
+      const scope = user && user.role === 'admin' ? 'all' : 'gallery';
+      const r = await fetch(`${API}/api/history?scope=${scope}&limit=200`, { headers: Object.assign({}, authHeaders) });
       const d = await r.json();
       if (d.ok) {
         historyItems.length = 0;
@@ -607,5 +616,12 @@ function renderGallery() {
   window.CW._patchJobCard = _patchJobCard;
   window.CW._onJobDone = _onJobDone;
   window.CW._onJobError = _onJobError;
+
+  // 如果页面已登录但历史还没进来，兜底再拉一次
+  setTimeout(function() {
+    if (window.CW.auth && window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser() && historyItems.length === 0) {
+      loadHistory();
+    }
+  }, 1500);
 
 })();
