@@ -179,7 +179,7 @@ function openWfEdit(fname) {
           var r = await fetch(API + '/api/workflows/' + encodeURIComponent(A._wfEditFilename) + '/upload-version', { method: 'POST', body: fd });
           if (!r.ok) { var d = await r.json(); throw new Error(d.detail || 'Upload failed'); }
           var d = await r.json();
-          alert('✅ 版本 ' + d.version + ' 上传成功');
+          alert('版本 ' + d.version + ' 上传成功');
           loadWfVersions(A._wfEditFilename);
           loadWorkflows(); // refresh field cache
         } catch (e) { alert('上传失败: ' + e.message); }
@@ -1008,8 +1008,8 @@ window.CW.delVersion = delVersion;
     if (_syncing) return;
     var sel = $('#wfMgrDeviceSelect');
     var deviceId = sel ? sel.value : '';
-    if (!deviceId) {
-      if (label) { label.textContent = '⚠️ 请先选择要同步的设备'; label.className = 'wf-sync-err'; }
+      if (!deviceId) {
+      if (label) { label.textContent = '请先选择要同步的设备'; label.className = 'wf-sync-err'; }
       return;
     }
     _syncing = true;
@@ -1023,9 +1023,9 @@ window.CW.delVersion = delVersion;
       if (d.ok && d.data) {
         var data = d.data;
         var msg = '';
-        if (data.synced > 0) msg += '✅ 同步了 ' + data.synced + ' 个工作流';
-        else msg += '✅ 已是最新';
-        if (data.errors > 0) msg += ' ⚠️ ' + data.errors + ' 个错误';
+        if (data.synced > 0) msg += '已同步 ' + data.synced + ' 个工作流';
+        else msg += '已是最新';
+        if (data.errors > 0) msg += '，' + data.errors + ' 个错误';
         msg += '（共扫描 ' + data.total + ' 个）';
         if (label) { label.textContent = msg; label.className = 'wf-sync-ok'; }
         if (data.synced > 0) {
@@ -1034,13 +1034,13 @@ window.CW.delVersion = delVersion;
           loadWfMeta();
         }
       } else {
-        if (label) { label.textContent = '❌ 同步失败: ' + (d.detail || JSON.stringify(d)); label.className = 'wf-sync-err'; }
+        if (label) { label.textContent = '同步失败: ' + (d.detail || JSON.stringify(d)); label.className = 'wf-sync-err'; }
       }
     } catch (e) {
-      if (label) { label.textContent = '❌ 同步出错: ' + e.message; label.className = 'wf-sync-err'; }
+      if (label) { label.textContent = '同步出错: ' + e.message; label.className = 'wf-sync-err'; }
     } finally {
       _syncing = false;
-      if (btn) { btn.disabled = false; btn.textContent = '⟳ 同步'; }
+      if (btn) { btn.disabled = false; btn.textContent = '同步'; }
       // Auto-clear status after 10 seconds
       setTimeout(function() {
         var lbl = $('#wfSyncLabel');

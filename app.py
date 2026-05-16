@@ -53,7 +53,8 @@ def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = "
     if len(_log_buffer) > _MAX_LOG:
         _log_buffer[:50] = []
     try:
-        asyncio.ensure_future(broadcast({"type": "log", "entry": entry}))
+        loop = asyncio.get_running_loop()
+        loop.create_task(broadcast({"type": "log", "entry": entry}))
     except Exception:
         pass
 
@@ -136,6 +137,32 @@ def _get_enabled_instances() -> list[dict]:
             instances.append(full)
     return instances
 
+def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[dict]:
+    """Return enabled instances visible to the current user."""
+    if current_user is None:
+        return _get_enabled_instances()
+    instances = []
+    for node in _load_nodes():
+        if not node.get("enabled", True):
+            continue
+        if not _is_node_connected(node["id"]):
+            continue
+        normalized = _normalize_node(node)
+        if not _can_view_node(normalized, current_user):
+            continue
+        for inst in normalized.get("instances", []):
+            if not inst.get("enabled", True):
+                continue
+            full = dict(inst)
+            full["_node_id"] = normalized["id"]
+            full["_node_name"] = normalized["name"]
+            full["_node_host"] = normalized["host"]
+            full["_node_connection"] = normalized.get("connection", "local")
+            full["_node_ssh"] = _resolve_ssh_config(normalized.get("ssh_config", {}))
+            full["url"] = f"http://{normalized['host']}:{inst['port']}"
+            instances.append(full)
+    return instances
+
 def _get_node_by_id(nid: str) -> Optional[dict]:
     for node in _load_nodes():
         if node["id"] == nid:
@@ -211,11 +238,11 @@ async def _queue_worker():
     """Non-blocking dispatcher — spawns a task per job so per-instance semaphore waits don't block the queue."""
     while True:
         try:
-            job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id = await _job_queue.get()
+            job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance, preferred_node_id = await _job_queue.get()
             if _job_runner:
-                task = asyncio.create_task(_run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id))
+                task = asyncio.create_task(_run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance, preferred_node_id))
             else:
-                task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h))
+                task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, preferred_instance, preferred_node_id))
             _job_tasks[job_id] = task
             task.add_done_callback(lambda _t, jid=job_id: _job_tasks.pop(jid, None))
         except Exception as e:
@@ -223,13 +250,18 @@ async def _queue_worker():
             await asyncio.sleep(1)
 
 
-async def _run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id):
+async def _run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance="", preferred_node_id=""):
     try:
-        await _job_runner.run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id=user_id)
+        await _job_runner.run(
+            job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h,
+            user_id=user_id,
+            preferred_instance=preferred_instance,
+            preferred_node_id=preferred_node_id,
+        )
     finally:
         _job_queue.task_done()
 
-async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h):
+async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, preferred_instance="", preferred_node_id=""):
     """Dispatch a job and serialize only per selected ComfyUI instance."""
     sem = None
     inst_held = False
@@ -242,7 +274,16 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
         # Phase 1: find the best instance
-        inst = await pick_best_instance(workflow_name)
+        candidate_instances = _get_enabled_instances()
+        if preferred_node_id:
+            candidate_instances = [item for item in candidate_instances if item.get("_node_id") == preferred_node_id]
+        if not candidate_instances:
+            raise RuntimeError("No enabled instances available")
+        inst = None
+        if preferred_instance:
+            inst = next((item for item in candidate_instances if item.get("name") == preferred_instance), None)
+        if not inst:
+            inst = await pick_best_instance(workflow_name)
         sem = _instance_semas.get(inst["name"]) or _instance_semas.get(inst["id"]) or asyncio.Semaphore(1)
         jobs[job_id]["message"] = f"匹配实例 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
@@ -2139,6 +2180,8 @@ class GenerateRequest(BaseModel):
     seed: int | None = None
     width: int = 0
     height: int = 0
+    preferred_instance: str = ""
+    preferred_node_id: str = ""
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2156,9 +2199,9 @@ async def index():
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/status")
-def api_status():
+def api_status(current_user: dict | None = Depends(get_current_user_optional)):
     instances = []
-    for inst in _get_enabled_instances():
+    for inst in _get_enabled_instances_for_user(current_user):
         q_size = _get_instance_queue_size(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
@@ -2168,6 +2211,9 @@ def api_status():
         instances.append({
             "name": name,
             "url": inst["url"],
+            "node_id": inst.get("_node_id", ""),
+            "node_name": inst.get("_node_name", ""),
+            "node_connection": inst.get("_node_connection", "local"),
             "up": comfyui_up(base_url=inst["url"]),
             "queue": q_size,
             "queue_running": q_run,
@@ -2278,9 +2324,9 @@ def api_gpu_kill(req: dict, current_user: dict = Depends(require_admin)):
         raise HTTPException(500, str(e))
 
 @app.get("/api/comfyui/status")
-def api_comfyui_status():
+def api_comfyui_status(current_user: dict | None = Depends(get_current_user_optional)):
     result = []
-    for inst in _get_enabled_instances():
+    for inst in _get_enabled_instances_for_user(current_user):
         name = inst["name"]
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
@@ -2307,6 +2353,9 @@ def api_comfyui_status():
                     pending_workflows.append(wf)
         result.append({
             "name": name, "up": is_active, "service": svc,
+            "node_id": inst.get("_node_id", ""),
+            "node_name": inst.get("_node_name", ""),
+            "node_connection": inst.get("_node_connection", "local"),
             "queue_running": queue_running, "queue_pending": queue_pending,
             "progress": current_progress,
             "current_workflow": current_workflow,
@@ -2851,11 +2900,16 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "prompt_preview": prompt_preview,
         "width": req.width, "height": req.height,
         "fields": req.fields,
+        "preferred_instance": req.preferred_instance or "",
+        "preferred_node_id": req.preferred_node_id or "",
         "queued_at": datetime.now().strftime("%H:%M:%S"),
         "user_id": user_id,
     }
 
-    _job_queue.put_nowait((job_id, path, req.fields, seed, vllm_was, req.width, req.height, user_id))
+    _job_queue.put_nowait((
+        job_id, path, req.fields, seed, vllm_was, req.width, req.height, user_id,
+        req.preferred_instance or "", req.preferred_node_id or ""
+    ))
     return {"job_id": job_id, "seed": seed}
 
 
@@ -2919,6 +2973,8 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     seed = random.randint(0, 2**63)
     width = old.get("width", 0)
     height = old.get("height", 0)
+    preferred_instance = old.get("preferred_instance", "")
+    preferred_node_id = old.get("preferred_node_id", "")
 
     path = _resolve_workflow(wf)
     if not path:
@@ -2942,10 +2998,15 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
         "user_id": user_id,
         "width": width, "height": height,
         "fields": fields,
+        "preferred_instance": preferred_instance,
+        "preferred_node_id": preferred_node_id,
         "queued_at": datetime.now().strftime("%H:%M:%S"),
     }
 
-    _job_queue.put_nowait((new_id, path, fields, seed, vllm_was, width, height, user_id))
+    _job_queue.put_nowait((
+        new_id, path, fields, seed, vllm_was, width, height, user_id,
+        preferred_instance, preferred_node_id
+    ))
     return {"job_id": new_id, "seed": seed}
 
 

@@ -57,7 +57,7 @@ function showToast(message, type) {
     container.className = 'toast-container';
     document.body.appendChild(container);
   }
-  var icons = { queued: '🕐', generating: '🎨', done: '✅', error: '❌' };
+  var icons = { queued: '○', generating: '◔', done: '✓', error: '×' };
   // Dedup: remove existing toast with same message
   var existing = container.querySelectorAll('.toast');
   for (var ei = 0; ei < existing.length; ei++) {
@@ -68,7 +68,7 @@ function showToast(message, type) {
   }
   var t = document.createElement('div');
   t.className = 'toast toast-' + type;
-  t.innerHTML = '<span class="toast-icon">' + (icons[type] || 'ℹ️') + '</span>' + escH(message);
+  t.innerHTML = '<span class="toast-icon">' + (icons[type] || 'i') + '</span>' + escH(message);
   container.appendChild(t);
   setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 4000);
 }

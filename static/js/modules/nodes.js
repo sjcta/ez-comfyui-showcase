@@ -40,7 +40,7 @@
     } else {
       var isDead = inst.status === 'dead';
       var fnName = isDead ? 'forceRestartInstance' : 'startInstance';
-      var btnText = isDead ? '🔄 强制重启' : '▶ 启动';
+      var btnText = isDead ? '强制重启' : '启动';
       html += '<button class="wf-mgr-btn btn-start" onclick="CW.' + fnName + '(\'' + escA(nid) + '\',\'' + escA(iid) + '\')">' + btnText + '</button>';
     }
     return html;
@@ -81,21 +81,16 @@
     var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
     var isAdmin = !!(currentUser && currentUser.role === 'admin');
     if (!nodes || !nodes.length) {
-      cont.innerHTML = '<div class="dim-tag">暂无设备，点击上方 "+ 添加设备" 开始</div>';
+      cont.innerHTML = '<div class="dim-tag">暂无设备，点击上方“添加设备”开始</div>';
       return;
     }
     var html = '';
     for (var n of nodes) {
-      var sshOk = n.ssh_ok || n.http_up;
-      var statusIcon = sshOk ? '🟢' : '🔴';
-      var statusText = sshOk ? '在线' : '离线';
       var connLabel = { local: '本机', 'remote-ssh': '本地网络', 'remote-http': '远端' }[n.connection] || n.connection;
       var connColor = { local: 'conn-local', 'remote-ssh': 'conn-ssh', 'remote-http': 'conn-http' }[n.connection] || '';
       html += '<div class="device-card" data-nid="' + escA(n.id) + '">';
       // Header
       var connected = (n.connected !== false);
-      statusIcon = connected ? (sshOk ? '🟢' : '🟡') : '⚪';
-      statusText = connected ? (sshOk ? '在线' : '待机') : '已断开';
       html += '<div class="device-card-header">';
       html += '<span class="device-card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> ' + escH(n.name) + ' <span class="node-conn-tag ' + connColor + '">' + escH(connLabel) + '</span></span>';
       html += '<button class="wf-mgr-btn device-status-toggle' + (connected ? ' btn-start' : ' btn-stop') + '" onclick="CW.toggleDeviceConnection(\'' + n.id + '\',' + connected + ')">' + (connected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> 已连接' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> 已断开') + '</button>';
@@ -340,7 +335,7 @@
         return;
       }
       if (!d.ok) {
-        contentEl.innerHTML = '<div style="color:var(--red);font-weight:600">❌ 测试失败: ' + escH(d.error || '未知错误') + '</div>';
+        contentEl.innerHTML = '<div style="color:var(--red);font-weight:600">测试失败: ' + escH(d.error || '未知错误') + '</div>';
         modalEl.style.display = ''; modalEl.classList.add('open');
         return;
       }
@@ -349,7 +344,6 @@
       // Overall status row
       var allOk = data.http && data.ssh && data.systemd;
       html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;background:' + (allOk ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)') + ';border:1px solid ' + (allOk ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)') + '">';
-      html += '<span style="font-size:18px">' + (allOk ? '✅' : '⚠️') + '</span>';
       html += '<span style="font-weight:700;font-size:14px;color:' + (allOk ? 'var(--green)' : 'var(--red)') + '">' + (allOk ? '全部服务正常' : '部分服务异常') + '</span>';
       html += '</div>';
       // Detail checks
@@ -362,7 +356,6 @@
       for (var ci = 0; ci < checks.length; ci++) {
         var c = checks[ci];
         html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;background:var(--bg-deep);border:1px solid var(--border)">';
-        html += '<span>' + (c.ok ? '✅' : '❌') + '</span>';
         html += '<div><div style="font-weight:600;font-size:12px;color:var(--text)">' + escH(c.label) + '</div>';
         if (c.detail) html += '<div style="font-size:10px;color:var(--dim);margin-top:2px">' + escH(c.detail) + '</div>';
         html += '</div></div>';
@@ -375,7 +368,6 @@
           var inst = data.instances[_ii];
           var instOk = inst.status === 'running' || inst.status === 'idle';
           html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:4px;background:var(--bg-deep);border:1px solid var(--border);font-size:12px">';
-          html += '<span>' + (instOk ? '✅' : '❌') + '</span>';
           html += '<span style="flex:1">' + escH(inst.name || inst.id) + ' <span style="color:var(--dim)">:' + inst.port + '</span></span>';
           var statusColor = instOk ? 'var(--green)' : 'var(--red)';
           html += '<span style="color:' + statusColor + ';font-weight:600">' + escH(inst.status || '?') + '</span>';
@@ -390,7 +382,7 @@
       var contentEl2 = $('#testResultContent');
       var modalEl2 = $('#testResultModal');
       if (contentEl2 && modalEl2) {
-        contentEl2.innerHTML = '<div style="color:var(--red);font-weight:600">❌ 测试失败: ' + escH(e.message) + '</div>';
+        contentEl2.innerHTML = '<div style="color:var(--red);font-weight:600">测试失败: ' + escH(e.message) + '</div>';
         modalEl2.classList.add('open');
       } else {
         alert('测试失败: ' + e.message);
@@ -432,7 +424,7 @@
         var row = document.createElement('div');
         row.className = 'scan-result-row';
         row.innerHTML = '<label><input type="checkbox" data-port="' + item.port + '" checked> ' +
-          '端口 ' + item.port + (item.comfyui ? ' ✅ ComfyUI' : ' ❌ 非ComfyUI') +
+          '端口 ' + item.port + (item.comfyui ? ' ComfyUI' : ' 非 ComfyUI') +
           (item.queue > 0 ? ' (队列' + item.queue + ')' : '') + '</label>';
         cont.appendChild(row);
       }
@@ -587,7 +579,7 @@
       if (!card) { loadNodes(); return; }
       var statusTag = card.querySelector('.device-status-tag');
       if (statusTag) {
-        statusTag.innerHTML = wasConnected ? '⚪ 已断开' : '🟢 在线';
+        statusTag.innerHTML = wasConnected ? '已断开' : '在线';
       }
       var toggleBtn = card.querySelector('.device-card-header button');
       if (toggleBtn) {

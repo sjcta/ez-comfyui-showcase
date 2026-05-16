@@ -283,6 +283,8 @@ async function doGenerate() {
           fields,
           width: parseInt(($('#widthInput') || {}).value) || 0,
           height: parseInt(($('#heightInput') || {}).value) || 0,
+          preferred_instance: A.currentTargetInstance || '',
+          preferred_node_id: A.currentTargetNodeId || '',
         }),
       });
       const d = await r.json();
@@ -298,6 +300,8 @@ async function doGenerate() {
         prompt_preview: ($('#promptInput') || {}).value ? $('#promptInput').value.slice(0, 300) : '',
         width: parseInt(($('#widthInput') || {}).value) || 0,
         height: parseInt(($('#heightInput') || {}).value) || 0,
+        preferred_instance: A.currentTargetInstance || '',
+        preferred_node_id: A.currentTargetNodeId || '',
         queued_at: new Date().toLocaleTimeString('en-GB'),
       };
       // Trigger onJobUpdate to kick off active job polling

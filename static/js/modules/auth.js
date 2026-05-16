@@ -8,6 +8,11 @@
   var API = A.API;
   var _currentUser = null;
   var _dropdownOpen = false;
+  var _historyFilters = {
+    query: '',
+    share: 'all'
+  };
+  var _historyHoverPreview = null;
 
   function _getToken() { return localStorage.getItem('v4_token'); }
   function _setToken(t) { localStorage.setItem('v4_token', t); }
@@ -24,6 +29,11 @@
     opts = opts || {};
     opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
     return fetch(url, opts);
+  }
+
+  function _withCacheBust(url) {
+    var sep = url.indexOf('?') >= 0 ? '&' : '?';
+    return url + sep + '_ts=' + Date.now();
   }
 
   function _mapAuthError(detail, fallbackText) {
@@ -75,20 +85,34 @@
         return r.json();
       }).then(function(user) {
         _currentUser = user || data;
-        _updateUI();
-        closeModal();
-        CW.toast(okText, 'done');
-        if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
-        if (window.CW && CW.loadHistory) CW.loadHistory();
-        return _currentUser;
+        return Promise.resolve(
+          window.CW && typeof window.CW.loadLoggedInModules === 'function'
+            ? window.CW.loadLoggedInModules(_currentUser)
+            : null
+        ).catch(function() {
+          return null;
+        }).then(function() {
+          _updateUI();
+          closeModal();
+          CW.toast(okText, 'done');
+          if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+          return _currentUser;
+        });
       }).catch(function() {
         _currentUser = data;
-        _updateUI();
-        closeModal();
-        CW.toast(okText, 'done');
-        if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
-        if (window.CW && CW.loadHistory) CW.loadHistory();
-        return data;
+        return Promise.resolve(
+          window.CW && typeof window.CW.loadLoggedInModules === 'function'
+            ? window.CW.loadLoggedInModules(_currentUser)
+            : null
+        ).catch(function() {
+          return null;
+        }).then(function() {
+          _updateUI();
+          closeModal();
+          CW.toast(okText, 'done');
+          if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+          return data;
+        });
       });
     }
     CW.toast((data && (data.detail || data.error)) || failText, 'error');
@@ -134,8 +158,7 @@
     _currentUser = null;
     _closeDropdown();
     _updateUI();
-    if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
-    if (window.CW && CW.loadHistory) CW.loadHistory();
+    if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
     CW.toast('已退出', 'info');
   }
 
@@ -149,11 +172,21 @@
       return r.json();
     }).then(function(user) {
       _currentUser = user;
-      _updateUI();
-      return user;
+      return Promise.resolve(
+        window.CW && typeof window.CW.loadLoggedInModules === 'function'
+          ? window.CW.loadLoggedInModules(user)
+          : null
+      ).catch(function() {
+        return null;
+      }).then(function() {
+        _updateUI();
+        if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+        return user;
+      });
     }).catch(function() {
       _clearToken();
       _updateUI();
+      if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
       return null;
     });
   }
@@ -266,9 +299,9 @@
       '<div class="auth-modal-header"><span class="auth-modal-title">账户管理</span>' +
       '<button class="auth-modal-close" type="button" onclick="CW.auth.closeAccount()">×</button></div>' +
       '<div class="account-tabs">' +
-      '<button class="account-tab active" data-tab="profile">账户</button>' +
-      '<button class="account-tab" data-tab="history">我的历史</button>' +
-      (_currentUser && _currentUser.role === 'admin' ? '<button class="account-tab" data-tab="users">用户管理</button>' : '') +
+      '<button class="account-tab active" data-tab="profile">我的账户</button>' +
+      '<button class="account-tab" data-tab="history">出图历史</button>' +
+      (_currentUser && _currentUser.role === 'admin' ? '<button class="account-tab" data-tab="users">所有用户</button>' : '') +
       '</div><div class="account-body" id="accountBody"></div></div></div>';
     var div = document.createElement('div');
     div.innerHTML = html;
@@ -292,14 +325,27 @@
     if (tab === 'users') return _loadUsers();
     if (tab === 'history') return _loadMyHistory();
     var body = $('#accountBody');
+    var roleText = (_currentUser.role === 'admin') ? '管理员' : '普通用户';
     body.innerHTML =
       '<div class="account-section">' +
-        '<div class="account-row"><span>用户名</span><strong>' + escH(_currentUser.username) + '</strong></div>' +
-        '<div class="account-row"><span>角色</span><strong>' + escH(_currentUser.role || 'user') + '</strong></div>' +
-        '<div class="account-form-grid">' +
-          '<input class="auth-input" id="acctOldPass" type="password" placeholder="当前密码">' +
-          '<input class="auth-input" id="acctNewPass" type="password" placeholder="新密码">' +
-          '<button class="btn btn-primary" id="acctChangePass">修改密码</button>' +
+        '<div class="account-panel-head">' +
+          '<strong>我的账户</strong>' +
+          '<span>查看当前登录信息，并修改你的登录密码。</span>' +
+        '</div>' +
+        '<div class="account-profile-card">' +
+          '<div class="account-profile-grid">' +
+            '<div class="account-row"><span>用户名</span><strong>' + escH(_currentUser.username) + '</strong></div>' +
+            '<div class="account-row"><span>账户 ID</span><strong>' + escH(_currentUser.id || '-') + '</strong></div>' +
+            '<div class="account-row"><span>角色</span><strong>' + escH(roleText) + '</strong></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="account-password-card">' +
+          '<strong class="account-card-title">修改密码</strong>' +
+          '<div class="account-form-grid">' +
+            '<input class="auth-input" id="acctOldPass" type="password" placeholder="当前密码">' +
+            '<input class="auth-input" id="acctNewPass" type="password" placeholder="新密码">' +
+            '<button class="wf-mgr-btn account-action-btn btn-primary-action" id="acctChangePass">修改密码</button>' +
+          '</div>' +
         '</div>' +
       '</div>';
     $('#acctChangePass').onclick = _changePassword;
@@ -325,33 +371,51 @@
   function _loadUsers() {
     var body = $('#accountBody');
     body.innerHTML = '<div class="account-loading">加载中...</div>';
-    apiFetch(API + '/api/users').then(function(r) {
+    apiFetch(_withCacheBust(API + '/api/users'), { cache: 'no-store' }).then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '加载失败'); });
       return r.json();
     }).then(function(d) {
       var rows = (d.data || []).map(function(u) {
+        var isSelf = !!(_currentUser && _currentUser.id === u.id);
         return '<div class="user-row" data-uid="' + escA(u.id) + '">' +
-          '<div><strong>' + escH(u.username) + '</strong><span>' + escH(u.id) + '</span></div>' +
+          '<div class="user-ident">' +
+            '<div class="user-ident-top"><strong>' + escH(u.username) + '</strong>' + (isSelf ? '<span class="account-self-tag">当前账户</span>' : '') + '</div>' +
+            '<span>' + escH(u.id) + '</span>' +
+          '</div>' +
           '<select class="user-role"><option value="user"' + (u.role === 'user' ? ' selected' : '') + '>user</option><option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option></select>' +
-          '<label class="account-check"><input type="checkbox" class="user-disabled"' + (u.disabled ? ' checked' : '') + '>禁用</label>' +
+          '<label class="account-check' + (isSelf ? ' disabled' : '') + '"><input type="checkbox" class="user-disabled"' + (u.disabled ? ' checked' : '') + (isSelf ? ' disabled' : '') + '>禁用</label>' +
           '<input class="auth-input user-pass" type="password" placeholder="重置密码">' +
-          '<button class="btn" type="button" onclick="CW.auth.saveUser(\'' + escA(u.id) + '\')">保存</button>' +
-          '<button class="btn danger" type="button" onclick="CW.auth.deleteUser(\'' + escA(u.id) + '\')">删除</button>' +
+          '<button class="wf-mgr-btn account-action-btn btn-save" type="button" onclick="CW.auth.saveUser(\'' + escA(u.id) + '\')">保存</button>' +
+          '<button class="wf-mgr-btn account-action-btn btn-delete' + (isSelf ? ' is-disabled' : '') + '" type="button"' + (isSelf ? ' disabled title="不能删除当前登录账户"' : ' onclick="CW.auth.deleteUser(\'' + escA(u.id) + '\')"') + '>删除</button>' +
           '</div>';
       }).join('');
       body.innerHTML =
         '<div class="account-section">' +
+          '<div class="account-panel-head">' +
+            '<strong>所有用户</strong>' +
+            '<span>管理员可以在这里新建、调整、禁用或删除平台用户。</span>' +
+          '</div>' +
           '<div class="account-create-user">' +
             '<strong>新建用户</strong>' +
             '<div class="account-create-grid">' +
               '<input class="auth-input" id="newUserName" placeholder="用户名">' +
               '<input class="auth-input" id="newUserPassword" type="password" placeholder="默认 admin">' +
               '<select class="user-role" id="newUserRole"><option value="user">user</option><option value="admin">admin</option></select>' +
-              '<button class="btn btn-primary" type="button" onclick="CW.auth.createUser()">创建用户</button>' +
+              '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.createUser()">创建用户</button>' +
             '</div>' +
           '</div>' +
-          '<div class="account-toolbar"><strong>注册用户</strong></div>' +
-          (rows || '<div class="account-empty">暂无用户</div>') +
+          '<div class="account-list-card">' +
+            '<div class="account-toolbar"><strong>注册用户</strong><span>' + escH(String((d.data || []).length)) + ' 个账户</span></div>' +
+            '<div class="user-table-head">' +
+              '<span>账户</span>' +
+              '<span>角色</span>' +
+              '<span>状态</span>' +
+              '<span>密码</span>' +
+              '<span>保存</span>' +
+              '<span>删除</span>' +
+            '</div>' +
+            (rows || '<div class="account-empty">暂无用户</div>') +
+          '</div>' +
         '</div>';
     }).catch(function(e) {
       body.innerHTML = '<div class="account-error">' + escH(e.message) + '</div>';
@@ -414,26 +478,124 @@
     return Array.from(document.querySelectorAll('#accountBody .hist-select:checked')).map(function(x) { return x.value; });
   }
 
+  function _ensureHistoryHoverPreview() {
+    if (_historyHoverPreview) return _historyHoverPreview;
+    var el = document.createElement('div');
+    el.className = 'account-hist-floating-preview';
+    el.innerHTML = '<img alt="">';
+    document.body.appendChild(el);
+    _historyHoverPreview = el;
+    return el;
+  }
+
+  function _showHistoryHoverPreview(src, anchorEl) {
+    if (!src || !anchorEl) return;
+    var preview = _ensureHistoryHoverPreview();
+    var img = preview.querySelector('img');
+    var rect = anchorEl.getBoundingClientRect();
+    var gap = 14;
+    var width = Math.min(420, Math.floor(window.innerWidth * 0.42));
+    var left = rect.right + gap;
+    if (left + width > window.innerWidth - 16) {
+      left = Math.max(16, rect.left - width - gap);
+    }
+    img.src = src;
+    preview.style.width = width + 'px';
+    preview.style.left = left + 'px';
+    preview.style.top = (rect.top + rect.height / 2) + 'px';
+    preview.classList.add('open');
+  }
+
+  function _hideHistoryHoverPreview() {
+    if (!_historyHoverPreview) return;
+    _historyHoverPreview.classList.remove('open');
+  }
+
+  function _matchHistoryFilter(item) {
+    var query = (_historyFilters.query || '').trim().toLowerCase();
+    var share = _historyFilters.share || 'all';
+    if (share === 'shared' && !item.is_public) return false;
+    if (share === 'private' && item.is_public) return false;
+    if (!query) return true;
+    var haystack = [
+      item.filename || '',
+      item.workflow || '',
+      item.prompt || '',
+      item.prompt_preview || '',
+      item.time || ''
+    ].join(' ').toLowerCase();
+    return haystack.indexOf(query) >= 0;
+  }
+
   function _loadMyHistory() {
     var body = $('#accountBody');
     body.innerHTML = '<div class="account-loading">加载中...</div>';
-    apiFetch(API + '/api/history?scope=mine&limit=100').then(function(r) { return r.json(); }).then(function(d) {
-      var rows = (d.data || []).map(function(h) {
+    apiFetch(_withCacheBust(API + '/api/history?scope=mine&limit=100'), { cache: 'no-store' }).then(function(r) { return r.json(); }).then(function(d) {
+      var items = (d.data || []);
+      var filtered = items.filter(_matchHistoryFilter);
+      var rows = filtered.map(function(h) {
+        var imageUrl = API + '/api/images/' + h.filename;
+        var thumbUrl = API + '/api/thumbs/' + (h.thumb || h.filename);
+        var promptText = h.prompt || h.prompt_preview || '未记录提示词';
+        var workflowName = (h.workflow || '').replace('.json', '') || '未命名工作流';
         return '<div class="account-hist-row">' +
           '<input type="checkbox" class="hist-select" value="' + escA(h.id) + '">' +
-          '<img src="' + escA(API + '/api/thumbs/' + (h.thumb || h.filename)) + '" alt="">' +
-          '<div><strong>' + escH((h.workflow || '').replace('.json', '')) + '</strong><span>' + escH(h.time || '') + '</span><p>' + escH(h.prompt || '') + '</p></div>' +
-          '<button class="btn" type="button" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (h.is_public ? '取消分享' : '分享') + '</button>' +
-          '<a class="btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>下载</a>' +
+          '<div class="account-hist-preview">' +
+            '<button class="account-hist-thumb" type="button" title="悬停查看完整预览，点击打开原图" onmouseenter="CW.auth.showHistoryHoverPreview(\'' + escA(imageUrl) + '\', this)" onmouseleave="CW.auth.hideHistoryHoverPreview()" onclick="window.open(\'' + escA(imageUrl) + '\', \'_blank\', \'noopener\')">' +
+              '<img src="' + escA(thumbUrl) + '" alt="' + escA(h.filename || '') + '">' +
+              '<span>预览</span>' +
+            '</button>' +
+          '</div>' +
+          '<div class="account-hist-meta">' +
+            '<strong>' + escH(workflowName) + '</strong>' +
+            '<span>文件名：' + escH(h.filename || '-') + '</span>' +
+            '<span>时间：' + escH(h.time || '-') + '</span>' +
+            '<p>' + escH(promptText) + '</p>' +
+          '</div>' +
+          '<button class="wf-mgr-btn account-action-btn ' + (h.is_public ? 'btn-delete' : 'btn-primary-action') + '" type="button" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (h.is_public ? '取消分享' : '分享') + '</button>' +
+          '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>下载</a>' +
         '</div>';
       }).join('');
       body.innerHTML =
         '<div class="account-section">' +
-          '<div class="account-toolbar"><strong>我的历史</strong><span></span>' +
-            '<button class="btn" type="button" onclick="CW.auth.downloadSelected()">批量下载</button>' +
-            '<button class="btn danger" type="button" onclick="CW.auth.deleteSelected()">批量删除</button></div>' +
-          (rows || '<div class="account-empty">暂无出图历史</div>') +
+          '<div class="account-panel-head">' +
+            '<strong>出图历史</strong>' +
+            '<span>管理你生成过的内容，支持筛选、分享、下载和批量清理。</span>' +
+          '</div>' +
+          '<div class="account-list-card">' +
+            '<div class="account-history-toolbar">' +
+              '<input class="auth-input account-history-search" id="historySearchInput" placeholder="筛选文件名、工作流、提示词" value="' + escA(_historyFilters.query) + '">' +
+              '<select class="user-role account-history-filter" id="historyShareFilter">' +
+                '<option value="all"' + (_historyFilters.share === 'all' ? ' selected' : '') + '>全部状态</option>' +
+                '<option value="shared"' + (_historyFilters.share === 'shared' ? ' selected' : '') + '>仅已分享</option>' +
+                '<option value="private"' + (_historyFilters.share === 'private' ? ' selected' : '') + '>仅未分享</option>' +
+              '</select>' +
+              '<span class="account-history-count">显示 ' + escH(String(filtered.length)) + ' / ' + escH(String(items.length)) + ' 条</span>' +
+            '</div>' +
+            '<div class="account-batch-actions">' +
+              '<span>先勾选记录，再执行批量操作</span>' +
+              '<div class="account-batch-actions-right">' +
+                '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.downloadSelected()">批量下载</button>' +
+                '<button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.deleteSelected()">批量删除</button>' +
+              '</div>' +
+            '</div>' +
+            (rows || '<div class="account-empty">没有符合筛选条件的出图记录</div>') +
+          '</div>' +
         '</div>';
+      var searchInput = $('#historySearchInput');
+      var shareFilter = $('#historyShareFilter');
+      if (searchInput) {
+        searchInput.oninput = function() {
+          _historyFilters.query = this.value || '';
+          _loadMyHistory();
+        };
+      }
+      if (shareFilter) {
+        shareFilter.onchange = function() {
+          _historyFilters.share = this.value || 'all';
+          _loadMyHistory();
+        };
+      }
     }).catch(function(e) { body.innerHTML = '<div class="account-error">' + escH(e.message) + '</div>'; });
   }
 
@@ -507,6 +669,8 @@
     toggleShare: toggleShare,
     deleteSelected: deleteSelected,
     downloadSelected: downloadSelected,
+    showHistoryHoverPreview: _showHistoryHoverPreview,
+    hideHistoryHoverPreview: _hideHistoryHoverPreview,
     getAuthHeaders: getAuthHeaders,
     apiFetch: apiFetch,
     toggleDropdown: _toggleDropdown
@@ -519,12 +683,24 @@
       opts = opts || {};
       var url = (typeof input === 'string') ? input : (input && input.url) || '';
       var shouldAttach = false;
+      var shouldBypassCache = false;
       try {
         var u = new URL(url, window.location.href);
         shouldAttach = u.origin === window.location.origin && u.pathname.indexOf((API || '') + '/api/') === 0;
+        shouldBypassCache = shouldAttach && ((opts.method || 'GET').toUpperCase() === 'GET');
+        if (shouldBypassCache) {
+          u.searchParams.set('_ts', String(Date.now()));
+          url = u.toString();
+          if (typeof input === 'string') input = url;
+          opts.cache = 'no-store';
+        }
       } catch (e) {}
       if (shouldAttach) {
         opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
+        if (shouldBypassCache) {
+          opts.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+          opts.headers.Pragma = 'no-cache';
+        }
       }
       return _nativeFetch(input, opts);
     };

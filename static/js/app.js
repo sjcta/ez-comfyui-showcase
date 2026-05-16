@@ -24,6 +24,8 @@
   let jobFields = {};
   // job_id → fields snapshot
   let historyItems = [];
+  let currentTargetInstance = '';
+  let currentTargetNodeId = '';
   let _histVisibleCount = 0;
   let _lastRenderedHistCount = 0;
 
@@ -61,6 +63,14 @@
   Object.defineProperty(window.__APP__, 'advOpen', {
     get: () => advOpen,
     set: (v) => { advOpen = v; }
+  });
+  Object.defineProperty(window.__APP__, 'currentTargetInstance', {
+    get: () => currentTargetInstance,
+    set: (v) => { currentTargetInstance = v || ''; }
+  });
+  Object.defineProperty(window.__APP__, 'currentTargetNodeId', {
+    get: () => currentTargetNodeId,
+    set: (v) => { currentTargetNodeId = v || ''; }
   });
   console.log('[BOOT] defineProperties done');
 
@@ -717,8 +727,11 @@
 
 function init() {
   console.log("[BOOT] init function");
-    pollStatus();
-    setInterval(pollStatus, 5000);
+    var statusPoller = (window.CW && window.CW.pollStatus && window.CW.pollStatus !== pollStatus)
+      ? window.CW.pollStatus
+      : pollStatus;
+    statusPoller();
+    setInterval(statusPoller, 5000);
     setInterval(() => {
       if (ws && ws.readyState === 1) ws.send('ping');
     }, 30000);
@@ -921,6 +934,14 @@ function init() {
   console.log('[BOOT] after Object.assign');
   console.log('[BOOT] getWFType=', typeof getWFType);
   window.CW = window.CW || {};
+  window.CW.refreshForAuthChange = function() {
+    window.__APP__.currentTargetInstance = '';
+    window.__APP__.currentTargetNodeId = '';
+    if (window.CW.loadWfMeta) window.CW.loadWfMeta();
+    if (window.CW.loadWorkflows) window.CW.loadWorkflows();
+    if (window.CW.loadHistory) window.CW.loadHistory();
+    if (window.CW.pollStatus) window.CW.pollStatus();
+  };
   window.CW._bootApp = function() {
     if (window.CW.__appBooted) return;
     window.CW.__appBooted = true;

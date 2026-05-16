@@ -140,6 +140,8 @@ class JobRunner:
         img_width: int = 0,
         img_height: int = 0,
         user_id: str = "",
+        preferred_instance: str = "",
+        preferred_node_id: str = "",
     ) -> None:
         """执行一次完整的出图流程。
 
@@ -183,6 +185,16 @@ class JobRunner:
             if not instances:
                 # 降级：从 inst_mgr 获取
                 pass
+            if preferred_node_id:
+                instances = [inst for inst in instances if inst.get("_node_id") == preferred_node_id]
+            if preferred_instance:
+                preferred_match = next((inst for inst in instances if inst.get("name") == preferred_instance), None)
+                if preferred_match:
+                    instance = preferred_match
+                else:
+                    instance = None
+            else:
+                instance = None
 
             def _affinity_getter(wf_name: str) -> str:
                 from modules.config import ModelGroup
@@ -208,14 +220,15 @@ class JobRunner:
             def _group_getter(inst_name: str) -> str:
                 return self._instance_group.get(inst_name, "")
 
-            instance = await pick_best_instance(
-                instances=instances,
-                workflow_name=workflow_name,
-                affinity_getter=_affinity_getter,
-                health_check=_health_check,
-                queue_size_getter=_queue_size,
-                group_getter=_group_getter,
-            )
+            if instance is None:
+                instance = await pick_best_instance(
+                    instances=instances,
+                    workflow_name=workflow_name,
+                    affinity_getter=_affinity_getter,
+                    health_check=_health_check,
+                    queue_size_getter=_queue_size,
+                    group_getter=_group_getter,
+                )
 
             if not instance:
                 raise RuntimeError("没有可用实例")

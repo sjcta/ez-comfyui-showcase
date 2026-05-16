@@ -28,6 +28,7 @@
     base + '/modules/node-editor.js?v=' + version,
     base + '/modules/nodes.js?v=' + version
   ];
+  var loggedInModulesPromise = null;
 
   function loadScript(src) {
     return new Promise(function(resolve, reject) {
@@ -91,10 +92,26 @@
     });
   }
 
+  function loadLoggedInModules(user) {
+    if (!user || !user.role) return Promise.resolve(false);
+    if (loggedInModulesPromise) return loggedInModulesPromise;
+    loggedInModulesPromise = (async function() {
+      for (var j = 0; j < loggedInModules.length; j++) {
+        await loadScript(loggedInModules[j]);
+      }
+      return true;
+    })().catch(function(err) {
+      loggedInModulesPromise = null;
+      throw err;
+    });
+    return loggedInModulesPromise;
+  }
+
   async function boot() {
     window.CW = window.CW || {};
     window.CW.__skipAutoBoot = true;
     window.CW_API_BASE = runtimeApiBase;
+    window.CW.loadLoggedInModules = loadLoggedInModules;
     loadFontPreconnects();
     if (!document.getElementById('cwStyleLink')) {
       var link = document.createElement('link');
@@ -113,13 +130,10 @@
     var authReady = window.CW.authReady || Promise.resolve(null);
     authReady.then(function(user) {
       if (user && user.role) {
-        return (async function() {
-          for (var j = 0; j < loggedInModules.length; j++) {
-            await loadScript(loggedInModules[j]);
-          }
+        return loadLoggedInModules(user).then(function() {
           if (window.CW.loadWorkflows) window.CW.loadWorkflows();
           if (window.CW.loadHistory) window.CW.loadHistory();
-        })();
+        });
       }
       if (window.CW.loadWorkflows) window.CW.loadWorkflows();
       if (window.CW.loadHistory) window.CW.loadHistory();
