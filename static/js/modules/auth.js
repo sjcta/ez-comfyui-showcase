@@ -673,7 +673,6 @@
       });
       _renderHistoryFromCache();
       _safeToast(makePublic ? '已分享到公共图库' : '已取消分享', 'done');
-      _syncMyHistory();
       if (CW.loadHistory) CW.loadHistory();
     }).catch(function(e) { CW.toast(e.message, 'error'); });
   }
