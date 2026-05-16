@@ -178,4 +178,5 @@ function initAdvToggle() {
   window.CW.initOverlayUpload = initOverlayUpload;
   window.CW.initResizeHandle = initResizeHandle;
   window.CW.initDragScroll = initDragScroll;
+  window.CW.toast = showToast;
 })();

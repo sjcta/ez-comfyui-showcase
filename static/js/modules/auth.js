@@ -13,6 +13,9 @@
     share: 'all'
   };
   var _historyHoverPreview = null;
+  var _accountActiveTab = 'profile';
+  var _usersCache = [];
+  var _historyCache = [];
 
   function _getToken() { return localStorage.getItem('v4_token'); }
   function _setToken(t) { localStorage.setItem('v4_token', t); }
@@ -322,6 +325,7 @@
   }
 
   function _renderAccountTab(tab) {
+    _accountActiveTab = tab || 'profile';
     if (tab === 'users') return _loadUsers();
     if (tab === 'history') return _loadMyHistory();
     var body = $('#accountBody');
@@ -351,6 +355,53 @@
     $('#acctChangePass').onclick = _changePassword;
   }
 
+  function _renderUsersFromCache() {
+    var body = $('#accountBody');
+    if (!body) return;
+    var rows = (_usersCache || []).map(function(u) {
+      var isSelf = !!(_currentUser && _currentUser.id === u.id);
+      return '<div class="user-row" data-uid="' + escA(u.id) + '">' +
+        '<div class="user-ident">' +
+          '<div class="user-ident-top"><strong>' + escH(u.username) + '</strong>' + (isSelf ? '<span class="account-self-tag">当前账户</span>' : '') + '</div>' +
+          '<span>' + escH(u.id) + '</span>' +
+        '</div>' +
+        '<select class="user-role"><option value="user"' + (u.role === 'user' ? ' selected' : '') + '>user</option><option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option></select>' +
+        '<label class="account-check' + (isSelf ? ' disabled' : '') + '"><input type="checkbox" class="user-disabled"' + (u.disabled ? ' checked' : '') + (isSelf ? ' disabled' : '') + '>禁用</label>' +
+        '<input class="auth-input user-pass" type="password" placeholder="重置密码">' +
+        '<button class="wf-mgr-btn account-action-btn btn-save" type="button" onclick="CW.auth.saveUser(\'' + escA(u.id) + '\')">保存</button>' +
+        '<button class="wf-mgr-btn account-action-btn btn-delete' + (isSelf ? ' is-disabled' : '') + '" type="button"' + (isSelf ? ' disabled title="不能删除当前登录账户"' : ' onclick="CW.auth.deleteUser(\'' + escA(u.id) + '\')"') + '>删除</button>' +
+        '</div>';
+    }).join('');
+    body.innerHTML =
+      '<div class="account-section">' +
+        '<div class="account-panel-head">' +
+          '<strong>所有用户</strong>' +
+          '<span>管理员可以在这里新建、调整、禁用或删除平台用户。</span>' +
+        '</div>' +
+        '<div class="account-create-user">' +
+          '<strong>新建用户</strong>' +
+          '<div class="account-create-grid">' +
+            '<input class="auth-input" id="newUserName" placeholder="用户名">' +
+            '<input class="auth-input" id="newUserPassword" type="password" placeholder="默认 admin">' +
+            '<select class="user-role" id="newUserRole"><option value="user">user</option><option value="admin">admin</option></select>' +
+            '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.createUser()">创建用户</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="account-list-card">' +
+          '<div class="account-toolbar"><strong>注册用户</strong><span>' + escH(String((_usersCache || []).length)) + ' 个账户</span></div>' +
+          '<div class="user-table-head">' +
+            '<span>账户</span>' +
+            '<span>角色</span>' +
+            '<span>状态</span>' +
+            '<span>密码</span>' +
+            '<span>保存</span>' +
+            '<span>删除</span>' +
+          '</div>' +
+          (rows || '<div class="account-empty">暂无用户</div>') +
+        '</div>' +
+      '</div>';
+  }
+
   function _changePassword() {
     var oldPass = $('#acctOldPass').value;
     var newPass = $('#acctNewPass').value;
@@ -375,50 +426,24 @@
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '加载失败'); });
       return r.json();
     }).then(function(d) {
-      var rows = (d.data || []).map(function(u) {
-        var isSelf = !!(_currentUser && _currentUser.id === u.id);
-        return '<div class="user-row" data-uid="' + escA(u.id) + '">' +
-          '<div class="user-ident">' +
-            '<div class="user-ident-top"><strong>' + escH(u.username) + '</strong>' + (isSelf ? '<span class="account-self-tag">当前账户</span>' : '') + '</div>' +
-            '<span>' + escH(u.id) + '</span>' +
-          '</div>' +
-          '<select class="user-role"><option value="user"' + (u.role === 'user' ? ' selected' : '') + '>user</option><option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option></select>' +
-          '<label class="account-check' + (isSelf ? ' disabled' : '') + '"><input type="checkbox" class="user-disabled"' + (u.disabled ? ' checked' : '') + (isSelf ? ' disabled' : '') + '>禁用</label>' +
-          '<input class="auth-input user-pass" type="password" placeholder="重置密码">' +
-          '<button class="wf-mgr-btn account-action-btn btn-save" type="button" onclick="CW.auth.saveUser(\'' + escA(u.id) + '\')">保存</button>' +
-          '<button class="wf-mgr-btn account-action-btn btn-delete' + (isSelf ? ' is-disabled' : '') + '" type="button"' + (isSelf ? ' disabled title="不能删除当前登录账户"' : ' onclick="CW.auth.deleteUser(\'' + escA(u.id) + '\')"') + '>删除</button>' +
-          '</div>';
-      }).join('');
-      body.innerHTML =
-        '<div class="account-section">' +
-          '<div class="account-panel-head">' +
-            '<strong>所有用户</strong>' +
-            '<span>管理员可以在这里新建、调整、禁用或删除平台用户。</span>' +
-          '</div>' +
-          '<div class="account-create-user">' +
-            '<strong>新建用户</strong>' +
-            '<div class="account-create-grid">' +
-              '<input class="auth-input" id="newUserName" placeholder="用户名">' +
-              '<input class="auth-input" id="newUserPassword" type="password" placeholder="默认 admin">' +
-              '<select class="user-role" id="newUserRole"><option value="user">user</option><option value="admin">admin</option></select>' +
-              '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.createUser()">创建用户</button>' +
-            '</div>' +
-          '</div>' +
-          '<div class="account-list-card">' +
-            '<div class="account-toolbar"><strong>注册用户</strong><span>' + escH(String((d.data || []).length)) + ' 个账户</span></div>' +
-            '<div class="user-table-head">' +
-              '<span>账户</span>' +
-              '<span>角色</span>' +
-              '<span>状态</span>' +
-              '<span>密码</span>' +
-              '<span>保存</span>' +
-              '<span>删除</span>' +
-            '</div>' +
-            (rows || '<div class="account-empty">暂无用户</div>') +
-          '</div>' +
-        '</div>';
+      _usersCache = (d.data || []).slice();
+      _renderUsersFromCache();
     }).catch(function(e) {
       body.innerHTML = '<div class="account-error">' + escH(e.message) + '</div>';
+    });
+  }
+
+  function _syncUsers() {
+    return apiFetch(_withCacheBust(API + '/api/users'), { cache: 'no-store' }).then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '加载失败'); });
+      return r.json();
+    }).then(function(d) {
+      _usersCache = (d.data || []).slice();
+      if (_accountActiveTab === 'users') _renderUsersFromCache();
+      return _usersCache;
+    }).catch(function(e) {
+      console.warn('sync users failed:', e && e.message ? e.message : e);
+      return _usersCache;
     });
   }
 
@@ -434,9 +459,11 @@
     }).then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '创建失败'); });
       return r.json();
-    }).then(function() {
+    }).then(function(d) {
+      if (d && d.data) _usersCache.push(d.data);
       CW.toast('用户已创建', 'done');
-      _loadUsers();
+      _renderUsersFromCache();
+      _syncUsers();
     }).catch(function(e) { CW.toast(e.message, 'error'); });
   }
 
@@ -457,8 +484,13 @@
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '保存失败'); });
       return r.json();
     }).then(function() {
+      _usersCache = (_usersCache || []).map(function(u) {
+        if (u.id !== uid) return u;
+        return Object.assign({}, u, body);
+      });
       CW.toast('用户已保存', 'done');
-      _loadUsers();
+      _renderUsersFromCache();
+      _syncUsers();
     }).catch(function(e) { CW.toast(e.message, 'error'); });
   }
 
@@ -469,8 +501,10 @@
         if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '删除失败'); });
         return r.json();
       }).then(function() {
+        _usersCache = (_usersCache || []).filter(function(u) { return u.id !== uid; });
         CW.toast('用户已删除', 'done');
-        _loadUsers();
+        _renderUsersFromCache();
+        _syncUsers();
       }).catch(function(e) { CW.toast(e.message, 'error'); });
   }
 
@@ -527,76 +561,101 @@
     return haystack.indexOf(query) >= 0;
   }
 
+  function _renderHistoryFromCache() {
+    var body = $('#accountBody');
+    if (!body) return;
+    var items = _historyCache || [];
+    var filtered = items.filter(_matchHistoryFilter);
+    var rows = filtered.map(function(h) {
+      var imageUrl = API + '/api/images/' + h.filename;
+      var thumbUrl = API + '/api/thumbs/' + (h.thumb || h.filename);
+      var promptText = h.prompt || h.prompt_preview || '未记录提示词';
+      var workflowName = (h.workflow || '').replace('.json', '') || '未命名工作流';
+      return '<div class="account-hist-row">' +
+        '<input type="checkbox" class="hist-select" value="' + escA(h.id) + '">' +
+        '<div class="account-hist-preview">' +
+          '<button class="account-hist-thumb" type="button" title="悬停查看完整预览，点击打开原图" onmouseenter="CW.auth.showHistoryHoverPreview(\'' + escA(imageUrl) + '\', this)" onmouseleave="CW.auth.hideHistoryHoverPreview()" onclick="window.open(\'' + escA(imageUrl) + '\', \'_blank\', \'noopener\')">' +
+            '<img src="' + escA(thumbUrl) + '" alt="' + escA(h.filename || '') + '">' +
+            '<span>预览</span>' +
+          '</button>' +
+        '</div>' +
+        '<div class="account-hist-meta">' +
+          '<strong>' + escH(workflowName) + '</strong>' +
+          '<span>文件名：' + escH(h.filename || '-') + '</span>' +
+          '<span>时间：' + escH(h.time || '-') + '</span>' +
+          '<p>' + escH(promptText) + '</p>' +
+        '</div>' +
+        '<button class="wf-mgr-btn account-action-btn ' + (h.is_public ? 'btn-delete' : 'btn-primary-action') + '" type="button" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (h.is_public ? '取消分享' : '分享') + '</button>' +
+        '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>下载</a>' +
+      '</div>';
+    }).join('');
+    body.innerHTML =
+      '<div class="account-section">' +
+        '<div class="account-panel-head">' +
+          '<strong>出图历史</strong>' +
+          '<span>管理你生成过的内容，支持筛选、分享、下载和批量清理。</span>' +
+        '</div>' +
+        '<div class="account-list-card">' +
+          '<div class="account-history-toolbar">' +
+            '<input class="auth-input account-history-search" id="historySearchInput" placeholder="筛选文件名、工作流、提示词" value="' + escA(_historyFilters.query) + '">' +
+            '<select class="user-role account-history-filter" id="historyShareFilter">' +
+              '<option value="all"' + (_historyFilters.share === 'all' ? ' selected' : '') + '>全部状态</option>' +
+              '<option value="shared"' + (_historyFilters.share === 'shared' ? ' selected' : '') + '>仅已分享</option>' +
+              '<option value="private"' + (_historyFilters.share === 'private' ? ' selected' : '') + '>仅未分享</option>' +
+            '</select>' +
+            '<span class="account-history-count">显示 ' + escH(String(filtered.length)) + ' / ' + escH(String(items.length)) + ' 条</span>' +
+          '</div>' +
+          '<div class="account-batch-actions">' +
+            '<span>先勾选记录，再执行批量操作</span>' +
+            '<div class="account-batch-actions-right">' +
+              '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.downloadSelected()">批量下载</button>' +
+              '<button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.deleteSelected()">批量删除</button>' +
+            '</div>' +
+          '</div>' +
+          (rows || '<div class="account-empty">没有符合筛选条件的出图记录</div>') +
+        '</div>' +
+      '</div>';
+    var searchInput = $('#historySearchInput');
+    var shareFilter = $('#historyShareFilter');
+    if (searchInput) {
+      searchInput.oninput = function() {
+        _historyFilters.query = this.value || '';
+        _renderHistoryFromCache();
+      };
+    }
+    if (shareFilter) {
+      shareFilter.onchange = function() {
+        _historyFilters.share = this.value || 'all';
+        _renderHistoryFromCache();
+      };
+    }
+  }
+
   function _loadMyHistory() {
     var body = $('#accountBody');
     body.innerHTML = '<div class="account-loading">加载中...</div>';
     apiFetch(_withCacheBust(API + '/api/history?scope=mine&limit=100'), { cache: 'no-store' }).then(function(r) { return r.json(); }).then(function(d) {
-      var items = (d.data || []);
-      var filtered = items.filter(_matchHistoryFilter);
-      var rows = filtered.map(function(h) {
-        var imageUrl = API + '/api/images/' + h.filename;
-        var thumbUrl = API + '/api/thumbs/' + (h.thumb || h.filename);
-        var promptText = h.prompt || h.prompt_preview || '未记录提示词';
-        var workflowName = (h.workflow || '').replace('.json', '') || '未命名工作流';
-        return '<div class="account-hist-row">' +
-          '<input type="checkbox" class="hist-select" value="' + escA(h.id) + '">' +
-          '<div class="account-hist-preview">' +
-            '<button class="account-hist-thumb" type="button" title="悬停查看完整预览，点击打开原图" onmouseenter="CW.auth.showHistoryHoverPreview(\'' + escA(imageUrl) + '\', this)" onmouseleave="CW.auth.hideHistoryHoverPreview()" onclick="window.open(\'' + escA(imageUrl) + '\', \'_blank\', \'noopener\')">' +
-              '<img src="' + escA(thumbUrl) + '" alt="' + escA(h.filename || '') + '">' +
-              '<span>预览</span>' +
-            '</button>' +
-          '</div>' +
-          '<div class="account-hist-meta">' +
-            '<strong>' + escH(workflowName) + '</strong>' +
-            '<span>文件名：' + escH(h.filename || '-') + '</span>' +
-            '<span>时间：' + escH(h.time || '-') + '</span>' +
-            '<p>' + escH(promptText) + '</p>' +
-          '</div>' +
-          '<button class="wf-mgr-btn account-action-btn ' + (h.is_public ? 'btn-delete' : 'btn-primary-action') + '" type="button" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (h.is_public ? '取消分享' : '分享') + '</button>' +
-          '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>下载</a>' +
-        '</div>';
-      }).join('');
-      body.innerHTML =
-        '<div class="account-section">' +
-          '<div class="account-panel-head">' +
-            '<strong>出图历史</strong>' +
-            '<span>管理你生成过的内容，支持筛选、分享、下载和批量清理。</span>' +
-          '</div>' +
-          '<div class="account-list-card">' +
-            '<div class="account-history-toolbar">' +
-              '<input class="auth-input account-history-search" id="historySearchInput" placeholder="筛选文件名、工作流、提示词" value="' + escA(_historyFilters.query) + '">' +
-              '<select class="user-role account-history-filter" id="historyShareFilter">' +
-                '<option value="all"' + (_historyFilters.share === 'all' ? ' selected' : '') + '>全部状态</option>' +
-                '<option value="shared"' + (_historyFilters.share === 'shared' ? ' selected' : '') + '>仅已分享</option>' +
-                '<option value="private"' + (_historyFilters.share === 'private' ? ' selected' : '') + '>仅未分享</option>' +
-              '</select>' +
-              '<span class="account-history-count">显示 ' + escH(String(filtered.length)) + ' / ' + escH(String(items.length)) + ' 条</span>' +
-            '</div>' +
-            '<div class="account-batch-actions">' +
-              '<span>先勾选记录，再执行批量操作</span>' +
-              '<div class="account-batch-actions-right">' +
-                '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.downloadSelected()">批量下载</button>' +
-                '<button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.deleteSelected()">批量删除</button>' +
-              '</div>' +
-            '</div>' +
-            (rows || '<div class="account-empty">没有符合筛选条件的出图记录</div>') +
-          '</div>' +
-        '</div>';
-      var searchInput = $('#historySearchInput');
-      var shareFilter = $('#historyShareFilter');
-      if (searchInput) {
-        searchInput.oninput = function() {
-          _historyFilters.query = this.value || '';
-          _loadMyHistory();
-        };
-      }
-      if (shareFilter) {
-        shareFilter.onchange = function() {
-          _historyFilters.share = this.value || 'all';
-          _loadMyHistory();
-        };
-      }
+      _historyCache = (d.data || []).slice();
+      _renderHistoryFromCache();
     }).catch(function(e) { body.innerHTML = '<div class="account-error">' + escH(e.message) + '</div>'; });
+  }
+
+  function _syncMyHistory() {
+    return apiFetch(_withCacheBust(API + '/api/history?scope=mine&limit=100'), { cache: 'no-store' }).then(function(r) {
+      return r.json();
+    }).then(function(d) {
+      if (!d.ok) throw new Error(d.detail || '加载失败');
+      _historyCache = (d.data || []).slice();
+      if (_accountActiveTab === 'history') _renderHistoryFromCache();
+      return _historyCache;
+    }).catch(function(e) {
+      console.warn('sync history failed:', e && e.message ? e.message : e);
+      return _historyCache;
+    });
+  }
+
+  function _safeToast(message, type) {
+    if (window.CW && typeof window.CW.toast === 'function') window.CW.toast(message, type);
   }
 
   function toggleShare(id, makePublic) {
@@ -608,8 +667,13 @@
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '操作失败'); });
       return r.json();
     }).then(function() {
-      CW.toast(makePublic ? '已分享到公共图库' : '已取消分享', 'done');
-      _loadMyHistory();
+      _historyCache = (_historyCache || []).map(function(item) {
+        if (item.id !== id) return item;
+        return Object.assign({}, item, { is_public: !!makePublic });
+      });
+      _renderHistoryFromCache();
+      _safeToast(makePublic ? '已分享到公共图库' : '已取消分享', 'done');
+      _syncMyHistory();
       if (CW.loadHistory) CW.loadHistory();
     }).catch(function(e) { CW.toast(e.message, 'error'); });
   }
@@ -623,8 +687,12 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: ids })
     }).then(function(r) { return r.json(); }).then(function() {
+      _historyCache = (_historyCache || []).filter(function(item) {
+        return ids.indexOf(String(item.id)) < 0;
+      });
       CW.toast('已删除', 'done');
-      _loadMyHistory();
+      _renderHistoryFromCache();
+      _syncMyHistory();
       if (CW.loadHistory) CW.loadHistory();
     });
   }

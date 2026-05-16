@@ -3020,7 +3020,10 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     uid = _user_id(current_user or {})
-    if current_user and current_user.get("role") == "admin":
+    if current_user and scope == "mine":
+        conditions = ["user_id = ?"]
+        params = [uid]
+    elif current_user and current_user.get("role") == "admin":
         conditions = [] if scope == "all" else ["(user_id = ? OR is_public = 1)"]
         params = [] if scope == "all" else [uid]
     elif current_user:
