@@ -207,6 +207,7 @@
       container.innerHTML =
         '<div class="auth-dropdown" id="authDropdownWrap">' +
           '<button class="tb-wf-mgr-btn auth-dropdown-trigger" id="authDropdownTrigger" type="button" aria-expanded="false" onclick="CW.auth.toggleDropdown()">' +
+            '<span class="auth-user-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg></span>' +
             '<span>' + escH(_currentUser.username) + '</span>' +
             '<span class="auth-role-chip">' + roleLabel + '</span>' +
             '<span class="auth-caret">▾</span>' +
@@ -231,7 +232,7 @@
   function _showModal(mode) {
     var old = $('#authModalOverlay');
     if (old) old.remove();
-    var html = '<div class="auth-modal-overlay open" id="authModalOverlay" onclick="if(event.target===this)closeModal()">' +
+    var html = '<div class="auth-modal-overlay" id="authModalOverlay" onclick="if(event.target===this)closeModal()">' +
       '<div class="auth-modal">' +
       '<div class="auth-modal-header">' +
       '<span class="auth-modal-title">' + (mode === 'login' ? '登录' : '注册') + '</span>' +
@@ -247,7 +248,10 @@
       '</div></div></div></div>';
     var div = document.createElement('div');
     div.innerHTML = html;
-    document.body.appendChild(div.firstElementChild);
+    var overlay = div.firstElementChild;
+    document.body.appendChild(overlay);
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, true);
+    else overlay.classList.add('open');
     setTimeout(function() { $('#authUsername').focus(); }, 100);
     $('#authSubmitBtn').onclick = function() {
       var u = $('#authUsername').value.trim();
@@ -289,7 +293,9 @@
 
   function closeModal() {
     var el = $('#authModalOverlay');
-    if (el) el.remove();
+    if (!el) return;
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(el, false, { removeAfterClose: true });
+    else el.remove();
   }
   window.closeModal = closeModal;
 
@@ -297,7 +303,7 @@
     _closeDropdown();
     var old = $('#accountModalOverlay');
     if (old) old.remove();
-    var html = '<div class="auth-modal-overlay open" id="accountModalOverlay" onclick="if(event.target===this)CW.auth.closeAccount()">' +
+    var html = '<div class="auth-modal-overlay" id="accountModalOverlay" onclick="if(event.target===this)CW.auth.closeAccount()">' +
       '<div class="account-modal">' +
       '<div class="auth-modal-header"><span class="auth-modal-title">账户管理</span>' +
       '<button class="auth-modal-close" type="button" onclick="CW.auth.closeAccount()">×</button></div>' +
@@ -308,7 +314,10 @@
       '</div><div class="account-body" id="accountBody"></div></div></div>';
     var div = document.createElement('div');
     div.innerHTML = html;
-    document.body.appendChild(div.firstElementChild);
+    var overlay = div.firstElementChild;
+    document.body.appendChild(overlay);
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, true);
+    else overlay.classList.add('open');
     $$('#accountModalOverlay .account-tab').forEach(function(btn) {
       btn.onclick = function() {
         $$('#accountModalOverlay .account-tab').forEach(function(x) { x.classList.remove('active'); });
@@ -321,7 +330,9 @@
 
   function closeAccount() {
     var el = $('#accountModalOverlay');
-    if (el) el.remove();
+    if (!el) return;
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(el, false, { removeAfterClose: true });
+    else el.remove();
   }
 
   function _renderAccountTab(tab) {
@@ -512,6 +523,13 @@
     return Array.from(document.querySelectorAll('#accountBody .hist-select:checked')).map(function(x) { return x.value; });
   }
 
+  function _canDeleteHistoryItem(item) {
+    if (_currentUser && _currentUser.role === 'admin') return true;
+    var uid = _currentUser && (_currentUser.sub || _currentUser.id);
+    var owner = item && item.user_id;
+    return !!(uid && owner && String(uid) === String(owner));
+  }
+
   function _ensureHistoryHoverPreview() {
     if (_historyHoverPreview) return _historyHoverPreview;
     var el = document.createElement('div');
@@ -566,6 +584,7 @@
     if (!body) return;
     var items = _historyCache || [];
     var filtered = items.filter(_matchHistoryFilter);
+    var isAdmin = _currentUser && _currentUser.role === 'admin';
     var rows = filtered.map(function(h) {
       var imageUrl = API + '/api/images/' + h.filename;
       var thumbUrl = API + '/api/thumbs/' + (h.thumb || h.filename);
@@ -585,15 +604,17 @@
           '<span>时间：' + escH(h.time || '-') + '</span>' +
           '<p>' + escH(promptText) + '</p>' +
         '</div>' +
-        '<button class="wf-mgr-btn account-action-btn ' + (h.is_public ? 'btn-delete' : 'btn-primary-action') + '" type="button" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (h.is_public ? '取消分享' : '分享') + '</button>' +
-        '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>下载</a>' +
+        '<div class="account-hist-actions">' +
+          '<button class="wf-mgr-btn account-action-btn share-state-btn ' + (h.is_public ? 'is-shared' : 'is-private') + '" type="button" title="' + (h.is_public ? '点击取消共享' : '点击设为共享') + '" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (window.CW && CW.icon ? CW.icon('share') : '') + (h.is_public ? ' 已共享' : ' 未共享') + '</button>' +
+          '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>下载</a>' +
+        '</div>' +
       '</div>';
     }).join('');
     body.innerHTML =
       '<div class="account-section">' +
         '<div class="account-panel-head">' +
-          '<strong>出图历史</strong>' +
-          '<span>管理你生成过的内容，支持筛选、分享、下载和批量清理。</span>' +
+          '<strong>' + (isAdmin ? '全部出图历史' : '出图历史') + '</strong>' +
+          '<span>' + (isAdmin ? '管理员可查看和管理所有用户及公开图库中的出图记录。' : '管理你生成过的内容，支持筛选、分享、下载和批量清理。') + '</span>' +
         '</div>' +
         '<div class="account-list-card">' +
           '<div class="account-history-toolbar">' +
@@ -634,14 +655,18 @@
   function _loadMyHistory() {
     var body = $('#accountBody');
     body.innerHTML = '<div class="account-loading">加载中...</div>';
-    apiFetch(_withCacheBust(API + '/api/history?scope=mine&limit=100'), { cache: 'no-store' }).then(function(r) { return r.json(); }).then(function(d) {
+    var scope = (_currentUser && _currentUser.role === 'admin') ? 'all' : 'mine';
+    var limit = (_currentUser && _currentUser.role === 'admin') ? 500 : 100;
+    apiFetch(_withCacheBust(API + '/api/history?scope=' + scope + '&limit=' + limit), { cache: 'no-store' }).then(function(r) { return r.json(); }).then(function(d) {
       _historyCache = (d.data || []).slice();
       _renderHistoryFromCache();
     }).catch(function(e) { body.innerHTML = '<div class="account-error">' + escH(e.message) + '</div>'; });
   }
 
   function _syncMyHistory() {
-    return apiFetch(_withCacheBust(API + '/api/history?scope=mine&limit=100'), { cache: 'no-store' }).then(function(r) {
+    var scope = (_currentUser && _currentUser.role === 'admin') ? 'all' : 'mine';
+    var limit = (_currentUser && _currentUser.role === 'admin') ? 500 : 100;
+    return apiFetch(_withCacheBust(API + '/api/history?scope=' + scope + '&limit=' + limit), { cache: 'no-store' }).then(function(r) {
       return r.json();
     }).then(function(d) {
       if (!d.ok) throw new Error(d.detail || '加载失败');
@@ -680,14 +705,18 @@
   function deleteSelected() {
     var ids = _selectedHistoryIds();
     if (!ids.length) return CW.toast('请选择记录', 'info');
+    var allowed = (_historyCache || []).filter(function(item) {
+      return ids.indexOf(String(item.id)) >= 0 && _canDeleteHistoryItem(item);
+    }).map(function(item) { return String(item.id); });
+    if (!allowed.length) return CW.toast('只能删除自己生成的内容', 'info');
     if (!confirm('确定删除选中的历史记录吗？')) return;
     apiFetch(API + '/api/history/batch-delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: ids })
+      body: JSON.stringify({ ids: allowed })
     }).then(function(r) { return r.json(); }).then(function() {
       _historyCache = (_historyCache || []).filter(function(item) {
-        return ids.indexOf(String(item.id)) < 0;
+        return allowed.indexOf(String(item.id)) < 0;
       });
       CW.toast('已删除', 'done');
       _renderHistoryFromCache();
@@ -735,6 +764,7 @@
     deleteUser: deleteUser,
     toggleShare: toggleShare,
     deleteSelected: deleteSelected,
+    canDeleteHistoryItem: _canDeleteHistoryItem,
     downloadSelected: downloadSelected,
     showHistoryHoverPreview: _showHistoryHoverPreview,
     hideHistoryHoverPreview: _hideHistoryHoverPreview,
@@ -753,7 +783,9 @@
       var shouldBypassCache = false;
       try {
         var u = new URL(url, window.location.href);
-        shouldAttach = u.origin === window.location.origin && u.pathname.indexOf((API || '') + '/api/') === 0;
+        var apiUrl = new URL(API || '/', window.location.href);
+        var apiPath = apiUrl.pathname.replace(/\/+$/, '');
+        shouldAttach = u.origin === apiUrl.origin && u.pathname.indexOf(apiPath + '/api/') === 0;
         shouldBypassCache = shouldAttach && ((opts.method || 'GET').toUpperCase() === 'GET');
         if (shouldBypassCache) {
           u.searchParams.set('_ts', String(Date.now()));

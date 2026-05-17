@@ -586,6 +586,12 @@ def _workflow_meta_row_to_entry(row: sqlite3.Row | None) -> dict | None:
         entry["versions"] = versions
     return _normalize_wf_meta_entry(filename, entry)
 
+
+def _workflow_config_row_to_entry(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    return _json_loads_safe(row["config_json"], None)
+
 def _init_gen_db():
     conn = sqlite3.connect(GEN_DB)
     conn.execute("""
@@ -633,9 +639,20 @@ def _init_gen_db():
             updated_at DATETIME DEFAULT (datetime('now','localtime'))
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_editor_config (
+            workflow_filename TEXT NOT NULL,
+            config_scope TEXT NOT NULL DEFAULT 'global',
+            user_id TEXT NOT NULL DEFAULT '',
+            config_json TEXT NOT NULL,
+            updated_at DATETIME DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (workflow_filename, config_scope, user_id)
+        )
+    """)
     conn.commit()
     conn.close()
     _migrate_wf_meta_json_to_db()
+    _migrate_wf_configs_to_db()
     # Initialize auth DB
     _init_auth_db()
 
@@ -1794,6 +1811,25 @@ def analyze_workflow(path: str) -> dict:
 
 def load_wf_config(name: str):
     """Load per-workflow config. Returns None if not found."""
+    try:
+        conn = _db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT config_json
+                FROM workflow_editor_config
+                WHERE workflow_filename=? AND config_scope='global' AND user_id=''
+                LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+        finally:
+            conn.close()
+        config = _workflow_config_row_to_entry(row)
+        if config is not None:
+            return config
+    except Exception as e:
+        add_log("warn", "wf_config", f"Failed to load workflow config from DB: {e}")
     p = os.path.join(WF_CONFIG_DIR, name)
     if os.path.isfile(p):
         with open(p) as f:
@@ -1803,10 +1839,112 @@ def load_wf_config(name: str):
 
 def save_wf_config(name: str, config: dict):
     """Save per-workflow config."""
+    _write_wf_config_to_db(name, config)
+    _export_wf_config_file_from_db(name)
+
+
+def _write_wf_config_to_db(name: str, config: dict, conn: sqlite3.Connection | None = None):
+    own_conn = conn is None
+    if own_conn:
+        conn = _db_connect()
+    conn.execute(
+        """
+        INSERT INTO workflow_editor_config
+            (workflow_filename, config_scope, user_id, config_json, updated_at)
+        VALUES (?, 'global', '', ?, datetime('now','localtime'))
+        ON CONFLICT(workflow_filename, config_scope, user_id) DO UPDATE SET
+            config_json=excluded.config_json,
+            updated_at=datetime('now','localtime')
+        """,
+        (name, _json_dumps_compact(config)),
+    )
+    if own_conn:
+        conn.commit()
+        conn.close()
+
+
+def _delete_wf_config(name: str):
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            DELETE FROM workflow_editor_config
+            WHERE workflow_filename=? AND config_scope='global' AND user_id=''
+            """,
+            (name,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    p = os.path.join(WF_CONFIG_DIR, name)
+    if os.path.isfile(p):
+        os.remove(p)
+
+
+def _export_wf_config_file_from_db(name: str):
     os.makedirs(WF_CONFIG_DIR, exist_ok=True)
     p = os.path.join(WF_CONFIG_DIR, name)
+    config = None
+    try:
+        conn = _db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT config_json
+                FROM workflow_editor_config
+                WHERE workflow_filename=? AND config_scope='global' AND user_id=''
+                LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+        finally:
+            conn.close()
+        config = _workflow_config_row_to_entry(row)
+    except Exception as e:
+        add_log("warn", "wf_config", f"Failed to export workflow config mirror: {e}")
+        return
+    if config is None:
+        if os.path.isfile(p):
+            os.remove(p)
+        return
     with open(p, "w") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def _migrate_wf_configs_to_db():
+    if not os.path.isdir(WF_CONFIG_DIR):
+        return
+    conn = _db_connect()
+    migrated = 0
+    try:
+        for filename in sorted(os.listdir(WF_CONFIG_DIR)):
+            p = os.path.join(WF_CONFIG_DIR, filename)
+            if not os.path.isfile(p):
+                continue
+            exists = conn.execute(
+                """
+                SELECT 1
+                FROM workflow_editor_config
+                WHERE workflow_filename=? AND config_scope='global' AND user_id=''
+                LIMIT 1
+                """,
+                (filename,),
+            ).fetchone()
+            if exists:
+                continue
+            try:
+                with open(p) as f:
+                    config = json.load(f)
+            except Exception as e:
+                add_log("warn", "wf_config", f"Failed to migrate {filename}: {e}")
+                continue
+            _write_wf_config_to_db(filename, config, conn=conn)
+            migrated += 1
+        conn.commit()
+    finally:
+        conn.close()
+    if migrated:
+        add_log("info", "wf_config", f"Migrated {migrated} workflow editor configs to DB")
 
 
 def parse_workflow(path: str, wf_name: str = "") -> dict:
@@ -2861,9 +2999,7 @@ def api_workflow_config_put(name: str, req: dict, current_user: dict = Depends(r
 
 @app.delete("/api/workflows/{name}/config")
 def api_workflow_config_delete(name: str, current_user: dict = Depends(require_admin)):
-    p = os.path.join(WF_CONFIG_DIR, name)
-    if os.path.isfile(p):
-        os.remove(p)
+    _delete_wf_config(name)
     return {"ok": True}
 
 

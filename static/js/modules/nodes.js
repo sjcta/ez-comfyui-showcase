@@ -322,6 +322,10 @@
     setTimeout(function() { el.classList.remove('show'); }, duration || 10000);
   }
 
+  function renderStatusBadge(ok, okLabel, failLabel) {
+    return '<span class="result-badge ' + (ok ? 'success' : 'danger') + '">' + escH(ok ? okLabel : failLabel) + '</span>';
+  }
+
 
   async function testNode(nid) {
     try {
@@ -335,19 +339,15 @@
         return;
       }
       if (!d.ok) {
-        contentEl.innerHTML = '<div style="color:var(--red);font-weight:600">测试失败: ' + escH(d.error || '未知错误') + '</div>';
+        contentEl.innerHTML = '<div class="result-panel"><div class="result-banner danger">测试失败</div><div class="result-detail-block">' + escH(d.error || '未知错误') + '</div></div>';
         modalEl.style.display = ''; modalEl.classList.add('open');
         return;
       }
       var data = d.data || {};
-      var html = '<div style="display:flex;flex-direction:column;gap:8px">';
-      // Overall status row
+      var html = '<div class="result-panel">';
       var allOk = data.http && data.ssh && data.systemd;
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;background:' + (allOk ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)') + ';border:1px solid ' + (allOk ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)') + '">';
-      html += '<span style="font-weight:700;font-size:14px;color:' + (allOk ? 'var(--green)' : 'var(--red)') + '">' + (allOk ? '全部服务正常' : '部分服务异常') + '</span>';
-      html += '</div>';
-      // Detail checks
-      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
+      html += '<div class="result-banner ' + (allOk ? 'success' : 'danger') + '">' + escH(allOk ? '全部服务正常' : '部分服务异常') + '</div>';
+      html += '<div class="result-grid">';
       var checks = [
         { label: 'HTTP 服务', ok: data.http, detail: data.http_detail || '' },
         { label: 'SSH 连接', ok: data.ssh, detail: data.ssh_detail || '' },
@@ -355,25 +355,25 @@
       ];
       for (var ci = 0; ci < checks.length; ci++) {
         var c = checks[ci];
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;background:var(--bg-deep);border:1px solid var(--border)">';
-        html += '<div><div style="font-weight:600;font-size:12px;color:var(--text)">' + escH(c.label) + '</div>';
-        if (c.detail) html += '<div style="font-size:10px;color:var(--dim);margin-top:2px">' + escH(c.detail) + '</div>';
-        html += '</div></div>';
+        html += '<div class="result-check-card">';
+        html += '<div class="result-check-head"><strong>' + escH(c.label) + '</strong>' + renderStatusBadge(!!c.ok, '正常', '异常') + '</div>';
+        if (c.detail) html += '<div class="result-check-note">' + escH(c.detail) + '</div>';
+        html += '</div>';
       }
       html += '</div>';
-      // Instance statuses (if any)
       if (data.instances && data.instances.length) {
-        html += '<div style="margin-top:4px;font-weight:600;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px">实例状态</div>';
+        html += '<div class="result-section-caption">实例状态</div>';
+        html += '<div class="result-list-stack">';
         for (var _ii = 0; _ii < data.instances.length; _ii++) {
           var inst = data.instances[_ii];
           var instOk = inst.status === 'running' || inst.status === 'idle';
-          html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:4px;background:var(--bg-deep);border:1px solid var(--border);font-size:12px">';
-          html += '<span style="flex:1">' + escH(inst.name || inst.id) + ' <span style="color:var(--dim)">:' + inst.port + '</span></span>';
-          var statusColor = instOk ? 'var(--green)' : 'var(--red)';
-          html += '<span style="color:' + statusColor + ';font-weight:600">' + escH(inst.status || '?') + '</span>';
-          if (inst.queue != null) html += '<span style="color:var(--dim);font-size:11px">队列: ' + inst.queue + '</span>';
-          html += '</div>';
+          html += '<div class="result-list-item">';
+          html += '<div class="result-list-main"><strong>' + escH(inst.name || inst.id) + '</strong><span>端口 ' + escH(String(inst.port)) + '</span></div>';
+          html += '<div class="result-list-side">' + renderStatusBadge(instOk, inst.status || 'ok', inst.status || '?');
+          if (inst.queue != null) html += '<span class="result-meta-inline">队列 ' + escH(String(inst.queue)) + '</span>';
+          html += '</div></div>';
         }
+        html += '</div>';
       }
       html += '</div>';
       contentEl.innerHTML = html;
@@ -382,7 +382,7 @@
       var contentEl2 = $('#testResultContent');
       var modalEl2 = $('#testResultModal');
       if (contentEl2 && modalEl2) {
-        contentEl2.innerHTML = '<div style="color:var(--red);font-weight:600">测试失败: ' + escH(e.message) + '</div>';
+        contentEl2.innerHTML = '<div class="result-panel"><div class="result-banner danger">测试失败</div><div class="result-detail-block">' + escH(e.message) + '</div></div>';
         modalEl2.classList.add('open');
       } else {
         alert('测试失败: ' + e.message);
@@ -421,11 +421,11 @@
       if (!modal || !cont) return;
       cont.innerHTML = '';
       for (var item of list) {
-        var row = document.createElement('div');
-        row.className = 'scan-result-row';
-        row.innerHTML = '<label><input type="checkbox" data-port="' + item.port + '" checked> ' +
-          '端口 ' + item.port + (item.comfyui ? ' ComfyUI' : ' 非 ComfyUI') +
-          (item.queue > 0 ? ' (队列' + item.queue + ')' : '') + '</label>';
+        var row = document.createElement('label');
+        row.className = 'result-choice-card scan-result-row';
+        row.innerHTML = '<input type="checkbox" data-port="' + item.port + '" checked>' +
+          '<span class="result-choice-main"><strong>端口 ' + item.port + '</strong><small>' + (item.comfyui ? '检测到 ComfyUI 服务' : '端口在线但未明确识别为 ComfyUI') + '</small></span>' +
+          '<span class="result-choice-side">' + (item.queue > 0 ? '队列 ' + item.queue : '空闲') + '</span>';
         cont.appendChild(row);
       }
       modal.dataset.nid = nid;
@@ -600,12 +600,12 @@
     var contentEl = $('#sshInfoContent');
     var modalEl = $('#sshInfoModal');
     if (!contentEl || !modalEl) { _showToast('SSH 信息弹窗未找到'); return; }
-    contentEl.innerHTML = '<div style="padding:16px 0;text-align:center;color:var(--text-muted)">加载中…</div>';
+    contentEl.innerHTML = '<div class="result-panel"><div class="result-detail-block centered">加载中...</div></div>';
     modalEl.style.display = ''; modalEl.classList.add('open');
     authFetch(API + '/api/nodes/' + encodeURIComponent(nid))
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (!d.ok) { contentEl.innerHTML = '<div class="error-msg" style="padding:12px;color:var(--red)">获取失败: ' + escH(d.error || '未知错误') + '</div>'; return; }
+        if (!d.ok) { contentEl.innerHTML = '<div class="result-panel"><div class="result-banner danger">获取失败</div><div class="result-detail-block">' + escH(d.error || '未知错误') + '</div></div>'; return; }
         var n = d.data;
         var ssh = n.ssh_config || {};
         var user = ssh.user || 'root';
@@ -613,14 +613,18 @@
         var port = ssh.port || 22;
         var auth = ssh.auth || 'password';
         var cmd = 'ssh ' + user + '@' + host + ' -p ' + port;
-        contentEl.innerHTML = '<div class="ssh-info" style="padding:8px 0">'
-          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">主机</span><span>' + escH(host + ':' + port) + '</span></div>'
-          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">用户</span><span>' + escH(user) + '</span></div>'
-          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">认证</span><span>' + escH(auth) + '</span></div>'
-          + '<div class="info-row" style="display:flex;padding:4px 0;gap:12px"><span style="min-width:64px;color:var(--text-muted)">命令</span><code style="flex:1;background:var(--bg-subtle);padding:4px 8px;border-radius:4px;font-size:12px;word-break:break-all;cursor:pointer" onclick="var r=document.createRange();r.selectNode(this);getSelection().removeAllRanges();getSelection().addRange(r)">' + escH(cmd) + '</code></div>'
+        contentEl.innerHTML = '<div class="result-panel">'
+          + '<div class="result-section-caption">连接摘要</div>'
+          + '<div class="result-list-stack">'
+          + '<div class="result-list-item"><div class="result-list-main"><strong>主机</strong><span>' + escH(host + ':' + port) + '</span></div></div>'
+          + '<div class="result-list-item"><div class="result-list-main"><strong>用户</strong><span>' + escH(user) + '</span></div></div>'
+          + '<div class="result-list-item"><div class="result-list-main"><strong>认证方式</strong><span>' + escH(auth) + '</span></div></div>'
+          + '</div>'
+          + '<div class="result-section-caption">可复制命令</div>'
+          + '<button type="button" class="result-command" onclick="var r=document.createRange();r.selectNode(this);getSelection().removeAllRanges();getSelection().addRange(r)">' + escH(cmd) + '</button>'
           + '</div>';
       })
-      .catch(function(e) { contentEl.innerHTML = '<div class="error-msg" style="padding:12px;color:var(--red)">获取失败: ' + escH(e.message) + '</div>'; });
+      .catch(function(e) { contentEl.innerHTML = '<div class="result-panel"><div class="result-banner danger">获取失败</div><div class="result-detail-block">' + escH(e.message) + '</div></div>'; });
   }
 
   function closeSshInfo() {

@@ -48,6 +48,33 @@
   function escA(s) {
     return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
+  const MODAL_TRANSITION_MS = 280;
+  function setModalOpen(el, open, opts) {
+    if (!el) return;
+    opts = opts || {};
+    if (el._modalCloseTimer) {
+      clearTimeout(el._modalCloseTimer);
+      el._modalCloseTimer = null;
+    }
+    if (open) {
+      if (opts.beforeOpen) opts.beforeOpen(el);
+      el.classList.remove('modal-closing');
+      el.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(function () {
+        el.classList.add('open');
+      });
+      return;
+    }
+    el.classList.add('modal-closing');
+    el.classList.remove('open');
+    el.setAttribute('aria-hidden', 'true');
+    var delay = opts.duration || MODAL_TRANSITION_MS;
+    el._modalCloseTimer = setTimeout(function () {
+      el.classList.remove('modal-closing');
+      if (opts.removeAfterClose && el.parentNode) el.parentNode.removeChild(el);
+      if (typeof opts.afterClose === 'function') opts.afterClose(el);
+    }, delay);
+  }
   // ── Expose shared state for modules ──
   console.log('[BOOT] before __APP__');
   window.__APP__ = { $, $$, escH, escA, API, jobs, jobFields, historyItems };
@@ -771,7 +798,7 @@ function init() {
     try{$('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });}catch(e){}
     try{$('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });}catch(e){}
     try{$('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });}catch(e){}
-    try{$('#wfEditThumbInput').addEventListener('change', function() { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(); });}catch(e){}
+    try{$('#wfEditThumbInput').addEventListener('change', function(e) { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(e); });}catch(e){}
 
     try{$('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });}catch(e){}
     try{$('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });}catch(e){}
@@ -927,6 +954,8 @@ function init() {
     retryJob,
     rndSeed,
     wfUploadOverlay,
+    setModalOpen,
+    MODAL_TRANSITION_MS,
     getWFType, wfTag,
     formatElapsed,
     shortSeed,

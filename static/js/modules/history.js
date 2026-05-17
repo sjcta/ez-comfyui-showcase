@@ -13,16 +13,39 @@
   var _filteredHistory = [];
   var lbIdx = -1;
   var lbItems = [];
-  var _galleryFilters = { type: '', size: '', style: '', workflow: '' };
+  var _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
   var _renderTimer = null;
+  var _lbLoadToken = 0;
+
+  function _lightboxImageUrl(filename) {
+    return `${API}/api/images/${filename}`;
+  }
+
+  function _lightboxDownloadName(filename) {
+    if (!filename) return 'image.png';
+    var parts = String(filename).split('/');
+    return parts[parts.length - 1] || 'image.png';
+  }
+
+  function _syncLightboxDownload(filename) {
+    var link = $('#lbDownload');
+    if (!link) return;
+    var url = _lightboxImageUrl(filename || '');
+    var downloadName = _lightboxDownloadName(filename || '');
+    link.href = url;
+    link.setAttribute('download', downloadName);
+    link.dataset.url = url;
+    link.dataset.filename = downloadName;
+  }
 function _attachSentinel() {
     const sentinel = document.getElementById('masonrySentinel');
     if (!sentinel) return;
     if (_sentinelObs) _sentinelObs.disconnect();
     _sentinelObs = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && _histVisibleCount < historyItems.length) {
-          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), historyItems.length);
+        var activeItems = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+        if (entries[0].isIntersecting && _histVisibleCount < activeItems.length) {
+          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), activeItems.length);
           _appendNewHistoryCards();
         }
       },
@@ -177,11 +200,10 @@ function _attachSentinel() {
   }
 
 function _renderHistCard(h, i) {
+    const canDelete = _canDeleteHistoryItem(h);
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfTag = window.CW.getWFType(h.workflow || '');
-    const meta1 = A._wfMeta[h.workflow] || {};
-    const mainText1 = wfTag ? wfTag.text : ((meta1.tags || [])[0] || '');
-    const mainCls1 = wfTag ? wfTag.cls : (mainText1 ? (mainText1 === '放大' ? 'wf-tag-cat' : 'wf-tag-res') : '');
+    const mainText1 = _historyItemType(h);
+    const mainCls1 = _typeClass(mainText1, h.workflow);
     const tagBadge = mainText1 ? `<div class="gi-type-badge ${mainCls1}">${mainText1}</div>` : '';
     const typeCls1 = mainCls1 ? 'gi-type-' + mainCls1.replace('wf-tag-', '') : '';
 
@@ -189,7 +211,7 @@ function _renderHistCard(h, i) {
       <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
         <img src="${imgSrc}" loading="lazy" alt="">
         ${tagBadge}
-        <button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
+        ${canDelete ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>` : ''}
         <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">${CW.icon("copy")} 复刻</button>
       </div>
       <div class="gi-info">
@@ -204,6 +226,134 @@ function _renderHistCard(h, i) {
         ${h.seed ? `<div class="gi-seed">${CW.icon("sprout")} ${h.seed}</div>` : ''}
       </div>
     </div>`;
+  }
+
+function _isAdminHistoryView() {
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    return !!(user && user.role === 'admin');
+  }
+
+function _canDeleteHistoryItem(h) {
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    if (user && user.role === 'admin') return true;
+    var uid = user && (user.sub || user.id);
+    var owner = h && h.user_id;
+    return !!(uid && owner && String(uid) === String(owner));
+  }
+
+function _currentUserId() {
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    return user && (user.sub || user.id) ? String(user.sub || user.id) : '';
+  }
+
+function _typeClass(typeText, workflowName) {
+    var fallback = window.CW && CW.getWFType ? CW.getWFType(workflowName || '') : null;
+    if (fallback && fallback.text === typeText) return fallback.cls;
+    if (typeText === '文生图') return 'wf-tag-t2i';
+    if (typeText === '图生图') return 'wf-tag-i2i';
+    if (typeText === '文生视频') return 'wf-tag-t2v';
+    if (typeText === '图生视频') return 'wf-tag-i2v';
+    if (typeText === '放大') return 'wf-tag-cat';
+    return typeText ? 'wf-tag-res' : '';
+  }
+
+function _historyItemType(item) {
+    if (item && item.workflow_type) return item.workflow_type;
+    var workflow = item && item.workflow ? item.workflow : '';
+    var meta = (A._wfMeta || {})[workflow] || {};
+    var tag = window.CW && CW.wfTag ? CW.wfTag(workflow, meta.tags) : null;
+    return tag && tag.text ? tag.text : '';
+  }
+
+function _syncOwnerFilterButtons() {
+    var val = _galleryFilters.owner || 'all';
+    var buttons = document.querySelectorAll('[data-owner-filter]');
+    buttons.forEach(function(btn) {
+      var active = btn.getAttribute('data-owner-filter') === val;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+function setHistoryOwnerFilter(value) {
+    _galleryFilters.owner = value || 'all';
+    _syncOwnerFilterButtons();
+    applyFilters();
+  }
+
+function _syncTypeFilterButtons() {
+    _renderTypeFilterButtons();
+    var val = _galleryFilters.type || '';
+    var buttons = document.querySelectorAll('[data-type-filter]');
+    buttons.forEach(function(btn) {
+      var active = btn.getAttribute('data-type-filter') === val;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+function _historyTypeOptions() {
+    var fromHistory = new Set();
+    historyItems.forEach(function(item) {
+      var type = _historyItemType(item);
+      if (type) fromHistory.add(type);
+    });
+    if (fromHistory.size > 0) {
+      return _sortTypeOptions(Array.from(fromHistory));
+    }
+    var set = new Set();
+    Object.keys(A._wfMeta || {}).forEach(function(fname) {
+      var meta = A._wfMeta[fname] || {};
+      var tags = meta.tags || [];
+      var typeTag = window.CW && CW.getWFType ? CW.getWFType(fname) : null;
+      var mainTag = typeTag ? typeTag.text : (tags[0] || '');
+      if (mainTag) set.add(mainTag);
+    });
+    return _sortTypeOptions(Array.from(set));
+  }
+
+function _sortTypeOptions(items) {
+    var priority = ['文生图', '图生图', '放大', '文生视频', '图生视频', '其他'];
+    return items.sort(function(a, b) {
+      var ai = priority.indexOf(a), bi = priority.indexOf(b);
+      if (ai >= 0 && bi >= 0) return ai - bi;
+      if (ai >= 0) return -1;
+      if (bi >= 0) return 1;
+      return a.localeCompare(b, 'zh');
+    });
+  }
+
+function _renderTypeFilterButtons() {
+    var wrap = document.querySelector('.gf-type-segment');
+    if (!wrap) return;
+    var options = _historyTypeOptions();
+    if (_galleryFilters.type && options.indexOf(_galleryFilters.type) < 0) {
+      _galleryFilters.type = '';
+    }
+    var html = '<button class="gf-segment-btn" type="button" data-type-filter="" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">全部类型</button>';
+    options.forEach(function(t) {
+      html += '<button class="gf-segment-btn" type="button" data-type-filter="' + escA(t) + '" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">' + escH(t) + '</button>';
+    });
+    wrap.innerHTML = html;
+  }
+
+function setHistoryTypeFilter(value) {
+    _galleryFilters.type = value || '';
+    _syncTypeFilterButtons();
+    applyFilters();
+  }
+
+function _hasActiveGalleryFilters() {
+    return (_galleryFilters.owner && _galleryFilters.owner !== 'all') ||
+      !!_galleryFilters.type ||
+      !!_galleryFilters.size ||
+      !!_galleryFilters.style;
   }
 
 function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.length + " filtered=" + _filteredHistory.length + " count=" + _histVisibleCount + " batch=" + _batchSize());
@@ -235,14 +385,15 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     }
 
     // ── History items (lazy loaded) ──
-    const filteredArr = _filteredHistory.length ? _filteredHistory : historyItems;
+    const filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     lbItems = filteredArr;
+    if (_isAdminHistoryView()) _histVisibleCount = filteredArr.length;
     const visibleItems = filteredArr.slice(0, _histVisibleCount);
     for (let i = 0; i < visibleItems.length; i++) {
       html += _renderHistCard(visibleItems[i], i);
     }
 
-    if (historyItems.length > _histVisibleCount) {
+    if (filteredArr.length > _histVisibleCount) {
       html += `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
     }
 
@@ -270,7 +421,7 @@ function _appendNewHistoryCards() {
     if (!gallery) return;
     const sentinel = gallery.querySelector('.masonry-sentinel');
     const prevCount = _lastRenderedHistCount;
-    const filteredArr2 = _filteredHistory.length ? _filteredHistory : historyItems;
+    const filteredArr2 = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     const newCount = Math.min(_histVisibleCount, filteredArr2.length);
     if (newCount <= prevCount) {
       if (sentinel) _attachSentinel();
@@ -298,7 +449,7 @@ function _appendNewHistoryCards() {
       requestAnimationFrame(() => {
         const rect = sentinel.getBoundingClientRect();
         if (rect.top < window.innerHeight + 200) {
-          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), historyItems.length);
+          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), filteredArr2.length);
           _appendNewHistoryCards();
         } else {
           _attachSentinel();
@@ -309,18 +460,17 @@ function _appendNewHistoryCards() {
 function _histCardHTML(h, i) {
     const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
     const canEdit = !!user;
+    const canDelete = _canDeleteHistoryItem(h);
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
-    const wfTag = window.CW.getWFType(h.workflow || '');
-    const meta2 = A._wfMeta[h.workflow] || {};
-    const mainText2 = wfTag ? wfTag.text : ((meta2.tags || [])[0] || '');
-    const mainCls2 = wfTag ? wfTag.cls : (mainText2 ? (mainText2 === '放大' ? 'wf-tag-cat' : 'wf-tag-res') : '');
+    const mainText2 = _historyItemType(h);
+    const mainCls2 = _typeClass(mainText2, h.workflow);
     const tagBadge = mainText2 ? `<div class="gi-type-badge ${mainCls2}">${mainText2}</div>` : '';
     const typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
     return `<div class="gi ${typeCls2}" data-wf="${escA(h.workflow || '')}" data-hist-idx="${i}" onclick="CW.fillFormFromHistory(${i})">
     <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
       <img src="${imgSrc}" loading="lazy" alt="">
       ${tagBadge}
-      ${canEdit ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>` : ''}
+      ${canDelete ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>` : ''}
       ${canEdit ? `<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图">${CW.icon("copy")} 复刻</button>` : ''}
     </div>
     <div class="gi-info">
@@ -341,15 +491,9 @@ function _histCardHTML(h, i) {
 
   _renderTimer = null;
 function _populateFilterOptions() {
-    var wfs = new Set();
     var styles = new Set();
-    var typeOpts = new Set();
     for(var k = 0; k < historyItems.length; k++) {
       var j = historyItems[k];
-      if(j.workflow) wfs.add(j.workflow.replace(".json", ""));
-      // Collect unique main tags for type filter
-      var _tag = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow || ''] || {}).tags);
-      if(_tag && _tag.text) typeOpts.add(_tag.text);
       try {
         var pObj = JSON.parse(j.prompt || '{}');
         if(pObj.style && typeof pObj.style === 'string') {
@@ -358,17 +502,7 @@ function _populateFilterOptions() {
         }
       } catch(e) {}
     }
-    var typeSel = document.getElementById("gfType");
-    if(typeSel) {
-      var curType = typeSel.value;
-      var sortedTypes = Array.from(typeOpts).sort();
-      var ht = '<option value="">全部类型</option>';
-      for(var ti = 0; ti < sortedTypes.length; ti++) {
-        ht += '<option value="' + sortedTypes[ti] + '">' + sortedTypes[ti] + '</option>';
-      }
-      typeSel.innerHTML = ht;
-      if(curType && typeOpts.has(curType)) typeSel.value = curType;
-    }
+    _syncTypeFilterButtons();
     var sizeSel = document.getElementById("gfSize");
     if(sizeSel) {
       sizeSel.innerHTML = '<option value="">全部尺寸</option>' +
@@ -376,17 +510,6 @@ function _populateFilterOptions() {
         '<option value="2K">2K (≤2048)</option>' +
         '<option value="4K">4K (≤3840)</option>' +
         '<option value="4K+">4K+ (>3840)</option>';
-    }
-    var wfSel = document.getElementById("gfWF");
-    if(wfSel) {
-      var cur2 = wfSel.value;
-      var arr2 = Array.from(wfs).sort();
-      var h2 = '<option value="">全部工作流</option>';
-      for(var m = 0; m < arr2.length; m++) {
-        h2 += '<option value="' + arr2[m] + '">' + arr2[m] + '</option>';
-      }
-      wfSel.innerHTML = h2;
-      if(cur2 && wfs.has(cur2)) wfSel.value = cur2;
     }
     var styleInput = document.getElementById("gfStyle");
     if(styleInput && styles.size > 0) {
@@ -404,9 +527,14 @@ function _populateFilterOptions() {
   }
 function _filterHistory(arr) {
     return arr.filter(function(j) {
+      if (_galleryFilters.owner && _galleryFilters.owner !== 'all') {
+        var uid = _currentUserId();
+        var owner = j && j.user_id ? String(j.user_id) : '';
+        if (_galleryFilters.owner === 'mine' && (!uid || owner !== uid)) return false;
+        if (_galleryFilters.owner === 'other' && uid && owner === uid) return false;
+      }
       if(_galleryFilters.type) {
-        var t = window.CW.wfTag(j.workflow || '', (A._wfMeta[j.workflow || ''] || {}).tags);
-        if(!t || t.text !== _galleryFilters.type) return false;
+        if(_historyItemType(j) !== _galleryFilters.type) return false;
       }
       if(_galleryFilters.size) {
         var maxDim = Math.max(j.width || 0, j.height || 0);
@@ -436,19 +564,17 @@ function _filterHistory(arr) {
         }
         if(searchText.indexOf(_galleryFilters.style) === -1) return false;
       }
-      if(_galleryFilters.workflow) {
-        if((j.workflow || "").replace(".json", "") !== _galleryFilters.workflow) return false;
-      }
       return true;
     });
   }
 
   _filteredHistory = [];
 
-  _galleryFilters = { type: '', size: '', style: '', workflow: '' };
+  _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
 function _ensureInitialBatch() {
     if (_histVisibleCount > 0) return;
-    _histVisibleCount = Math.min(_batchSize(), (_filteredHistory.length ? _filteredHistory.length : historyItems.length)); console.log("[GALLERY DEBUG] _ensureInitialBatch: batch=" + _batchSize() + " filtered=" + _filteredHistory.length + " hist=" + historyItems.length + " => count=" + _histVisibleCount);
+    var initialItems = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+    _histVisibleCount = Math.min(_batchSize(), initialItems.length); console.log("[GALLERY DEBUG] _ensureInitialBatch: batch=" + _batchSize() + " filtered=" + _filteredHistory.length + " hist=" + historyItems.length + " => count=" + _histVisibleCount);
   }
 function _batchSize() {
     return _getColumnCount() * 2;
@@ -463,45 +589,194 @@ function _getColumnCount() {
   }
 
 function lbNav(dir) {
+    if (window.__APP__ && Array.isArray(window.__APP__._lbItems)) lbItems = window.__APP__._lbItems;
     lbIdx = Math.max(0, Math.min(lbIdx + dir, lbItems.length - 1));
     renderLB();
   }
 
-function renderLB() {
+  function _lightboxPreviewUrl(item) {
+    if (!item) return '';
+    return item.thumb ? `${API}/api/thumbs/${item.thumb}` : _lightboxImageUrl(item.filename);
+  }
+
+  function _primeLightboxImage(fullSrc, previewSrc) {
+    var lbImg = $('#lbImg');
+    var stage = $('#lbStage');
+    if (!lbImg || !stage) return;
+    _lbLoadToken += 1;
+    var token = _lbLoadToken;
+    stage.classList.remove('is-live');
+    lbImg.classList.remove('lb-ready');
+    lbImg.classList.add('lb-visible', 'lb-preview');
+    lbImg.src = previewSrc || fullSrc;
+    if (!fullSrc || fullSrc === previewSrc) {
+      requestAnimationFrame(function () {
+        if (token !== _lbLoadToken) return;
+        stage.classList.add('is-live');
+        lbImg.classList.remove('lb-preview');
+        lbImg.classList.add('lb-ready');
+      });
+      return;
+    }
+    var loader = new Image();
+    loader.onload = function () {
+      if (token !== _lbLoadToken) return;
+      lbImg.src = fullSrc;
+      requestAnimationFrame(function () {
+        if (token !== _lbLoadToken) return;
+        stage.classList.add('is-live');
+        lbImg.classList.remove('lb-preview');
+        lbImg.classList.add('lb-ready');
+      });
+    };
+    loader.src = fullSrc;
+  }
+
+  function _animateLightboxFromSource(sourceEl, previewSrc) {
+    var overlay = $('#lightbox');
+    var stage = $('#lbStage');
+    if (!overlay || !stage || !sourceEl || !sourceEl.getBoundingClientRect) {
+      if (stage) stage.classList.add('is-live');
+      return;
+    }
+    var thumb = sourceEl.querySelector ? (sourceEl.querySelector('img') || sourceEl) : sourceEl;
+    var fromRect = thumb.getBoundingClientRect();
+    if (!fromRect.width || !fromRect.height) {
+      stage.classList.add('is-live');
+      return;
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        var toRect = stage.getBoundingClientRect();
+        if (!toRect.width || !toRect.height) {
+          stage.classList.add('is-live');
+          return;
+        }
+        var flight = document.createElement('img');
+        flight.className = 'lb-flight';
+        flight.src = previewSrc || thumb.currentSrc || thumb.src || '';
+        flight.alt = '';
+        flight.style.left = fromRect.left + 'px';
+        flight.style.top = fromRect.top + 'px';
+        flight.style.width = fromRect.width + 'px';
+        flight.style.height = fromRect.height + 'px';
+        flight.style.borderRadius = getComputedStyle(thumb).borderRadius || '18px';
+        document.body.appendChild(flight);
+        overlay.classList.add('lb-has-flight');
+        requestAnimationFrame(function () {
+          flight.style.left = toRect.left + 'px';
+          flight.style.top = toRect.top + 'px';
+          flight.style.width = toRect.width + 'px';
+          flight.style.height = toRect.height + 'px';
+          flight.style.borderRadius = getComputedStyle(stage).borderRadius || '28px';
+          flight.style.opacity = '0.9';
+          flight.style.filter = 'blur(0px)';
+        });
+        setTimeout(function () {
+          overlay.classList.remove('lb-has-flight');
+          stage.classList.add('is-live');
+          flight.remove();
+        }, 320);
+      });
+    });
+  }
+
+  function _openLightbox(opts) {
+    opts = opts || {};
+    var overlay = $('#lightbox');
+    if (!overlay) return;
+    var fullSrc = opts.fullSrc || '';
+    var previewSrc = opts.previewSrc || fullSrc;
+    _primeLightboxImage(fullSrc, previewSrc);
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, true);
+    else overlay.classList.add('open');
+    _animateLightboxFromSource(opts.sourceEl, previewSrc);
+    document.body.style.overflow = 'hidden';
+  }
+
+function renderLB(sourceEl) {
+    if (window.__APP__ && Array.isArray(window.__APP__._lbItems)) lbItems = window.__APP__._lbItems;
     if (lbIdx < 0 || lbIdx >= lbItems.length) return;
     const h = lbItems[lbIdx];
-    var lbImg = $('#lbImg'); lbImg.src = ''; lbImg.src = `${API}/api/images/${h.filename}`;
+    _syncLightboxDownload(h.filename);
     $('#lbInfo').textContent = h.prompt || '—';
     $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
     $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
+    _openLightbox({
+      fullSrc: _lightboxImageUrl(h.filename),
+      previewSrc: _lightboxPreviewUrl(h),
+      sourceEl: sourceEl,
+    });
   }
 
 function closeLB() {
-    $('#lightbox').classList.remove('open');
+    var overlay = $('#lightbox');
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, false);
+    else if (overlay) overlay.classList.remove('open');
+    _lbLoadToken += 1;
+    var stage = $('#lbStage');
+    var lbImg = $('#lbImg');
+    if (stage) stage.classList.remove('is-live');
+    if (lbImg) lbImg.classList.remove('lb-visible', 'lb-preview', 'lb-ready');
+    if (overlay) overlay.classList.remove('lb-has-flight');
     document.body.style.overflow = '';
+    _syncLightboxDownload('');
     lbIdx = -1;
   }
 
-function openJobLB(filename, label) {
+async function downloadLB(e) {
+    var link = $('#lbDownload');
+    if (!link) return;
+    var url = link.dataset.url || link.href;
+    var filename = link.dataset.filename || 'image.png';
+    var isMobileModal = window.matchMedia && window.matchMedia('(max-width: 765px)').matches;
+    if (!isMobileModal) return;
+    if (e) e.preventDefault();
+    try {
+      var resp = await fetch(url, { credentials: 'same-origin' });
+      if (!resp.ok) throw new Error('download failed');
+      var blob = await resp.blob();
+      var blobUrl = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+      }, 1200);
+    } catch (err) {
+      window.open(url, '_blank', 'noopener');
+    }
+  }
+
+function openJobLB(filename, label, sourceEl) {
     // Show a single-item lightbox for a job image
-    const imgSrc = `${API}/api/images/${filename}`;
-    var lbImg = $('#lbImg'); lbImg.src = ''; lbImg.src = imgSrc;
+    _syncLightboxDownload(filename);
     $('#lbInfo').textContent = label || '';
     $('#lbPrev').style.display = 'none';
     $('#lbNext').style.display = 'none';
-    $('#lightbox').classList.add('open');
-    document.body.style.overflow = 'hidden';
+    _openLightbox({
+      fullSrc: _lightboxImageUrl(filename),
+      previewSrc: sourceEl && sourceEl.querySelector ? ((sourceEl.querySelector('img') || {}).currentSrc || '') : '',
+      sourceEl: sourceEl,
+    });
   }
 
-function openLB(idx) {
+function openLB(idx, sourceEl) {
+    if (window.__APP__ && Array.isArray(window.__APP__._lbItems)) lbItems = window.__APP__._lbItems;
     lbIdx = idx;
-    renderLB();
-    $('#lightbox').classList.add('open');
-    document.body.style.overflow = 'hidden';
+    renderLB(sourceEl);
   }
 
 async function delHist(id) {
-    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) return;
+    var item = historyItems.find(function(h) { return h.id === id; });
+    if (!_canDeleteHistoryItem(item)) {
+      if (window.CW && CW.toast) CW.toast('只能删除自己生成的内容，管理员可删除全部历史', 'info');
+      return;
+    }
     if (!confirm('确认删除这张图片？')) return;
     // Mark card as deleting immediately
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
@@ -544,15 +819,13 @@ async function loadHistory() {
 
 
 function applyFilters() {
+    _syncOwnerFilterButtons();
+    _syncTypeFilterButtons();
     var el;
-    el = document.getElementById("gfType");
-    _galleryFilters.type = el ? el.value : "";
     el = document.getElementById("gfSize");
     _galleryFilters.size = el ? el.value : "";
     el = document.getElementById("gfStyle");
     _galleryFilters.style = el ? el.value.toLowerCase() : "";
-    el = document.getElementById("gfWF");
-    _galleryFilters.workflow = el ? el.value : "";
     _filteredHistory = _filterHistory(historyItems);
     _histVisibleCount = 0;
     _lastRenderedHistCount = 0;
@@ -561,15 +834,13 @@ function applyFilters() {
   }
 
 function clearFilters() {
-    _galleryFilters = { type: "", size: "", style: "", workflow: "" };
+    _galleryFilters = { owner: "all", type: "", size: "", style: "" };
+    _syncOwnerFilterButtons();
+    _syncTypeFilterButtons();
     var el;
-    el = document.getElementById("gfType");
-    if (el) el.value = "";
     el = document.getElementById("gfSize");
     if (el) el.value = "";
     el = document.getElementById("gfStyle");
-    if (el) el.value = "";
-    el = document.getElementById("gfWF");
     if (el) el.value = "";
     _filteredHistory = _filterHistory(historyItems);
     _histVisibleCount = 0;
@@ -589,10 +860,17 @@ function renderGallery() {
   if (!window.CW) window.CW = {};
   window.CW.applyFilters = applyFilters;
   window.CW.clearFilters = clearFilters;
+  window.CW.setHistoryOwnerFilter = setHistoryOwnerFilter;
+  window.CW.setHistoryTypeFilter = setHistoryTypeFilter;
+  window.CW.refreshHistoryTypeFilters = function() {
+    _syncTypeFilterButtons();
+    applyFilters();
+  };
   window.CW.delHist = delHist;
   window.CW.openLB = openLB;
   window.CW.openJobLB = openJobLB;
   window.CW.closeLB = closeLB;
+  window.CW.downloadLB = downloadLB;
   window.CW.lbNav = lbNav;
   window.CW.loadHistory = loadHistory;
   // Data-only refresh (no gallery re-render)

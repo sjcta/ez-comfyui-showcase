@@ -13,7 +13,7 @@ if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1779018200"></script>
+<script src="static/js/module_loader.js?v=1779024300"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -120,59 +120,79 @@ if (location.protocol === 'file:') {
 
 <!-- ═══ 编辑弹窗 ═══ -->
 <div class="v4-overlay" id="wfEditModal">
-  <div class="v4-card">
-    <div class="v4-header">
-      <span class="v4-title" id="wfEditTitle">编辑工作流</span>
+  <div class="v4-card wf-edit-card">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title" id="wfEditTitle">编辑工作流</span>
+        <p class="modal-hero-subtitle">整理名称、标签、预览图与版本，保证普通用户看到的是清晰可用的工作流卡片。</p>
+      </div>
       <button class="v4-close" id="wfEditClose" onclick="if(window.CW&&CW.closeWfEdit)CW.closeWfEdit()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div class="v4-body">
-      <div class="wf-edit-row">
-        <label>名称</label>
-        <input type="text" id="wfEditName" placeholder="工作流名称">
-      </div>
-      <div class="wf-edit-row">
-        <label>缩略图</label>
-        <div style="display:flex;align-items:center;gap:8px">
-          <img id="wfEditThumbImg" style="width:80px;height:60px;object-fit:cover;border-radius:4px;display:none">
-          <div id="wfEditThumbPlaceholder" style="width:80px;height:60px;background:var(--bg-deep);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px">无预览</div>
-          <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
-          <button class="wf-mgr-btn" onclick="document.getElementById('wfEditThumbInput').click()">上传缩略图</button>
+    <div class="v4-body wf-edit-body">
+      <div class="modal-two-panel wf-edit-layout">
+        <div class="modal-main-stack">
+          <section class="modal-section-card modal-section-card-accent">
+            <div class="modal-section-head">
+              <div>
+                <h3>封面与基础信息</h3>
+                <p>把工作流名称、标签和封面放在同一个视图里处理，减少来回切换。</p>
+              </div>
+            </div>
+            <div class="wf-edit-core-grid">
+              <div class="wf-edit-preview-panel wf-edit-preview-panel-inline">
+                <div class="wf-edit-thumb" id="wfEditThumb" title="点击上传缩略图">
+                  <img id="wfEditThumbImg" alt="工作流缩略图" style="display:none">
+                  <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-camera"/></svg><span>点击上传缩略图</span></div>
+                </div>
+                <div class="wf-edit-preview-actions">
+                  <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
+                  <button class="wf-mgr-btn" type="button" onclick="document.getElementById('wfEditThumbInput').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传缩略图</button>
+                  <span class="wf-edit-side-note">建议使用横向封面，列表与共享卡片里的展示会更稳定。</span>
+                </div>
+              </div>
+              <div class="modal-form-stack wf-edit-core-form">
+                <div class="wf-edit-row">
+                  <label>工作流名称</label>
+                  <input type="text" id="wfEditName" placeholder="工作流名称">
+                </div>
+                <div class="wf-edit-row">
+                  <label>标签</label>
+                  <div class="wf-edit-tags" id="wfEditTags"></div>
+                  <div class="wf-edit-tag-add">
+                    <input type="text" id="wfEditTagInput" list="v4WfEditTagSuggest" class="wf-edit-tag-input" placeholder="输入或选择标签，回车添加">
+                    <datalist id="wfEditTagSuggest">
+                      <option value="文生图">
+                      <option value="图生图">
+                      <option value="文生视频">
+                      <option value="图生视频">
+                      <option value="2K">
+                      <option value="4K">
+                      <option value="8K">
+                    </datalist>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-      </div>
-      <div class="wf-edit-row">
-        <label>标签</label>
-        <div class="wf-edit-tags" id="wfEditTags"></div>
-        <div class="wf-edit-tag-add">
-          <input type="text" id="wfEditTagInput" list="v4WfEditTagSuggest" class="wf-edit-tag-input" placeholder="输入或选择标签，回车添加">
-          <datalist id="wfEditTagSuggest">
-            <option value="文生图">
-            <option value="图生图">
-            <option value="文生视频">
-            <option value="图生视频">
-            <option value="2K">
-            <option value="4K">
-            <option value="8K">
-          </datalist>
-        </div>
-      </div>
-      <div class="wf-edit-row wf-edit-versions-row">
-        <label>版本管理</label>
-        <div class="wf-edit-versions">
-          <div class="wf-edit-version-upload">
-            <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
-            <button class="wf-mgr-btn" id="wfEditVersionBtn" onclick="document.getElementById('v4WfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传版本</button>
-            <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
-          </div>
-          <div class="wf-edit-version-list" id="v4WfEditVersionList"></div>
-        </div>
-      </div>
-      <div class="wf-edit-row">
-        <label>缩略图</label>
-        <div class="wf-edit-thumb" id="v4WfEditThumb" title="点击上传缩略图">
-          <img id="v4WfEditThumbImg" src="" alt="">
-          <div class="wf-edit-thumb-placeholder" id="v4WfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-camera"/></svg></div>
-        </div>
-        <input type="file" id="v4WfEditThumbInput" accept="image/*" style="display:none">
+        <aside class="modal-side-stack">
+          <section class="modal-section-card">
+            <div class="modal-section-head">
+              <div>
+                <h3>版本管理</h3>
+                <p>保留历史版本，方便回滚和对比。</p>
+              </div>
+            </div>
+            <div class="wf-edit-versions">
+              <div class="wf-edit-version-upload">
+                <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
+                <button class="wf-mgr-btn" id="wfEditVersionBtn" type="button" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传版本</button>
+                <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
+              </div>
+              <div class="wf-edit-version-list" id="wfEditVersionList"></div>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
     <div class="wf-edit-footer">
@@ -185,27 +205,36 @@ if (location.protocol === 'file:') {
 <!-- ═══ 节点编辑器 ═══ -->
 <div class="v4-overlay" id="nodeEditorModal">
   <div class="v4-card wide">
-    <div class="v4-header">
-      <span class="v4-title" id="nodeEditorTitle">节点编辑</span>
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title" id="nodeEditorTitle">节点编辑</span>
+        <p class="modal-hero-subtitle">把字段整理进用户可见的输入区、输出区或隐藏区，移动端会优先按这个配置生成更易用的表单。</p>
+      </div>
       <button class="v4-close" id="nodeEditorClose"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div class="v4-body compact">
-      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye"/></svg> 切换可见性</div>
+    <div class="v4-body compact node-editor-body">
+      <div class="node-editor-overview">
+        <div class="ne-instructions">拖拽字段卡片到目标区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye"/></svg> 切换可见性，修改输入框文案可直接影响前台显示名称。</div>
+        <div class="node-editor-stats" id="nodeEditorStats">
+          <span class="node-editor-stat"><strong id="neStatTotal">0</strong><span>字段总数</span></span>
+          <span class="node-editor-stat"><strong id="neStatVisible">0</strong><span>当前可见</span></span>
+        </div>
+      </div>
       <div class="ne-zones" id="neZones">
         <div class="ne-zone" data-zone="user_input">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 用户输入</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 用户输入</div><span class="ne-zone-meta">首屏关键参数</span></div>
           <div class="ne-zone-cards" id="neZoneUserInput"></div>
         </div>
         <div class="ne-zone" data-zone="advanced">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-settings"/></svg> 高级参数</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-settings"/></svg> 高级参数</div><span class="ne-zone-meta">进阶控制项</span></div>
           <div class="ne-zone-cards" id="neZoneAdvanced"></div>
         </div>
         <div class="ne-zone" data-zone="output">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-send"/></svg> 输出</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-send"/></svg> 输出</div><span class="ne-zone-meta">生成结果相关</span></div>
           <div class="ne-zone-cards" id="neZoneOutput"></div>
         </div>
         <div class="ne-zone" data-zone="hidden">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye-off"/></svg> 隐藏</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye-off"/></svg> 隐藏</div><span class="ne-zone-meta">保留但不展示</span></div>
           <div class="ne-zone-cards" id="neZoneHidden"></div>
         </div>
       </div>
@@ -222,8 +251,13 @@ if (location.protocol === 'file:') {
 <!-- ═══ 删除确认弹窗 ═══ -->
 <div class="v4-overlay" id="wfDelModal">
   <div class="v4-card narrow">
-    <div class="v4-title">确认删除？</div>
-    <div class="v4-body" id="v4WfDelMsg"></div>
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">确认删除</span>
+        <p class="modal-hero-subtitle">删除后工作流与版本记录将无法恢复。</p>
+      </div>
+    </div>
+    <div class="v4-body" id="wfDelMsg"></div>
     <div class="wf-del-actions">
       <button class="btn wf-del-cancel" id="wfDelCancel">取消</button>
       <button class="btn btn-danger wf-del-confirm" id="wfDelConfirm">删除</button>
@@ -319,10 +353,12 @@ if (location.protocol === 'file:') {
 <div class="lightbox" id="lightbox">
   <button class="lb-close" onclick="CW.closeLB()" title="关闭"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)" title="上一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-  <a class="lb-download" id="lbDownload" download title="下载原图">
+  <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
   </a>
-  <img id="lbImg" src="" alt="">
+  <div class="lb-stage" id="lbStage">
+    <img id="lbImg" src="" alt="">
+  </div>
   <div class="lb-loading" id="lbLoading" style="display:none">加载中...</div>
   <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)" title="下一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></button>
   <div class="lb-info" id="lbInfo"></div>
@@ -375,110 +411,114 @@ if (location.protocol === 'file:') {
 <!-- ═══ 设备编辑弹窗 (V4 Glass) ═══ -->
 <div class="v4-overlay" id="deviceEditModal">
   <div class="v4-card dev-edit-glass-card">
-    <div class="v4-header dev-edit-grad-header">
-      <span class="v4-title" id="v4DeviceEditTitle">
-        <svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-server"/></svg>
-        添加设备
-      </span>
+    <div class="v4-header dev-edit-grad-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title" id="v4DeviceEditTitle">
+          <svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-server"/></svg>
+          添加设备
+        </span>
+        <p class="modal-hero-subtitle">把连接方式、访问入口、实例预设和共享权限拆分管理，手机端也能更顺畅地填写。</p>
+      </div>
       <button class="v4-close" onclick="CW.closeDeviceEditor()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <form id="v4DeviceEditForm" class="v4-body">
-      <!-- 基础信息 -->
-      <div class="de-glass-section">
-        <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 基础信息</div>
-        <div class="de-glass-body">
-          <div class="de-compact-row">
-            <label class="de-field-label">设备名称</label>
-            <input type="text" name="name" class="de-field-input" placeholder="例如：DGX Spark" required>
-          </div>
-          <div class="de-compact-row">
-            <label class="de-field-label">主机地址</label>
-            <input type="text" name="host" class="de-field-input" placeholder="IP 地址或域名" required>
-          </div>
-          <div class="de-compact-row">
-            <label class="de-field-label">连接方式</label>
-            <select name="connection" class="de-field-input de-field-select" onchange="CW.onDevConnChange()">
-              <option value="remote-ssh">SSH - 本地网络</option>
-              <option value="remote-http">HTTP - 远端</option>
-              <option value="local">本机</option>
-            </select>
-          </div>
-          <div class="de-compact-row">
-            <label class="de-field-label">标签</label>
-            <input type="text" name="labels" class="de-field-input" placeholder="GPU,高性能,测试">
-          </div>
-          <div class="de-compact-row">
-            <label class="de-field-label">共享设备</label>
-            <label class="account-check"><input type="checkbox" name="shared"> 允许其他用户调用</label>
-          </div>
-        </div>
-      </div>
+    <form id="v4DeviceEditForm" class="v4-body de-form-body">
+      <div class="modal-two-panel de-layout">
+        <div class="modal-main-stack">
+          <section class="de-glass-section">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 设备身份</div>
+            <div class="de-glass-body de-field-grid">
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">设备名称</label>
+                <input type="text" name="name" class="de-field-input" placeholder="例如：DGX Spark" required>
+              </div>
+              <div class="de-field-block">
+                <label class="de-field-label">主机地址</label>
+                <input type="text" name="host" class="de-field-input" placeholder="IP 地址或域名" required>
+              </div>
+              <div class="de-field-block">
+                <label class="de-field-label">连接方式</label>
+                <select name="connection" class="de-field-input de-field-select" onchange="CW.onDevConnChange()">
+                  <option value="remote-ssh">SSH - 本地网络</option>
+                  <option value="remote-http">HTTP - 远端</option>
+                  <option value="local">本机</option>
+                </select>
+              </div>
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">标签</label>
+                <input type="text" name="labels" class="de-field-input" placeholder="GPU,高性能,测试">
+              </div>
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">共享设置</label>
+                <label class="de-check-card"><input type="checkbox" name="shared"> <span><strong>共享设备</strong><small>允许其他用户调用这个设备</small></span></label>
+              </div>
+            </div>
+          </section>
 
-      <!-- SSH 配置 (Glass) -->
-      <div class="de-glass-section" id="devSshSection">
-        <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-lock"/></svg> SSH 连接配置</div>
-        <div class="de-glass-body">
-          <div class="de-compact-row">
-            <label class="de-field-label">SSH 用户</label>
-            <input type="text" name="ssh_user" class="de-field-input" value="root" placeholder="ssh 登录用户名">
-          </div>
-          <div class="de-compact-row">
-            <label class="de-field-label">SSH 端口</label>
-            <input type="number" name="ssh_port" class="de-field-input de-field-input-sm" value="22" min="1" max="65535">
-          </div>
-          <div class="de-compact-row">
-            <label class="de-field-label">认证方式</label>
-            <select name="ssh_auth" class="de-field-input de-field-select" onchange="CW.onDevSshAuthChange()">
-              <option value="password">密码</option>
-              <option value="key">密钥文件</option>
-            </select>
-          </div>
-          <div class="de-compact-row" id="devSshPwRow">
-            <label class="de-field-label">密码</label>
-            <input type="password" name="ssh_password" class="de-field-input" placeholder="SSH 登录密码">
-          </div>
-          <div class="de-compact-row" id="devSshKeyRow" style="display:none">
-            <label class="de-field-label">密钥路径</label>
-            <input type="text" name="ssh_key_path" class="de-field-input" placeholder="~/.ssh/id_rsa">
-          </div>
+          <section class="de-glass-section" id="devSshSection">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-lock"/></svg> SSH 连接配置</div>
+            <div class="de-glass-body de-field-grid">
+              <div class="de-field-block">
+                <label class="de-field-label">SSH 用户</label>
+                <input type="text" name="ssh_user" class="de-field-input" value="root" placeholder="ssh 登录用户名">
+              </div>
+              <div class="de-field-block">
+                <label class="de-field-label">SSH 端口</label>
+                <input type="number" name="ssh_port" class="de-field-input" value="22" min="1" max="65535">
+              </div>
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">认证方式</label>
+                <select name="ssh_auth" class="de-field-input de-field-select" onchange="CW.onDevSshAuthChange()">
+                  <option value="password">密码</option>
+                  <option value="key">密钥文件</option>
+                </select>
+              </div>
+              <div class="de-field-block de-field-block-span" id="devSshPwRow">
+                <label class="de-field-label">密码</label>
+                <input type="password" name="ssh_password" class="de-field-input" placeholder="SSH 登录密码">
+              </div>
+              <div class="de-field-block de-field-block-span" id="devSshKeyRow" style="display:none">
+                <label class="de-field-label">密钥路径</label>
+                <input type="text" name="ssh_key_path" class="de-field-input" placeholder="~/.ssh/id_rsa">
+              </div>
+            </div>
+          </section>
         </div>
-      </div>
+        <aside class="modal-side-stack">
+          <section class="de-glass-section">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-globe"/></svg> 访问入口</div>
+            <div class="de-glass-body">
+              <div class="de-field-block">
+                <label class="de-field-label">访问 URL 模板</label>
+                <input type="text" name="access_url" class="de-field-input" placeholder="http://{host}:{port}" value="http://{host}:{port}">
+              </div>
+              <div class="de-hint-glass">输入主机地址后自动填写，<code>{port}</code> 会被替换为实例端口。</div>
+            </div>
+          </section>
 
-      <!-- 访问入口 -->
-      <div class="de-glass-section">
-        <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-globe"/></svg> 访问入口</div>
-        <div class="de-glass-body">
-          <div class="de-compact-row">
-            <label class="de-field-label">访问 URL 模板</label>
-            <input type="text" name="access_url" class="de-field-input" placeholder="http://{host}:{port}" value="http://{host}:{port}">
-          </div>
-          <div class="de-hint-glass">输入主机地址后自动填写，<code>{port}</code> 会被替换为实例端口</div>
-        </div>
-      </div>
+          <section class="de-glass-section">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-sliders"/></svg> 实例预设</div>
+            <div class="de-glass-body">
+              <div class="de-field-block">
+                <label class="de-field-label">默认端口列表</label>
+                <input type="text" name="preset_ports" class="de-field-input" placeholder="8188,8190,8189" value="8190,8189">
+              </div>
+              <div class="de-hint-glass">逗号分隔，添加设备后会自动扫描这些端口。</div>
+              <div class="de-field-block">
+                <label class="de-field-label">工作流目录</label>
+                <input type="text" name="preset_wf_dirs" class="de-field-input" placeholder="/path/to/workflows">
+              </div>
+              <div class="de-hint-glass">远程工作流 JSON 文件目录，多个路径用逗号分隔。</div>
+            </div>
+          </section>
 
-      <!-- 实例预设 -->
-      <div class="de-glass-section">
-        <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-sliders"/></svg> 实例预设</div>
-        <div class="de-glass-body">
-          <div class="de-compact-row">
-            <label class="de-field-label">默认端口列表</label>
-            <input type="text" name="preset_ports" class="de-field-input" placeholder="8188,8190,8189" value="8190,8189">
-          </div>
-          <div class="de-hint-glass">逗号分隔，添加设备后会自动扫描这些端口</div>
-          <div class="de-compact-row" style="margin-top:10px">
-            <label class="de-field-label">工作流目录</label>
-            <input type="text" name="preset_wf_dirs" class="de-field-input" placeholder="/path/to/workflows">
-          </div>
-          <div class="de-hint-glass">远程工作流 JSON 文件目录（逗号分隔多个路径），用于自动同步</div>
-        </div>
-      </div>
-
-      <!-- 已登记实例（编辑时显示） -->
-      <div class="de-glass-section" id="devInstSection" style="display:none">
-        <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-server"/></svg> 已登记实例</div>
-        <div class="de-glass-body">
-          <div id="deviceEditInstances" class="de-inst-glass-list"></div>
-        </div>
+          <section class="de-glass-section" id="devInstSection" style="display:none">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-server"/></svg> 已登记实例</div>
+            <div class="de-glass-body">
+              <div class="de-side-note">这里只展示当前已登记的实例，保存后会继续沿用。</div>
+              <div id="deviceEditInstances" class="de-inst-glass-list"></div>
+            </div>
+          </section>
+        </aside>
       </div>
     </form>
     <div class="de-glass-footer">
@@ -491,12 +531,15 @@ if (location.protocol === 'file:') {
 <!-- ═══ 扫描结果弹窗 ═══ -->
 <div class="v4-overlay" id="scanResultModal">
   <div class="v4-card narrow">
-    <div class="v4-header">
-      <span class="v4-title">扫描结果</span>
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">扫描结果</span>
+        <p class="modal-hero-subtitle">选择要登记为实例的端口，未选中的结果不会写入设备配置。</p>
+      </div>
       <button class="v4-close" onclick="CW.closeScanModal()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="v4-body compact">
-      <div id="scanResultList"></div>
+      <div id="scanResultList" class="result-list-stack"></div>
     </div>
     <div class="ne-footer">
       <button class="btn" onclick="CW.closeScanModal()">取消</button>
@@ -508,8 +551,11 @@ if (location.protocol === 'file:') {
 <!-- ═══ 节点测试结果弹窗 ═══ -->
 <div class="v4-overlay" id="testResultModal">
   <div class="v4-card narrow">
-    <div class="v4-header">
-      <span class="v4-title">连通测试</span>
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">连通测试</span>
+        <p class="modal-hero-subtitle">查看 HTTP、SSH、systemd 与实例状态，快速判断节点是否可用。</p>
+      </div>
       <button class="v4-close" onclick="CW.closeTestResult()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="v4-body compact">
@@ -524,8 +570,11 @@ if (location.protocol === 'file:') {
 <!-- ═══ SSH 连接信息弹窗 ═══ -->
 <div class="v4-overlay" id="sshInfoModal" style="display:none">
   <div class="v4-card narrow">
-    <div class="v4-header">
-      <span class="v4-title">SSH 连接信息</span>
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">SSH 连接信息</span>
+        <p class="modal-hero-subtitle">用于排障或手动登录设备，可直接复制命令行。</p>
+      </div>
       <button class="v4-close" onclick="CW.closeSshInfo()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="v4-body compact">

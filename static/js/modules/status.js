@@ -55,10 +55,11 @@ function updateServices(d) {
 
 function updateGPU(g, instances) {
     const target = _getCurrentTarget(instances || []);
+    const gpu = target && target.gpu ? target.gpu : g;
     const fill = $('#vramFill');
     if (!fill) return;
-    const pct = g && target && target.node_connection === 'local' ? (g.vram_pct || 0) : 0;
-    const temp = g && target && target.node_connection === 'local' ? (g.temp_c || 0) : 0;
+    const pct = gpu && target ? (gpu.vram_pct || 0) : 0;
+    const temp = gpu && target ? (gpu.temp_c || 0) : 0;
     fill.style.width = pct + '%';
     // State: green=idle, yellow=busy, orange=overloaded (vram>70% or temp>65)
     const isOverload = pct > 70 || temp > 65;
@@ -67,16 +68,16 @@ function updateGPU(g, instances) {
     // Also tint the entire statusbar
     const bar = $('#statusbar');
     if (bar) bar.dataset.state = isOverload ? 'overload' : isBusy ? 'busy' : 'idle';
-    var used = Number(g && target && target.node_connection === 'local' ? (g.vram_used_mb || 0) : 0);
-    var total = Number(g && target && target.node_connection === 'local' ? (g.vram_total_mb || 0) : 0);
+    var used = Number(gpu && target ? (gpu.vram_used_mb || 0) : 0);
+    var total = Number(gpu && target ? (gpu.vram_total_mb || 0) : 0);
     var vramText = $('#vramText');
     if (vramText) {
       vramText.textContent = total > 0
         ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%)`
-        : (target ? `${target.node_name || target.name} 未上报 VRAM` : '无可用设备');
+        : (target ? `${target.node_name || target.name} ${gpu && gpu.message ? gpu.message : '未上报 VRAM'}` : '无可用设备');
     }
     if ($('#gpuTemp')) $('#gpuTemp').textContent = total > 0 ? `${temp} °C` : '— °C';
-    if ($('#gpuUtil')) $('#gpuUtil').textContent = total > 0 ? `GPU ${g.util_pct}%` : (target ? (target.name + ' · ' + (target.up ? '在线' : '离线')) : 'GPU —%');
+    if ($('#gpuUtil')) $('#gpuUtil').textContent = total > 0 ? `GPU ${gpu.util_pct}%` : (target ? ((target.node_name || target.name) + ' · ' + (target.up ? '在线' : '离线')) : 'GPU —%');
     if ($('#vramSegments') && !$('#vramSegments').dataset.done) {
       [25, 50, 75].forEach((pct) => {
         const seg = document.createElement('div');

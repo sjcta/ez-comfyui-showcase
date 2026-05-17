@@ -10,6 +10,27 @@
   var _nodeEditorConfig = null;
   var _nodeEditorData = null;
   var _nodeEditorFname = '';
+  var _nodeEditorCompactMobile = false;
+
+  function updateNodeEditorStats() {
+    var cards = document.querySelectorAll('#nodeEditorModal .ne-field');
+    var total = cards.length;
+    var visible = 0;
+    for (var i = 0; i < cards.length; i++) {
+      if (!cards[i].classList.contains('hidden-field')) visible += 1;
+    }
+    var totalEl = document.getElementById('neStatTotal');
+    var visibleEl = document.getElementById('neStatVisible');
+    if (totalEl) totalEl.textContent = String(total);
+    if (visibleEl) visibleEl.textContent = String(visible);
+  }
+
+  function updateNodeCompactState() {
+    _nodeEditorCompactMobile = !!(window.matchMedia && window.matchMedia('(max-width: 765px)').matches);
+    var modal = document.getElementById('nodeEditorModal');
+    if (!modal) return;
+    modal.classList.toggle('node-editor-mobile-compact', _nodeEditorCompactMobile);
+  }
 
 function resetNodeConfig() {
     if (!_nodeEditorFname) return;
@@ -153,6 +174,10 @@ function renderNodeEditor(analyze, config) {
           : '');
       (function (card, f) {
         card.addEventListener('dragstart', function (ev) {
+          if (_nodeEditorCompactMobile) {
+            ev.preventDefault();
+            return;
+          }
           ev.dataTransfer.setData('text/plain', f.key);
           ev.dataTransfer.effectAllowed = 'move';
           card.style.opacity = '.4';
@@ -160,9 +185,15 @@ function renderNodeEditor(analyze, config) {
         card.addEventListener('dragend', function () {
           card.style.opacity = '';
         });
+        card.addEventListener('click', function(ev) {
+          if (!_nodeEditorCompactMobile) return;
+          if (ev.target && (ev.target.closest('.ne-field-vis') || ev.target.closest('.ne-field-label-input'))) return;
+          card.classList.toggle('expanded');
+        });
         card.querySelector('.ne-field-vis').addEventListener('click', function () {
           var isHidden = card.classList.toggle('hidden-field');
           this.innerHTML = isHidden ? CW.icon('eye-off') : CW.icon('eye');
+          updateNodeEditorStats();
         });
       })(card, f);
       container.appendChild(card);
@@ -173,6 +204,7 @@ function renderNodeEditor(analyze, config) {
         if (!el) return;
         var parent = el.parentElement;
         parent.addEventListener('dragover', function (ev) {
+          if (_nodeEditorCompactMobile) return;
           ev.preventDefault();
           ev.dataTransfer.dropEffect = 'move';
           parent.classList.add('drag-over');
@@ -181,15 +213,19 @@ function renderNodeEditor(analyze, config) {
           parent.classList.remove('drag-over');
         });
         parent.addEventListener('drop', function (ev) {
+          if (_nodeEditorCompactMobile) return;
           ev.preventDefault();
           parent.classList.remove('drag-over');
           var key = ev.dataTransfer.getData('text/plain');
           if (!key) return;
           var card = document.querySelector('.ne-field[data-key="' + CSS.escape(key) + '"]');
           if (card) el.appendChild(card);
+          updateNodeEditorStats();
         });
       })(zone, zoneMap[zone]);
     }
+    updateNodeEditorStats();
+    setTimeout(updateNodeEditorStats, 0);
   }
 function closeNodeEditor() {
     $('#nodeEditorModal').classList.remove('open');
@@ -213,8 +249,10 @@ function openNodeEditor(fname) {
     ]).then(function (results) {
       _nodeEditorData = results[0];
       _nodeEditorConfig = results[1];
+      updateNodeCompactState();
       renderNodeEditor(results[0], results[1]);
       $('#nodeEditorModal').classList.add('open');
+      setTimeout(updateNodeEditorStats, 0);
     });
   }
 
@@ -224,4 +262,5 @@ function openNodeEditor(fname) {
   window.CW.closeNodeEditor = closeNodeEditor;
   window.CW.saveNodeConfig = saveNodeConfig;
   window.CW.resetNodeConfig = resetNodeConfig;
+  window.addEventListener('resize', updateNodeCompactState);
 })();

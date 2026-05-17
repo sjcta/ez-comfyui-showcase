@@ -3,206 +3,35 @@
   "workflow": "i2i_Qwen_Edit.json",
   "fields": [
     {
-      "key": "9::filename_prefix",
-      "zone": "output",
-      "visible": true,
-      "label": "filename_prefix",
-      "order": 0,
-      "type": "text"
-    },
-    {
       "key": "41::image",
       "zone": "user_input",
       "visible": true,
-      "label": "image",
-      "order": 1,
+      "label": "image-persist-test",
+      "order": 0,
       "type": "image"
-    },
-    {
-      "key": "41::upload",
-      "zone": "hidden",
-      "visible": false,
-      "label": "upload",
-      "order": 2,
-      "type": "image"
-    },
-    {
-      "key": "170:145::shift",
-      "zone": "hidden",
-      "visible": false,
-      "label": "shift",
-      "order": 3,
-      "type": "number"
-    },
-    {
-      "key": "170:146::vae_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "vae_name",
-      "order": 4,
-      "type": "text"
-    },
-    {
-      "key": "170:148::reference_latents_method",
-      "zone": "hidden",
-      "visible": false,
-      "label": "reference_latents_method",
-      "order": 5,
-      "type": "text"
     },
     {
       "key": "170:151::prompt",
       "zone": "user_input",
       "visible": true,
       "label": "prompt",
-      "order": 6,
+      "order": 1,
       "type": "textarea"
-    },
-    {
-      "key": "170:152::strength",
-      "zone": "hidden",
-      "visible": false,
-      "label": "strength",
-      "order": 7,
-      "type": "number",
-      "step": 0.05,
-      "min": 0,
-      "max": 1
-    },
-    {
-      "key": "170:153::lora_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "lora_name",
-      "order": 8,
-      "type": "text"
-    },
-    {
-      "key": "170:153::strength_model",
-      "zone": "hidden",
-      "visible": false,
-      "label": "strength_model",
-      "order": 9,
-      "type": "text"
-    },
-    {
-      "key": "170:154::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 10,
-      "type": "toggle"
-    },
-    {
-      "key": "170:155::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 11,
-      "type": "toggle"
-    },
-    {
-      "key": "170:162::clip_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "clip_name",
-      "order": 12,
-      "type": "text"
-    },
-    {
-      "key": "170:162::type",
-      "zone": "hidden",
-      "visible": false,
-      "label": "type",
-      "order": 13,
-      "type": "text"
-    },
-    {
-      "key": "170:162::device",
-      "zone": "hidden",
-      "visible": false,
-      "label": "device",
-      "order": 14,
-      "type": "text"
-    },
-    {
-      "key": "170:163::switch",
-      "zone": "hidden",
-      "visible": false,
-      "label": "switch",
-      "order": 15,
-      "type": "toggle"
-    },
-    {
-      "key": "170:165::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 16,
-      "type": "toggle"
-    },
-    {
-      "key": "170:166::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 17,
-      "type": "toggle"
-    },
-    {
-      "key": "170:168::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 18,
-      "type": "toggle"
-    },
-    {
-      "key": "170:164::switch",
-      "zone": "hidden",
-      "visible": false,
-      "label": "switch",
-      "order": 19,
-      "type": "toggle"
-    },
-    {
-      "key": "170:167::switch",
-      "zone": "hidden",
-      "visible": false,
-      "label": "switch",
-      "order": 20,
-      "type": "toggle"
     },
     {
       "key": "170:169::seed",
       "zone": "advanced",
       "visible": true,
       "label": "seed",
-      "order": 21,
+      "order": 0,
       "type": "seed"
-    },
-    {
-      "key": "170:169::steps",
-      "zone": "advanced",
-      "visible": true,
-      "label": "steps",
-      "order": 22,
-      "type": "number"
-    },
-    {
-      "key": "170:169::cfg",
-      "zone": "advanced",
-      "visible": true,
-      "label": "cfg",
-      "order": 23,
-      "type": "number"
     },
     {
       "key": "170:169::sampler_name",
       "zone": "advanced",
       "visible": true,
       "label": "sampler_name",
-      "order": 24,
+      "order": 1,
       "type": "select",
       "options": [
         "euler",
@@ -228,7 +57,7 @@
       "zone": "advanced",
       "visible": true,
       "label": "scheduler",
-      "order": 25,
+      "order": 2,
       "type": "select",
       "options": [
         "normal",
@@ -245,18 +74,34 @@
       "zone": "advanced",
       "visible": true,
       "label": "denoise",
-      "order": 26,
+      "order": 3,
       "type": "number",
       "step": 0.05,
       "min": 0,
       "max": 1
     },
     {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "filename_prefix",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "41::upload",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upload",
+      "order": 0,
+      "type": "text"
+    },
+    {
       "key": "43::unet_name",
       "zone": "hidden",
       "visible": false,
       "label": "unet_name",
-      "order": 27,
+      "order": 1,
       "type": "text"
     },
     {
@@ -264,7 +109,135 @@
       "zone": "hidden",
       "visible": false,
       "label": "reference_latents_method",
-      "order": 28,
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "170:145::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "170:146::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "170:148::reference_latents_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "reference_latents_method",
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "170:151::image2",
+      "zone": "hidden",
+      "visible": false,
+      "label": "image2",
+      "order": 6,
+      "type": "text"
+    },
+    {
+      "key": "170:151::image3",
+      "zone": "hidden",
+      "visible": false,
+      "label": "image3",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "170:152::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "170:153::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "170:153::strength_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength_model",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "170:154::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "170:155::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 12,
+      "type": "text"
+    },
+    {
+      "key": "170:162::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "170:162::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "170:162::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "170:165::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 16,
+      "type": "text"
+    },
+    {
+      "key": "170:166::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 17,
+      "type": "text"
+    },
+    {
+      "key": "170:168::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 18,
       "type": "text"
     }
   ]

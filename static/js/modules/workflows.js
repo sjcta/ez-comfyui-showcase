@@ -73,6 +73,21 @@ function onWfThumbClick(fname) {
     $('#wfEditThumbInput').click();
   }
 
+  function syncWfThumbPreview(src) {
+    const img = $('#wfEditThumbImg');
+    const ph = $('#wfEditThumbPlaceholder');
+    if (!img || !ph) return;
+    if (src) {
+      img.src = src;
+      img.style.display = '';
+      ph.style.display = 'none';
+    } else {
+      img.src = '';
+      img.style.display = 'none';
+      ph.style.display = '';
+    }
+  }
+
 async function saveWfEdit() {
     if (!A._wfEditFilename) return;
     const name = $('#wfEditName').value.trim() || A._wfEditFilename.replace('.json', '');
@@ -92,6 +107,7 @@ async function saveWfEdit() {
   }
 
 async function onWfThumbUpload(e) {
+    if (!e || !e.target) return;
     const file = e.target.files[0];
     if (!file || !A._wfEditFilename) return;
     const fd = new FormData();
@@ -102,9 +118,7 @@ async function onWfThumbUpload(e) {
       // Show preview
       const reader = new FileReader();
       reader.onload = (ev) => {
-        $('#wfEditThumbImg').src = ev.target.result;
-        $('#wfEditThumbImg').style.display = '';
-        $('#wfEditThumbPlaceholder').style.display = 'none';
+        syncWfThumbPreview(ev.target.result);
       };
       reader.readAsDataURL(file);
     } catch (e) {}
@@ -163,17 +177,7 @@ function openWfEdit(fname) {
     });
     // Thumbnail
     const thumbUrl = meta.thumbnail ? `${API}/api/workflows/thumbnail/${meta.thumbnail}` : '';
-    const img = $('#wfEditThumbImg');
-    const ph = $('#wfEditThumbPlaceholder');
-    if (thumbUrl) {
-      img.src = thumbUrl;
-      img.style.display = '';
-      ph.style.display = 'none';
-    } else {
-      img.src = '';
-      img.style.display = 'none';
-      ph.style.display = '';
-    }
+    syncWfThumbPreview(thumbUrl);
     // Clear tag input
     var tagInput = $('#wfEditTagInput');
     if (tagInput) tagInput.value = '';
