@@ -7,6 +7,19 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs, historyItems = A.historyItems;
 
+  function authFetch(url, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers || {});
+    if (window.CW && CW.auth && typeof CW.auth.apiFetch === 'function') {
+      return CW.auth.apiFetch(url, opts);
+    }
+    try {
+      var token = localStorage.getItem('v4_token');
+      if (token && !opts.headers.Authorization) opts.headers.Authorization = 'Bearer ' + token;
+    } catch (e) {}
+    return fetch(url, opts);
+  }
+
   // ── Manager toolbar state ──
   var _mgrFilter = '';  // '' = all
   var _mgrSortBy = 'manual';
@@ -225,7 +238,7 @@ function _tagCls(t) {
       var mainTag = _getPrimaryTag(fname, meta);
       if (mainTag) tagCounts[mainTag] = (tagCounts[mainTag] || 0) + 1;
     }
-    var tagOrder = ['全部', '文生图', '图生图', '放大', '文生视频', '图生视频'];
+    var tagOrder = ['全部', '文生图', '图生图', '放大', '文生视频', '图生视频', '其他'];
     var allTags = Object.keys(tagCounts);
     allTags.sort(function(a, b) {
       if (a === '全部') return -1;
@@ -248,7 +261,7 @@ function _tagCls(t) {
   function _getPrimaryTag(fname, meta) {
     var tags = meta.tags || [];
     var typeTag = window.CW.getWFType(fname);
-    return typeTag ? typeTag.text : (tags[0] || '');
+    return typeTag ? typeTag.text : (tags[0] || '其他');
   }
 
   function mgrFilterTag(tag) {
@@ -307,7 +320,7 @@ function renderWfGrid() {
           '<button class="wf-mgr-btn" onclick="CW.openWfEdit(\'' + escA(fname) + '\')">'+CW.icon('pencil')+' 编辑</button>' +
           '<button class="wf-mgr-btn" onclick="CW.openNodeEditor(\'' + escA(fname) + '\')">'+CW.icon('settings')+' 节点</button>' +
           '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\')">'+CW.icon('download')+' 下载</button>' +
-          (isAdmin ? '<button class="wf-mgr-btn" onclick="CW.toggleWfShare(\'' + escA(fname) + '\',' + (!meta.shared) + ')">' + CW.icon('globe') + (meta.shared ? ' 取消共享' : ' 共享') + '</button>' : '') +
+          (isAdmin ? '<button class="wf-mgr-btn wf-share-btn ' + (meta.shared ? 'is-shared' : 'is-private') + '" title="' + (meta.shared ? '点击取消共享' : '点击设为共享') + '" onclick="CW.toggleWfShare(\'' + escA(fname) + '\',' + (!meta.shared) + ')">' + CW.icon('share') + (meta.shared ? ' 已共享' : ' 未共享') + '</button>' : '') +
           '<button class="wf-mgr-btn danger" onclick="CW.openWfDel(\'' + escA(fname) + '\')">'+CW.icon('trash-2')+' 删除</button>' +
         '</div>' +
       '</div>' +
@@ -316,9 +329,47 @@ function renderWfGrid() {
     grid.innerHTML = html;
   }
 
+  function _updateWfShareCard(fname) {
+    var card = document.querySelector('.wf-mgr-card[data-fname="' + fname.replace(/"/g, '\\"') + '"]');
+    if (!card) return;
+    var meta = (A._wfMeta && A._wfMeta[fname]) || {};
+    var shared = !!meta.shared;
+    var shareBtn = card.querySelector('.wf-share-btn');
+    if (shareBtn) {
+      shareBtn.classList.toggle('is-shared', shared);
+      shareBtn.classList.toggle('is-private', !shared);
+      shareBtn.title = shared ? '点击取消共享' : '点击设为共享';
+      shareBtn.innerHTML = CW.icon('share') + (shared ? ' 已共享' : ' 未共享');
+      shareBtn.setAttribute('onclick', "CW.toggleWfShare('" + escA(fname) + "'," + (!shared) + ")");
+    }
+    var nameRow = card.querySelector('.wf-mgr-card-name');
+    var tagsWrap = nameRow ? nameRow.querySelector('.wf-mgr-tags') : null;
+    if (!nameRow) return;
+    var sharedTag = tagsWrap ? Array.from(tagsWrap.querySelectorAll('.wf-mgr-tag')).find(function(el) {
+      return (el.textContent || '').trim() === '共享';
+    }) : null;
+    if (shared) {
+      if (!tagsWrap) {
+        tagsWrap = document.createElement('span');
+        tagsWrap.className = 'wf-mgr-tags';
+        nameRow.appendChild(document.createTextNode(' '));
+        nameRow.appendChild(tagsWrap);
+      }
+      if (!sharedTag) {
+        sharedTag = document.createElement('span');
+        sharedTag.className = 'wf-mgr-tag res';
+        sharedTag.textContent = '共享';
+        tagsWrap.appendChild(sharedTag);
+      }
+    } else if (sharedTag) {
+      sharedTag.remove();
+      if (tagsWrap && !tagsWrap.children.length) tagsWrap.remove();
+    }
+  }
+
 async function loadWfMeta() {
     try {
-      const r = await fetch(API + '/api/workflows/meta');
+      const r = await authFetch(API + '/api/workflows/meta');
       A._wfMeta = await r.json();
     } catch (e) {
       A._wfMeta = {};
@@ -383,7 +434,7 @@ function showAddDir() {
 
 async function loadWfDirs() {
     try {
-      const r = await fetch(API + '/api/workflow-dirs');
+      const r = await authFetch(API + '/api/workflow-dirs');
       const dirs = await r.json();
       const list = $('#wfDirsList');
       if (!list) return;
@@ -432,7 +483,7 @@ function openWfMgr() {
     var sel = $('#wfMgrDeviceSelect');
     if (!sel) return;
     try {
-      var r = await fetch(API + '/api/nodes');
+      var r = await authFetch(API + '/api/nodes');
       var d = await r.json();
       if (!d.ok) return;
       sel.innerHTML = '<option value="">选择设备...</option>';
@@ -473,19 +524,25 @@ async function uploadWF(file) {
   }
 
   function toggleWfShare(fname, shared) {
-    fetch(API + '/api/workflows/meta/' + encodeURIComponent(fname), {
+    authFetch(API + '/api/workflows/meta/' + encodeURIComponent(fname), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shared: shared })
     }).then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '操作失败'); });
       return r.json();
+    }).then(function(saved) {
+      if (!A._wfMeta[fname]) A._wfMeta[fname] = {};
+      A._wfMeta[fname] = Object.assign({}, A._wfMeta[fname], saved || {});
+      if (!!A._wfMeta[fname].shared !== !!shared) {
+        throw new Error('共享状态未保存，请刷新后重试');
+      }
+      _updateWfShareCard(fname);
     }).then(function() {
-      if (A._wfMeta[fname]) A._wfMeta[fname].shared = shared;
-      renderWfGrid();
-      loadWorkflows();
       CW.toast(shared ? '工作流已共享' : '已取消共享', 'done');
-    }).catch(function(e) { CW.toast(e.message, 'error'); });
+    }).catch(function(e) {
+      CW.toast(e.message || '共享状态保存失败，请确认当前账号是管理员', 'error');
+    });
   }
 
 function _applyTabFilter() {
@@ -579,7 +636,7 @@ async function selectWF(name) {
       // Preserve uploaded reference image
       var _savedRefVal = $('#refImageValue')?.value || '';
       var _savedRefSrc = $('#refImagePreview')?.src || '';
-      const r = await fetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
+      const r = await authFetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
       const fields = d.fields || [];
       window.__APP__._wfFieldMeta = fields.map((f) => ({
@@ -616,7 +673,7 @@ async function selectWF(name) {
 
 async function loadWorkflows() {
     try {
-      const [r, metaR] = await Promise.all([fetch(`${API}/api/workflows`), fetch(`${API}/api/workflows/meta`)]);
+      const [r, metaR] = await Promise.all([authFetch(`${API}/api/workflows`), authFetch(`${API}/api/workflows/meta`)]);
       const wfs = await r.json();
       try {
         A._wfMeta = await metaR.json();
@@ -726,6 +783,9 @@ async function loadWorkflows() {
           tabHtml += `<button class="wf-tab wf-tab-${_tagCls(t)} ${A._currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
         }
         tabsEl.innerHTML = tabHtml;
+        if (window.CW && typeof CW.refreshHistoryTypeFilters === 'function') {
+          CW.refreshHistoryTypeFilters();
+        }
       }
       // Apply current tab filter
       _applyTabFilter();
@@ -754,7 +814,7 @@ async function loadWfVersions(fname) {
     if (!list) return;
     list.innerHTML = '<span class="dim-tag">加载中...</span>';
     try {
-      var r = await fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/versions');
+      var r = await authFetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/versions');
       var d = await r.json();
       var versions = d.versions || {};
       var active = d.active_version || '';

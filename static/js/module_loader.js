@@ -7,7 +7,7 @@
   'use strict';
 
   var base = 'static/js';
-  var version = '1778833333';
+  var version = '1779018200';
   var runtimeApiBase = (location.protocol === 'file:')
     ? 'http://localhost:18000'
     : '';

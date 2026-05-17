@@ -13,7 +13,7 @@ if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1778833333"></script>
+<script src="static/js/module_loader.js?v=1779018200"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -65,7 +65,7 @@ if (location.protocol === 'file:') {
     <div class="wf-mgr-layout">
       <!-- 左侧：统计面板 -->
       <div class="wf-mgr-sidebar">
-<button class="wf-mgr-gold-btn" onclick="document.getElementById('wfUploadInput').click()">
+        <button class="wf-mgr-gold-btn" onclick="document.getElementById('wfUploadInput').click()">
           <svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-upload"/></svg>
           上传工作流
         </button>
@@ -287,25 +287,23 @@ if (location.protocol === 'file:') {
   <!-- 中列：出图中 + 历史（瀑布流） -->
   <div class="col-center" id="colCenter">
     <div class="col-header">
-      <span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
+      <span class="col-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
       <span class="ch-count" id="histCount"></span>
       <input class="gf-search" id="gfStyle" type="text" placeholder="搜索..." oninput="CW.applyFilters()">
     </div>
     <div class="gallery-filters" id="galleryFilters">
-      <select id="gfType" onchange="CW.applyFilters()">
-        <option value="">全部类型</option>
-        <option value="文生图">文生图</option>
-        <option value="图生图">图生图</option>
-        <option value="文生视频">文生视频</option>
-        <option value="图生视频">图生视频</option>
-      </select>
+      <div class="gf-segment" role="group" aria-label="图片归属筛选">
+        <button class="gf-segment-btn active" type="button" data-owner-filter="all" onclick="CW.setHistoryOwnerFilter('all')">所有图片</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="mine" onclick="CW.setHistoryOwnerFilter('mine')">我的图片</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="other" onclick="CW.setHistoryOwnerFilter('other')">其他</button>
+      </div>
+      <span class="gf-sep"></span>
+      <div class="gf-segment gf-type-segment" role="group" aria-label="图片类型筛选">
+        <button class="gf-segment-btn active" type="button" data-type-filter="" onclick="CW.setHistoryTypeFilter('')">全部类型</button>
+      </div>
       <span class="gf-sep"></span>
       <select id="gfSize" onchange="CW.applyFilters()">
         <option value="">全部尺寸</option>
-      </select>
-      <span class="gf-sep"></span>
-      <select id="gfWF" onchange="CW.applyFilters()">
-        <option value="">全部工作流</option>
       </select>
       <button class="gf-clear" onclick="CW.clearFilters()" title="清除"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>

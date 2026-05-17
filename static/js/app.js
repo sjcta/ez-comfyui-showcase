@@ -377,7 +377,11 @@
     var comfyBtn = $('#svcComfyUI');
     if (comfyBtn)
       comfyBtn.addEventListener('click', function () {
-        openInstPopup('comfyui');
+        if (window.CW && window.CW.openInstPopup && window.CW.openInstPopup !== openInstPopup) {
+          window.CW.openInstPopup('comfyui');
+        } else {
+          openInstPopup('comfyui');
+        }
       });
   }
   // ══════════════════════════════════════════════════════════════════════════
@@ -735,8 +739,6 @@ function init() {
     setInterval(() => {
       if (ws && ws.readyState === 1) ws.send('ping');
     }, 30000);
-    window.CW.loadWfMeta && window.CW.loadWfMeta();
-    window.CW.loadHistory && window.CW.loadHistory();
     if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
       window.CW.authReady.finally(function() {
         pollJobs();

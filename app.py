@@ -139,8 +139,6 @@ def _get_enabled_instances() -> list[dict]:
 
 def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[dict]:
     """Return enabled instances visible to the current user."""
-    if current_user is None:
-        return _get_enabled_instances()
     instances = []
     for node in _load_nodes():
         if not node.get("enabled", True):
@@ -148,7 +146,10 @@ def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[di
         if not _is_node_connected(node["id"]):
             continue
         normalized = _normalize_node(node)
-        if not _can_view_node(normalized, current_user):
+        if current_user is None:
+            if not normalized.get("shared"):
+                continue
+        elif not _can_view_node(normalized, current_user):
             continue
         for inst in normalized.get("instances", []):
             if not inst.get("enabled", True):
@@ -544,6 +545,47 @@ MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
 # ── Generation SQLite Database ──
 GEN_DB = os.path.join(_BASE, "data", "generation.db")
 
+def _db_connect(path: str = GEN_DB) -> sqlite3.Connection:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _json_dumps_compact(value) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+def _json_loads_safe(value, default):
+    if value in (None, ""):
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+def _workflow_meta_row_to_entry(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    filename = row["filename"]
+    entry = {
+        "name": row["name"] or filename.replace(".json", ""),
+        "tags": _json_loads_safe(row["tags_json"], []),
+        "owner_id": row["owner_id"] or _bootstrap_admin_user_id(),
+        "shared": bool(row["shared"]),
+    }
+    optional_fields = {
+        "source": row["source"],
+        "source_path": row["source_path"],
+        "thumbnail": row["thumbnail"],
+        "sort_order": row["sort_order"],
+        "active_version": row["active_version"],
+    }
+    for key, value in optional_fields.items():
+        if value not in (None, ""):
+            entry[key] = value
+    versions = _json_loads_safe(row["versions_json"], {})
+    if versions:
+        entry["versions"] = versions
+    return _normalize_wf_meta_entry(filename, entry)
+
 def _init_gen_db():
     conn = sqlite3.connect(GEN_DB)
     conn.execute("""
@@ -575,8 +617,25 @@ def _init_gen_db():
         conn.execute("ALTER TABLE generations ADD COLUMN is_public INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_meta (
+            filename TEXT PRIMARY KEY,
+            name TEXT DEFAULT '',
+            tags_json TEXT DEFAULT '[]',
+            owner_id TEXT DEFAULT '',
+            shared INTEGER DEFAULT 0,
+            source TEXT DEFAULT '',
+            source_path TEXT DEFAULT '',
+            thumbnail TEXT DEFAULT '',
+            sort_order INTEGER,
+            versions_json TEXT DEFAULT '{}',
+            active_version TEXT DEFAULT '',
+            updated_at DATETIME DEFAULT (datetime('now','localtime'))
+        )
+    """)
     conn.commit()
     conn.close()
+    _migrate_wf_meta_json_to_db()
     # Initialize auth DB
     _init_auth_db()
 
@@ -630,11 +689,14 @@ def _gen_db_to_record(row: dict) -> dict:
             params = json.loads(row["params"])
         except Exception:
             pass
+    workflow = row["workflow"]
+    workflow_type = _workflow_primary_type(workflow)
     return {
         "id": row["id"],
         "filename": row.get("image_path", ""),
         "thumb": row.get("thumb_path", ""),
-        "workflow": row["workflow"],
+        "workflow": workflow,
+        "workflow_type": workflow_type,
         "prompt": row.get("prompt", ""),
         "seed": seed_val,
         "width": row.get("width", 0),
@@ -645,6 +707,27 @@ def _gen_db_to_record(row: dict) -> dict:
         "user_id": row.get("user_id", ""),
         "is_public": bool(row.get("is_public", 0)),
     }
+
+
+def _workflow_primary_type(filename: str) -> str:
+    """Return the backend workflow category even when the workflow itself is not visible."""
+    name = os.path.basename(filename or "")
+    lower = name.lower()
+    if lower.startswith("i2v") or "-i2v" in lower or "_i2v" in lower:
+        return "图生视频"
+    if lower.startswith("t2v") or "-t2v" in lower or "_t2v" in lower:
+        return "文生视频"
+    if lower.startswith("i2i") or "-i2i" in lower or "_i2i" in lower:
+        return "图生图"
+    if lower.startswith("t2i") or "-t2i" in lower or "_t2i" in lower:
+        return "文生图"
+    try:
+        meta = _load_wf_meta()
+        entry = _normalize_wf_meta_entry(name, meta.get(name, {}))
+        tags = entry.get("tags") or []
+        return tags[0] if tags else ""
+    except Exception:
+        return ""
 
 
 def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
@@ -818,6 +901,86 @@ def _normalize_wf_meta_entry(filename: str, entry: dict | None) -> dict:
     return item
 
 
+def _write_wf_meta_entry_to_db(filename: str, entry: dict, conn: sqlite3.Connection | None = None):
+    normalized = _normalize_wf_meta_entry(filename, entry)
+    own_conn = conn is None
+    if own_conn:
+        conn = _db_connect()
+    conn.execute(
+        """
+        INSERT INTO workflow_meta
+            (filename, name, tags_json, owner_id, shared, source, source_path, thumbnail, sort_order, versions_json, active_version, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
+        ON CONFLICT(filename) DO UPDATE SET
+            name=excluded.name,
+            tags_json=excluded.tags_json,
+            owner_id=excluded.owner_id,
+            shared=excluded.shared,
+            source=excluded.source,
+            source_path=excluded.source_path,
+            thumbnail=excluded.thumbnail,
+            sort_order=excluded.sort_order,
+            versions_json=excluded.versions_json,
+            active_version=excluded.active_version,
+            updated_at=datetime('now','localtime')
+        """,
+        (
+            filename,
+            normalized.get("name", filename.replace(".json", "")),
+            _json_dumps_compact(normalized.get("tags", [])),
+            normalized.get("owner_id", _bootstrap_admin_user_id()),
+            1 if normalized.get("shared") else 0,
+            normalized.get("source", ""),
+            normalized.get("source_path", ""),
+            normalized.get("thumbnail", ""),
+            normalized.get("sort_order"),
+            _json_dumps_compact(normalized.get("versions", {})),
+            normalized.get("active_version", ""),
+        ),
+    )
+    if own_conn:
+        conn.commit()
+        conn.close()
+
+
+def _migrate_wf_meta_json_to_db():
+    if not os.path.isfile(WF_META_FILE):
+        return
+    try:
+        with open(WF_META_FILE) as f:
+            raw = json.load(f)
+    except Exception as e:
+        add_log("warn", "wf_meta", f"Failed to migrate wf_meta.json: {e}")
+        return
+    if not isinstance(raw, dict):
+        return
+    conn = _db_connect()
+    try:
+        for filename, entry in raw.items():
+            exists = conn.execute("SELECT 1 FROM workflow_meta WHERE filename=? LIMIT 1", (filename,)).fetchone()
+            if exists:
+                continue
+            _write_wf_meta_entry_to_db(filename, entry or {}, conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _delete_wf_meta_entry(filename: str):
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM workflow_meta WHERE filename=?", (filename,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _export_wf_meta_json_from_db():
+    meta = _load_wf_meta()
+    with open(WF_META_FILE, "w") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+
 def _can_view_workflow(filename: str, entry: dict, current_user: dict | None) -> bool:
     if current_user and _is_admin_user(current_user):
         return True
@@ -865,6 +1028,7 @@ _job_tasks: dict[str, asyncio.Task] = {}
 history: list[dict] = []
 ws_clients: list[WebSocket] = []
 gpu_cache: dict = {"ts": 0, "data": None}
+node_gpu_cache: dict = {}
 
 # ── Model Affinity Routing ──────────────────────────────────────────────
 # Per-instance semaphores: one concurrent job per ComfyUI instance
@@ -1178,6 +1342,117 @@ def get_gpu_stats() -> dict:
     }
     gpu_cache["ts"] = now
     gpu_cache["data"] = data
+    return data
+
+
+def _empty_gpu_stats(message: str = "") -> dict:
+    return {
+        "vram_used_mb": 0,
+        "vram_total_mb": 0,
+        "vram_pct": 0,
+        "temp_c": 0,
+        "util_pct": 0,
+        "message": message,
+    }
+
+
+def _parse_nvidia_smi_stats(out: str) -> dict:
+    line = (out or "").strip().splitlines()[0] if (out or "").strip() else ""
+    if not line:
+        return _empty_gpu_stats("VRAM 未上报")
+    parts = [x.strip() for x in line.split(",")]
+    if len(parts) < 4:
+        return _empty_gpu_stats("VRAM 未上报")
+    raw_used, raw_total, raw_temp, raw_util = parts[:4]
+    used = 0 if raw_used in ("[N/A]", "[N/A ]", "N/A") else float(raw_used or 0)
+    total = 0 if raw_total in ("[N/A]", "[N/A ]", "N/A") else float(raw_total or 0)
+    temp = 0 if raw_temp in ("[N/A]", "[N/A ]", "N/A") else int(float(raw_temp or 0))
+    util = 0 if raw_util in ("[N/A]", "[N/A ]", "N/A") else int(float(raw_util or 0))
+    pct = round(used / total * 100, 1) if total else 0
+    return {
+        "vram_used_mb": round(used),
+        "vram_total_mb": round(total),
+        "vram_pct": pct,
+        "temp_c": temp,
+        "util_pct": util,
+        "message": "",
+    }
+
+
+def _build_ssh_command(node: dict, remote_args: list[str]) -> list[str]:
+    ssh = _resolve_ssh_config(node.get("ssh_config", {}))
+    if ssh.get("auth") == "password" and ssh.get("password"):
+        cmd = [
+            "sshpass", "-p", ssh["password"], "ssh",
+            f"{ssh.get('user', 'root')}@{node['host']}",
+        ]
+    else:
+        cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
+    return cmd + ["-p", str(ssh.get("port", 22))] + remote_args
+
+
+def _parse_meminfo_stats(out: str, base: dict | None = None) -> dict:
+    base = dict(base or _empty_gpu_stats())
+    try:
+        total = re.search(r"MemTotal:\s+(\d+)", out or "")
+        avail = re.search(r"MemAvailable:\s+(\d+)", out or "")
+        if not total or not avail:
+            return base
+        total_mb = int(total.group(1)) / 1024
+        used_mb = total_mb - (int(avail.group(1)) / 1024)
+        pct = round(used_mb / total_mb * 100, 1) if total_mb else 0
+        base.update({
+            "vram_used_mb": round(used_mb),
+            "vram_total_mb": round(total_mb),
+            "vram_pct": pct,
+            "message": "",
+        })
+    except Exception:
+        pass
+    return base
+
+
+def _run_remote_gpu_query(node: dict) -> dict:
+    cmd = _build_ssh_command(node, [
+        "nvidia-smi",
+        "--query-gpu=memory.used,memory.total,temperature.gpu,utilization.gpu",
+        "--format=csv,noheader,nounits",
+    ])
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+    if r.returncode != 0:
+        return _empty_gpu_stats((r.stderr or "VRAM 未获取到").strip()[:120])
+    data = _parse_nvidia_smi_stats(r.stdout)
+    if data.get("vram_total_mb", 0) > 0:
+        return data
+    mem_cmd = _build_ssh_command(node, ["cat", "/proc/meminfo"])
+    mem = subprocess.run(mem_cmd, capture_output=True, text=True, timeout=8)
+    if mem.returncode == 0:
+        return _parse_meminfo_stats(mem.stdout, data)
+    data["message"] = (mem.stderr or data.get("message") or "VRAM 未获取到").strip()[:120]
+    return data
+
+
+def get_node_gpu_stats(node: dict | None) -> dict:
+    if not node:
+        return _empty_gpu_stats("设备不存在")
+    conn = node.get("connection", "local")
+    if conn == "local":
+        data = dict(get_gpu_stats())
+        data.setdefault("message", "")
+        return data
+    if conn != "remote-ssh":
+        return _empty_gpu_stats("该设备暂不支持 VRAM 查询")
+
+    now = time.time()
+    key = node.get("id") or node.get("host") or ""
+    cached = node_gpu_cache.get(key)
+    if cached and now - cached.get("ts", 0) < 5:
+        return cached["data"]
+    try:
+        data = _run_remote_gpu_query(node)
+    except Exception as e:
+        data = _empty_gpu_stats(str(e)[:120])
+    node_gpu_cache[key] = {"ts": now, "data": data}
     return data
 
 
@@ -2201,7 +2476,11 @@ async def index():
 @app.get("/api/status")
 def api_status(current_user: dict | None = Depends(get_current_user_optional)):
     instances = []
+    node_gpu = {}
     for inst in _get_enabled_instances_for_user(current_user):
+        node_id = inst.get("_node_id", "")
+        if node_id not in node_gpu:
+            node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
         q_size = _get_instance_queue_size(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
@@ -2219,6 +2498,7 @@ def api_status(current_user: dict | None = Depends(get_current_user_optional)):
             "queue_running": q_run,
             "queue_pending": q_pend,
             "loaded_group": grp,
+            "gpu": node_gpu.get(node_id, _empty_gpu_stats("VRAM 未获取到")),
         })
     return {
         "comfyui": any(i["up"] for i in instances),
@@ -2326,8 +2606,12 @@ def api_gpu_kill(req: dict, current_user: dict = Depends(require_admin)):
 @app.get("/api/comfyui/status")
 def api_comfyui_status(current_user: dict | None = Depends(get_current_user_optional)):
     result = []
+    node_gpu = {}
     for inst in _get_enabled_instances_for_user(current_user):
         name = inst["name"]
+        node_id = inst.get("_node_id", "")
+        if node_id not in node_gpu:
+            node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
@@ -2362,6 +2646,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             "pending_workflows": pending_workflows,
             "current_prompt": current_label, "loaded_group": grp,
             "port": inst["url"].split(":")[-1] if ":" in inst["url"] else "",
+            "gpu": node_gpu.get(node_id, _empty_gpu_stats("VRAM 未获取到")),
         })
     return {"instances": result}
 
@@ -2411,22 +2696,32 @@ def api_vllm(action: str, current_user: dict = Depends(require_admin)):
 
 def _get_workflow_dirs() -> list[str]:
     """Collect workflow directories from all enabled nodes (node-level + instance-level) + legacy dirs."""
-    dirs = set()
+    dirs = []
+    seen = set()
+
+    def _append_dir(path: str):
+        if not path:
+            return
+        if path in seen:
+            return
+        seen.add(path)
+        dirs.append(path)
+
     for node in _load_nodes():
         if not node.get("enabled", True):
             continue
         # Node-level workflow_dirs
         for wd in node.get("workflow_dirs", []):
-            dirs.add(wd)
+            _append_dir(wd)
         # Instance-level workflow_dirs
         for inst in node.get("instances", []):
             for wd in inst.get("workflow_dirs", []):
-                dirs.add(wd)
+                _append_dir(wd)
     # Also include legacy WF_DIRS_FILE dirs
     legacy = _load_wf_dirs()
     for d in legacy:
-        dirs.add(d)
-    return list(dirs)
+        _append_dir(d)
+    return dirs
 
 @app.post("/api/workflows/sync")
 async def api_sync_workflows(current_user: dict = Depends(require_admin)):
@@ -2520,34 +2815,34 @@ def api_workflow_find_closest(workflow: str = "", wf_id: str = "", wf_tags: str 
 
 @app.get("/api/workflows/{name}/fields")
 def api_workflow_fields(name: str, current_user: dict | None = Depends(get_current_user_optional)):
-    path = _resolve_workflow(name)
-    if not path:
-        raise HTTPException(404)
     entry = _normalize_wf_meta_entry(name, _load_wf_meta().get(name, {}))
     if not _can_view_workflow(name, entry, current_user):
         raise HTTPException(403, "No permission for this workflow")
+    path = _resolve_workflow(name, entry)
+    if not path:
+        raise HTTPException(404)
     return parse_workflow(path, wf_name=name)
 
 @app.get("/api/workflows/{name}/analyze")
 def api_workflow_analyze(name: str, current_user: dict | None = Depends(get_current_user_optional)):
-    path = _resolve_workflow(name)
-    if not path:
-        raise HTTPException(404)
     entry = _normalize_wf_meta_entry(name, _load_wf_meta().get(name, {}))
     if not _can_view_workflow(name, entry, current_user):
         raise HTTPException(403, "No permission for this workflow")
+    path = _resolve_workflow(name, entry)
+    if not path:
+        raise HTTPException(404)
     return analyze_workflow(path)
 
 
 
 @app.get("/api/workflows/{name}/download")
 def api_workflow_download(name: str, current_user: dict | None = Depends(get_current_user_optional)):
-    path = _resolve_workflow(name)
-    if not path:
-        raise HTTPException(404)
     entry = _normalize_wf_meta_entry(name, _load_wf_meta().get(name, {}))
     if not _can_view_workflow(name, entry, current_user):
         raise HTTPException(403, "No permission for this workflow")
+    path = _resolve_workflow(name, entry)
+    if not path:
+        raise HTTPException(404)
     return FileResponse(path, media_type="application/json", filename=name)
 
 @app.get("/api/workflows/{name}/config")
@@ -2597,12 +2892,14 @@ async def api_workflow_upload(file: UploadFile = File(...), current_user: dict =
             "owner_id": _user_id(current_user),
             "shared": False,
         }
-        _save_wf_meta(meta)
+        _write_wf_meta_entry_to_db(name, meta[name])
+        _export_wf_meta_json_from_db()
     else:
         meta[name]["source"] = "ez-comfy"
         meta[name]["source_path"] = dest
         meta[name]["owner_id"] = meta[name].get("owner_id") or _user_id(current_user)
-        _save_wf_meta(meta)
+        _write_wf_meta_entry_to_db(name, meta[name])
+        _export_wf_meta_json_from_db()
     return {"ok": True, "name": name}
 
 
@@ -2681,19 +2978,40 @@ def api_input_image(filename: str):
 # ── Workflow Metadata ─────────────────────────────────────────────────
 
 def _load_wf_meta() -> dict:
-    if os.path.isfile(WF_META_FILE):
-        try:
-            with open(WF_META_FILE) as f:
-                raw = json.load(f)
-            if isinstance(raw, dict):
-                return {k: _normalize_wf_meta_entry(k, v) for k, v in raw.items()}
-        except Exception as e:
-            add_log("warn", "wf_meta", f"Failed to load wf_meta.json: {e}")
-    return {}
+    try:
+        conn = _db_connect()
+        rows = conn.execute("SELECT * FROM workflow_meta ORDER BY filename").fetchall()
+        conn.close()
+        result = {}
+        for row in rows:
+            entry = _workflow_meta_row_to_entry(row)
+            if entry is not None:
+                result[row["filename"]] = entry
+        return result
+    except Exception as e:
+        add_log("warn", "wf_meta", f"Failed to load workflow_meta table: {e}")
+        if os.path.isfile(WF_META_FILE):
+            try:
+                with open(WF_META_FILE) as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    return {k: _normalize_wf_meta_entry(k, v) for k, v in raw.items()}
+            except Exception as json_err:
+                add_log("warn", "wf_meta", f"Failed to load wf_meta.json fallback: {json_err}")
+        return {}
 
 def _save_wf_meta(meta: dict):
+    normalized = {k: _normalize_wf_meta_entry(k, v) for k, v in meta.items()}
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM workflow_meta")
+        for filename, entry in normalized.items():
+            _write_wf_meta_entry_to_db(filename, entry, conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
     with open(WF_META_FILE, "w") as f:
-        json.dump({k: _normalize_wf_meta_entry(k, v) for k, v in meta.items()}, f, ensure_ascii=False, indent=2)
+        json.dump(normalized, f, ensure_ascii=False, indent=2)
 
 
 def _load_wf_dirs() -> list[str]:
@@ -2715,14 +3033,32 @@ def _save_wf_dirs(dirs: list[str]):
         json.dump(dirs, f, ensure_ascii=False, indent=2)
 
 
-def _resolve_workflow(name: str) -> str | None:
+def _resolve_workflow(name: str, entry: dict | None = None) -> str | None:
+    """Resolve a workflow file by filename, preferring the metadata-pinned source path.
+
+    This avoids reading the wrong file when multiple workflow directories contain the
+    same basename (for example local cache plus synced remote copies).
+    """
+    normalized = _normalize_wf_meta_entry(name, entry or _load_wf_meta().get(name, {}))
+    source_path = str(normalized.get("source_path") or "").strip()
+    if source_path:
+        preferred = os.path.abspath(os.path.expanduser(source_path))
+        if os.path.basename(preferred) == name and os.path.isfile(preferred):
+            return preferred
+
+    candidates = []
     for d in _get_workflow_dirs():
         p = os.path.join(d, name)
         if os.path.isfile(p):
-            return p
-        matches = glob.glob(os.path.join(d, "**", name), recursive=True)
-        if matches:
-            return matches[0]
+            candidates.append(os.path.abspath(p))
+        candidates.extend(
+            os.path.abspath(m)
+            for m in glob.glob(os.path.join(d, "**", name), recursive=True)
+            if os.path.isfile(m)
+        )
+    if candidates:
+        # Deterministic fallback for names without pinned metadata.
+        return sorted(set(candidates))[0]
     return None
 
 
@@ -2766,6 +3102,7 @@ def _auto_detect_tags(workflow_path: str) -> list[str]:
 @app.get("/api/workflows/meta")
 def api_workflows_meta(current_user: dict | None = Depends(get_current_user_optional)):
     meta = _load_wf_meta()
+    dirty = False
     seen = {}
     for d in _get_workflow_dirs():
         for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
@@ -2775,17 +3112,24 @@ def api_workflows_meta(current_user: dict | None = Depends(get_current_user_opti
     result = {}
     for fname in sorted(seen):
         f = seen[fname]
-        entry = _normalize_wf_meta_entry(fname, meta.get(fname, {}))
-        if "tags" not in entry:
+        raw_entry = meta.get(fname, {})
+        entry = _normalize_wf_meta_entry(fname, raw_entry)
+        if fname not in meta:
+            meta[fname] = entry
+            dirty = True
+        if "tags" not in raw_entry:
             entry["tags"] = _auto_detect_tags(f)
             meta[fname] = entry
-        if "name" not in entry:
+            dirty = True
+        if "name" not in raw_entry:
             entry["name"] = fname.replace(".json", "")
             meta[fname] = entry
+            dirty = True
         if not _can_view_workflow(fname, entry, current_user):
             continue
         result[fname] = entry
-    _save_wf_meta(meta)
+    if dirty:
+        _save_wf_meta(meta)
     return result
 
 
@@ -2799,10 +3143,19 @@ def api_update_wf_meta(filename: str, body: dict, current_user: dict = Depends(g
         meta[filename]["name"] = body["name"]
     if "tags" in body:
         meta[filename]["tags"] = body["tags"]
-    if _is_admin_user(current_user) and "shared" in body:
+    if "shared" in body and not _is_admin_user(current_user):
+        raise HTTPException(403, "Admin permission required to share workflows")
+    if "shared" in body:
         meta[filename]["shared"] = bool(body["shared"])
-    _save_wf_meta(meta)
-    return meta[filename]
+        add_log(
+            "info",
+            "workflow",
+            f"Workflow {filename} shared={meta[filename]['shared']} by {_user_id(current_user)}",
+        )
+    _write_wf_meta_entry_to_db(filename, meta[filename])
+    _export_wf_meta_json_from_db()
+    saved = _normalize_wf_meta_entry(filename, _load_wf_meta().get(filename, {}))
+    return saved
 
 
 @app.delete("/api/workflows/meta/{filename}")
@@ -2810,8 +3163,8 @@ def api_delete_wf_meta(filename: str, current_user: dict = Depends(get_current_u
     meta = _load_wf_meta()
     entry = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
     if filename in meta and _can_manage_workflow(filename, entry, current_user):
-        del meta[filename]
-        _save_wf_meta(meta)
+        _delete_wf_meta_entry(filename)
+        _export_wf_meta_json_from_db()
     elif filename in meta:
         raise HTTPException(403, "No permission for this workflow")
     return {"ok": True}
@@ -2831,7 +3184,8 @@ async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = 
     if not _can_manage_workflow(filename, meta[filename], current_user):
         raise HTTPException(403, "No permission for this workflow")
     meta[filename]["thumbnail"] = thumb_name
-    _save_wf_meta(meta)
+    _write_wf_meta_entry_to_db(filename, meta[filename])
+    _export_wf_meta_json_from_db()
     return {"ok": True, "thumbnail": thumb_name}
 
 
@@ -2850,7 +3204,8 @@ def api_rename_workflow(filename: str, body: dict, current_user: dict = Depends(
     if not _can_manage_workflow(filename, meta[filename], current_user):
         raise HTTPException(403, "No permission for this workflow")
     meta[filename]["name"] = body.get("name", filename.replace(".json", ""))
-    _save_wf_meta(meta)
+    _write_wf_meta_entry_to_db(filename, meta[filename])
+    _export_wf_meta_json_from_db()
     return meta[filename]
 
 
@@ -2858,17 +3213,17 @@ def api_rename_workflow(filename: str, body: dict, current_user: dict = Depends(
 
 @app.delete("/api/workflows/{name}")
 def api_workflow_delete(name: str, current_user: dict = Depends(get_current_user)):
-    path = _resolve_workflow(name)
-    if not path:
-        raise HTTPException(404)
     meta = _load_wf_meta()
     entry = _normalize_wf_meta_entry(name, meta.get(name, {}))
     if not _can_manage_workflow(name, entry, current_user):
         raise HTTPException(403, "No permission for this workflow")
+    path = _resolve_workflow(name, entry)
+    if not path:
+        raise HTTPException(404)
     os.remove(path)
     if name in meta:
-        del meta[name]
-        _save_wf_meta(meta)
+        _delete_wf_meta_entry(name)
+        _export_wf_meta_json_from_db()
     return {"ok": True}
 
 
@@ -2878,7 +3233,11 @@ def api_workflow_delete(name: str, current_user: dict = Depends(get_current_user
 
 @app.post("/api/generate")
 def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    path = _resolve_workflow(req.workflow)
+    meta = _load_wf_meta()
+    entry = _normalize_wf_meta_entry(req.workflow, meta.get(req.workflow, {}))
+    if not _can_view_workflow(req.workflow, entry, current_user):
+        raise HTTPException(403, "No permission for this workflow")
+    path = _resolve_workflow(req.workflow, entry)
     if not path:
         raise HTTPException(404, "Workflow not found")
 
@@ -2976,7 +3335,11 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     preferred_instance = old.get("preferred_instance", "")
     preferred_node_id = old.get("preferred_node_id", "")
 
-    path = _resolve_workflow(wf)
+    meta = _load_wf_meta()
+    entry = _normalize_wf_meta_entry(wf, meta.get(wf, {}))
+    if not _can_view_workflow(wf, entry, current_user):
+        raise HTTPException(403, "No permission for this workflow")
+    path = _resolve_workflow(wf, entry)
     if not path:
         raise HTTPException(404, "Workflow not found")
 
@@ -3070,14 +3433,9 @@ def api_history_delete(item_id: str, current_user: dict = Depends(get_current_us
     if not row:
         conn.close()
         raise HTTPException(404, "Record not found")
-    # Allow: own records, anonymous records, or admin user
     owner_id = row["user_id"] or ""
     current_uid = user_id or ""
-    can_delete = (
-        not owner_id or
-        owner_id == "anonymous" or
-        owner_id == current_uid
-    )
+    can_delete = _is_admin_user(current_user) or bool(owner_id and current_uid and owner_id == current_uid)
     if not can_delete:
         conn.close()
         raise HTTPException(403, "无权删除他人的记录")
@@ -3844,7 +4202,8 @@ def api_workflow_versions(name: str):
         if versions != entry.get("versions", {}):
             entry["versions"] = versions
             meta[name] = entry
-            _save_wf_meta(meta)
+            _write_wf_meta_entry_to_db(name, entry)
+            _export_wf_meta_json_from_db()
     return {"versions": versions, "active_version": entry.get("active_version", ""),
             "base": {"filename": name, "path": _resolve_workflow(name) or ""}}
 
@@ -3900,8 +4259,8 @@ async def api_upload_workflow_version(name: str, file: UploadFile = File(...), c
     versions[vname] = vpath
     entry["versions"] = versions
     entry["active_version"] = vname
-    meta[name] = entry
-    _save_wf_meta(meta)
+    _write_wf_meta_entry_to_db(name, entry)
+    _export_wf_meta_json_from_db()
     return {"ok": True, "version": vname, "versions": versions}
 
 
@@ -3923,8 +4282,8 @@ def api_activate_workflow_version(name: str, body: dict, current_user: dict = De
         import shutil
         shutil.copy2(vpath, current_path)
     entry["active_version"] = version
-    meta[name] = entry
-    _save_wf_meta(meta)
+    _write_wf_meta_entry_to_db(name, entry)
+    _export_wf_meta_json_from_db()
     return {"ok": True, "version": version}
 
 
@@ -3944,8 +4303,8 @@ def api_delete_workflow_version(name: str, version: str, current_user: dict = De
     if entry.get("active_version") == version:
         entry["active_version"] = "v1"
     entry["versions"] = versions
-    meta[name] = entry
-    _save_wf_meta(meta)
+    _write_wf_meta_entry_to_db(name, entry)
+    _export_wf_meta_json_from_db()
     return {"ok": True, "deleted": version}
 
 if __name__ == "__main__":

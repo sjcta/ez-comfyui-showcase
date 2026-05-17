@@ -657,7 +657,6 @@
     var sortBy = (window.CW && CW.getMgrSortBy) ? CW.getMgrSortBy() : 'manual';
     if (sel) sel.value = sortBy;
     if (sel) sel.onchange = function() { if (window.CW && CW.setMgrSortBy) CW.setMgrSortBy(this.value); if (window.CW && CW.renderWfGrid) CW.renderWfGrid(); };
-    if (window.CW && CW.loadWorkflows) CW.loadWorkflows();
   }
 
   // ─── 导出 ───
