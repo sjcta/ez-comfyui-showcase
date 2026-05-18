@@ -11,25 +11,55 @@
       "type": "textarea"
     },
     {
-      "key": "27::steps",
-      "zone": "advanced",
-      "visible": true,
-      "label": "步数",
-      "order": 1,
-      "type": "number",
-      "min": 1,
-      "max": 100
-    },
-    {
       "key": "30::width",
-      "zone": "advanced",
+      "zone": "user_input",
       "visible": true,
       "label": "宽度",
+      "order": 1,
+      "type": "number",
+      "step": 64,
+      "min": 256,
+      "max": 4096
+    },
+    {
+      "key": "30::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
       "order": 2,
       "type": "number",
       "step": 64,
       "min": 256,
       "max": 4096
+    },
+    {
+      "key": "27::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 0,
+      "type": "number",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "27::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 1,
+      "type": "number",
+      "step": 0.5,
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "30::batch_size",
+      "zone": "advanced",
+      "visible": true,
+      "label": "batch_size",
+      "order": 2,
+      "type": "number"
     },
     {
       "key": "35::steps",
@@ -42,7 +72,7 @@
       "max": 100
     },
     {
-      "key": "27::cfg",
+      "key": "35::cfg",
       "zone": "advanced",
       "visible": true,
       "label": "CFG",
@@ -53,149 +83,11 @@
       "max": 30
     },
     {
-      "key": "30::height",
-      "zone": "advanced",
-      "visible": true,
-      "label": "高度",
-      "order": 5,
-      "type": "number",
-      "step": 64,
-      "min": 256,
-      "max": 4096
-    },
-    {
-      "key": "35::cfg",
-      "zone": "advanced",
-      "visible": true,
-      "label": "CFG",
-      "order": 6,
-      "type": "number",
-      "step": 0.5,
-      "min": 0,
-      "max": 30
-    },
-    {
-      "key": "27::sampler_name",
-      "zone": "advanced",
-      "visible": true,
-      "label": "采样器",
-      "order": 7,
-      "type": "select",
-      "options": [
-        "euler",
-        "euler_ancestral",
-        "heun",
-        "dpm_2",
-        "dpm_2_ancestral",
-        "lms",
-        "dpm_fast",
-        "dpm_adaptive",
-        "dpmpp_2s_ancestral",
-        "dpmpp_sde",
-        "dpmpp_2m",
-        "dpmpp_2m_sde",
-        "ddim",
-        "uni_pc",
-        "uni_pc_bh2",
-        "res_multistep"
-      ]
-    },
-    {
-      "key": "30::batch_size",
-      "zone": "advanced",
-      "visible": true,
-      "label": "batch_size",
-      "order": 8,
-      "type": "number"
-    },
-    {
-      "key": "35::sampler_name",
-      "zone": "advanced",
-      "visible": true,
-      "label": "采样器",
-      "order": 9,
-      "type": "select",
-      "options": [
-        "euler",
-        "euler_ancestral",
-        "heun",
-        "dpm_2",
-        "dpm_2_ancestral",
-        "lms",
-        "dpm_fast",
-        "dpm_adaptive",
-        "dpmpp_2s_ancestral",
-        "dpmpp_sde",
-        "dpmpp_2m",
-        "dpmpp_2m_sde",
-        "ddim",
-        "uni_pc",
-        "uni_pc_bh2",
-        "res_multistep"
-      ]
-    },
-    {
-      "key": "27::scheduler",
-      "zone": "advanced",
-      "visible": true,
-      "label": "调度器",
-      "order": 10,
-      "type": "select",
-      "options": [
-        "normal",
-        "karras",
-        "exponential",
-        "sgm_uniform",
-        "simple",
-        "ddim_uniform",
-        "beta"
-      ]
-    },
-    {
-      "key": "35::scheduler",
-      "zone": "advanced",
-      "visible": true,
-      "label": "调度器",
-      "order": 11,
-      "type": "select",
-      "options": [
-        "normal",
-        "karras",
-        "exponential",
-        "sgm_uniform",
-        "simple",
-        "ddim_uniform",
-        "beta"
-      ]
-    },
-    {
-      "key": "27::denoise",
-      "zone": "advanced",
-      "visible": true,
-      "label": "降噪",
-      "order": 12,
-      "type": "number",
-      "step": 0.05,
-      "min": 0,
-      "max": 1
-    },
-    {
-      "key": "35::denoise",
-      "zone": "advanced",
-      "visible": true,
-      "label": "降噪",
-      "order": 13,
-      "type": "number",
-      "step": 0.05,
-      "min": 0,
-      "max": 1
-    },
-    {
       "key": "61::filename_prefix",
       "zone": "output",
       "visible": true,
       "label": "文件名前缀",
-      "order": 14,
+      "order": 0,
       "type": "text"
     },
     {
@@ -203,47 +95,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "upscale_method",
-      "order": 15,
-      "type": "text"
-    },
-    {
-      "key": "60::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 16,
-      "type": "number"
-    },
-    {
-      "key": "64::vae_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "vae_name",
-      "order": 17,
-      "type": "text"
-    },
-    {
-      "key": "65::clip_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "clip_name",
-      "order": 18,
-      "type": "text"
-    },
-    {
-      "key": "67::unet_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "unet_name",
-      "order": 19,
-      "type": "text"
-    },
-    {
-      "key": "71::upscale_method",
-      "zone": "hidden",
-      "visible": false,
-      "label": "upscale_method",
-      "order": 20,
+      "order": 0,
       "type": "text"
     },
     {
@@ -251,15 +103,55 @@
       "zone": "hidden",
       "visible": false,
       "label": "scale_by",
-      "order": 21,
+      "order": 1,
       "type": "number"
+    },
+    {
+      "key": "60::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 2,
+      "type": "number"
+    },
+    {
+      "key": "64::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "65::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 4,
+      "type": "text"
     },
     {
       "key": "65::type",
       "zone": "hidden",
       "visible": false,
       "label": "type",
-      "order": 22,
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "65::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 6,
+      "type": "text"
+    },
+    {
+      "key": "67::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 7,
       "type": "text"
     },
     {
@@ -267,7 +159,15 @@
       "zone": "hidden",
       "visible": false,
       "label": "weight_dtype",
-      "order": 23,
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "71::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 9,
       "type": "text"
     },
     {
@@ -275,16 +175,116 @@
       "zone": "hidden",
       "visible": false,
       "label": "scale_by",
-      "order": 24,
+      "order": 10,
       "type": "number"
     },
     {
-      "key": "65::device",
+      "key": "27::denoise",
       "zone": "hidden",
       "visible": false,
-      "label": "device",
-      "order": 25,
-      "type": "text"
+      "label": "降噪",
+      "order": 11,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "27::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "调度器",
+      "order": 12,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "27::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "采样器",
+      "order": 13,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "35::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "调度器",
+      "order": 14,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "35::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "采样器",
+      "order": 15,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "35::denoise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "降噪",
+      "order": 16,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
     }
   ]
 }

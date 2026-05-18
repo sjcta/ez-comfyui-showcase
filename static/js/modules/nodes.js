@@ -122,13 +122,15 @@
       }
       // Footer actions
       html += '<div class="device-card-footer">';
-      if (n.connection === 'remote-ssh') {
+      if (isAdmin && n.connection === 'remote-ssh') {
         html += "<button class=\"wf-mgr-btn\" onclick='CW.showSshInfo(\"" + n.id + "\")' title=\"SSH 连接信息\">" + CW.icon('settings') + ' SSH</button>';
       }
       if (n.connection === 'remote-ssh') {
       // SSH moved to footer
       }
-      html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">' + CW.icon('search') + ' 连通测试</button>';
+      if (isAdmin) {
+        html += '<button class="wf-mgr-btn" onclick="CW.testNode(\'' + n.id + '\')">' + CW.icon('search') + ' 连通测试</button>';
+      }
 
       if (n.can_manage) {
         html += '<button class="wf-mgr-btn" onclick="CW.openDeviceEditor(\'' + n.id + '\')">' + CW.icon('pencil') + ' 编辑</button>';
@@ -315,11 +317,11 @@
 
   // ─── 操作 ───
   function _showToast(msg, duration) {
-    var el = $('#deviceToast');
-    if (!el) { alert(msg); return; }
-    el.textContent = msg;
-    el.classList.add('show');
-    setTimeout(function() { el.classList.remove('show'); }, duration || 10000);
+    if (window.CW && typeof window.CW.toast === 'function') {
+      window.CW.toast(msg, 'info');
+      return;
+    }
+    alert(msg);
   }
 
   function renderStatusBadge(ok, okLabel, failLabel) {
@@ -328,6 +330,11 @@
 
 
   async function testNode(nid) {
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    if (!(currentUser && currentUser.role === 'admin')) {
+      if (window.CW && typeof CW.toast === 'function') CW.toast('只有管理员可以执行连通测试', 'warn');
+      return;
+    }
     try {
       var r = await authFetch(API + '/api/nodes/' + encodeURIComponent(nid) + '/test', { method: 'POST' });
       var d = await r.json();
@@ -557,9 +564,9 @@
     if (overlay) overlay.classList.add('open');
     // Set SVG icon for toolbar button and overlay title
     var tbBtn = $('#tbDeviceBtn');
-    if (tbBtn) tbBtn.innerHTML = CW.icon('settings-2') + ' 设备管理';
+    if (tbBtn) tbBtn.innerHTML = CW.icon('monitor-cog') + ' 设备管理';
     var title = $('#deviceMgrTitle');
-    if (title) title.innerHTML = CW.icon('settings-2') + ' 设备管理';
+    if (title) title.innerHTML = CW.icon('monitor-cog') + ' 设备管理';
     loadNodes();
   }
 
@@ -597,6 +604,11 @@
   }
 
   function showSshInfo(nid) {
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    if (!(currentUser && currentUser.role === 'admin')) {
+      if (window.CW && typeof CW.toast === 'function') CW.toast('只有管理员可以查看 SSH 信息', 'warn');
+      return;
+    }
     var contentEl = $('#sshInfoContent');
     var modalEl = $('#sshInfoModal');
     if (!contentEl || !modalEl) { _showToast('SSH 信息弹窗未找到'); return; }

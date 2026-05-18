@@ -345,7 +345,7 @@ function renderQuickForm(fields) {
       if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
-        html += '<div class="fg"><label>' + escH(labelText + nodeInfo) + '</label><div style="position:relative"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea><button id="clearPromptBtn" class="clear-btn" onclick="CW.clearPrompt()">X Clear</button></div></div>';
+        html += '<div class="fg"><label>' + escH(labelText + nodeInfo) + '</label><div style="position:relative"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea><button id="clearPromptBtn" class="clear-btn" onclick="CW.clearPrompt()">清除文字</button></div></div>';
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
         html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
@@ -494,6 +494,31 @@ function _resetRefImage() {
   }
 
 var __curZone = null;
+  async function _parseUploadResponse(resp) {
+    var text = await resp.text();
+    var data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        data = { detail: text };
+      }
+    }
+    if (!resp.ok || !data.ok) {
+      throw new Error((data && (data.detail || data.error || data.message)) || ('upload fail (' + resp.status + ')'));
+    }
+    return data;
+  }
+
+  function _uploadRefImage(file) {
+    var fd = new FormData();
+    fd.append('file', file);
+    var upload = (window.CW && window.CW.auth && typeof window.CW.auth.apiFetch === 'function')
+      ? window.CW.auth.apiFetch(API + '/api/upload-image', { method: 'POST', body: fd })
+      : fetch(API + '/api/upload-image', { method: 'POST', body: fd });
+    return upload.then(_parseUploadResponse);
+  }
+
   function _initRefImageZone() {
     if (_refImageInited) return;
     _refImageInited = true;
@@ -510,12 +535,8 @@ var __curZone = null;
     fileInput.addEventListener('change', async function() {
       if (!fileInput.files.length) return;
       var file = fileInput.files[0];
-      var fd = new FormData();
-      fd.append('file', file);
       try {
-        var r = await fetch(API + '/api/upload-image', { method: 'POST', body: fd });
-        var d = await r.json();
-        if (!r.ok || !d.ok) throw new Error(d.detail || 'upload fail');
+        var d = await _uploadRefImage(file);
         valueInput.value = d.filename;
         if (preview) {
           preview.src = API + '/api/input-image/' + d.filename;
@@ -547,12 +568,8 @@ var __curZone = null;
       zone.classList.remove('dragover');
       var file = e.dataTransfer.files[0];
       if (!file) return;
-      var fd = new FormData();
-      fd.append('file', file);
       try {
-        var r = await fetch(API + '/api/upload-image', { method: 'POST', body: fd });
-        var d = await r.json();
-        if (!r.ok || !d.ok) throw new Error(d.detail || 'upload fail');
+        var d = await _uploadRefImage(file);
         valueInput.value = d.filename;
         if (preview) {
           preview.src = API + '/api/input-image/' + d.filename;

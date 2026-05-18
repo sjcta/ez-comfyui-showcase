@@ -36,6 +36,42 @@
     this.galleryEl = galleryEl;
   }
 
+  function _jobSortPriority(status) {
+    if (status === 'queued') return 0;
+    if (status === 'preparing' || status === 'starting_comfyui') return 1;
+    if (status === 'generating' || status === 'downloading') return 2;
+    if (status === 'error') return 3;
+    return 4;
+  }
+
+  function _jobSortTimestamp(job) {
+    if (!job) return 0;
+    var raw = job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
+    if (!raw) return 0;
+    if (typeof raw === 'number') return raw;
+    var parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed)) return parsed;
+    if (typeof raw === 'string') {
+      var timeMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+      if (timeMatch) {
+        return (parseInt(timeMatch[1], 10) * 3600) +
+          (parseInt(timeMatch[2], 10) * 60) +
+          parseInt(timeMatch[3] || '0', 10);
+      }
+    }
+    return 0;
+  }
+
+  function _sortJobCards(items) {
+    return items.slice().sort(function(a, b) {
+      var prioDiff = _jobSortPriority(a.status) - _jobSortPriority(b.status);
+      if (prioDiff !== 0) return prioDiff;
+      var tsDiff = _jobSortTimestamp(b) - _jobSortTimestamp(a);
+      if (tsDiff !== 0) return tsDiff;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+  }
+
   /**
    * 统一渲染函数 — 合并 _renderJobCard + _renderHistCard
    * @param {Object} data - { id, status, image, prompt_preview, workflow, width, height, seed, progress, generating_at, queued_at, elapsed, time, instance, message }
@@ -84,8 +120,8 @@
     var wfMeta = (A._wfMeta || {})[j.workflow] || {};
     var wfLabel = wfMeta.name || (j.workflow ? j.workflow.replace('.json', '') : '');
     var wfTag = window.CW.getWFType ? window.CW.getWFType(j.workflow || '') : '';
-    var tagHtml = wfTag ? ' <span class="' + wfTag.cls + '">' + wfTag.text + '</span>' : '';
-    var instBadge = j.instance ? ' <span>#' + escH(j.instance) + '</span>' : '';
+    var tagHtml = wfTag ? '<div class="gi-type-badge ' + wfTag.cls + '">' + wfTag.text + '</div>' : '';
+    var instBadge = j.instance ? '<div class="gi-inst-badge">#' + escH(j.instance) + '</div>' : '';
 
     // ── Type class for border color ──
     var _jMeta1 = (A._wfMeta || {})[j.workflow] || {};
@@ -99,7 +135,7 @@
       imgHtml +
       (j.status === 'error' ? '<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob(\'' + escA(j.id) + '\')">重新尝试</button></div>' : '') +
       '<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob(\'' + escA(j.id) + '\')" title="' + (j.status === 'generating' ? '取消' : '删除') + '"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' +
-      (tagHtml || instBadge ? '<div class="gi-wf-badge">' + tagHtml + instBadge + '</div>' : '') +
+      (tagHtml || instBadge ? '<div class="gi-tags-row">' + tagHtml + instBadge + '</div>' : '') +
       '</div>' +
       '<div class="gi-info" onclick="event.stopPropagation();CW.restoreJob(\'' + escA(j.id) + '\')">' +
       (j.status === 'generating' ? '<div class="gi-progress-top"><div class="gi-progress-fill" style="width:' + (j.progress ? j.progress.pct : 0) + '%"></div></div>' : '') +
@@ -274,7 +310,7 @@
     var activeJobs = Object.values(jobs).filter(function (j) { return j.status !== 'done' && j.status !== 'error'; });
     // Error jobs (kept briefly for visibility)
     var errorJobs = Object.values(jobs).filter(function (j) { return j.status === 'error'; });
-    var jobCards = activeJobs.concat(errorJobs);
+    var jobCards = _sortJobCards(activeJobs.concat(errorJobs));
 
     // ── Hash check ──
     var hash = _galleryHash(jobs, historyItems);
@@ -283,7 +319,7 @@
 
     // Update count badge
     var histCountEl = $('#histCount');
-    if (histCountEl) histCountEl.textContent = '(' + (activeJobs.length + historyItems.length) + ')';
+    if (histCountEl) histCountEl.textContent = String(activeJobs.length + historyItems.length);
 
     var html = '';
 

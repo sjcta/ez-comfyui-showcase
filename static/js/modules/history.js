@@ -16,6 +16,8 @@
   var _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
   var _renderTimer = null;
   var _lbLoadToken = 0;
+  var _lbCurrentItem = null;
+  var _lbFavorites = {};
 
   function _lightboxImageUrl(filename) {
     return `${API}/api/images/${filename}`;
@@ -36,6 +38,27 @@
     link.setAttribute('download', downloadName);
     link.dataset.url = url;
     link.dataset.filename = downloadName;
+  }
+
+  function _syncLightboxActions(item) {
+    _lbCurrentItem = item || null;
+    var favBtn = $('#lbFavoriteBtn');
+    var shareBtn = $('#lbShareBtn');
+    var canShare = !!(item && item.id);
+    var favKey = item && (item.id || item.filename || item.original || item.prompt);
+    var isFav = !!(favKey && _lbFavorites[favKey]);
+    if (favBtn) {
+      favBtn.classList.toggle('is-active', isFav);
+      favBtn.disabled = !item;
+      favBtn.classList.toggle('is-disabled', !item);
+      favBtn.title = isFav ? '取消收藏' : '收藏';
+    }
+    if (shareBtn) {
+      shareBtn.classList.toggle('is-shared', !!(item && item.is_public));
+      shareBtn.disabled = !canShare;
+      shareBtn.classList.toggle('is-disabled', !canShare);
+      shareBtn.title = item && item.is_public ? '取消分享' : '快速分享';
+    }
   }
 function _attachSentinel() {
     const sentinel = document.getElementById('masonrySentinel');
@@ -89,8 +112,8 @@ function _attachSentinel() {
     const wfMeta = A._wfMeta[j.workflow] || {};
     const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
     const wfTag = window.CW.getWFType(j.workflow || '');
-    const tagHtml = wfTag ? ` <span class="${wfTag.cls}">${wfTag.text}</span>` : '';
-    const instBadge = j.instance ? ` <span>#${escH(j.instance)}</span>` : '';
+    const tagHtml = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
+    const instBadge = j.instance ? `<div class="gi-inst-badge">#${escH(j.instance)}</div>` : '';
 
     // ── Info area ──
     // Type class for border color
@@ -104,7 +127,7 @@ function _attachSentinel() {
         ${imgHtml}
         ${j.status === "error" ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ""}
         <button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${escA(j.id)}')" title="${j.status === 'generating' ? '取消' : '删除'}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>
-        ${tagHtml || instBadge ? `<div class="gi-wf-badge">${tagHtml}${instBadge}</div>` : ''}
+        ${tagHtml || instBadge ? `<div class="gi-tags-row">${tagHtml}${instBadge}</div>` : ''}
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
         ${j.status === 'generating' ? `<div class="gi-progress-top"><div class="gi-progress-fill" style="width:${j.progress?.pct || 0}%"></div></div>` : ''}
@@ -349,11 +372,47 @@ function setHistoryTypeFilter(value) {
     applyFilters();
   }
 
-function _hasActiveGalleryFilters() {
+  function _hasActiveGalleryFilters() {
     return (_galleryFilters.owner && _galleryFilters.owner !== 'all') ||
       !!_galleryFilters.type ||
       !!_galleryFilters.size ||
       !!_galleryFilters.style;
+  }
+
+  function _jobSortPriority(status) {
+    if (status === 'queued') return 0;
+    if (status === 'preparing' || status === 'starting_comfyui') return 1;
+    if (status === 'generating' || status === 'downloading') return 2;
+    if (status === 'error') return 3;
+    return 4;
+  }
+
+  function _jobSortTimestamp(job) {
+    if (!job) return 0;
+    var raw = job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
+    if (!raw) return 0;
+    if (typeof raw === 'number') return raw;
+    var parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed)) return parsed;
+    if (typeof raw === 'string') {
+      var timeMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+      if (timeMatch) {
+        return (parseInt(timeMatch[1], 10) * 3600) +
+          (parseInt(timeMatch[2], 10) * 60) +
+          parseInt(timeMatch[3] || '0', 10);
+      }
+    }
+    return 0;
+  }
+
+  function _sortJobCards(items) {
+    return items.slice().sort(function(a, b) {
+      var prioDiff = _jobSortPriority(a.status) - _jobSortPriority(b.status);
+      if (prioDiff !== 0) return prioDiff;
+      var tsDiff = _jobSortTimestamp(b) - _jobSortTimestamp(a);
+      if (tsDiff !== 0) return tsDiff;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
   }
 
 function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.length + " filtered=" + _filteredHistory.length + " count=" + _histVisibleCount + " batch=" + _batchSize());
@@ -367,7 +426,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     // Error jobs (kept briefly for visibility)
     const errorJobs = Object.values(jobs).filter((j) => j.status === 'error');
 
-    const jobCards = [...activeJobs, ...errorJobs];
+    const jobCards = _sortJobCards([...activeJobs, ...errorJobs]);
 
     // ── Hash check: skip rebuild if nothing changed ──
     const hash = _galleryHash(jobs, historyItems);
@@ -375,7 +434,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     _lastGalleryHash = hash;
 
     // Count: active jobs + history
-    $('#histCount').textContent = `(${activeJobs.length + historyItems.length})`;
+    $('#histCount').textContent = String(activeJobs.length + historyItems.length);
 
     var html = '';
 
@@ -699,6 +758,7 @@ function renderLB(sourceEl) {
     if (lbIdx < 0 || lbIdx >= lbItems.length) return;
     const h = lbItems[lbIdx];
     _syncLightboxDownload(h.filename);
+    _syncLightboxActions(h);
     $('#lbInfo').textContent = h.prompt || '—';
     $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
     $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
@@ -721,6 +781,7 @@ function closeLB() {
     if (overlay) overlay.classList.remove('lb-has-flight');
     document.body.style.overflow = '';
     _syncLightboxDownload('');
+    _syncLightboxActions(null);
     lbIdx = -1;
   }
 
@@ -755,6 +816,7 @@ async function downloadLB(e) {
 function openJobLB(filename, label, sourceEl) {
     // Show a single-item lightbox for a job image
     _syncLightboxDownload(filename);
+    _syncLightboxActions(null);
     $('#lbInfo').textContent = label || '';
     $('#lbPrev').style.display = 'none';
     $('#lbNext').style.display = 'none';
@@ -769,6 +831,34 @@ function openLB(idx, sourceEl) {
     if (window.__APP__ && Array.isArray(window.__APP__._lbItems)) lbItems = window.__APP__._lbItems;
     lbIdx = idx;
     renderLB(sourceEl);
+  }
+
+  function toggleLBFavorite() {
+    if (!_lbCurrentItem) return;
+    var key = _lbCurrentItem.id || _lbCurrentItem.filename || _lbCurrentItem.original || _lbCurrentItem.prompt;
+    if (!key) return;
+    _lbFavorites[key] = !_lbFavorites[key];
+    _syncLightboxActions(_lbCurrentItem);
+    if (window.CW && CW.toast) CW.toast(_lbFavorites[key] ? '已收藏' : '已取消收藏', 'done');
+  }
+
+  function toggleLBShare() {
+    if (!_lbCurrentItem || !_lbCurrentItem.id) {
+      if (window.CW && CW.toast) CW.toast('当前图片暂不支持快速分享', 'info');
+      return;
+    }
+    var auth = window.CW && CW.auth;
+    if (!(auth && typeof auth.toggleShare === 'function')) {
+      if (window.CW && CW.toast) CW.toast('分享功能暂不可用', 'error');
+      return;
+    }
+    var next = !_lbCurrentItem.is_public;
+    var currentId = _lbCurrentItem.id;
+    auth.toggleShare(currentId, next).then(function(result) {
+      if (!_lbCurrentItem || _lbCurrentItem.id !== currentId) return;
+      _lbCurrentItem = Object.assign({}, _lbCurrentItem, { is_public: !!(result && result.is_public) });
+      _syncLightboxActions(_lbCurrentItem);
+    }).catch(function() {});
   }
 
 async function delHist(id) {
@@ -872,6 +962,8 @@ function renderGallery() {
   window.CW.closeLB = closeLB;
   window.CW.downloadLB = downloadLB;
   window.CW.lbNav = lbNav;
+  window.CW.toggleLBFavorite = toggleLBFavorite;
+  window.CW.toggleLBShare = toggleLBShare;
   window.CW.loadHistory = loadHistory;
   // Data-only refresh (no gallery re-render)
   async function loadHistoryNoRender() {

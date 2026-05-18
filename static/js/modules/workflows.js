@@ -93,16 +93,26 @@ async function saveWfEdit() {
     const name = $('#wfEditName').value.trim() || A._wfEditFilename.replace('.json', '');
     const tags = [...$('#wfEditTags').querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
     try {
-      await fetch(API + '/api/workflows/meta/' + encodeURIComponent(A._wfEditFilename), {
+      const r = await authFetch(API + '/api/workflows/meta/' + encodeURIComponent(A._wfEditFilename), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, tags }),
       });
-      A._wfMeta[A._wfEditFilename] = { ...(A._wfMeta[A._wfEditFilename] || {}), name, tags };
-    } catch (e) {}
+      if (!r.ok) {
+        const d = await r.json().catch(function() { return {}; });
+        throw new Error(d.detail || '保存失败');
+      }
+      const saved = await r.json().catch(function() { return {}; });
+      A._wfMeta[A._wfEditFilename] = Object.assign({}, A._wfMeta[A._wfEditFilename] || {}, saved || {}, { name, tags });
+      CW.toast('工作流名称已保存', 'done');
+    } catch (e) {
+      CW.toast(e.message || '工作流保存失败', 'error');
+      return;
+    }
     closeWfEdit();
     renderWfGrid();
     // Also refresh main workflow grid if it shows names
+    loadWfMeta();
     loadWorkflows();
   }
 
@@ -114,14 +124,29 @@ async function onWfThumbUpload(e) {
     fd.append('filename', A._wfEditFilename);
     fd.append('file', file);
     try {
-      await fetch(API + '/api/workflows/meta/thumbnail', { method: 'POST', body: fd });
+      const r = await authFetch(API + '/api/workflows/meta/thumbnail', { method: 'POST', body: fd });
+      if (!r.ok) {
+        const d = await r.json().catch(function() { return {}; });
+        throw new Error(d.detail || '缩略图上传失败');
+      }
+      const saved = await r.json().catch(function() { return {}; });
+      if (!A._wfMeta[A._wfEditFilename]) A._wfMeta[A._wfEditFilename] = {};
+      if (saved && saved.thumbnail) {
+        A._wfMeta[A._wfEditFilename].thumbnail = saved.thumbnail;
+      }
       // Show preview
       const reader = new FileReader();
       reader.onload = (ev) => {
         syncWfThumbPreview(ev.target.result);
       };
       reader.readAsDataURL(file);
-    } catch (e) {}
+      renderWfGrid();
+      loadWfMeta();
+      loadWorkflows();
+      CW.toast('缩略图已更新', 'done');
+    } catch (e) {
+      CW.toast(e.message || '缩略图上传失败', 'error');
+    }
     e.target.value = '';
   }
 
@@ -159,8 +184,16 @@ function closeWfEdit() {
   }
 
 function openWfEdit(fname) {
-    A._wfEditFilename = fname;
     const meta = A._wfMeta[fname] || {};
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    var isAdmin = !!(currentUser && currentUser.role === 'admin');
+    var currentUid = currentUser ? String(currentUser.sub || currentUser.id || '') : '';
+    var canManage = !!(isAdmin || (currentUid && String(meta.owner_id || '') === currentUid));
+    if (!canManage) {
+      CW.toast('你没有权限编辑该工作流', 'warn');
+      return;
+    }
+    A._wfEditFilename = fname;
     $('#wfEditTitle').textContent = '编辑 ' + (meta.name || fname.replace('.json', ''));
     $('#wfEditName').value = meta.name || fname.replace('.json', '');
     // Render tags
@@ -281,6 +314,7 @@ function renderWfGrid() {
     const empty = $('#wfOverlayEmpty');
     var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
     var isAdmin = !!(currentUser && currentUser.role === 'admin');
+    var currentUid = currentUser ? String(currentUser.sub || currentUser.id || '') : '';
     var entries = Object.entries(A._wfMeta);
     // removed
     if (!entries.length) {
@@ -302,6 +336,7 @@ function renderWfGrid() {
     let html = '';
     for (var _mi = 0; _mi < entries.length; _mi++) {
       var fname = entries[_mi][0], meta = entries[_mi][1];
+      var canManage = !!(isAdmin || (currentUid && String(meta.owner_id || '') === currentUid));
       const displayName = meta.name || fname.replace('.json', '');
       const tags = meta.tags || [];
       const thumbUrl = meta.thumbnail ? API + '/api/workflows/thumbnail/' + meta.thumbnail : '';
@@ -312,7 +347,7 @@ function renderWfGrid() {
       var _pcat = _getPrimaryTag(fname, meta);
       html += '<div class="wf-mgr-card" data-fname="' + escA(fname) + '" data-idx="' + _mi + '" data-cat="' + escA(_pcat) + '">' +
       '<div class="wf-mgr-drag" draggable="true" ondragstart="WF_MGR._mgrDragStart(event)" ondragover="WF_MGR._mgrDragOver(event)" ondrop="WF_MGR._mgrDrop(event)" ondragend="WF_MGR._mgrDragEnd(event)" ontouchstart="WF_MGR._touchDragStart(event)" ontouchmove="WF_MGR._touchDragMove(event)" ontouchend="WF_MGR._touchDragEnd(event)">⠿</div>' +
-      '<div class="wf-mgr-card-thumb" onclick="CW.onWfThumbClick(\'' + escA(fname) + '\')">' +
+      '<div class="wf-mgr-card-thumb' + (canManage ? '' : ' is-readonly') + '"' + (canManage ? ' onclick="CW.onWfThumbClick(\'' + escA(fname) + '\')"' : '') + '>' +
         (thumbUrl ? '<img src="' + thumbUrl + '" alt="">' : '<div class="wf-mgr-card-thumb-placeholder">'+CW.icon('camera')+'</div>') +
       '</div>' +
       '<div class="wf-mgr-card-body">' +
@@ -321,11 +356,11 @@ function renderWfGrid() {
           '<div class="wf-mgr-card-filename" title="' + escA(fname) + '">' + escH(fname) + '</div>' +
         '</div>' +
         '<div class="wf-mgr-card-actions">' +
-          '<button class="wf-mgr-btn" onclick="CW.openWfEdit(\'' + escA(fname) + '\')">'+CW.icon('pencil')+' 编辑</button>' +
-          '<button class="wf-mgr-btn" onclick="CW.openNodeEditor(\'' + escA(fname) + '\')">'+CW.icon('settings')+' 节点</button>' +
+          (canManage ? '<button class="wf-mgr-btn" onclick="CW.openWfEdit(\'' + escA(fname) + '\')">'+CW.icon('pencil')+' 编辑</button>' : '') +
+          (canManage ? '<button class="wf-mgr-btn" onclick="CW.openNodeEditor(\'' + escA(fname) + '\')">'+CW.icon('settings')+' 节点</button>' : '') +
           '<button class="wf-mgr-btn" onclick="CW.downloadWf(\'' + escA(fname) + '\')">'+CW.icon('download')+' 下载</button>' +
           (isAdmin ? '<button class="wf-mgr-btn wf-share-btn ' + (meta.shared ? 'is-shared' : 'is-private') + '" title="' + (meta.shared ? '点击取消共享' : '点击设为共享') + '" onclick="CW.toggleWfShare(\'' + escA(fname) + '\',' + (!meta.shared) + ')">' + CW.icon('share') + (meta.shared ? ' 已共享' : ' 未共享') + '</button>' : '') +
-          '<button class="wf-mgr-btn danger" onclick="CW.openWfDel(\'' + escA(fname) + '\')">'+CW.icon('trash-2')+' 删除</button>' +
+          (canManage ? '<button class="wf-mgr-btn danger" onclick="CW.openWfDel(\'' + escA(fname) + '\')">'+CW.icon('trash-2')+' 删除</button>' : '') +
         '</div>' +
       '</div>' +
     '</div>';
@@ -738,7 +773,7 @@ async function loadWorkflows() {
           const previewSrc = thumb ? `${API}/api/thumbs/${thumb}` : '';
           const previewImg = previewSrc
             ? `<img src="${previewSrc}" loading="lazy" alt="" draggable="false">`
-            : `<div class="wf-card-icon">${CW.icon('settings-2')}</div>`;
+            : `<div class="wf-card-icon">${CW.icon('workflow')}</div>`;
           const catText = wfTagMap[w.name] || '其他';
           const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
             `<span class="wf-tag ${_tagColor(t)} wf-tag-sm">${escH(t)}</span>`
@@ -822,7 +857,12 @@ async function loadWfVersions(fname) {
       var d = await r.json();
       var versions = d.versions || {};
       var active = d.active_version || '';
-      var keys = Object.keys(versions).sort();
+      var keys = Object.keys(versions).sort(function(a, b) {
+        var na = parseInt(String(a).replace(/^v/i, ''), 10);
+        var nb = parseInt(String(b).replace(/^v/i, ''), 10);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b));
+      });
       if (!keys.length) {
         // Show base version (current file) with download
         var baseHtml = '';

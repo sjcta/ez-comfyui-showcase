@@ -3,27 +3,19 @@
   "workflow": "i2i-Qwen-Edit-v2511.json",
   "fields": [
     {
-      "key": "170:151::prompt",
-      "zone": "user_input",
-      "visible": true,
-      "label": "prompt",
-      "order": 0,
-      "type": "textarea"
-    },
-    {
       "key": "41::image",
       "zone": "user_input",
       "visible": true,
       "label": "image",
-      "order": 1,
+      "order": 0,
       "type": "image"
     },
     {
-      "key": "44::prompt",
-      "zone": "advanced",
-      "visible": false,
+      "key": "170:151::prompt",
+      "zone": "user_input",
+      "visible": true,
       "label": "prompt",
-      "order": 0,
+      "order": 1,
       "type": "textarea"
     },
     {
@@ -31,7 +23,7 @@
       "zone": "advanced",
       "visible": true,
       "label": "seed",
-      "order": 1,
+      "order": 0,
       "type": "seed"
     },
     {
@@ -39,7 +31,7 @@
       "zone": "advanced",
       "visible": true,
       "label": "sampler_name",
-      "order": 2,
+      "order": 1,
       "type": "select",
       "options": [
         "euler",
@@ -65,7 +57,7 @@
       "zone": "advanced",
       "visible": true,
       "label": "scheduler",
-      "order": 3,
+      "order": 2,
       "type": "select",
       "options": [
         "normal",
@@ -82,7 +74,7 @@
       "zone": "advanced",
       "visible": true,
       "label": "denoise",
-      "order": 4,
+      "order": 3,
       "type": "number",
       "step": 0.05,
       "min": 0,
@@ -97,12 +89,12 @@
       "type": "text"
     },
     {
-      "key": "43::unet_name",
+      "key": "44::prompt",
       "zone": "hidden",
       "visible": false,
-      "label": "unet_name",
+      "label": "prompt",
       "order": 0,
-      "type": "text"
+      "type": "textarea"
     },
     {
       "key": "45::reference_latents_method",
@@ -223,6 +215,14 @@
       "label": "strength_model",
       "order": 15,
       "type": "number"
+    },
+    {
+      "key": "43::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 16,
+      "type": "text"
     }
   ]
 }

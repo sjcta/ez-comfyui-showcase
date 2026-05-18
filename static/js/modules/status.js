@@ -61,9 +61,10 @@ function updateGPU(g, instances) {
     const pct = gpu && target ? (gpu.vram_pct || 0) : 0;
     const temp = gpu && target ? (gpu.temp_c || 0) : 0;
     fill.style.width = pct + '%';
-    // State: green=idle, yellow=busy, orange=overloaded (vram>70% or temp>65)
-    const isOverload = pct > 70 || temp > 65;
-    const isBusy = pct > 30 || temp > 50;
+    // State: green=idle, yellow=busy, red=overloaded.
+    // Keep "red" for clearly high pressure so low VRAM usage does not look alarming.
+    const isOverload = pct >= 80 || temp >= 85;
+    const isBusy = !isOverload && (pct >= 50 || temp >= 70);
     fill.className = 'sb-vram-fill' + (isOverload ? ' overload' : isBusy ? ' busy' : '');
     // Also tint the entire statusbar
     const bar = $('#statusbar');
@@ -73,7 +74,7 @@ function updateGPU(g, instances) {
     var vramText = $('#vramText');
     if (vramText) {
       vramText.textContent = total > 0
-        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%)`
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%) · ${temp} °C`
         : (target ? `${target.node_name || target.name} ${gpu && gpu.message ? gpu.message : '未上报 VRAM'}` : '无可用设备');
     }
     if ($('#gpuTemp')) $('#gpuTemp').textContent = total > 0 ? `${temp} °C` : '— °C';
@@ -91,7 +92,7 @@ function updateGPU(g, instances) {
 
 function openInstPopup(mode) {
     var overlay = $('#instPopup');
-    var title = $('#instPopupTitle');
+    var title = $('#v4InstPopupTitle') || $('#instPopupTitle');
     if (!overlay) return;
     overlay.classList.add('open');
     overlay._mode = mode || 'comfyui';
@@ -129,10 +130,24 @@ async function _refreshInstCards() {
     try {
       var r = await fetch(API + '/api/comfyui/status');
       var d = await r.json();
-      var html = '<div class="popup-section-title">ComfyUI \u5b9e\u4f8b</div>';
+      var grouped = {};
+      var order = [];
+      for (var gi = 0; gi < (d.instances || []).length; gi++) {
+        var item = d.instances[gi];
+        var nodeKey = item.node_id || item.node_name || 'default';
+        if (!grouped[nodeKey]) {
+          grouped[nodeKey] = { name: item.node_name || item.node_id || '默认设备', items: [] };
+          order.push(nodeKey);
+        }
+        grouped[nodeKey].items.push(item);
+      }
+      var html = '';
       var groupMap = { nunchaku: 'Nunchaku', 'z-image-turbo': 'Z-Image Turbo', seedvr: 'SeedVR' };
-      for (var idx = 0; idx < (d.instances || []).length; idx++) {
-        var inst = d.instances[idx];
+      for (var oi = 0; oi < order.length; oi++) {
+        var group = grouped[order[oi]];
+        html += '<div class="popup-section-title">' + escH(group.name) + ' \u5b9e\u4f8b\u5217\u8868</div>';
+        for (var idx = 0; idx < group.items.length; idx++) {
+        var inst = group.items[idx];
         var isSelected = A.currentTargetInstance === inst.name && (!A.currentTargetNodeId || A.currentTargetNodeId === inst.node_id);
         var statusCls = inst.up ? 'on' : 'off';
         var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
@@ -154,7 +169,7 @@ async function _refreshInstCards() {
           inst.name +
           ' <span class="dim-tag">:' +
           inst.port +
-          '</span>' + (inst.node_name ? ' <span class="dim-tag">' + escH(inst.node_name) + '</span>' : '') + '</div>' +
+          '</span></div>' +
           '<button class="inst-card-btn" onclick="CW.setTargetInstance(\'' + escA(inst.name) + '\',\'' + escA(inst.node_id || '') + '\')">' + (isSelected ? '当前目标' : '设为目标') + '</button>' +
           '<button class="inst-card-btn ' +
           btnCls +
@@ -189,7 +204,9 @@ async function _refreshInstCards() {
           `</span></div>`;
         if (inst.loaded_group) html += '<span class="inst-card-group">' + escH(inst.loaded_group) + '</span>';
         html += '</div>';
+        }
       }
+      if (!html) html = '<div class="st-empty">\u6682\u65e0 ComfyUI \u5b9e\u4f8b</div>';
       box.innerHTML = html;
     } catch (e) {
       box.innerHTML =

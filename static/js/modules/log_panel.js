@@ -10,6 +10,10 @@
   var ICON_UNDOCK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><polyline points="15 18 9 12 15 6"/></svg>';
   var _logPanelPos = null;
 
+  function _isMobileLogViewport() {
+    return window.matchMedia('(max-width: 900px)').matches;
+  }
+
   function _logLoad() {
     var API = window.CW_API_BASE || location.pathname.replace(/\/+$/, '');
     fetch(API + '/api/logs').then(function(r) { return r.json(); }).then(function(entries) {
@@ -27,11 +31,13 @@
     var tbBtn = document.getElementById('tbLogBtn');
     var dockBtn = document.getElementById('logDockBtn');
     if (!panel || !colRight) return;
-    panel.classList.remove('log-panel--floating', 'log-panel--docked', 'log-panel--hidden');
+    panel.classList.remove('log-panel--floating', 'log-panel--docked', 'log-panel--mobile-docked', 'log-panel--hidden');
 
     if (state === 'hidden') {
       if (panel.parentNode && panel.parentNode.id === 'colRight') {
         colRight.classList.remove('log-open');
+        document.body.appendChild(panel);
+      } else if (panel.parentNode !== document.body) {
         document.body.appendChild(panel);
       }
       panel.classList.add('log-panel--hidden');
@@ -48,9 +54,22 @@
       if (dockBtn) { dockBtn.innerHTML = ICON_UNDOCK; dockBtn.title = '\u53d6\u6d88\u5438\u9644'; }
       return;
     }
+    if (state === 'mobile-docked') {
+      colRight.classList.remove('log-open');
+      if (panel.parentNode !== document.body) document.body.appendChild(panel);
+      panel.classList.add('log-panel--mobile-docked');
+      panel.style.removeProperty('--log-top');
+      panel.style.removeProperty('--log-left');
+      panel.style.removeProperty('--log-right');
+      if (tbBtn) tbBtn.classList.add('active');
+      if (dockBtn) { dockBtn.innerHTML = ICON_UNDOCK; dockBtn.title = '\u53d6\u6d88\u5438\u9644'; }
+      return;
+    }
     if (state === 'floating') {
       if (panel.parentNode && panel.parentNode.id === 'colRight') {
         colRight.classList.remove('log-open');
+        document.body.appendChild(panel);
+      } else if (panel.parentNode !== document.body) {
         document.body.appendChild(panel);
       }
       panel.classList.add('log-panel--floating');
@@ -81,6 +100,12 @@
     var panel = document.getElementById('logPanel');
     if (!panel) return;
     var inCol = panel.parentNode && panel.parentNode.id === 'colRight';
+    var isMobileDocked = panel.classList.contains('log-panel--mobile-docked');
+    if (_isMobileLogViewport()) {
+      _logSetState(isMobileDocked ? 'floating' : 'mobile-docked');
+      if (!isMobileDocked) _logLoad();
+      return;
+    }
     _logSetState(inCol ? 'floating' : 'docked');
     if (!inCol) _logLoad();
   };
@@ -159,5 +184,19 @@
   } else {
     _initDrag();
   }
+
+  window.addEventListener('resize', function() {
+    var panel = document.getElementById('logPanel');
+    if (!panel) return;
+    if (_isMobileLogViewport()) {
+      if (panel.parentNode && panel.parentNode.id === 'colRight') {
+        _logSetState('mobile-docked');
+      }
+      return;
+    }
+    if (panel.classList.contains('log-panel--mobile-docked')) {
+      _logSetState('floating');
+    }
+  });
 
 })();

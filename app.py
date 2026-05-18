@@ -509,21 +509,6 @@ def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
     return result
 
 
-async def _periodic_sync_worker():
-    """Periodic background task to sync remote workflows every 5 minutes."""
-    while True:
-        await asyncio.sleep(300)  # 5 minutes
-        try:
-            add_log("info", "sync", "开始定时同步远程工作流...")
-            result = await asyncio.to_thread(sync_remote_workflows)
-            if result["synced"] > 0:
-                add_log("info", "sync", f"同步完成: +{result['synced']} 工作流")
-            elif result["errors"] > 0:
-                add_log("warn", "sync", f"同步完成: {result['errors']} 错误")
-        except Exception as e:
-            add_log("error", "sync", f"同步失败: {e}")
-
-
 # ── Config ──────────────────────────────────────────────────────────────
 import os, platform
 
@@ -722,6 +707,7 @@ def _gen_db_to_record(row: dict) -> dict:
         "time": row.get("created_at", ""),
         "field_values": params,
         "user_id": row.get("user_id", ""),
+        "username": row.get("username", ""),
         "is_public": bool(row.get("is_public", 0)),
     }
 
@@ -1036,7 +1022,9 @@ def get_current_user_id(request: Request) -> str:
 
 # Legacy DGX paths (kept for backward compat when running on Spark)
 COMFYUI_DIR   = "/home/sjcta/software/ComfyUI-Project"
-COMFYUI_INPUT = "/home/sjcta/software/ComfyUI-Project/ComfyUI/input"
+COMFYUI_INPUT = os.environ.get("COMFYUI_INPUT") or "/home/sjcta/software/ComfyUI-Project/ComfyUI/input"
+if not os.path.isdir(COMFYUI_INPUT):
+    COMFYUI_INPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "input")
 VLLM_CONTAINER = "qwen36-vllm"
 
 # ── State ───────────────────────────────────────────────────────────────
@@ -1245,19 +1233,11 @@ async def lifespan(app: FastAPI):
         get_enabled_instances_fn=_get_enabled_instances,
         insert_gen_fn=_insert_generation,
     )
-    # Initial remote workflow sync
-    try:
-        add_log("info", "sync", "启动时同步远程工作流...")
-        sync_result = await asyncio.to_thread(sync_remote_workflows)
-        add_log("info", "sync", f"同步完成: +{sync_result['synced']} 新工作流, {sync_result['errors']} 错误")
-    except Exception as e:
-        add_log("error", "sync", f"启动同步失败: {e}")
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
     _background_tasks.append(asyncio.create_task(_dead_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
-    _background_tasks.append(asyncio.create_task(_periodic_sync_worker()))
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
@@ -3094,9 +3074,12 @@ async def api_upload_image(file: UploadFile = File(...), current_user: dict = De
         raise HTTPException(400, f"Unsupported image format: {ext}")
     unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}{ext}"
     dest = os.path.join(COMFYUI_INPUT, unique_name)
-    os.makedirs(COMFYUI_INPUT, exist_ok=True)
-    with open(dest, "wb") as f:
-        f.write(content)
+    try:
+        os.makedirs(COMFYUI_INPUT, exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"Image upload failed: {e}")
     return {"ok": True, "filename": unique_name, "path": dest}
 
 
@@ -3540,7 +3523,11 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
         params.append(status)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     rows = conn.execute(
-        "SELECT * FROM generations" + where_clause + " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        "SELECT generations.*, users.username AS username "
+        "FROM generations "
+        "LEFT JOIN users ON users.id = generations.user_id" +
+        where_clause +
+        " ORDER BY generations.created_at DESC LIMIT ? OFFSET ?",
         params + [limit, offset],
     ).fetchall()
     total = conn.execute(
@@ -3818,10 +3805,22 @@ def api_users_list(current_user: dict = Depends(require_admin)):
     rows = conn.execute(
         "SELECT id, username, role, disabled, avatar, created_at FROM users ORDER BY created_at ASC"
     ).fetchall()
+
+    gen_conn = sqlite3.connect(GEN_DB)
+    gen_conn.row_factory = sqlite3.Row
+    counts = {
+        r["user_id"] or "": int(r["gen_count"] or 0)
+        for r in gen_conn.execute(
+            "SELECT user_id, COUNT(*) AS gen_count FROM generations GROUP BY user_id"
+        ).fetchall()
+    }
+    gen_conn.close()
+
     conn.close()
     return {"ok": True, "data": [
         {"id": r["id"], "username": r["username"], "role": r["role"],
-         "disabled": bool(r["disabled"]), "avatar": r["avatar"], "created_at": r["created_at"]}
+         "disabled": bool(r["disabled"]), "avatar": r["avatar"], "created_at": r["created_at"],
+         "generation_count": counts.get(r["id"], 0)}
         for r in rows
     ]}
 

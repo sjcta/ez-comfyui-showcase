@@ -1,31 +1,31 @@
 {
   "SeedVR2_upscale_2k.json": {
-    "name": "SeedVR2_upscale_2k",
+    "name": "SeedVR2 2K 放大",
     "tags": [
-      "图生图"
+      "放大"
     ],
     "owner_id": "1ec621fd",
-    "shared": false,
+    "shared": true,
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_upscale_2k.json"
   },
   "SeedVR2_upscale_4k.json": {
-    "name": "SeedVR2_upscale_4k",
+    "name": "SeedVR2 4K 放大",
     "tags": [
-      "图生图"
+      "放大"
     ],
     "owner_id": "1ec621fd",
-    "shared": false,
+    "shared": true,
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_upscale_4k.json"
   },
   "i2i-FireRed-Edit-1.1.json": {
-    "name": "i2i-FireRed-Edit-1.1",
+    "name": "小红书(FireRed) 图片编辑 1.1",
     "tags": [
       "图生图"
     ],
     "owner_id": "1ec621fd",
-    "shared": false
+    "shared": true
   },
   "i2i-FireRed-Edit-8step.json": {
     "name": "i2i-FireRed-Edit-8step",
@@ -48,17 +48,17 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-Qwen-Edit-v2511.json"
   },
   "i2i-Qwen-Rapid-seedVR2-4k.json": {
-    "name": "i2i-Qwen-Rapid-seedVR2-4k",
+    "name": "千问 Rapid + SeedVR2 4K",
     "tags": [
       "图生图"
     ],
     "owner_id": "1ec621fd",
-    "shared": false,
+    "shared": true,
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-Qwen-Rapid-seedVR2-4k.json"
   },
   "i2i-Qwen-SeedVR2.json": {
-    "name": "i2i-Qwen-SeedVR2",
+    "name": "Qwen + SeedVR2 放大",
     "tags": [
       "图生图"
     ],
@@ -68,7 +68,7 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2i-Qwen-SeedVR2.json"
   },
   "i2i_Qwen_Edit.json": {
-    "name": "i2i_Qwen_Edit",
+    "name": "千问图片编辑",
     "tags": [
       "图生图"
     ],
@@ -108,7 +108,7 @@
     "shared": false
   },
   "t2i-nunchaku-z-image-turbo-highSD.json": {
-    "name": "t2i-nunchaku-z-image-turbo-highSD",
+    "name": "Nunchaku (Z-Image) 加速 + SD放大",
     "tags": [
       "文生图"
     ],
@@ -118,7 +118,7 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-nunchaku-z-image-turbo-highSD.json"
   },
   "t2i-z-image-seedvr4k.json": {
-    "name": "t2i-z-image-seedvr4k",
+    "name": "Z-Image + SeedVR2 放大",
     "tags": [
       "文生图",
       "2K"
@@ -129,7 +129,7 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-z-image-seedvr4k.json"
   },
   "t2i-z-image.json": {
-    "name": "t2i-z-image",
+    "name": "Z-Image 快速出图",
     "tags": [
       "文生图",
       "2K"
@@ -140,7 +140,7 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-z-image.json"
   },
   "t2i_Qwen_Image_2512_4steps.json": {
-    "name": "t2i_Qwen_Image_2512_4steps",
+    "name": "千问(2512) 4步出图",
     "tags": [
       "文生图"
     ],
@@ -150,7 +150,7 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_Qwen_Image_2512_4steps.json"
   },
   "t2i_nunchaku_seedvr4k.json": {
-    "name": "t2i_nunchaku_seedvr4k",
+    "name": "Nunchaku + SeedVR2 4K",
     "tags": [
       "文生图",
       "2K"

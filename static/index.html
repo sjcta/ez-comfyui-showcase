@@ -7,7 +7,7 @@
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ez ComfyUI Showcase</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23F59E0B'/><stop offset='100%' stop-color='%238B5CF6'/></linearGradient></defs><polygon points='50,10 85,35 75,80 25,80 15,35' fill='url(%23g)' stroke='%23F59E0B' stroke-width='2'/><polygon points='50,20 70,35 65,65 35,65 30,35' fill='rgba(245,158,11,0.2)' stroke='%238B5CF6' stroke-width='1'/></svg>">
+<link rel="icon" type="image/png" href="static/icons/ez-site-logo-64.png">
 <script>
 if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
@@ -22,10 +22,10 @@ if (location.protocol === 'file:') {
 
 <!-- ═══ 标题栏 ═══ -->
 <header class="titlebar">
-  <div class="logo"><span><svg class="cw-icon" width="18" height="18" viewBox="0 0 100 100"><defs><linearGradient id='logoG' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23F59E0B'/><stop offset='100%' stop-color='%238B5CF6'/></linearGradient></defs><polygon points='50,10 85,35 75,80 25,80 15,35' fill='url(#logoG)' stroke='%23F59E0B' stroke-width='2'/><polygon points='50,20 70,35 65,65 35,65 30,35' fill='rgba(245,158,11,0.2)' stroke='%238B5CF6' stroke-width='1'/></svg></span> <span style="background:linear-gradient(135deg,%23F59E0B,%238B5CF6);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Ez ComfyUI</span></div>
+  <div class="logo"><span class="site-logo-wrap"><img class="site-logo-image" src="static/icons/ez-site-logo-64.png" alt="EZ ComfyUI logo"></span><span class="site-logo-text">Ez ComfyUI</span></div>
   <div class="titlebar-right">
-    <button class="tb-wf-mgr-btn" id="tbDeviceBtn" onclick="if(window.CW&&CW.openDeviceMgr)CW.openDeviceMgr()" title="设备管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>设备管理</button>
-    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" onclick="if(window.CW&&CW.openWfMgr)CW.openWfMgr()" title="工作流管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理</button>
+    <button class="tb-wf-mgr-btn" id="tbDeviceBtn" onclick="if(window.CW&&CW.openDeviceMgr)CW.openDeviceMgr()" title="设备管理"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-monitor-cog"/></svg>设备管理</button>
+    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" onclick="if(window.CW&&CW.openWfMgr)CW.openWfMgr()" title="工作流管理"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg>工作流管理</button>
     <button class="tb-log-btn" id="tbLogBtn" onclick="CW.toggleLog()" title="日志"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>日志</button>
     <div id="authContainer" class="auth-container"></div>
   </div>
@@ -35,7 +35,7 @@ if (location.protocol === 'file:') {
 <div class="v4-overlay page" id="wfOverlay">
   <div class="wf-overlay-inner">
     <div class="v4-header wf-mgr-grad-header">
-      <span class="v4-title">工作流管理</span>
+      <span class="v4-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg> 工作流管理</span>
       <span class="wf-overlay-count" id="wfOverlayCount"></span>
       <button class="v4-close" id="wfOverlayClose" onclick="if(window.CW&&CW.closeWfMgr)CW.closeWfMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
@@ -146,7 +146,6 @@ if (location.protocol === 'file:') {
                 </div>
                 <div class="wf-edit-preview-actions">
                   <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
-                  <button class="wf-mgr-btn" type="button" onclick="document.getElementById('wfEditThumbInput').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传缩略图</button>
                   <span class="wf-edit-side-note">建议使用横向封面，列表与共享卡片里的展示会更稳定。</span>
                 </div>
               </div>
@@ -184,12 +183,12 @@ if (location.protocol === 'file:') {
               </div>
             </div>
             <div class="wf-edit-versions">
+              <div class="wf-edit-version-list" id="wfEditVersionList"></div>
               <div class="wf-edit-version-upload">
                 <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
                 <button class="wf-mgr-btn" id="wfEditVersionBtn" type="button" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传版本</button>
                 <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
               </div>
-              <div class="wf-edit-version-list" id="wfEditVersionList"></div>
             </div>
           </section>
         </aside>
@@ -352,6 +351,14 @@ if (location.protocol === 'file:') {
 <!-- ═══ Lightbox ═══ -->
 <div class="lightbox" id="lightbox">
   <button class="lb-close" onclick="CW.closeLB()" title="关闭"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  <div class="lb-actions" id="lbActions">
+    <button class="lb-action-btn lb-fav" id="lbFavoriteBtn" type="button" title="收藏" onclick="if(window.CW&&CW.toggleLBFavorite) CW.toggleLBFavorite()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 20.2-.7-.63C6.2 14.96 3 12.03 3 8.43 3 5.5 5.24 3.2 8.1 3.2c1.62 0 3.18.78 4.1 2 0 0 .02.03.04.05.92-1.27 2.5-2.05 4.16-2.05C19.26 3.2 21.5 5.5 21.5 8.43c0 3.6-3.2 6.53-8.3 11.14l-.7.63Z"/></svg>
+    </button>
+    <button class="lb-action-btn lb-share" id="lbShareBtn" type="button" title="快速分享" onclick="if(window.CW&&CW.toggleLBShare) CW.toggleLBShare()">
+      <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-share"/></svg>
+    </button>
+  </div>
   <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)" title="上一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg></button>
   <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -368,12 +375,15 @@ if (location.protocol === 'file:') {
 
 
 <div class="v4-overlay" id="instPopup" onclick="if(event.target===this)CW.closeInstPopup()">
-  <div class="inst-popup">
-    <div class="inst-popup-header">
-      <h3 id="v4InstPopupTitle">ComfyUI 实例管理</h3>
-      <button class="inst-popup-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+  <div class="inst-popup wf-overlay-inner">
+    <div class="v4-header device-grad-header">
+      <span class="v4-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-server"/></svg><span id="v4InstPopupTitle">ComfyUI 实例管理</span></span>
+      <button class="v4-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div id="instCards"></div>
+    <div class="inst-popup-body">
+      <div class="inst-popup-note">集中查看实例状态、目标实例和 GPU 占用，实例卡片状态语义保持不变。</div>
+      <div id="instCards"></div>
+    </div>
   </div>
 </div>
 <div class="confirm-modal" id="confirmModal">
