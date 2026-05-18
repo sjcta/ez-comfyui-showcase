@@ -21,6 +21,35 @@
   var _expandedHistoryPrompts = {};
   var _historyFavorites = {};
 
+  function _historyFavoriteStorageKey() {
+    var ident = _currentUser && (_currentUser.id || _currentUser.user_id || _currentUser.username);
+    return 'cw_history_favorites:' + (ident ? String(ident) : 'guest');
+  }
+
+  function _loadHistoryFavorites() {
+    var storageKey = _historyFavoriteStorageKey();
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (raw) return JSON.parse(raw || '{}') || {};
+      var legacy = localStorage.getItem('cw_history_favorites');
+      var migrated = localStorage.getItem('cw_history_favorites_migrated:' + storageKey);
+      if (legacy && !migrated && storageKey !== 'cw_history_favorites:guest') {
+        localStorage.setItem(storageKey, legacy);
+        localStorage.setItem('cw_history_favorites_migrated:' + storageKey, '1');
+        return JSON.parse(legacy || '{}') || {};
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function _saveHistoryFavorites() {
+    try {
+      localStorage.setItem(_historyFavoriteStorageKey(), JSON.stringify(_historyFavorites || {}));
+    } catch (e) {}
+  }
+
   function _getToken() { return localStorage.getItem('v4_token'); }
   function _setToken(t) { localStorage.setItem('v4_token', t); }
   function _clearToken() { localStorage.removeItem('v4_token'); }
@@ -92,6 +121,7 @@
         return r.json();
       }).then(function(user) {
         _currentUser = user || data;
+        _historyFavorites = _loadHistoryFavorites();
         return Promise.resolve(
           window.CW && typeof window.CW.loadLoggedInModules === 'function'
             ? window.CW.loadLoggedInModules(_currentUser)
@@ -107,6 +137,7 @@
         });
       }).catch(function() {
         _currentUser = data;
+        _historyFavorites = _loadHistoryFavorites();
         return Promise.resolve(
           window.CW && typeof window.CW.loadLoggedInModules === 'function'
             ? window.CW.loadLoggedInModules(_currentUser)
@@ -163,6 +194,7 @@
   function logout() {
     _clearToken();
     _currentUser = null;
+    _historyFavorites = _loadHistoryFavorites();
     _closeDropdown();
     _updateUI();
     if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
@@ -171,7 +203,11 @@
 
   function restoreSession() {
     var token = _getToken();
-    if (!token) { _updateUI(); return Promise.resolve(null); }
+    if (!token) {
+      _historyFavorites = _loadHistoryFavorites();
+      _updateUI();
+      return Promise.resolve(null);
+    }
     return fetch(API + '/auth/me', {
       headers: { 'Authorization': 'Bearer ' + token }
     }).then(function(r) {
@@ -179,6 +215,7 @@
       return r.json();
     }).then(function(user) {
       _currentUser = user;
+      _historyFavorites = _loadHistoryFavorites();
       return Promise.resolve(
         window.CW && typeof window.CW.loadLoggedInModules === 'function'
           ? window.CW.loadLoggedInModules(user)
@@ -757,14 +794,26 @@
     return String(item.id || item.filename || item.original || item.prompt || '');
   }
 
-  function isHistoryFavorited(id) {
+  function _findHistoryItem(id, fallbackItem) {
+    if (fallbackItem) return fallbackItem;
     var item = (_historyCache || []).find(function(entry) { return String(entry.id) === String(id); });
+    if (item) return item;
+    var appItems = window.__APP__ && window.__APP__.historyItems;
+    if (Array.isArray(appItems)) {
+      item = appItems.find(function(entry) { return String(entry.id) === String(id); });
+      if (item) return item;
+    }
+    return null;
+  }
+
+  function isHistoryFavorited(id, fallbackItem) {
+    var item = _findHistoryItem(id, fallbackItem);
     var key = _historyFavoriteKey(item);
     return !!(key && _historyFavorites[key]);
   }
 
-  function toggleHistoryFavorite(id) {
-    var item = (_historyCache || []).find(function(entry) { return String(entry.id) === String(id); });
+  function toggleHistoryFavorite(id, fallbackItem) {
+    var item = _findHistoryItem(id, fallbackItem);
     if (!item) {
       CW.toast('未找到这条出图记录', 'info');
       return;
@@ -775,8 +824,41 @@
       return;
     }
     _historyFavorites[key] = !_historyFavorites[key];
-    if (_accountActiveTab === 'history') _renderHistoryFromCache();
-    CW.toast(_historyFavorites[key] ? '已收藏' : '已取消收藏', 'done');
+    _saveHistoryFavorites();
+    _syncHistoryFavoriteUi(item, _historyFavorites[key]);
+    CW.toast(_historyFavorites[key] ? '已收藏' : '已取消收藏', _historyFavorites[key] ? 'favorite' : 'unfavorite');
+    return _historyFavorites[key];
+  }
+
+  function _setFavoriteButtonState(btn, isFavorited) {
+    if (!btn) return;
+    btn.classList.toggle('is-active', !!isFavorited);
+    btn.title = isFavorited ? '取消收藏' : '收藏';
+    btn.setAttribute('aria-label', isFavorited ? '取消收藏' : '收藏');
+  }
+
+  function _syncHistoryFavoriteUi(item, isFavorited) {
+    var ids = [item && item.id, item && item.filename, item && item.thumb]
+      .filter(Boolean)
+      .map(String);
+    var cards = [];
+    ids.forEach(function(id) {
+      document.querySelectorAll('[data-hist-id="' + CSS.escape(id) + '"]').forEach(function(card) {
+        if (cards.indexOf(card) < 0) cards.push(card);
+      });
+    });
+    cards.forEach(function(card) {
+      card.dataset.favorited = isFavorited ? '1' : '0';
+      _setFavoriteButtonState(card.querySelector('.gi-fav-btn'), isFavorited);
+    });
+    document.querySelectorAll('.account-hist-favorite-btn').forEach(function(btn) {
+      var onClick = btn.getAttribute('onclick') || '';
+      if (!ids.some(function(id) { return onClick.indexOf(id) !== -1; })) return;
+      btn.classList.toggle('is-active', !!isFavorited);
+      btn.title = isFavorited ? '取消收藏' : '收藏';
+      var svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', isFavorited ? 'currentColor' : 'none');
+    });
   }
 
   function _renderHistoryFromCache() {

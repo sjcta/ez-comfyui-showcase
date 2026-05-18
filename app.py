@@ -27,11 +27,13 @@ import bcrypt
 
 # ── V4 refactored module imports (keep inline implementations for backward compat) ──
 from modules.config import NodeCategory, ModelGroup, NODE_STATUS_MAP
+from modules.comfyui_upload import ensure_workflow_images_available
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
+from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult
 
 # ── Auth config
@@ -44,14 +46,160 @@ ACCESS_TOKEN_EXPIRE_DAYS = 7
 
 # ── Logging ──
 _log_buffer: list[dict] = []
-_MAX_LOG = 500
+_MAX_LOG = 2000
+_LOG_RETENTION_SEC = 3600
+_LOG_FILE = os.environ.get(
+    "EZ_COMFYUI_LOG_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "logs", "recent.jsonl"),
+)
+
+def _log_job_for_id(job_id: str) -> dict | None:
+    if not job_id:
+        return None
+    job_id = str(job_id)
+    job_map = globals().get("jobs") or {}
+    if job_id in job_map:
+        return job_map[job_id]
+    suffix = job_id[-12:]
+    for jid, job in job_map.items():
+        if str(jid).endswith(suffix):
+            return job
+    return None
+
+
+def _log_workflow_type(workflow: str) -> str:
+    if not workflow:
+        return ""
+    classifier = globals().get("_workflow_primary_type")
+    if callable(classifier):
+        try:
+            return classifier(workflow) or ""
+        except Exception:
+            pass
+    return ""
+
+
+def _trim_log_buffer(now: float | None = None) -> None:
+    now = now or time.time()
+    cutoff = now - _LOG_RETENTION_SEC
+    _log_buffer[:] = [entry for entry in _log_buffer if float(entry.get("ts") or 0) >= cutoff]
+    if len(_log_buffer) > _MAX_LOG:
+        del _log_buffer[:len(_log_buffer) - _MAX_LOG]
+
+
+def _persist_log_buffer() -> None:
+    try:
+        os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
+        with open(_LOG_FILE, "w", encoding="utf-8") as fh:
+            for entry in _log_buffer:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _append_persistent_log(entry: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
+        with open(_LOG_FILE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _load_recent_logs() -> None:
+    if not os.path.isfile(_LOG_FILE):
+        return
+    now = time.time()
+    cutoff = now - _LOG_RETENTION_SEC
+    loaded: list[dict] = []
+    try:
+        with open(_LOG_FILE, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if float(entry.get("ts") or 0) >= cutoff:
+                    loaded.append(entry)
+        _log_buffer[:] = loaded[-_MAX_LOG:]
+        _persist_log_buffer()
+    except Exception:
+        pass
+
 
 def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = ""):
+    phase = str(phase or "")
+    raw_msg = str(msg or "")
+    raw_details = str(details or "")
+    if phase == "stop" or raw_msg.strip().lower() == "stop":
+        return
+    msg_map = {
+        "Starting generation": "开始生成",
+        "Workflow finished": "工作流完成",
+        "Workflow execution started": "工作流开始执行",
+    }
+    phase_map = {
+        "generate": "生成",
+        "complete": "完成",
+        "node": "节点",
+        "sampler": "采样",
+        "step": "步进",
+        "start": "开始",
+        "done": "完成",
+        "error": "错误",
+        "wstrack": "进度追踪",
+        "coldstart": "冷启动",
+        "instance": "实例",
+        "queue": "队列",
+        "wf_meta": "工作流元数据",
+        "wf_config": "工作流配置",
+        "db": "数据库",
+        "idle": "空闲回收",
+        "dead": "实例恢复",
+        "stuck": "任务卡住",
+        "ws": "通信",
+    }
+    msg = msg_map.get(raw_msg, raw_msg)
+    if msg.startswith("Sampling "):
+        msg = "采样 " + msg[len("Sampling "):]
+    elif msg.startswith("WS error:"):
+        msg = "进度追踪错误:" + msg[len("WS error:"):]
+    elif msg.startswith("ComfyUI execution error:"):
+        msg = "ComfyUI 执行错误:" + msg[len("ComfyUI execution error:"):]
+    elif msg.startswith("Prompt 已提交:"):
+        msg = "任务已提交:" + msg[len("Prompt 已提交:"):]
+    elif msg.endswith(" started"):
+        msg = msg[:-len(" started")] + " 已启动"
+    elif msg.endswith(" stopped"):
+        msg = msg[:-len(" stopped")] + " 已停止"
+    elif msg.endswith(" restarted"):
+        msg = msg[:-len(" restarted")] + " 已重启"
+    elif msg.endswith(" start FAILED"):
+        msg = msg[:-len(" start FAILED")] + " 启动失败"
+    elif msg.endswith(" stop FAILED"):
+        msg = msg[:-len(" stop FAILED")] + " 停止失败"
+    elif msg.endswith(" restart FAILED"):
+        msg = msg[:-len(" restart FAILED")] + " 重启失败"
+    phase = phase_map.get(phase, phase)
+    details = msg_map.get(raw_details, raw_details)
+    job = _log_job_for_id(job_id)
+    workflow = str((job or {}).get("workflow") or "")
+    workflow_type = str((job or {}).get("workflow_type") or _log_workflow_type(workflow))
     entry = {"ts": time.time(), "level": level, "phase": phase,
              "msg": str(msg)[:200], "job_id": job_id[-12:], "details": str(details)[:500]}
+    user_id = str((job or {}).get("user_id") or "")
+    if user_id:
+        entry["user_id"] = user_id
+    if workflow:
+        entry["workflow"] = workflow
+    if workflow_type:
+        entry["workflow_type"] = workflow_type
     _log_buffer.append(entry)
-    if len(_log_buffer) > _MAX_LOG:
-        _log_buffer[:50] = []
+    _trim_log_buffer()
+    _append_persistent_log(entry)
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(broadcast({"type": "log", "entry": entry}))
@@ -59,6 +207,15 @@ def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = "
         pass
 
 NODES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "nodes.json")
+
+
+def _friendly_generation_error(err: Exception) -> str:
+    text = str(err)
+    if "Connection refused" in text or "Errno 61" in text or "Errno 111" in text:
+        return "ComfyUI 连接被拒绝，请检查出图实例是否仍在运行"
+    if "timed out" in text or "TimeoutError" in text:
+        return "ComfyUI 响应超时，请稍后重试"
+    return text[:200]
 
 # ── Runtime connection state ──
 _connected_nodes: dict[str, bool] = {}  # node_id -> connected (default True if missing)
@@ -712,6 +869,26 @@ def _gen_db_to_record(row: dict) -> dict:
     }
 
 
+def _history_username_map(user_ids: list[str]) -> dict[str, str]:
+    """Look up usernames from the auth database for generation history rows."""
+    ids = sorted({str(uid) for uid in user_ids if uid})
+    if not ids:
+        return {}
+    try:
+        conn = sqlite3.connect(AUTH_DB)
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT id, username FROM users WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        conn.close()
+        return {row["id"]: row["username"] for row in rows}
+    except Exception as e:
+        add_log("warn", "history", f"用户名查询失败：{e}", "")
+        return {}
+
+
 def _workflow_primary_type(filename: str) -> str:
     """Return the backend workflow category even when the workflow itself is not visible."""
     name = os.path.basename(filename or "")
@@ -1003,6 +1180,8 @@ def _can_manage_workflow(filename: str, entry: dict, current_user: dict) -> bool
 
 
 def _can_access_job(job: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
     owner = job.get("user_id", "")
     uid = _user_id(current_user or {})
     return bool(uid and owner == uid)
@@ -1198,6 +1377,7 @@ async def _stuck_job_watcher():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _inst_mgr, _job_runner
+    _load_recent_logs()
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
@@ -1232,6 +1412,7 @@ async def lifespan(app: FastAPI):
         history_dir=HISTORY_DIR,
         get_enabled_instances_fn=_get_enabled_instances,
         insert_gen_fn=_insert_generation,
+        input_dir=COMFYUI_INPUT,
     )
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
@@ -1252,9 +1433,28 @@ def _api_node_disconnect(nid: str, current_user: dict = Depends(require_admin)):
     _connected_nodes[nid] = False
     return {"ok": True}
 
+def _can_view_log_entry(entry: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    entry_user_id = str(entry.get("user_id") or "")
+    if entry_user_id and entry_user_id == str(current_user.get("id") or ""):
+        return True
+    log_job_suffix = str(entry.get("job_id") or "")
+    if not log_job_suffix:
+        return False
+    for jid, job in jobs.items():
+        if str(jid).endswith(log_job_suffix) and _can_access_job(job, current_user):
+            return True
+    return False
+
+
 @app.get("/api/logs")
-def api_logs(limit: int = 200, current_user: dict = Depends(require_admin)):
-    return list(_log_buffer[-limit:])
+def api_logs(limit: int = _MAX_LOG, current_user: dict = Depends(get_current_user)):
+    _trim_log_buffer()
+    _persist_log_buffer()
+    safe_limit = max(1, min(int(limit or _MAX_LOG), _MAX_LOG))
+    visible = [entry for entry in _log_buffer if _can_view_log_entry(entry, current_user)]
+    return list(visible[-safe_limit:])
 static_dir = Path(__file__).parent / "static"
 if static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -1522,8 +1722,19 @@ def comfyui_post(path: str, data: dict, base_url: str = None) -> dict:
         url, data=payload,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            body = ""
+        detail = f"HTTP Error {e.code}: {e.reason}"
+        if body:
+            detail = f"{detail}; {body[:500]}"
+        raise RuntimeError(f"HTTP POST {url} 失败: {detail}") from e
 
 
 def comfyui_get(path: str, base_url: str = None) -> dict:
@@ -2284,6 +2495,10 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 if "seed" in v.get("inputs", {}):
                     v["inputs"]["seed"] = seed
 
+        issues = validate_api_prompt(wf)
+        if issues:
+            raise RuntimeError(describe_api_prompt_issues(issues))
+
         if vllm_was_running:
             jobs[job_id]["message"] = "停止 vLLM 释放显存..."
             await broadcast({"type": "job_update", "job": jobs[job_id]})
@@ -2306,6 +2521,8 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                     break
             else:
                 raise TimeoutError(f"ComfyUI #{inst['name']} 启动超时 (180s)")
+
+        ensure_workflow_images_available(wf, COMFYUI_INPUT, inst_url)
 
         add_log("info", "generate", "Starting generation", job_id)
         jobs[job_id]["status"] = "generating"
@@ -2349,6 +2566,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         elapsed = time.time() - elapsed_start
 
         # ── Remote image pullback: download output images from remote instance ──
+        downloaded = []
         if ws_ok and pid:
             jobs[job_id]["status"] = "downloading"
             jobs[job_id]["message"] = "正在拉取图片..."
@@ -2367,22 +2585,31 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             _extra = jobs[job_id].get("ws_error", "") if job_id in jobs else ""
             raise TimeoutError(f"出图失败{' ('+_extra[:100]+')' if _extra else ''}")
 
-        hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
         filename = None
-        if pid in hist:
-            for node_out in hist[pid].get("outputs", {}).values():
-                for img in node_out.get("images", []):
-                    filename = img["filename"]
-                    break
-                if filename:
-                    break
+        src = ""
+        if downloaded:
+            src = downloaded[0]
+            filename = os.path.basename(src)
+        if not filename:
+            try:
+                hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
+                if pid in hist:
+                    for node_out in hist[pid].get("outputs", {}).values():
+                        for img in node_out.get("images", []):
+                            filename = img["filename"]
+                            break
+                        if filename:
+                            break
+            except Exception as e:
+                raise RuntimeError(_friendly_generation_error(e))
         if job_id not in jobs or jobs[job_id].get("status") == "error":
             return False, pid or ""
         if not filename:
             raise RuntimeError("未找到输出图片")
 
         # Prefer local OUTPUT_DIR (files were downloaded there via _download_remote_images_sync)
-        src = os.path.join(OUTPUT_DIR, filename)
+        if not src:
+            src = os.path.join(OUTPUT_DIR, filename)
         if not os.path.isfile(src):
             matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
             if matches:
@@ -2450,7 +2677,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         if isinstance(e, TimeoutError):
             jobs[job_id]["message"] = "出图失败"
         else:
-            jobs[job_id]["message"] = str(e)
+            jobs[job_id]["message"] = _friendly_generation_error(e)
         await broadcast({"type": "job_update", "job": jobs[job_id]})
     finally:
         save_jobs()
@@ -3073,23 +3300,29 @@ async def api_upload_image(file: UploadFile = File(...), current_user: dict = De
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
         raise HTTPException(400, f"Unsupported image format: {ext}")
     unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}{ext}"
-    dest = os.path.join(COMFYUI_INPUT, unique_name)
+    user_dir = _user_id(current_user) or "anonymous"
+    date_dir = datetime.now().strftime("%Y-%m-%d")
+    rel_name = f"{user_dir}/{date_dir}/{unique_name}"
+    dest = os.path.join(COMFYUI_INPUT, user_dir, date_dir, unique_name)
     try:
-        os.makedirs(COMFYUI_INPUT, exist_ok=True)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:
             f.write(content)
     except Exception as e:
         raise HTTPException(500, f"Image upload failed: {e}")
-    return {"ok": True, "filename": unique_name, "path": dest}
+    return {"ok": True, "filename": rel_name, "path": dest}
 
 
-@app.get("/api/input-image/{filename}")
+@app.get("/api/input-image/{filename:path}")
 def api_input_image(filename: str):
-    safe = os.path.basename(filename)
-    path = os.path.join(COMFYUI_INPUT, safe)
+    safe = filename.replace("\\", "/").lstrip("/")
+    path = os.path.abspath(os.path.join(COMFYUI_INPUT, safe))
+    input_root = os.path.abspath(COMFYUI_INPUT)
+    if os.path.commonpath([input_root, path]) != input_root:
+        raise HTTPException(400, "Invalid image path")
     if not os.path.isfile(path):
         raise HTTPException(404)
-    ext = os.path.splitext(safe)[1].lower()
+    ext = os.path.splitext(path)[1].lower()
     media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
 
@@ -3365,16 +3598,40 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     seed = req.seed if req.seed is not None else random.randint(0, 2**63)
     vllm_was = vllm_running()
 
+    try:
+        with open(path) as f:
+            wf_check = json.load(f)
+        for key, val in req.fields.items():
+            if "::" not in key:
+                continue
+            nid, field = key.split("::", 1)
+            if nid in wf_check and "inputs" in wf_check[nid]:
+                wf_check[nid]["inputs"][field] = val
+        for nid, v in wf_check.items():
+            if isinstance(v, dict) and v.get("class_type") == "KSampler":
+                if "seed" in v.get("inputs", {}):
+                    v["inputs"]["seed"] = seed
+        issues = validate_api_prompt(wf_check)
+        if issues:
+            detail = describe_api_prompt_issues(issues)
+            add_log("error", "workflow", detail)
+            raise HTTPException(400, detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"工作流校验失败: {e}") from e
+
     prompt_preview = ""
     for k, v in req.fields.items():
         if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
             prompt_preview = str(v)[:200]
             break
 
-    add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
+    workflow_type = _workflow_primary_type(req.workflow)
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
         "workflow": req.workflow, "seed": str(seed),
+        "workflow_type": workflow_type,
         "prompt_preview": prompt_preview,
         "width": req.width, "height": req.height,
         "fields": req.fields,
@@ -3383,6 +3640,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "queued_at": datetime.now().strftime("%H:%M:%S"),
         "user_id": user_id,
     }
+    add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
 
     _job_queue.put_nowait((
         job_id, path, req.fields, seed, vllm_was, req.width, req.height, user_id,
@@ -3393,8 +3651,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
 @app.get("/api/jobs")
 def api_all_jobs(current_user: dict = Depends(get_current_user)):
-    uid = _user_id(current_user or {})
-    return [j for j in jobs.values() if j.get("user_id") == uid]
+    return [j for j in jobs.values() if _can_access_job(j, current_user)]
 
 
 @app.get("/api/jobs/{job_id}")
@@ -3476,6 +3733,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     jobs[new_id] = {
         "id": new_id, "status": "queued", "message": "排队中...",
         "workflow": wf, "seed": str(seed),
+        "workflow_type": _workflow_primary_type(wf),
         "prompt_preview": prompt_preview,
         "user_id": user_id,
         "width": width, "height": height,
@@ -3522,20 +3780,23 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
         conditions.append("status = ?")
         params.append(status)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-    rows = conn.execute(
-        "SELECT generations.*, users.username AS username "
-        "FROM generations "
-        "LEFT JOIN users ON users.id = generations.user_id" +
-        where_clause +
-        " ORDER BY generations.created_at DESC LIMIT ? OFFSET ?",
-        params + [limit, offset],
-    ).fetchall()
+    rows = [
+        dict(r) for r in conn.execute(
+            "SELECT * FROM generations" +
+            where_clause +
+            " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+    ]
     total = conn.execute(
         "SELECT COUNT(*) FROM generations" + where_clause,
         params,
     ).fetchone()[0]
     conn.close()
-    return {"ok": True, "data": [_gen_db_to_record(dict(r)) for r in rows], "total": total}
+    usernames = _history_username_map([r.get("user_id", "") for r in rows])
+    for row in rows:
+        row["username"] = usernames.get(row.get("user_id", ""), "")
+    return {"ok": True, "data": [_gen_db_to_record(r) for r in rows], "total": total}
 
 
 @app.post("/api/history")

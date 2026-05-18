@@ -93,7 +93,15 @@ async function fillFormFromHistory(idx) {
       // Only re-fetch fields if workflow actually changed
       if (targetWf !== A.currentWF) {
         await window.CW.selectWF(targetWf);
+      } else if (window.CW.highlightWF) {
+        window.CW.highlightWF();
       }
+      requestAnimationFrame(function() {
+        var card = Array.prototype.slice.call(document.querySelectorAll('.wf-card')).find(function(el) {
+          return el.dataset && el.dataset.name === targetWf;
+        });
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      });
     } else {
       console.warn('[fillFormFromHistory] no match for workflow:', h.workflow, '— restoring common fields only');
     }
@@ -124,7 +132,7 @@ async function fillFormFromHistory(idx) {
           var preview = document.querySelector('#refImagePreview');
           var ph = document.querySelector('#refImagePlaceholder');
           if (vInput) vInput.value = v;
-          if (preview) { preview.src = API + '/api/input-image/' + v; preview.style.display = ''; }
+          if (preview) { preview.src = API + '/api/input-image/' + encodeURIComponent(v); preview.style.display = ''; }
           if (ph) ph.style.display = 'none';
           break;
         }
@@ -455,7 +463,7 @@ function renderAdvFields(fields) {
         }
         case 'toggle':
         case 'bool':
-          html += `<label class="toggle-label"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === true ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span></label>`;
+          html += `<label class="toggle-label bool-toggle"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === 'true' ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label>`;
           break;
         case 'seed':
           html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"><button type="button" class="btn-dice" onclick="CW.rndSeed(this)">${CW.icon('dice-1')}</button></div>`;
@@ -539,7 +547,7 @@ var __curZone = null;
         var d = await _uploadRefImage(file);
         valueInput.value = d.filename;
         if (preview) {
-          preview.src = API + '/api/input-image/' + d.filename;
+          preview.src = API + '/api/input-image/' + encodeURIComponent(d.filename);
           preview.style.display = '';
         }
         if (placeholder) placeholder.style.display = 'none';
@@ -572,7 +580,7 @@ var __curZone = null;
         var d = await _uploadRefImage(file);
         valueInput.value = d.filename;
         if (preview) {
-          preview.src = API + '/api/input-image/' + d.filename;
+          preview.src = API + '/api/input-image/' + encodeURIComponent(d.filename);
           preview.style.display = '';
         }
         if (placeholder) placeholder.style.display = 'none';

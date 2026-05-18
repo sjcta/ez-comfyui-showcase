@@ -197,8 +197,9 @@
     var used = Number(g.vram_used_mb || 0);
     var total = Number(g.vram_total_mb || 0);
     if ($('#vramText')) {
+      var compactVram = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
       $('#vramText').textContent = total > 0
-        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%) · ${temp} °C`
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB${compactVram ? '' : ` (${pct}%)`} · ${temp} °C`
         : '未获取到 VRAM';
     }
     if ($('#gpuTemp')) $('#gpuTemp').textContent = `${temp} °C`;
@@ -949,13 +950,27 @@ function init() {
   console.log('[DEBUG] getWFType exists:', typeof getWFType !== 'undefined');
   console.log('[DEBUG] cancelJob exists:', typeof cancelJob !== 'undefined');
   console.log('[DEBUG] window.CW keys:', Object.keys(window.CW).length);
+  function logWorkflowClass(workflowType, jobId) {
+    if (!jobId) return 'log-system';
+    if (workflowType === '文生图') return 'log-flow log-flow-t2i';
+    if (workflowType === '图生图') return 'log-flow log-flow-i2i';
+    if (workflowType === '文生视频') return 'log-flow log-flow-t2v';
+    if (workflowType === '图生视频') return 'log-flow log-flow-i2v';
+    if (workflowType === '放大') return 'log-flow log-flow-cat';
+    if (workflowType) return 'log-flow log-flow-other';
+    return 'log-task';
+  }
   window.CW._logEntries = [];
   window.CW._onLog = function(entry) {
     window.CW._logEntries.push(entry);
     var body = document.getElementById('logBody');
     if (!body) return;
+    var filter = document.getElementById('logLevelFilter');
+    var activeLevel = filter ? filter.value : '';
+    if (activeLevel && entry.level !== activeLevel) return;
     var el = document.createElement('div');
-    el.className = 'log-entry';
+    el.className = 'log-entry ' + logWorkflowClass(entry.workflow_type || '', entry.job_id || '');
+    if (entry.workflow) el.title = entry.workflow;
     var ts = new Date(entry.ts * 1000).toLocaleTimeString();
     el.innerHTML = '<span class="log-time">' + ts + '</span>'
       + '<span class="log-level ' + entry.level + '">' + entry.level.toUpperCase() + '</span>'
@@ -964,6 +979,8 @@ function init() {
       + (entry.details ? '<div class="log-details">' + entry.details + '</div>' : '');
     body.appendChild(el);
     body.scrollTop = body.scrollHeight;
+    var countEl = document.getElementById('logCount');
+    if (countEl) countEl.textContent = String((window.CW._logEntries || []).length);
   };
   window.CW.toggleLog = function() {
     var panel = document.getElementById('logPanel');

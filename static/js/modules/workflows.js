@@ -22,6 +22,7 @@
 
   // ── Manager toolbar state ──
   var _mgrFilter = '';  // '' = all
+  var _mgrSearch = '';
   var _mgrSortBy = 'manual';
   var _mgrDragIdx = -1;
   // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
@@ -309,6 +310,40 @@ function _tagCls(t) {
 
   function toggleMgrSortDir() {}
 
+function _patchWfMgrGrid(grid, html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var next = Array.prototype.slice.call(tpl.content.children);
+    var oldByKey = {};
+    Array.prototype.slice.call(grid.children).forEach(function(child) {
+      var key = child.getAttribute && child.getAttribute('data-fname');
+      if (key) oldByKey[key] = child;
+    });
+    next.forEach(function(newChild) {
+      var key = newChild.getAttribute('data-fname');
+      var oldChild = key ? oldByKey[key] : null;
+      if (oldChild) {
+        delete oldByKey[key];
+        if (oldChild.outerHTML !== newChild.outerHTML) {
+          oldChild.replaceWith(newChild);
+          newChild.classList.add('is-entering');
+          requestAnimationFrame(function() { newChild.classList.remove('is-entering'); });
+        } else {
+          grid.appendChild(oldChild);
+        }
+      } else {
+        newChild.classList.add('is-entering');
+        grid.appendChild(newChild);
+        requestAnimationFrame(function() { newChild.classList.remove('is-entering'); });
+      }
+    });
+    Object.keys(oldByKey).forEach(function(key) {
+      var oldChild = oldByKey[key];
+      oldChild.classList.add('is-exiting');
+      setTimeout(function() { if (oldChild.parentNode) oldChild.remove(); }, 180);
+    });
+  }
+
 function renderWfGrid() {
     const grid = $('#wfOverlayGrid');
     const empty = $('#wfOverlayEmpty');
@@ -330,8 +365,23 @@ function renderWfGrid() {
         return _getPrimaryTag(e[0], e[1]) === _mgrFilter;
       });
     }
+    if (_mgrSearch) {
+      var q = _mgrSearch.toLowerCase();
+      entries = entries.filter(function(e) {
+        var fname = String(e[0] || '').toLowerCase();
+        var meta = e[1] || {};
+        var display = String(meta.name || '').toLowerCase();
+        var tags = (meta.tags || []).join(' ').toLowerCase();
+        return fname.indexOf(q) >= 0 || display.indexOf(q) >= 0 || tags.indexOf(q) >= 0;
+      });
+    }
     // Sort
     _mgrSortEntries(entries);
+    if (!entries.length) {
+      grid.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
 
     let html = '';
     for (var _mi = 0; _mi < entries.length; _mi++) {
@@ -365,7 +415,7 @@ function renderWfGrid() {
       '</div>' +
     '</div>';
     }
-    grid.innerHTML = html;
+    _patchWfMgrGrid(grid, html);
   }
 
   function _updateWfShareCard(fname) {
@@ -506,8 +556,8 @@ function closeWfMgr() {
   }
 
   function _syncSelectionBar() {
-    // Reload meta and refresh the selection bar tabs
-    if (window.CW.loadWorkflows) window.CW.loadWorkflows();
+    // Keep manager close lightweight; do not refresh history/workflow grids here.
+    renderMgrFilterTabs();
   }
 
 function openWfMgr() {
@@ -627,7 +677,7 @@ function highlightWF() {
 function _isInView(el, container) {
   var cr = el.getBoundingClientRect();
   var vr = container.getBoundingClientRect();
-  return cr.right <= vr.right && cr.left >= vr.left;
+  return cr.right <= vr.right && cr.left >= vr.left && cr.bottom <= vr.bottom && cr.top >= vr.top;
 }
 
 
@@ -648,7 +698,7 @@ async function selectWF(name) {
       var ac = $$('.wf-card.active')[0];
       if (ac) {
         if (grid && !_isInView(ac, grid)) {
-          ac.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+          ac.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'center' });
         }
       }
       if (grid) grid.style.scrollSnapType = snapType || '';
@@ -942,8 +992,9 @@ async function loadWfVersions(fname) {
   if (!window.CW) window.CW = {};
 
 function setMgrFilter(val) {
-    _mgrFilter = val || '';
+    _mgrSearch = (val || '').trim();
     renderMgrFilterTabs();
+    renderWfGrid();
 }
 
 function onWfMgrDeviceChange(deviceId) {
@@ -959,6 +1010,7 @@ function manualSyncWorkflows() {
 }
 
   window.CW.selectWF = selectWF;
+  window.CW.highlightWF = highlightWF;
   window.CW.loadWfVersions = loadWfVersions;
   window.CW.activateWfVersion = activateWfVersion;
 window.CW.delVersion = delVersion;

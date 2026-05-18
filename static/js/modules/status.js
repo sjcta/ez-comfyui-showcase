@@ -43,13 +43,21 @@ function updateServices(d) {
     const target = _getCurrentTarget(insts);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');
+    const bar = $('#statusbar');
+    const anyRunning = insts.some(function(inst) { return (inst.queue_running || 0) > 0; });
+    const anyPending = insts.some(function(inst) { return (inst.queue_pending || 0) > 0; });
+    if (bar) bar.dataset.instanceState = anyRunning ? 'running' : anyPending ? 'pending' : 'idle';
     if (comfyBtn) comfyBtn.className = 'svc-btn ' + (target && target.up ? 'on' : 'off');
     if (comfyState) {
-      if (!target) comfyState.textContent = '无可用实例';
-      else if (!target.up) comfyState.textContent = (target.node_name || target.name || '目标实例') + ' 已关闭';
-      else if ((target.queue_running || 0) > 0) comfyState.textContent = (target.node_name || target.name) + ' 出图中';
-      else if ((target.queue_pending || 0) > 0) comfyState.textContent = (target.node_name || target.name) + ' 排队中';
-      else comfyState.textContent = (target.node_name || target.name) + ' 待机';
+      var compactState = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+      var targetName = target ? (target.node_name || target.name || '目标实例') : '';
+      var stateText = '';
+      if (!target) stateText = '无可用实例';
+      else if (!target.up) stateText = '已关闭';
+      else if ((target.queue_running || 0) > 0) stateText = '出图中';
+      else if ((target.queue_pending || 0) > 0) stateText = '排队中';
+      else stateText = '待机';
+      comfyState.textContent = compactState || !targetName ? stateText : targetName + ' ' + stateText;
     }
   }
 
@@ -73,12 +81,13 @@ function updateGPU(g, instances) {
     var total = Number(gpu && target ? (gpu.vram_total_mb || 0) : 0);
     var vramText = $('#vramText');
     if (vramText) {
+      var compactVram = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
       vramText.textContent = total > 0
-        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%) · ${temp} °C`
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB${compactVram ? '' : ` (${pct}%)`} · ${temp} °C`
         : (target ? `${target.node_name || target.name} ${gpu && gpu.message ? gpu.message : '未上报 VRAM'}` : '无可用设备');
     }
-    if ($('#gpuTemp')) $('#gpuTemp').textContent = total > 0 ? `${temp} °C` : '— °C';
-    if ($('#gpuUtil')) $('#gpuUtil').textContent = total > 0 ? `GPU ${gpu.util_pct}%` : (target ? ((target.node_name || target.name) + ' · ' + (target.up ? '在线' : '离线')) : 'GPU —%');
+    if ($('#gpuTemp')) $('#gpuTemp').textContent = '';
+    if ($('#gpuUtil')) $('#gpuUtil').textContent = '';
     if ($('#vramSegments') && !$('#vramSegments').dataset.done) {
       [25, 50, 75].forEach((pct) => {
         const seg = document.createElement('div');

@@ -64,6 +64,16 @@ def _http_post(url: str, data: dict) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            body = ""
+        detail = f"HTTP Error {e.code}: {e.reason}"
+        if body:
+            detail = f"{detail}; {body[:500]}"
+        raise RuntimeError(f"HTTP POST {url} 失败: {detail}") from e
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         raise RuntimeError(f"HTTP POST {url} 失败: {e}") from e
 
@@ -176,13 +186,16 @@ class WSTracker:
         self._prompt_id: str = ""
         self._completed_units: float = 0.0
         self._last_prog: int = 0
+        self._current_node_id: str = ""
         self._current_node_cls: str = ""
         self._sampler_cur: int = 0
         self._sampler_total: int = 0
+        self._completed_node_ids: set[str] = set()
         self._node_entered_at: dict[str, float] = {}  # weight=0 node → entry time
         self._start_time: float = 0.0
         self._cancelled: bool = False
         self._workflow_done: bool = False
+        self._last_pct: float = 0.0
 
     # ── 注入 ────────────────────────────────────────────────────────────
 
@@ -224,12 +237,15 @@ class WSTracker:
         self._prompt_id = ""
         self._completed_units = 0.0
         self._last_prog = 0
+        self._current_node_id = ""
         self._current_node_cls = ""
         self._sampler_cur = 0
         self._sampler_total = 0
+        self._completed_node_ids = set()
         self._node_entered_at = {}
         self._cancelled = False
         self._workflow_done = False
+        self._last_pct = 0.0
 
         total_units = self._step_info.total_units
         node_weights = self._step_info.node_weights
@@ -259,7 +275,7 @@ class WSTracker:
 
         # ── Phase 2: 提交 prompt ──────────────────────────────────────
         await self._report_progress({
-            "pct": 0, "message": "提交工作流...", "current_node": ""
+            "pct": 12, "message": "提交工作流...", "current_node": ""
         })
         try:
             resp = await asyncio.to_thread(
@@ -500,20 +516,21 @@ class WSTracker:
 
         nid = str(node_id)
         cls = self._node_types.get(nid, "")
+        self._current_node_id = nid
         self._current_node_cls = cls
         title = self._node_titles.get(nid, cls or nid)
         weight = node_weights.get(nid, 1.0)
         cum_pct = self._calc_pct()
         self._log("info", "node", f"[{cls}] {title} ({cum_pct:.0f}%)", self._job_id)
 
-        # 采样器/超分器：不在此加 weight（由 progress 事件逐 step 累加）
+        # 采样器/超分器：不在此加 weight（由 progress 事件逐 step 累加）。
+        # 普通节点也必须等 executed 事件才计入完成；否则 VAEDecode/SaveImage
+        # 一开始执行就会把整体进度推到 100%。
         if cls in NodeCategoryDict.SAMPLER or cls in NodeCategoryDict.UPSCALE:
             self._last_prog = 0
             self._sampler_cur = 0
             self._sampler_total = 0
-        elif weight > 0:
-            self._completed_units += weight
-        else:
+        elif weight <= 0:
             # weight=0 节点 → 记录进入时间，供时长推算
             self._node_entered_at[nid] = time.time()
 
@@ -540,7 +557,7 @@ class WSTracker:
         self._sampler_total = total
 
         if cur > self._last_prog:
-            node_id = str(data.get("node", "")) if data.get("node") is not None else ""
+            node_id = str(data.get("node", "")) if data.get("node") is not None else self._current_node_id
             weight = node_weights.get(node_id, 1.0)
             if weight > 0:
                 delta = (cur - self._last_prog) / total * weight
@@ -553,6 +570,7 @@ class WSTracker:
         # 更新 current_node_cls
         prog_node = data.get("node")
         if prog_node is not None:
+            self._current_node_id = str(prog_node)
             cls = self._node_types.get(str(prog_node), "")
             if cls:
                 self._current_node_cls = cls
@@ -574,10 +592,21 @@ class WSTracker:
         """
         enode = data.get("node")
         if enode is not None:
-            cls = self._node_types.get(str(enode), "")
+            node_id = str(enode)
+            cls = self._node_types.get(node_id, "")
             if cls:
+                self._current_node_id = node_id
                 self._current_node_cls = cls
-                self._log("info", "done", f"[{cls}] Completed", self._job_id)
+                if (
+                    node_id not in self._completed_node_ids
+                    and cls not in NodeCategoryDict.SAMPLER
+                    and cls not in NodeCategoryDict.UPSCALE
+                ):
+                    weight = self._step_info.node_weights.get(node_id, 1.0)
+                    if weight > 0:
+                        self._completed_units += weight
+                    self._completed_node_ids.add(node_id)
+                self._log("info", "done", f"[{cls}] Completed ({self._calc_pct():.0f}%)", self._job_id)
 
         pct = self._calc_pct()
         await self._report_progress({
@@ -643,8 +672,19 @@ class WSTracker:
         """
         total = self._step_info.total_units
         if total <= 0:
-            return 0.0
-        return min(100.0, self._completed_units / total * 100.0)
+            raw = 0.0
+        else:
+            raw = min(1.0, max(0.0, self._completed_units / total))
+        if self._workflow_done or raw >= 1.0:
+            pct = 100.0
+        else:
+            # Human-facing progress bands:
+            # 0-12% is queue/startup/prompt submission, 18-96% is actual ComfyUI work,
+            # and the remaining 4% is reserved for image download/storage.
+            pct = 18.0 + raw * 78.0
+            pct = min(96.0, pct)
+        self._last_pct = max(self._last_pct, pct)
+        return self._last_pct
 
     def _build_status_message(self, pct: float) -> str:
         """构造可读的状态消息。

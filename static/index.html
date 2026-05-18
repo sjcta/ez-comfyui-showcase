@@ -13,7 +13,7 @@ if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1779024300"></script>
+<script src="static/js/module_loader.js?v=1779031500"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -328,6 +328,7 @@ if (location.protocol === 'file:') {
       <div class="gf-segment" role="group" aria-label="图片归属筛选">
         <button class="gf-segment-btn active" type="button" data-owner-filter="all" onclick="CW.setHistoryOwnerFilter('all')">所有图片</button>
         <button class="gf-segment-btn" type="button" data-owner-filter="mine" onclick="CW.setHistoryOwnerFilter('mine')">我的图片</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="favorite" onclick="CW.setHistoryOwnerFilter('favorite')">我的收藏</button>
         <button class="gf-segment-btn" type="button" data-owner-filter="other" onclick="CW.setHistoryOwnerFilter('other')">其他</button>
       </div>
       <span class="gf-sep"></span>

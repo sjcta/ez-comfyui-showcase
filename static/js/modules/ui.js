@@ -64,23 +64,17 @@ function showToast(message, type) {
     danger: 'error',
     loading: 'generating'
   };
-  var resolvedType = aliases[type] || type;
-  var iconMap = {
-    info: 'info',
-    queued: 'clock-3',
-    generating: 'loader-circle',
-    done: 'check-circle-2',
-    warn: 'triangle-alert',
-    error: 'octagon-x'
-  };
-  var titleMap = {
-    info: '提示',
-    queued: '队列通知',
-    generating: '任务进度',
-    done: '操作完成',
-    warn: '注意',
-    error: '操作失败'
-  };
+	  var resolvedType = aliases[type] || type;
+		  var iconMap = {
+		    info: 'info',
+		    queued: 'clock',
+		    generating: 'loader',
+		    done: 'check-circle',
+		    favorite: 'heart',
+		    unfavorite: 'heart',
+		    warn: 'alert-triangle',
+		    error: 'x-circle'
+		  };
   // Dedup: remove existing toast with same message
   var existing = container.querySelectorAll('.toast');
   for (var ei = 0; ei < existing.length; ei++) {
@@ -90,13 +84,12 @@ function showToast(message, type) {
     }
   }
   var t = document.createElement('div');
-  t.className = 'toast toast-' + resolvedType;
-  t.innerHTML = ''
-    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon(iconMap[resolvedType] || 'bell', 16) : '') + '</span>'
-    + '<span class="toast-content">'
-    +   '<span class="toast-title">' + escH(titleMap[resolvedType] || titleMap.info) + '</span>'
-    +   '<span class="toast-message">' + escH(message) + '</span>'
-    + '</span>'
+	  t.className = 'toast toast-' + resolvedType;
+	  t.innerHTML = ''
+	    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon(iconMap[resolvedType] || 'bell', 16) : '') + '</span>'
+	    + '<span class="toast-content">'
+	    +   '<span class="toast-message">' + escH(message) + '</span>'
+	    + '</span>'
     + '<button class="toast-close" type="button" title="关闭">×</button>';
   var closeBtn = t.querySelector('.toast-close');
   if (closeBtn) closeBtn.addEventListener('click', function () {
