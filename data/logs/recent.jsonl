@@ -231,3 +231,5 @@
 {"ts": 1779209098.386227, "level": "info", "phase": "实例", "msg": "[DGX Spark] A stoped", "job_id": "", "details": "stop"}
 {"ts": 1779209158.3884742, "level": "warn", "phase": "空闲回收", "msg": "Stopping idle A (964s idle)", "job_id": "", "details": ""}
 {"ts": 1779209158.689815, "level": "info", "phase": "实例", "msg": "[DGX Spark] A stoped", "job_id": "", "details": "stop"}
+{"ts": 1779209218.6915321, "level": "warn", "phase": "空闲回收", "msg": "Stopping idle A (1025s idle)", "job_id": "", "details": ""}
+{"ts": 1779209218.967633, "level": "info", "phase": "实例", "msg": "[DGX Spark] A stoped", "job_id": "", "details": "stop"}
