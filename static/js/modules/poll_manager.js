@@ -149,13 +149,14 @@
         if (window.CW.toast) {
           var toastTypes = { queued: 'queued', generating: 'generating', downloading: 'queued', done: 'done', error: 'error' };
           var tType = toastTypes[job.status] || 'info';
-          window.CW.toast(shortId + ' ' + typeLabel + ' ' + (job.status === 'downloading' ? '拉取图片' : (job.status === 'queued' ? '排队中' : (job.status === 'generating' ? '出图中' : (job.status === 'done' ? '完成' : (job.status === 'error' ? '失败' : job.status))))), tType);
+          window.CW.toast(shortId + ' ' + typeLabel + ' ' + (job.status === 'downloading' ? '拉取图片' : (job.status === 'queued' ? '排队中' : (job.status === 'generating' ? '出图中' : (job.status === 'done' ? '结束出图' : (job.status === 'error' ? '失败' : job.status))))), tType);
         }
       } catch (e) {}
     }
 
     // Update job store
     jobs[job.id] = job;
+    if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
 
     // ── Done: immediate image swap + background history refresh ──
     if (job.status === 'done' && job.image) {

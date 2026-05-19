@@ -24,10 +24,11 @@ from typing import Any, Awaitable, Callable
 
 from modules.instance_manager import InstanceManager
 from modules.instance_picker import pick_best_instance
+from modules.prompt_labels import infer_generation_label
 from modules.step_calculator import StepCalculator
 from modules.comfyui_upload import ensure_workflow_images_available
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
-from modules.ws_tracker import WSTracker, TrackResult
+from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout
 
 
 def _friendly_generation_error(err: Exception) -> str:
@@ -141,6 +142,7 @@ class JobRunner:
         # ── 运行态 ──────────────────────────────────────────────────
         self._running_jobs: dict[str, asyncio.Task] = {}
         self._step_calculator = StepCalculator()
+        self._submit_retry_limit = 3
 
     # ── 主入口 ─────────────────────────────────────────────────────────
 
@@ -199,6 +201,12 @@ class JobRunner:
             if not instances:
                 # 降级：从 inst_mgr 获取
                 pass
+            failed_instances = set(self._jobs[job_id].get("failed_instances", []))
+            if failed_instances and len(failed_instances) < len(instances):
+                instances = [
+                    inst for inst in instances
+                    if inst.get("name") not in failed_instances
+                ]
             if preferred_node_id:
                 instances = [inst for inst in instances if inst.get("_node_id") == preferred_node_id]
             if preferred_instance:
@@ -215,10 +223,10 @@ class JobRunner:
                 return ""
 
             def _health_check(inst: dict) -> bool:
-                try:
-                    return self._comfyui_up(inst.get("url", ""))
-                except Exception:
-                    return True  # 乐观假设
+                # A stopped instance is still a valid candidate: the next phase
+                # is responsible for cold-starting it and reporting real startup
+                # failures. Filtering here would skip cold start entirely.
+                return True
 
             def _queue_size(inst: dict) -> int:
                 try:
@@ -231,6 +239,25 @@ class JobRunner:
                 except Exception:
                     return 999
 
+            def _local_queue_size(inst: dict) -> int:
+                name = inst.get("name", "")
+                if not name:
+                    return 0
+                active_status = {"dispatching", "queued", "starting_comfyui", "preparing", "generating", "downloading"}
+                return sum(
+                    1
+                    for jid, job in self._jobs.items()
+                    if jid != job_id
+                    and job.get("instance") == name
+                    and job.get("status") in active_status
+                )
+
+            def _combined_queue_size(inst: dict) -> int:
+                remote = _queue_size(inst)
+                if remote >= 999:
+                    return remote
+                return remote + _local_queue_size(inst)
+
             def _group_getter(inst_name: str) -> str:
                 return self._instance_group.get(inst_name, "")
 
@@ -240,12 +267,16 @@ class JobRunner:
                     workflow_name=workflow_name,
                     affinity_getter=_affinity_getter,
                     health_check=_health_check,
-                    queue_size_getter=_queue_size,
+                    queue_size_getter=_combined_queue_size,
                     group_getter=_group_getter,
                 )
 
             if not instance:
                 raise RuntimeError("没有可用实例")
+
+            self._jobs[job_id]["instance"] = instance["name"]
+            self._jobs[job_id]["target_node_id"] = instance.get("_node_id", "")
+            self._jobs[job_id]["target_url"] = instance.get("url", "")
 
             # ── 获取实例信号量 ─────────────────────────────────────
             inst_sem_key = instance.get("name") or instance.get("id", "")
@@ -414,6 +445,35 @@ class JobRunner:
                 prompt_id = result.prompt_id
                 if prompt_id:
                     self._jobs[job_id]["prompt_id"] = prompt_id
+            except PromptStartTimeout as stalled:
+                prompt_id = stalled.prompt_id
+                attempt_count = int(self._jobs[job_id].get("submit_retry_count", 0)) + 1
+                self._jobs[job_id]["submit_retry_count"] = attempt_count
+                failed = list(dict.fromkeys(
+                    list(self._jobs[job_id].get("failed_instances", [])) +
+                    [instance["name"]]
+                ))
+                self._jobs[job_id]["failed_instances"] = failed
+                self._jobs[job_id]["ws_error"] = str(stalled)[:300]
+                self._jobs[job_id]["message"] = (
+                    f"实例 {instance['name']} 提交后无响应，自动纠错 {attempt_count}/{self._submit_retry_limit}..."
+                )
+                self._jobs[job_id]["progress"] = {"pct": 12}
+                self._save_jobs()
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+                await self._recover_submit_stall(job_id, instance, prompt_id)
+                if inst_held and sem:
+                    self._jobs[job_id]["sem_acquired"] = False
+                    sem.release()
+                    inst_held = False
+                if attempt_count < self._submit_retry_limit:
+                    await self.run(
+                        job_id, workflow_path, field_values, seed, vllm_was_running,
+                        img_width, img_height, user_id=user_id,
+                        preferred_instance="", preferred_node_id=preferred_node_id,
+                    )
+                    return
+                raise TimeoutError("提交工作流多次无响应，实例容器或设备可能异常")
             except Exception as _ws_err:
                 self._add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
                 self._jobs[job_id]["ws_error"] = str(_ws_err)[:300]
@@ -511,6 +571,59 @@ class JobRunner:
             if vllm_was_running:
                 self._start_vllm()
 
+    async def _recover_submit_stall(self, job_id: str, instance: dict, prompt_id: str) -> None:
+        """Try to clean up a prompt that was accepted but never began execution."""
+        inst_name = instance.get("name", "")
+        inst_url = instance.get("url", "").rstrip("/")
+        self._add_log(
+            "warn", "stuck",
+            f"实例 {inst_name} 提交后无执行事件，正在自动纠错",
+            job_id,
+        )
+
+        def _post(path: str, payload: dict) -> None:
+            if not inst_url:
+                return
+            req = urllib.request.Request(
+                f"{inst_url}{path}",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+
+        if prompt_id:
+            try:
+                await asyncio.to_thread(_post, "/queue", {"delete": [prompt_id]})
+            except Exception as e:
+                self._add_log("warn", "stuck", f"清理队列失败: {e}", job_id)
+
+        try:
+            await asyncio.to_thread(_post, "/interrupt", {})
+        except Exception:
+            pass
+
+        node = self._get_node_by_id(instance.get("_node_id", ""))
+        if node:
+            try:
+                restarted = await asyncio.to_thread(
+                    self._run_instance_action, node, instance, "restart"
+                )
+                if restarted:
+                    self._add_log("warn", "stuck", f"已重启实例 {inst_name}", job_id)
+                    for _ in range(60):
+                        await asyncio.sleep(2)
+                        try:
+                            if self._comfyui_up(instance["url"]):
+                                return
+                        except Exception:
+                            pass
+                else:
+                    self._add_log("warn", "stuck", f"实例 {inst_name} 重启命令失败", job_id)
+            except Exception as e:
+                self._add_log("warn", "stuck", f"实例 {inst_name} 重启异常: {e}", job_id)
+
     # ── 取消 ────────────────────────────────────────────────────────────
 
     async def cancel(self, job_id: str) -> bool:
@@ -592,11 +705,7 @@ class JobRunner:
 
         new_id = f"job_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
 
-        prompt_preview = ""
-        for k, v in fields.items():
-            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_preview = str(v)[:200]
-                break
+        prompt_preview = infer_generation_label(wf, fields)[:200]
 
         new_vllm_was = self._vllm_running()
 
@@ -718,11 +827,10 @@ class JobRunner:
 
         actual_w, actual_h = self._get_image_size(rel_path)
 
-        prompt_text = ""
-        for k, v in field_values.items():
-            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_text = str(v)
-                break
+        prompt_text = infer_generation_label(
+            os.path.basename(workflow_path),
+            field_values,
+        )
 
         record = {
             "id": job_id,
@@ -753,6 +861,7 @@ class JobRunner:
                 status="done",
                 message=f"完成 ({elapsed:.1f}s)",
                 image=rel_path,
+                thumb=record.get("thumb", ""),
                 elapsed=round(elapsed, 1),
                 progress={"pct": 100},
             )

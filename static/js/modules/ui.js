@@ -5,7 +5,18 @@
   'use strict';
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
-  var API = A.API, jobs = A.jobs;
+var API = A.API, jobs = A.jobs;
+
+function _ensureToastContainer() {
+  var container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  return container;
+}
 
 function initResizeHandle() {
     const handle = $('#resizeHandle');
@@ -49,14 +60,19 @@ function clearPrompt() {
   if (inp) { inp.value = ''; inp.dispatchEvent(new Event('input')); inp.focus(); }
 }
 
+function syncClearPromptButton() {
+  var inp = $('#promptInput');
+  var btn = $('#clearPromptBtn');
+  if (!btn) return;
+  var hasText = !!(inp && inp.value.trim());
+  btn.classList.remove('hidden');
+  btn.classList.toggle('is-invisible', !hasText);
+  var actions = btn.closest ? btn.closest('.prompt-actions') : null;
+  if (actions) actions.classList.toggle('has-content', hasText);
+}
+
 function showToast(message, type) {
-  var container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
-  }
+  var container = _ensureToastContainer();
   type = type || 'info';
   var aliases = {
     success: 'done',
@@ -205,4 +221,5 @@ function initAdvToggle() {
   window.CW.initResizeHandle = initResizeHandle;
   window.CW.initDragScroll = initDragScroll;
   window.CW.toast = showToast;
+  window.CW.syncClearPromptButton = syncClearPromptButton;
 })();

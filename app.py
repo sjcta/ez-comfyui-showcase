@@ -31,6 +31,7 @@ from modules.comfyui_upload import ensure_workflow_images_available
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner
+from modules.prompt_labels import infer_generation_label
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
@@ -219,9 +220,13 @@ def _friendly_generation_error(err: Exception) -> str:
 
 # ── Runtime connection state ──
 _connected_nodes: dict[str, bool] = {}  # node_id -> connected (default True if missing)
+ACTIVE_JOB_STATUSES = {"dispatching", "queued", "starting_comfyui", "preparing", "generating", "downloading"}
 
 def _is_node_connected(nid: str) -> bool:
     return _connected_nodes.get(nid, True)
+
+def _job_is_active_for_instance(job: dict, instance_name: str) -> bool:
+    return job.get("instance") == instance_name and job.get("status") in ACTIVE_JOB_STATUSES
 
 def _resolve_secret_value(value: str) -> str:
     """Resolve config secrets. Use env:NAME in JSON to avoid storing cleartext."""
@@ -441,8 +446,24 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         if preferred_instance:
             inst = next((item for item in candidate_instances if item.get("name") == preferred_instance), None)
         if not inst:
-            inst = await pick_best_instance(workflow_name)
+            inst = await mod_picker.pick_best_instance(
+                instances=candidate_instances,
+                workflow_name=workflow_name,
+                affinity_getter=lambda wf: (pick_affinity_instance(wf) or {}).get("name", ""),
+                health_check=lambda _inst: True,
+                queue_size_getter=lambda item: _get_instance_queue_size(item["url"]) + sum(
+                    1
+                    for jid, job in jobs.items()
+                    if jid != job_id
+                    and job.get("instance") == item.get("name")
+                    and job.get("status") in ACTIVE_JOB_STATUSES
+                ),
+                group_getter=lambda name: _instance_group.get(name, ""),
+            )
         sem = _instance_semas.get(inst["name"]) or _instance_semas.get(inst["id"]) or asyncio.Semaphore(1)
+        jobs[job_id]["instance"] = inst["name"]
+        jobs[job_id]["target_node_id"] = inst.get("_node_id", "")
+        jobs[job_id]["target_url"] = inst.get("url", "")
         jobs[job_id]["message"] = f"匹配实例 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -467,8 +488,6 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         jobs[job_id]["message"] = f"实例 {inst['name']} 就绪，开始出图"
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-        jobs[job_id]["instance"] = inst["name"]
-        await broadcast({"type": "job_update", "job": jobs[job_id]})
         _instance_group[inst["name"]] = extract_model_group(workflow_name)
 
         await generate_task(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, instance=inst)
@@ -684,11 +703,56 @@ JOBS_FILE    = os.environ.get("JOBS_FILE", os.path.join(_BASE, "data", "jobs.jso
 PORT = int(os.environ.get("EZ_COMFYUI_PORT", "9091"))
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
 
+
+def _safe_rel_path(base_dir: str, rel_path: str) -> str:
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    root = os.path.abspath(base_dir)
+    path = os.path.abspath(os.path.join(root, safe))
+    if os.path.commonpath([root, path]) != root:
+        raise HTTPException(400, "Invalid path")
+    return path
+
+
+def _workflow_thumbnail_rel(path: str) -> str:
+    root = os.path.abspath(WORKFLOW_DIR)
+    full = os.path.abspath(path)
+    if os.path.commonpath([root, full]) != root:
+        raise HTTPException(400, "Workflow thumbnail must live under workflow directory")
+    return os.path.relpath(full, root).replace("\\", "/")
+
+
+def _workflow_thumbnail_path(filename: str, entry: dict | None, ext: str) -> tuple[str, str]:
+    workflow_path = _resolve_workflow(filename, entry)
+    if not workflow_path:
+        workflow_path = os.path.join(WORKFLOW_DIR, filename)
+    workflow_dir = os.path.dirname(os.path.abspath(workflow_path))
+    thumb_name = os.path.splitext(os.path.basename(filename))[0] + ext
+    thumb_path = os.path.join(workflow_dir, thumb_name)
+    return thumb_path, _workflow_thumbnail_rel(thumb_path)
+
+
+def _candidate_generated_media_paths(rel_path: str) -> list[str]:
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    if not safe:
+        return []
+    return [_safe_rel_path(OUTPUT_DIR, safe)]
+
+
+def _image_media_type(path: str, default: str = "application/octet-stream") -> str:
+    ext = os.path.splitext(path)[1].lower()
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }.get(ext, default)
+
 # ── Generation SQLite Database ──
 GEN_DB = os.path.join(_BASE, "data", "generation.db")
 
-def _db_connect(path: str = GEN_DB) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+def _db_connect(path: str | None = None) -> sqlite3.Connection:
+    conn = sqlite3.connect(path or GEN_DB)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -765,6 +829,14 @@ def _init_gen_db():
         conn.execute("ALTER TABLE generations ADD COLUMN is_public INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    try:
+        conn.execute("ALTER TABLE generations ADD COLUMN deleted_at TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE generations ADD COLUMN deleted_by TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_meta (
             filename TEXT PRIMARY KEY,
@@ -793,10 +865,11 @@ def _init_gen_db():
     """)
     conn.commit()
     conn.close()
-    _migrate_wf_meta_json_to_db()
-    _migrate_wf_configs_to_db()
     # Initialize auth DB
     _init_auth_db()
+    _migrate_wf_meta_json_to_db()
+    _migrate_legacy_wf_thumbnails()
+    _migrate_wf_configs_to_db()
 
 
 def _init_auth_db():
@@ -842,6 +915,7 @@ def _init_auth_db():
 def _gen_db_to_record(row: dict) -> dict:
     """Transform a SQLite generations row to the JSON record format used by the frontend."""
     seed_val = str(row["seed"]) if row.get("seed") else ""
+    deleted_at = row.get("deleted_at", "") or ""
     params = {}
     if row.get("params"):
         try:
@@ -866,6 +940,10 @@ def _gen_db_to_record(row: dict) -> dict:
         "user_id": row.get("user_id", ""),
         "username": row.get("username", ""),
         "is_public": bool(row.get("is_public", 0)),
+        "is_deleted": bool(deleted_at),
+        "deleted_at": deleted_at,
+        "deleted_by": row.get("deleted_by", "") or "",
+        "sort_index": row.get("history_rowid", 0),
     }
 
 
@@ -913,6 +991,8 @@ def _workflow_primary_type(filename: str) -> str:
 def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
     """Insert a generation record into SQLite."""
     try:
+        if not record.get("thumb") and record.get("filename"):
+            record["thumb"] = make_thumbnail(record.get("filename", "")) or ""
         conn = sqlite3.connect(GEN_DB)
         conn.execute(
             """INSERT OR REPLACE INTO generations
@@ -1146,6 +1226,39 @@ def _migrate_wf_meta_json_to_db():
         conn.close()
 
 
+def _migrate_legacy_wf_thumbnails():
+    """Move old flat workflow thumbnails next to their workflow JSON files."""
+    if not os.path.isdir(WF_THUMB_DIR):
+        return
+    meta = _load_wf_meta()
+    changed = False
+    for fname, entry in list(meta.items()):
+        thumb = str((entry or {}).get("thumbnail") or "")
+        if not thumb or "/" in thumb.replace("\\", "/"):
+            continue
+        src = os.path.join(WF_THUMB_DIR, thumb)
+        if not os.path.isfile(src):
+            continue
+        ext = os.path.splitext(thumb)[1].lower() or ".jpg"
+        entry = _normalize_wf_meta_entry(fname, entry)
+        try:
+            dest, rel = _workflow_thumbnail_path(fname, entry, ext)
+        except HTTPException as e:
+            add_log("warn", "wf_thumb", f"Failed to migrate {thumb}: {e.detail}")
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if os.path.abspath(dest) != os.path.abspath(src):
+            if os.path.isfile(dest):
+                os.remove(src)
+            else:
+                shutil.move(src, dest)
+        entry["thumbnail"] = rel
+        _write_wf_meta_entry_to_db(fname, entry)
+        changed = True
+    if changed:
+        _export_wf_meta_json_from_db()
+
+
 def _delete_wf_meta_entry(filename: str):
     conn = _db_connect()
     try:
@@ -1288,7 +1401,7 @@ async def _idle_instance_watcher():
             last = _instance_last_active.get(name, 0)
             if last == 0:
                 continue
-            active_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("generating", "dispatching", "preparing", "queued")]
+            active_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
             if active_jobs:
                 continue
             if now - last > IDLE_TIMEOUT:
@@ -1806,53 +1919,14 @@ async def pick_best_instance(workflow_name: str = "") -> dict:
     instances = _get_enabled_instances()
     if not instances:
         raise RuntimeError("No enabled instances available")
-
-    # Phase 0: T2I → A, I2I → B. The selected instance is cold-started later.
-    if workflow_name:
-        lower = workflow_name.lower()
-        inst_a = next((i for i in instances if i["name"] == "A"), None)
-        inst_b = next((i for i in instances if i["name"] == "B"), None)
-        if lower.startswith("t2i") or "_t2i" in lower or "-t2i" in lower:
-            if inst_a:
-                return inst_a
-        if lower.startswith("i2i") or "_i2i" in lower or "-i2i" in lower:
-            if inst_b:
-                return inst_b
-
-    # Phase 1: try workflow affinity
-    if workflow_name:
-        affinity = pick_affinity_instance(workflow_name)
-        if affinity:
-            return affinity
-
-    # Phase 2: prefer idle instance with same or no model group
-    wf_group = extract_model_group(workflow_name) if workflow_name else ""
-    sizes = await asyncio.gather(*[asyncio.to_thread(_get_instance_queue_size, inst["url"]) for inst in instances])
-
-    # Best: idle instance with matching group
-    for inst, sz in zip(instances, sizes):
-        if sz == 0 and _instance_group.get(inst["name"]) == wf_group:
-            return inst
-    # Good: idle instance with no loaded group
-    for inst, sz in zip(instances, sizes):
-        if sz == 0 and not _instance_group.get(inst["name"]):
-            return inst
-
-    # Phase 3: shortest queue
-    best, best_load = None, 999
-    for inst, load in zip(instances, sizes):
-        if load >= best_load:
-            continue
-        ig = _instance_group.get(inst["name"], "")
-        if ig in (wf_group, ""):
-            best, best_load = inst, load
-    if not best:
-        for inst, load in zip(instances, sizes):
-            if load < best_load:
-                best, best_load = inst, load
-    chosen = best or instances[0]
-
-    return chosen
+    return await mod_picker.pick_best_instance(
+        instances=instances,
+        workflow_name=workflow_name,
+        affinity_getter=lambda wf: (pick_affinity_instance(wf) or {}).get("name", ""),
+        health_check=lambda _inst: True,
+        queue_size_getter=lambda inst: _get_instance_queue_size(inst["url"]),
+        group_getter=lambda name: _instance_group.get(name, ""),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2637,11 +2711,11 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         rel_path = f"{subdir}/{hist_name}"
         actual_w, actual_h = get_image_size(rel_path)
 
-        prompt_text = ""
-        for k, v in field_values.items():
-            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_text = str(v)
-                break
+        prompt_text = infer_generation_label(
+            os.path.basename(workflow_path),
+            field_values,
+            _workflow_primary_type(os.path.basename(workflow_path)),
+        )
 
         thumb_rel = make_thumbnail(rel_path) or ""
         record = {
@@ -2666,7 +2740,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         jobs[job_id].update(
             status="done", message=f"完成 ({elapsed:.1f}s)",
-            image=rel_path, elapsed=round(elapsed, 1),
+            image=rel_path, thumb=thumb_rel, elapsed=round(elapsed, 1),
         )
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -2711,8 +2785,45 @@ def load_jobs():
 # ══════════════════════════════════════════════════════════════════════════
 
 HISTORY_FILE = os.path.join(HISTORY_DIR, "history.json")
-THUMB_DIR = os.path.join(HISTORY_DIR, "thumbs")
 THUMB_SIZE = 400
+
+
+def _project_ffmpeg_bin() -> str | None:
+    """Return an explicitly configured or project-local ffmpeg binary."""
+    configured = os.environ.get("EZ_COMFYUI_FFMPEG", "")
+    candidates = [
+        configured,
+        os.path.join(_BASE, ".venv", "bin", "ffmpeg"),
+        os.path.join(_BASE, "bin", "ffmpeg"),
+        os.path.join(_BASE, "tools", "ffmpeg", "ffmpeg"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _make_thumbnail_with_pillow(src: str, thumb_path: str) -> bool:
+    """Create a thumbnail using the project Python environment."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(src) as img:
+            img = ImageOps.exif_transpose(img)
+            img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
+            if img.mode not in ("RGB", "L"):
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                if "A" in img.getbands():
+                    background.paste(img, mask=img.getchannel("A"))
+                else:
+                    background.paste(img)
+                img = background
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(thumb_path, "JPEG", quality=82, optimize=True)
+        return os.path.isfile(thumb_path)
+    except Exception as e:
+        add_log("warn", "thumbnail", f"pillow thumbnail failed: {e}", os.path.basename(src))
+        return False
 
 
 def make_thumbnail(rel_path: str) -> str | None:
@@ -2729,16 +2840,25 @@ def make_thumbnail(rel_path: str) -> str | None:
     if os.path.isfile(thumb_path):
         return thumb_rel
     os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    if _make_thumbnail_with_pillow(src, thumb_path):
+        return thumb_rel
+    ffmpeg = _project_ffmpeg_bin()
+    if not ffmpeg:
+        add_log("warn", "thumbnail", "project ffmpeg not configured; thumbnail skipped", rel_path)
+        return None
     try:
-        subprocess.run([
-            "ffmpeg", "-y", "-i", src,
+        result = subprocess.run([
+            ffmpeg, "-y", "-i", src,
             "-vf", f"scale=w={THUMB_SIZE}:h={THUMB_SIZE}:force_original_aspect_ratio=decrease",
+            "-frames:v", "1",
             "-q:v", "3", thumb_path
         ], capture_output=True, timeout=10)
         if os.path.isfile(thumb_path):
             return thumb_rel
-    except Exception:
-        pass
+        stderr = (result.stderr or b"").decode("utf-8", "ignore").strip()
+        add_log("warn", "thumbnail", f"thumbnail failed ({result.returncode}): {stderr[-300:]}", rel_path)
+    except Exception as e:
+        add_log("warn", "thumbnail", f"thumbnail failed: {e}", rel_path)
     return None
 
 def get_image_size(rel_path: str) -> tuple[int, int]:
@@ -2959,11 +3079,11 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
-        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
-        queue_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching")])
-        queue_pending = len([j for j in inst_jobs if j["status"] == "preparing"])
+        inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
+        queue_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
+        queue_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
         grp = _instance_group.get(name, "")
-        current_job = next((j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("generating", "dispatching", "preparing")), None)
+        current_job = next((j for j in jobs.values() if _job_is_active_for_instance(j, name)), None)
         current_label = ""
         current_workflow = ""
         current_progress = 0
@@ -2976,7 +3096,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             prog = current_job.get("progress", {}) or {}
             current_progress = prog.get("pct", 0) if isinstance(prog, dict) else 0
         for j in jobs.values():
-            if j.get("instance") == name and j.get("status") in ("queued", "preparing"):
+            if j.get("instance") == name and j.get("status") in ("queued", "preparing", "starting_comfyui"):
                 wf = (j.get("workflow") or "").replace(".json", "")
                 if wf:
                     pending_workflows.append(wf)
@@ -3316,15 +3436,23 @@ async def api_upload_image(file: UploadFile = File(...), current_user: dict = De
 @app.get("/api/input-image/{filename:path}")
 def api_input_image(filename: str):
     safe = filename.replace("\\", "/").lstrip("/")
-    path = os.path.abspath(os.path.join(COMFYUI_INPUT, safe))
-    input_root = os.path.abspath(COMFYUI_INPUT)
-    if os.path.commonpath([input_root, path]) != input_root:
-        raise HTTPException(400, "Invalid image path")
-    if not os.path.isfile(path):
+    path = _resolve_input_image_path(safe)
+    if not path:
         raise HTTPException(404)
     ext = os.path.splitext(path)[1].lower()
     media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+def _resolve_input_image_path(filename: str) -> str:
+    safe = filename.replace("\\", "/").lstrip("/")
+    input_root = os.path.abspath(COMFYUI_INPUT)
+    path = os.path.abspath(os.path.join(input_root, safe))
+    if os.path.commonpath([input_root, path]) != input_root:
+        raise HTTPException(400, "Invalid image path")
+    if os.path.isfile(path):
+        return path
+    return ""
 
 
 # ── Workflow Metadata ─────────────────────────────────────────────────
@@ -3485,6 +3613,36 @@ def api_workflows_meta(current_user: dict | None = Depends(get_current_user_opti
     return result
 
 
+@app.post("/api/workflows/meta/sort")
+def api_sort_wf_meta(body: dict, current_user: dict = Depends(get_current_user)):
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Sort payload must be an object")
+    meta = _load_wf_meta()
+    seen = set()
+    for d in _get_workflow_dirs():
+        for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
+            seen.add(os.path.basename(f))
+    updates: list[tuple[str, int]] = []
+    for filename, order in body.items():
+        filename = os.path.basename(str(filename or ""))
+        if not filename or filename not in seen:
+            raise HTTPException(404, f"Workflow not found: {filename}")
+        entry = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+        if not _can_manage_workflow(filename, entry, current_user):
+            raise HTTPException(403, f"No permission for workflow: {filename}")
+        try:
+            updates.append((filename, int(order)))
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"Invalid sort order for workflow: {filename}")
+    for filename, order in updates:
+        entry = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+        entry["sort_order"] = order
+        meta[filename] = entry
+        _write_wf_meta_entry_to_db(filename, entry)
+    _export_wf_meta_json_from_db()
+    return {"ok": True, "meta": api_workflows_meta(current_user)}
+
+
 @app.put("/api/workflows/meta/{filename}")
 def api_update_wf_meta(filename: str, body: dict, current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
@@ -3524,29 +3682,34 @@ def api_delete_wf_meta(filename: str, current_user: dict = Depends(get_current_u
 
 @app.post("/api/workflows/meta/thumbnail")
 async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    os.makedirs(WF_THUMB_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename)[1] or ".jpg"
-    thumb_name = f"{os.path.splitext(filename)[0]}{ext}"
-    thumb_path = os.path.join(WF_THUMB_DIR, thumb_name)
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+        raise HTTPException(400, f"Unsupported image format: {ext}")
     content = await file.read()
-    with open(thumb_path, "wb") as f:
-        f.write(content)
+    if not content:
+        raise HTTPException(400, "Empty file")
     meta = _load_wf_meta()
     meta[filename] = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
     if not _can_manage_workflow(filename, meta[filename], current_user):
         raise HTTPException(403, "No permission for this workflow")
-    meta[filename]["thumbnail"] = thumb_name
+    thumb_path, rel_thumb = _workflow_thumbnail_path(filename, meta[filename], ext)
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    with open(thumb_path, "wb") as f:
+        f.write(content)
+    meta[filename]["thumbnail"] = rel_thumb
     _write_wf_meta_entry_to_db(filename, meta[filename])
     _export_wf_meta_json_from_db()
-    return {"ok": True, "thumbnail": thumb_name}
+    return {"ok": True, "thumbnail": rel_thumb}
 
 
-@app.get("/api/workflows/thumbnail/{name}")
+@app.get("/api/workflows/thumbnail/{name:path}")
 def api_get_wf_thumbnail(name: str):
-    path = os.path.join(WF_THUMB_DIR, name)
+    path = _safe_rel_path(WORKFLOW_DIR, name)
     if not os.path.isfile(path):
         raise HTTPException(404)
-    return FileResponse(path, media_type="image/jpeg")
+    ext = os.path.splitext(path)[1].lower()
+    media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
 
 
 @app.put("/api/workflows/{filename}/rename")
@@ -3621,13 +3784,8 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     except Exception as e:
         raise HTTPException(400, f"工作流校验失败: {e}") from e
 
-    prompt_preview = ""
-    for k, v in req.fields.items():
-        if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-            prompt_preview = str(v)[:200]
-            break
-
     workflow_type = _workflow_primary_type(req.workflow)
+    prompt_preview = infer_generation_label(req.workflow, req.fields, workflow_type)[:200]
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
         "workflow": req.workflow, "seed": str(seed),
@@ -3724,11 +3882,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     vllm_was = vllm_running()
 
-    prompt_preview = ""
-    for k, v in fields.items():
-        if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-            prompt_preview = str(v)[:200]
-            break
+    prompt_preview = infer_generation_label(wf, fields, _workflow_primary_type(wf))[:200]
 
     jobs[new_id] = {
         "id": new_id, "status": "queued", "message": "排队中...",
@@ -3760,7 +3914,17 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     uid = _user_id(current_user or {})
-    if current_user and scope == "mine":
+    trash_mode = scope == "trash"
+    if trash_mode and not current_user:
+        conn.close()
+        raise HTTPException(401, "Not authenticated")
+    if current_user and trash_mode and current_user.get("role") == "admin":
+        conditions = []
+        params = []
+    elif current_user and trash_mode:
+        conditions = ["user_id = ?"]
+        params = [uid]
+    elif current_user and scope == "mine":
         conditions = ["user_id = ?"]
         params = [uid]
     elif current_user and current_user.get("role") == "admin":
@@ -3779,15 +3943,30 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     if status:
         conditions.append("status = ?")
         params.append(status)
+    if trash_mode:
+        conditions.append("COALESCE(deleted_at, '') != ''")
+    else:
+        conditions.append("COALESCE(deleted_at, '') = ''")
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     rows = [
         dict(r) for r in conn.execute(
-            "SELECT * FROM generations" +
+            "SELECT generations.*, generations.rowid AS history_rowid FROM generations" +
             where_clause +
-            " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            " ORDER BY datetime(created_at) DESC, history_rowid DESC LIMIT ? OFFSET ?",
             params + [limit, offset],
         ).fetchall()
     ]
+    thumb_updates = []
+    for row in rows:
+        if row.get("thumb_path") or not row.get("image_path"):
+            continue
+        thumb = make_thumbnail(row.get("image_path", "")) or ""
+        if thumb:
+            row["thumb_path"] = thumb
+            thumb_updates.append((thumb, row.get("id", "")))
+    if thumb_updates:
+        conn.executemany("UPDATE generations SET thumb_path=? WHERE id=?", thumb_updates)
+        conn.commit()
     total = conn.execute(
         "SELECT COUNT(*) FROM generations" + where_clause,
         params,
@@ -3809,49 +3988,163 @@ def api_history_create(req: dict, current_user: dict = Depends(get_current_user)
 
 @app.delete("/api/history/{item_id}")
 def api_history_delete(item_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a generation record from SQLite and remove its image file."""
-    user_id = current_user.get("sub", "")
+    """Soft-delete a generation record while keeping image files untouched."""
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT image_path, user_id FROM generations WHERE id=?", (item_id,)).fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(404, "Record not found")
-    owner_id = row["user_id"] or ""
-    current_uid = user_id or ""
-    can_delete = _is_admin_user(current_user) or bool(owner_id and current_uid and owner_id == current_uid)
-    if not can_delete:
-        conn.close()
-        raise HTTPException(403, "无权删除他人的记录")
-    if row["image_path"]:
-        # Try HISTORY_DIR first, then OUTPUT_DIR
-        for img_dir in [HISTORY_DIR, OUTPUT_DIR]:
-            img_path = os.path.join(img_dir, row["image_path"])
-            if os.path.isfile(img_path):
-                os.remove(img_path)
-            thumb_path = os.path.join(img_dir, row["image_path"].rsplit(".", 1)[0] + "_thumb.jpg")
-            if os.path.isfile(thumb_path):
-                os.remove(thumb_path)
-    conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
+    _history_owner_check(conn, item_id, current_user, allow_deleted=True)
+    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "UPDATE generations SET deleted_at=?, deleted_by=? WHERE id=?",
+        (deleted_at, current_user.get("sub", ""), item_id),
+    )
     conn.commit()
     conn.close()
-    # Also clean up from in-memory JSON history
     global history
     item = next((h for h in history if h["id"] == item_id), None)
     if item:
-        history = [h for h in history if h["id"] != item_id]
+        item["is_deleted"] = True
+        item["deleted_at"] = deleted_at
+        item["deleted_by"] = current_user.get("sub", "")
         save_history()
-    return {"ok": True}
+    return {"ok": True, "deleted": True, "deleted_at": deleted_at}
 
 
-def _history_owner_check(conn, item_id: str, current_user: dict):
+def _history_owner_check(conn, item_id: str, current_user: dict, allow_deleted: bool = False):
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT id, image_path, thumb_path, user_id FROM generations WHERE id=?", (item_id,)).fetchone()
+    row = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at FROM generations WHERE id=?", (item_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Record not found")
     if current_user.get("role") != "admin" and row["user_id"] != current_user.get("sub"):
         raise HTTPException(403, "无权操作他人的记录")
+    if not allow_deleted and row["deleted_at"]:
+        raise HTTPException(404, "Record deleted")
     return row
+
+
+def _delete_history_files(row) -> None:
+    image_path = row["image_path"] if row and "image_path" in row.keys() else ""
+    thumb_path = row["thumb_path"] if row and "thumb_path" in row.keys() else ""
+    candidates = []
+    if image_path:
+        candidates.append(_safe_rel_path(OUTPUT_DIR, image_path))
+        thumb_guess = image_path.rsplit(".", 1)[0] + "_thumb.jpg"
+        candidates.append(_safe_rel_path(OUTPUT_DIR, thumb_guess))
+    if thumb_path:
+        candidates.append(_safe_rel_path(OUTPUT_DIR, thumb_path))
+    seen = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path):
+            os.remove(path)
+
+
+def _purge_history_record(conn, item_id: str, current_user: dict) -> bool:
+    row = _history_owner_check(conn, item_id, current_user, allow_deleted=True)
+    _delete_history_files(row)
+    conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
+    global history
+    history = [h for h in history if h.get("id") != item_id]
+    return True
+
+
+@app.post("/api/history/{item_id}/restore")
+def api_history_restore(item_id: str, current_user: dict = Depends(get_current_user)):
+    """Restore a soft-deleted generation record."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    _history_owner_check(conn, item_id, current_user, allow_deleted=True)
+    conn.execute("UPDATE generations SET deleted_at='', deleted_by='' WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+    item = next((h for h in history if h.get("id") == item_id), None)
+    if item:
+        item["is_deleted"] = False
+        item["deleted_at"] = ""
+        item["deleted_by"] = ""
+        save_history()
+    return {"ok": True, "restored": True}
+
+
+@app.post("/api/history/{item_id}/permanent-delete")
+def api_history_permanent_delete(item_id: str, current_user: dict = Depends(get_current_user)):
+    """Permanently delete a generation record and its files."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    _purge_history_record(conn, item_id, current_user)
+    conn.commit()
+    conn.close()
+    save_history()
+    return {"ok": True, "deleted": True}
+
+
+@app.post("/api/history/batch-restore")
+def api_history_batch_restore(body: dict, current_user: dict = Depends(get_current_user)):
+    ids = [str(x) for x in body.get("ids", []) if str(x)]
+    if not ids:
+        raise HTTPException(400, "ids required")
+    restored = 0
+    for item_id in ids:
+        try:
+            api_history_restore(item_id, current_user)
+            restored += 1
+        except HTTPException as e:
+            if e.status_code in (403, 404):
+                continue
+            raise
+    return {"ok": True, "restored": restored}
+
+
+@app.post("/api/history/batch-permanent-delete")
+def api_history_batch_permanent_delete(body: dict, current_user: dict = Depends(get_current_user)):
+    ids = [str(x) for x in body.get("ids", []) if str(x)]
+    if not ids:
+        raise HTTPException(400, "ids required")
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    deleted = 0
+    for item_id in ids:
+        try:
+            _purge_history_record(conn, item_id, current_user)
+            deleted += 1
+        except HTTPException as e:
+            if e.status_code in (403, 404):
+                continue
+            raise
+    conn.commit()
+    conn.close()
+    save_history()
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/history/trash/clear")
+def api_history_clear_trash(current_user: dict = Depends(get_current_user)):
+    """Permanently delete every deleted record the current user can manage."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    if current_user.get("role") == "admin":
+        rows = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at FROM generations WHERE COALESCE(deleted_at, '') != ''").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, image_path, thumb_path, user_id, deleted_at FROM generations WHERE user_id=? AND COALESCE(deleted_at, '') != ''",
+            (current_user.get("sub", ""),),
+        ).fetchall()
+    deleted_ids = []
+    for row in rows:
+        _delete_history_files(row)
+        deleted_ids.append(row["id"])
+    if deleted_ids:
+        placeholders = ",".join("?" for _ in deleted_ids)
+        conn.execute(f"DELETE FROM generations WHERE id IN ({placeholders})", deleted_ids)
+    conn.commit()
+    conn.close()
+    if deleted_ids:
+        global history
+        deleted_set = set(deleted_ids)
+        history = [h for h in history if h.get("id") not in deleted_set]
+        save_history()
+    return {"ok": True, "deleted": len(deleted_ids)}
 
 
 @app.post("/api/history/{item_id}/share")
@@ -3903,53 +4196,51 @@ def api_history_batch_download(body: dict, current_user: dict = Depends(get_curr
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for row in rows:
             rel = row["image_path"]
-            for base in (OUTPUT_DIR, HISTORY_DIR):
-                p = os.path.join(base, rel)
-                if os.path.isfile(p):
-                    zf.write(p, arcname=os.path.basename(rel))
-                    break
+            p = _safe_rel_path(OUTPUT_DIR, rel)
+            if os.path.isfile(p):
+                zf.write(p, arcname=os.path.basename(rel))
     return FileResponse(zip_path, media_type="application/zip", filename=zip_name)
 
 
 @app.delete("/api/history")
 def api_history_clear(current_user: dict = Depends(get_current_user)):
-    """Clear all generation records for the current user."""
+    """Move all generation records for the current user to trash."""
     user_id = current_user.get("sub", "")
+    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(GEN_DB)
-    conn.execute("DELETE FROM generations WHERE user_id=?", (user_id,))
+    conn.execute(
+        "UPDATE generations SET deleted_at=?, deleted_by=? WHERE user_id=? AND COALESCE(deleted_at, '') = ''",
+        (deleted_at, user_id, user_id),
+    )
     conn.commit()
     conn.close()
-    # Also clean in-memory JSON history
-    global history
-    history = [h for h in history if h.get("user_id") != user_id]
-    save_history()
-    return {"ok": True}
+    changed = False
+    for item in history:
+        if item.get("user_id") == user_id and not item.get("deleted_at"):
+            item["is_deleted"] = True
+            item["deleted_at"] = deleted_at
+            item["deleted_by"] = user_id
+            changed = True
+    if changed:
+        save_history()
+    return {"ok": True, "deleted": True, "deleted_at": deleted_at}
 
 
 @app.get("/api/images/{filename:path}")
 def api_image(filename: str):
     """Serve generated images."""
-    path = os.path.join(OUTPUT_DIR, filename)
+    path = _safe_rel_path(OUTPUT_DIR, filename)
     if os.path.isfile(path):
-        return FileResponse(path, media_type="image/png")
-    old = os.path.join(HISTORY_DIR, filename)
-    if os.path.isfile(old):
-        return FileResponse(old, media_type="image/png")
+        return FileResponse(path, media_type=_image_media_type(path, "image/png"))
     raise HTTPException(404)
 
 
 @app.get("/api/thumbs/{filename:path}")
 def api_thumb(filename: str):
     """Serve thumbnail images."""
-    path = os.path.join(OUTPUT_DIR, filename)
+    path = _safe_rel_path(OUTPUT_DIR, filename)
     if os.path.isfile(path):
-        return FileResponse(path, media_type="image/jpeg")
-    old_t = os.path.join(HISTORY_DIR, "thumbs", filename)
-    if os.path.isfile(old_t):
-        return FileResponse(old_t, media_type="image/jpeg")
-    old_o = os.path.join(HISTORY_DIR, "thumbs", filename.replace("_thumb.jpg", ".png"))
-    if os.path.isfile(old_o):
-        return FileResponse(old_o, media_type="image/png")
+        return FileResponse(path, media_type=_image_media_type(path, "image/jpeg"))
     raise HTTPException(404)
 
 

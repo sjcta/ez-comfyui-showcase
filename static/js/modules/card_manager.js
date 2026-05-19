@@ -24,7 +24,7 @@
   var _lastRenderedHistCount = 0;
   var _lastGalleryHash = '';
   var _filteredHistory = [];
-  var _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
+  var _galleryFilters = { owner: 'all', type: '', style: '' };
   var _renderTimer = null;
   var _cleanupTimer = null;
 
@@ -76,13 +76,28 @@
     return String((h && (h.id || h.filename || h.thumb)) || '');
   }
 
+  function _historyActionState(item) {
+    if (window.CW && CW.auth && typeof CW.auth.getHistoryActionState === 'function') {
+      return CW.auth.getHistoryActionState(item);
+    }
+    return {
+      hasUser: false,
+      canFavorite: false,
+      canShare: false,
+      canDelete: false,
+      isFavorited: false
+    };
+  }
+
   function _isHistoryFavorited(item) {
-    return !!(item && window.CW && CW.auth && typeof CW.auth.isHistoryFavorited === 'function' && CW.auth.isHistoryFavorited(item.id, item));
+    return !!_historyActionState(item).isFavorited;
   }
 
   function _favoriteBadgeHtml(item) {
-    var isFav = _isHistoryFavorited(item);
+    var actionState = _historyActionState(item);
+    var isFav = !!actionState.isFavorited;
     var id = item && item.id ? String(item.id) : '';
+    if (!actionState.canFavorite) return '';
     if (!id || !(window.CW && CW.auth && typeof CW.auth.toggleHistoryFavorite === 'function')) return '';
     return '<button class="gi-fav-btn' + (isFav ? ' is-active' : '') + '" type="button" title="' + (isFav ? '取消收藏' : '收藏') + '" aria-label="' + (isFav ? '取消收藏' : '收藏') + '" onclick="event.stopPropagation();CW.auth.toggleHistoryFavorite(\'' + escA(id) + '\')"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.2 10.7 20C5.8 15.6 2.5 12.6 2.5 8.8 2.5 5.8 4.8 3.5 7.8 3.5c1.7 0 3.3.8 4.2 2.1.9-1.3 2.5-2.1 4.2-2.1 3 0 5.3 2.3 5.3 5.3 0 3.8-3.3 6.8-8.2 11.2L12 21.2Z"/></svg></button>';
   }
@@ -99,7 +114,7 @@
   function _stableGalleryHTML(html) {
     return String(html || '')
       .replace(/\sdata-hist-idx="[^"]*"/g, '')
-      .replace(/CW\.fillFormFromHistory\(\d+\)/g, 'CW.fillFormFromHistory(#)')
+      .replace(/CW\.fillFormFromHistory\(\d+(?:,\s*'[^']*')?\)/g, 'CW.fillFormFromHistory(#)')
       .replace(/CW\.openLB\(\d+(, this)?\)/g, 'CW.openLB(#)');
   }
 
@@ -240,19 +255,22 @@
     var imgSrc = h.thumb ? API + '/api/thumbs/' + h.thumb : API + '/api/images/' + h.filename;
     var mainText1 = _historyItemType(h);
     var mainCls1 = _typeClass(mainText1, h.workflow);
+    var displayPrompt = _historyDisplayPrompt(h);
+    var sensitiveCls = _isSensitivePreview(h, displayPrompt) ? ' gi-sensitive' : '';
     var tagBadge = mainText1 ? '<div class="gi-type-badge ' + mainCls1 + '">' + mainText1 + '</div>' : '';
     var typeCls1 = mainCls1 ? 'gi-type-' + mainCls1.replace('wf-tag-', '') : '';
+    var histKey = _histKey(h);
 
-	    return '<div class="gi ' + typeCls1 + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(_histKey(h)) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ')">' +
-	      '<div class="gi-img" onclick="event.stopPropagation();CW.openLB(' + i + ', this)">' +
+		    return '<div class="gi ' + typeCls1 + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
+	      '<div class="gi-img' + sensitiveCls + '" onclick="event.stopPropagation();CW.openLB(' + i + ', this)">' +
 	      '<img src="' + imgSrc + '" loading="lazy" alt="">' +
 	      _favoriteBadgeHtml(h) +
 	      tagBadge +
 	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' : '') +
 	      '</div>' +
 	      '<div class="gi-info">' +
-	      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
-	      '<div class="gi-prompt" title="' + escA(h.prompt || '') + '">' + escH(h.prompt || '—') + '</div>' +
+		      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
+	      '<div class="gi-prompt" title="' + escA(displayPrompt) + '">' + escH(displayPrompt) + '</div>' +
       '<div class="gi-meta">' +
       '<span>' + (window.CW.icon ? CW.icon('clock') : '') + ' ' + _fmtTime(h.time) + '</span>' +
       '<div class="gi-meta-row">' +
@@ -329,34 +347,49 @@
    */
   CardManager.prototype.onJobDone = function (job) {
     if (!job.image) return;
+    if (window.CW.refreshWorkflowPreviewFromJob) window.CW.refreshWorkflowPreviewFromJob(job);
     var card = document.querySelector('[data-job-id="' + job.id + '"]');
     var cleanupDelay = 960;
     if (card) {
-      var imgDiv = card.querySelector('.gi-img');
-      if (imgDiv) {
-        var placeholderHtml = imgDiv.innerHTML;
-        imgDiv.className = 'gi-img job-complete-flip';
-        imgDiv.setAttribute('onclick', "event.stopPropagation();CW.openJobLB('" + escA(job.image) + "','" + escA(job.prompt_preview || '') + "', this)");
-        imgDiv.innerHTML =
-          '<div class="job-flip-scene">' +
-            '<div class="job-flip-face job-flip-front">' + placeholderHtml + '</div>' +
-            '<div class="job-flip-face job-flip-back">' +
-              '<img class="job-complete-img" src="' + API + '/api/images/' + job.image + '" loading="lazy" alt="">' +
-              '<div class="job-complete-wash"></div>' +
-            '</div>' +
-          '</div>';
-        card.className = 'gi job-card done completing flip-complete';
-        setTimeout(function() {
-          if (!imgDiv.parentNode) return;
-          imgDiv.className = 'gi-img';
-          imgDiv.innerHTML = '<img src="' + API + '/api/images/' + job.image + '" loading="lazy" alt="">';
-          card.classList.remove('completing', 'flip-complete');
-        }, cleanupDelay);
-      }
+      var frontHtml = card.innerHTML;
+      var wfTag = window.CW.getWFType ? window.CW.getWFType(job.workflow || '') : '';
+      var tagBadge = wfTag ? '<div class="gi-type-badge ' + wfTag.cls + '">' + wfTag.text + '</div>' : '';
+      var displayPrompt = job.prompt_preview || (job.workflow ? job.workflow.replace('.json', '') : '出图完成');
+      var completeHtml =
+        '<div class="gi-img" onclick="event.stopPropagation();CW.openJobLB(\'' + escA(job.image) + '\',\'' + escA(job.prompt_preview || '') + '\', this)">' +
+          '<img src="' + API + '/api/images/' + job.image + '" loading="lazy" alt="">' +
+          tagBadge +
+        '</div>' +
+        '<div class="gi-info">' +
+          '<div class="gi-prompt" title="' + escA(displayPrompt) + '">' + escH(displayPrompt) + '</div>' +
+          '<div class="gi-meta"><span>' + (window.CW.icon ? CW.icon('clock') : '') + ' 刚刚</span>' +
+            '<div class="gi-meta-row">' +
+              '<span>' + (window.CW.icon ? CW.icon('timer') : '') + ' ' + _fmtElapsed(job.elapsed || 0) + '</span>' +
+              '<span>' + (window.CW.icon ? CW.icon('ruler') : '') + ' ' + (job.width && job.height ? job.width + '×' + job.height : '—') + '</span>' +
+            '</div></div>' +
+          (job.seed ? '<div class="gi-seed">' + (window.CW.icon ? CW.icon('sprout') : '') + ' ' + escH(String(job.seed)) + '</div>' : '') +
+        '</div>';
+      card.className = 'gi job-card done completing flip-complete job-card-complete-flip';
+      card.innerHTML =
+        '<div class="job-card-flip-scene">' +
+          '<div class="job-card-flip-face job-card-flip-front">' + frontHtml + '</div>' +
+          '<div class="job-card-flip-face job-card-flip-back">' + completeHtml + '<div class="job-complete-wash"></div></div>' +
+        '</div>';
+      setTimeout(function() {
+        if (!card.parentNode) return;
+        card.classList.remove('completing', 'flip-complete', 'job-card-complete-flip');
+        card.innerHTML = completeHtml;
+      }, cleanupDelay);
     }
     setTimeout(function() {
       delete jobs[job.id];
-      if (window.CW.loadHistory) window.CW.loadHistory();
+      var historyPromise = window.CW.loadHistory ? window.CW.loadHistory() : null;
+      Promise.resolve(historyPromise).then(function() {
+        if (window.CW.loadWorkflows) return window.CW.loadWorkflows();
+        return null;
+      }).catch(function(e) {
+        console.warn('refresh workflow previews failed:', e && e.message ? e.message : e);
+      });
     }, cleanupDelay);
   };
 
@@ -419,12 +452,13 @@
       html += this._renderJobCard(jobCards[ci]);
     }
 
-    // ── History items (lazy loaded) ──
+    // ── History items ──
     var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     var histCountEl = $('#histCount');
     if (histCountEl) histCountEl.textContent = String(filteredArr.length) + ' / ' + String(historyItems.length);
     // Update lbItems for lightbox (used by history.js)
     if (window.__APP__) window.__APP__._lbItems = filteredArr;
+    _histVisibleCount = filteredArr.length;
     var visibleItems = filteredArr.slice(0, _histVisibleCount);
     for (var hi = 0; hi < visibleItems.length; hi++) {
       html += this._renderHistCard(visibleItems[hi], hi);
@@ -466,13 +500,7 @@
   }
 
   function _canDeleteHistoryItem(h) {
-    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
-      ? window.CW.auth.getCurrentUser()
-      : null;
-    if (user && user.role === 'admin') return true;
-    var uid = user && (user.sub || user.id);
-    var owner = h && h.user_id;
-    return !!(uid && owner && String(uid) === String(owner));
+    return !!_historyActionState(h).canDelete;
   }
 
   function _currentUserId() {
@@ -499,6 +527,36 @@
     var meta = (A._wfMeta || {})[workflow] || {};
     var tag = window.CW && CW.wfTag ? CW.wfTag(workflow, meta.tags) : null;
     return tag && tag.text ? tag.text : '';
+  }
+
+  function _historyDisplayPrompt(item) {
+    if (!item) return '—';
+    var text = item.prompt || item.prompt_preview || '';
+    if (text) return text;
+    if (_historyItemType(item) === '放大') {
+      var fields = item.field_values || {};
+      var resolution = 0;
+      Object.keys(fields).some(function(key) {
+        var field = String(key).split('::').pop();
+        if (field !== 'resolution' && field !== 'max_resolution') return false;
+        resolution = parseInt(fields[key], 10) || 0;
+        return true;
+      });
+      if (resolution >= 3840) return '4K 放大';
+      if (resolution >= 1920) return '2K 放大';
+      return resolution > 0 ? (resolution + 'P 放大') : '放大';
+    }
+    return '—';
+  }
+
+  function _isSensitivePreview(item, displayPrompt) {
+    var text = [
+      displayPrompt,
+      item && item.prompt,
+      item && item.prompt_preview
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (!text) return false;
+    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸露|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
   }
 
   function _syncOwnerFilterButtons() {
@@ -582,7 +640,6 @@
   function _hasActiveGalleryFilters() {
     return (_galleryFilters.owner && _galleryFilters.owner !== 'all') ||
       !!_galleryFilters.type ||
-      !!_galleryFilters.size ||
       !!_galleryFilters.style;
   }
 
@@ -663,18 +720,21 @@
     var imgSrc = h.thumb ? API + '/api/thumbs/' + h.thumb : API + '/api/images/' + h.filename;
     var mainText2 = _historyItemType(h);
     var mainCls2 = _typeClass(mainText2, h.workflow);
+    var displayPrompt = _historyDisplayPrompt(h);
+    var sensitiveCls = _isSensitivePreview(h, displayPrompt) ? ' gi-sensitive' : '';
     var tagBadge = mainText2 ? '<div class="gi-type-badge ' + mainCls2 + '">' + mainText2 + '</div>' : '';
     var typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
-    return '<div class="gi ' + typeCls2 + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(_histKey(h)) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ')">' +
-	      '<div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(' + i + ', this)">' +
+    var histKey = _histKey(h);
+    return '<div class="gi ' + typeCls2 + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
+	      '<div class="gi-img lazy-img' + sensitiveCls + '" onclick="event.stopPropagation();CW.openLB(' + i + ', this)">' +
 	      '<img src="' + imgSrc + '" loading="lazy" alt="">' +
 	      _favoriteBadgeHtml(h) +
 	      tagBadge +
 	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' : '') +
 	      '</div>' +
 	      '<div class="gi-info">' +
-	      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
-	      '<div class="gi-prompt" title="' + escA(h.prompt || '') + '">' + escH(h.prompt || '—') + '</div>' +
+	      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
+	      '<div class="gi-prompt" title="' + escA(displayPrompt) + '">' + escH(displayPrompt) + '</div>' +
       '<div class="gi-meta">' +
       '<span>' + (window.CW.icon ? CW.icon('clock') : '') + ' ' + _fmtTime(h.time) + '</span>' +
       '<div class="gi-meta-row">' +
@@ -742,14 +802,6 @@
       } catch (e) {}
     }
     _syncTypeFilterButtons();
-    var sizeSel = document.getElementById('gfSize');
-    if (sizeSel) {
-      sizeSel.innerHTML = '<option value="">全部尺寸</option>' +
-        '<option value="1K">1K (≤1024)</option>' +
-        '<option value="2K">2K (≤2048)</option>' +
-        '<option value="4K">4K (≤3840)</option>' +
-        '<option value="4K+">4K+ (>3840)</option>';
-    }
     var styleInput = document.getElementById('gfStyle');
     if (styleInput && styles.size > 0) {
       var dlId = 'styleDatalist';
@@ -776,15 +828,6 @@
       }
       if (_galleryFilters.type) {
         if (_historyItemType(j) !== _galleryFilters.type) return false;
-      }
-      if (_galleryFilters.size) {
-        var maxDim = Math.max(j.width || 0, j.height || 0);
-        var sizeLevel = '';
-        if (maxDim <= 1024) sizeLevel = '1K';
-        else if (maxDim <= 2048) sizeLevel = '2K';
-        else if (maxDim <= 3840) sizeLevel = '4K';
-        else sizeLevel = '4K+';
-        if (sizeLevel !== _galleryFilters.size) return false;
       }
       if (_galleryFilters.style) {
         var searchText = '';
@@ -813,8 +856,6 @@
     _syncOwnerFilterButtons();
     _syncTypeFilterButtons();
     var el;
-    el = document.getElementById('gfSize');
-    _galleryFilters.size = el ? el.value : '';
     el = document.getElementById('gfStyle');
     _galleryFilters.style = el ? el.value.toLowerCase() : '';
     _filteredHistory = this.filterHistory(historyItems);
@@ -825,12 +866,10 @@
   };
 
   CardManager.prototype.clearFilters = function () {
-    _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
+    _galleryFilters = { owner: 'all', type: '', style: '' };
     _syncOwnerFilterButtons();
     _syncTypeFilterButtons();
     var el;
-    el = document.getElementById('gfSize');
-    if (el) el.value = '';
     el = document.getElementById('gfStyle');
     if (el) el.value = '';
     _filteredHistory = this.filterHistory(historyItems);

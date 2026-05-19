@@ -99,6 +99,7 @@
     get: () => currentTargetNodeId,
     set: (v) => { currentTargetNodeId = v || ''; }
   });
+  window.__APP__.manualTargetInstance = false;
   console.log('[BOOT] defineProperties done');
 
   function shortSeed(s) {
@@ -161,7 +162,9 @@
     const totalPend = insts.reduce((s, i) => s + (i.queue_pending || 0), 0);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');
-    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off');
+    const runningInst = insts.find(function(i) { return i.up && (i.queue_running || 0) > 0; });
+    var runningPct = runningInst ? Math.max(0, Math.min(100, Math.round(Number(runningInst.progress || 0) || 0))) : 0;
+    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off') + (totalRun > 0 ? ' running' : totalPend > 0 ? ' pending' : '');
     if (comfyState) {
       var upCount = insts.filter(function (i) {
         return i.up;
@@ -173,7 +176,7 @@
         return i.up && i.queue_pending > 0;
       }).length;
       if (!anyUp) comfyState.textContent = '全部关闭';
-      else if (busyCount > 0) comfyState.textContent = '出图中(' + busyCount + '/' + upCount + ')';
+      else if (busyCount > 0) comfyState.textContent = '出图中 ' + runningPct + '%';
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
       else comfyState.textContent = '待机(' + upCount + ')';
     }
@@ -527,11 +530,12 @@
         if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + ' 排队中', 'queued');
         else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + ' 出图中', 'generating');
         else if (job.status === 'downloading') showToast(shortId + ' ' + typeLabel + ' 拉取图片', 'queued');
-        else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 完成', 'done');
+        else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 结束出图', 'done');
         else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + ' 失败', 'error');
       } catch(e) {}
     }
     jobs[job.id] = job;
+    if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
     // ── Done: immediate image swap + background history refresh ──
     if (job.status === 'done' && job.image) {
       if (!prev || prev.status !== 'done' || !prev.image) {
@@ -1023,6 +1027,7 @@ function init() {
   window.CW.refreshForAuthChange = function() {
     window.__APP__.currentTargetInstance = '';
     window.__APP__.currentTargetNodeId = '';
+    window.__APP__.manualTargetInstance = false;
     if (window.CW.loadWfMeta) window.CW.loadWfMeta();
     if (window.CW.loadWorkflows) window.CW.loadWorkflows();
     if (window.CW.loadHistory) window.CW.loadHistory();

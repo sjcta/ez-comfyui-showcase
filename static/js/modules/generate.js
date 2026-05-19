@@ -54,8 +54,44 @@ function scaleDim(w, h, maxSide = 1920) {
     return [Math.max(sw, 256), Math.max(sh, 256)];
   }
 
-async function fillFormFromHistory(idx) {
-    const h = historyItems[idx];
+function _quickGenerationLabel() {
+    var prompt = ($('#promptInput') || {}).value || '';
+    if (prompt.trim()) return prompt.slice(0, 300);
+    var meta = (A._wfMeta || {})[A.currentWF] || {};
+    var tags = meta.tags || [];
+    var typeTag = window.CW && CW.getWFType ? CW.getWFType(A.currentWF || '') : null;
+    var isUpscale = (typeTag && typeTag.text === '放大') || tags.indexOf('放大') >= 0 || /upscale|seedvr/i.test(A.currentWF || '');
+    if (!isUpscale) return '';
+    var resolution = 0;
+    var fields = A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      if (f.field === 'resolution') {
+        var el = document.querySelector('#advFields [data-key="' + f.key + '"]');
+        resolution = parseInt((el && el.value) || f.value || 0, 10) || 0;
+        break;
+      }
+    }
+    if (resolution >= 3840) return '4K 放大';
+    if (resolution >= 1920) return '2K 放大';
+    return resolution > 0 ? (resolution + 'P 放大') : '放大';
+  }
+
+  function _historyKey(item) {
+    return String((item && (item.id || item.filename || item.thumb)) || '');
+  }
+
+  function _historyItemByKey(key) {
+    key = String(key || '');
+    if (!key) return null;
+    for (var i = 0; i < historyItems.length; i++) {
+      if (_historyKey(historyItems[i]) === key) return historyItems[i];
+    }
+    return null;
+  }
+
+async function fillFormFromHistory(idx, key) {
+    const h = _historyItemByKey(key) || historyItems[idx];
     if (!h) return;
     if (!h.workflow) return;
     // Always find and switch to the correct workflow + tab
@@ -291,8 +327,8 @@ async function doGenerate() {
           fields,
           width: parseInt(($('#widthInput') || {}).value) || 0,
           height: parseInt(($('#heightInput') || {}).value) || 0,
-          preferred_instance: A.currentTargetInstance || '',
-          preferred_node_id: A.currentTargetNodeId || '',
+          preferred_instance: A.manualTargetInstance ? (A.currentTargetInstance || '') : '',
+          preferred_node_id: A.manualTargetInstance ? (A.currentTargetNodeId || '') : '',
         }),
       });
       const d = await r.json();
@@ -305,13 +341,19 @@ async function doGenerate() {
         message: '排队中...',
         workflow: A.currentWF,
         seed: String(d.seed),
-        prompt_preview: ($('#promptInput') || {}).value ? $('#promptInput').value.slice(0, 300) : '',
+        prompt_preview: _quickGenerationLabel(),
         width: parseInt(($('#widthInput') || {}).value) || 0,
         height: parseInt(($('#heightInput') || {}).value) || 0,
-        preferred_instance: A.currentTargetInstance || '',
-        preferred_node_id: A.currentTargetNodeId || '',
+        preferred_instance: A.manualTargetInstance ? (A.currentTargetInstance || '') : '',
+        preferred_node_id: A.manualTargetInstance ? (A.currentTargetNodeId || '') : '',
         queued_at: new Date().toLocaleTimeString('en-GB'),
       };
+      try {
+        var wfTag = window.CW && CW.getWFType ? CW.getWFType(A.currentWF) : null;
+        var typeLabel = wfTag ? wfTag.text : '';
+        var shortId = String(d.job_id || '').slice(-6);
+        if (window.CW && CW.toast) CW.toast((shortId ? shortId + ' ' : '') + typeLabel + ' 开始出图', 'generating');
+      } catch (e) {}
       // Trigger onJobUpdate to kick off active job polling
       window.CW.onJobUpdate(jobs[d.job_id]);
       window.CW.renderGallery();
@@ -338,7 +380,7 @@ function renderQuickForm(fields) {
     // Preserve prompt text across workflow switches
     var _savedPrompt = ($('#promptInput') || {}).value || '';
     var hasZones = fields.some(function(f) { return f.zone; });
-    var html = '', hasTextEncode = false, hasLoadImage = false;
+    var html = '', hasTextEncode = false, hasLoadImage = false, quickImageRendered = false;
     var hasLatentW = false, hasLatentH = false, latentW = 1024, latentH = 1024;
     for (var fi = 0; fi < fields.length; fi++) {
       var f = fields[fi], zone = f.zone || (hasZones ? 'hidden' : 'advanced');
@@ -353,14 +395,15 @@ function renderQuickForm(fields) {
       if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
-        html += '<div class="fg"><label>' + escH(labelText + nodeInfo) + '</label><div style="position:relative"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea><button id="clearPromptBtn" class="clear-btn" onclick="CW.clearPrompt()">清除文字</button></div></div>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label><div class="prompt-actions"><button id="clearPromptBtn" class="clear-btn is-invisible" type="button" onclick="CW.clearPrompt()">清除文字</button></div></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div></div>';
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
+        quickImageRendered = true;
         html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
       } else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'width') { hasLatentW = true; latentW = f.value || 1024; }
       else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'height') { hasLatentH = true; latentH = f.value || 1024; }
     }
-    if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage) {
+    if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage && !quickImageRendered) {
       html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
     }
     // Restore saved prompt text after DOM rebuild
@@ -370,7 +413,7 @@ function renderQuickForm(fields) {
     }
     if (hasLatentW || hasLatentH) {
       var sw = hasLatentW ? latentW : 1024, sh = hasLatentH ? latentH : 1024;
-      html += '<div class="fg" id="sizeSection"><label>Size</label><div class="ratio-grid" id="ratioGrid">';
+      html += '<div class="fg" id="sizeSection"><label>出图比例</label><div class="ratio-grid" id="ratioGrid">';
       var presets = [[1024,1024,'1:1','22px','22px'],[1536,1024,'3:2','26px','17px'],[1920,1080,'16:9','28px','16px'],[1536,1152,'4:3','24px','18px'],[1152,1536,'3:4','18px','24px'],[1024,1536,'2:3','16px','24px'],[1080,1920,'9:16','14px','24px']];
       for (var pi = 0; pi < presets.length; pi++) {
         var p = presets[pi];
@@ -385,6 +428,11 @@ function renderQuickForm(fields) {
     if (_savedPrompt) {
       var pi2 = $('#promptInput');
       if (pi2 && !pi2.value) pi2.value = _savedPrompt;
+    }
+    var promptInput = $('#promptInput');
+    if (promptInput && window.CW.syncClearPromptButton) {
+      promptInput.addEventListener('input', window.CW.syncClearPromptButton);
+      window.CW.syncClearPromptButton();
     }
     if (hasLoadImage) { _refImageInited = false; setTimeout(function() { _initRefImageZone(); }, 50); }
   }
@@ -485,8 +533,16 @@ function renderAdvFields(fields) {
 
 function toggleGenForm() {
     const form = $('#genForm');
+    if (!form) return;
+    const footer = $('.gen-footer');
     const btn = $('#genToggleMobile');
-    const open = form.classList.toggle('mobile-open');
+    const title = $('#genTitle');
+    const arrow = $('#genArrow');
+    const open = !form.classList.contains('mobile-open');
+    form.classList.toggle('mobile-open', open);
+    if (footer) footer.classList.toggle('mobile-open', open);
+    if (title) title.classList.toggle('is-open', open);
+    if (arrow) arrow.textContent = open ? '\u25B4' : '\u25BE';
     if (btn) btn.innerHTML = open ? CW.icon('zap') + ' 收起 \u25B4' : CW.icon('zap') + ' 快速出图 \u25BE';
   }
 

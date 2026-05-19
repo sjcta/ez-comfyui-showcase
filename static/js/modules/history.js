@@ -11,13 +11,16 @@
   var _lastRenderedHistCount = 0;
   var _lastGalleryHash = '';
   var _filteredHistory = [];
+  var _pinnedHistoryIds = [];
+  var _optimisticHistoryById = {};
   var lbIdx = -1;
   var lbItems = [];
-  var _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
+  var _galleryFilters = { owner: 'all', type: '', style: '' };
   var _renderTimer = null;
   var _lbLoadToken = 0;
   var _lbCurrentItem = null;
   var _lbFavorites = {};
+  var HISTORY_FETCH_LIMIT = 5000;
 
   function _lightboxImageUrl(filename) {
     return `${API}/api/images/${filename}`;
@@ -55,19 +58,20 @@
     _lbCurrentItem = item || null;
     var favBtn = $('#lbFavoriteBtn');
     var shareBtn = $('#lbShareBtn');
-    var canShare = !!(item && item.id);
-    var favKey = item && (item.id || item.filename || item.original || item.prompt);
-    var isFav = !!(item && _isHistoryFavorited(item)) || !!(favKey && _lbFavorites[favKey]);
+    var actionState = _historyActionState(item);
+    var isFav = !!(actionState && actionState.isFavorited);
     if (favBtn) {
+      favBtn.style.display = actionState.canFavorite ? '' : 'none';
       favBtn.classList.toggle('is-active', isFav);
-      favBtn.disabled = !item;
-      favBtn.classList.toggle('is-disabled', !item);
+      favBtn.disabled = !actionState.canFavorite;
+      favBtn.classList.toggle('is-disabled', !actionState.canFavorite);
       favBtn.title = isFav ? '取消收藏' : '收藏';
     }
     if (shareBtn) {
+      shareBtn.style.display = actionState.canShare ? '' : 'none';
       shareBtn.classList.toggle('is-shared', !!(item && item.is_public));
-      shareBtn.disabled = !canShare;
-      shareBtn.classList.toggle('is-disabled', !canShare);
+      shareBtn.disabled = !actionState.canShare;
+      shareBtn.classList.toggle('is-disabled', !actionState.canShare);
       shareBtn.title = item && item.is_public ? '取消分享' : '快速分享';
     }
   }
@@ -79,16 +83,31 @@
 
   function _isHistoryFavorited(item) {
     if (!item) return false;
-    if (window.CW && CW.auth && typeof CW.auth.isHistoryFavorited === 'function') {
-      return CW.auth.isHistoryFavorited(item.id, item);
+    if (window.CW && CW.auth && typeof CW.auth.getHistoryActionState === 'function') {
+      return !!CW.auth.getHistoryActionState(item).isFavorited;
     }
     var key = _historyFavoriteKey(item);
     return !!(key && _lbFavorites[key]);
   }
 
+  function _historyActionState(item) {
+    if (window.CW && CW.auth && typeof CW.auth.getHistoryActionState === 'function') {
+      return CW.auth.getHistoryActionState(item);
+    }
+    return {
+      hasUser: false,
+      canFavorite: false,
+      canShare: false,
+      canDelete: false,
+      isFavorited: false
+    };
+  }
+
   function _favoriteBadgeHtml(item) {
-    var isFav = _isHistoryFavorited(item);
+    var actionState = _historyActionState(item);
+    var isFav = !!actionState.isFavorited;
     var id = item && item.id ? String(item.id) : '';
+    if (!actionState.canFavorite) return '';
     if (!id || !(window.CW && CW.auth && typeof CW.auth.toggleHistoryFavorite === 'function')) return '';
     return '<button class="gi-fav-btn' + (isFav ? ' is-active' : '') + '" type="button" title="' + (isFav ? '取消收藏' : '收藏') + '" aria-label="' + (isFav ? '取消收藏' : '收藏') + '" onclick="event.stopPropagation();CW.auth.toggleHistoryFavorite(\'' + escA(id) + '\')"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.2 10.7 20C5.8 15.6 2.5 12.6 2.5 8.8 2.5 5.8 4.8 3.5 7.8 3.5c1.7 0 3.3.8 4.2 2.1.9-1.3 2.5-2.1 4.2-2.1 3 0 5.3 2.3 5.3 5.3 0 3.8-3.3 6.8-8.2 11.2L12 21.2Z"/></svg></button>';
   }
@@ -212,37 +231,77 @@ function _attachSentinel() {
     }
   }
 
+  function _refreshWorkflowPreviewFromJob(job) {
+    if (!job || !job.workflow || !job.image) return;
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    var currentUid = currentUser && (currentUser.sub || currentUser.id);
+    if (currentUser && job.user_id && String(job.user_id) !== String(currentUid || '')) return;
+    if (!currentUser && job.user_id) return;
+
+    var imgSrc = job.thumb ? (API + '/api/thumbs/' + job.thumb) : (API + '/api/images/' + job.image);
+    var cards = document.querySelectorAll('.wf-card[data-name]');
+    cards.forEach(function(card) {
+      if (card.getAttribute('data-name') !== job.workflow) return;
+      var preview = card.querySelector('.wf-card-preview');
+      if (!preview) return;
+      preview.innerHTML = '<img src="' + escA(imgSrc) + '" loading="lazy" alt="" draggable="false">';
+    });
+  }
+
+  function _refreshWorkflowCardsAfterJobDone(job) {
+    _refreshWorkflowPreviewFromJob(job);
+    if (window.CW && typeof CW.loadWorkflows === 'function') {
+      Promise.resolve(CW.loadWorkflows()).catch(function(e) {
+        console.warn('refresh workflow previews failed:', e && e.message ? e.message : e);
+      });
+    }
+  }
+
   function _onJobDone(job) {
     if (!job.image) return; // Wait for image to arrive
+    _refreshWorkflowPreviewFromJob(job);
     // Immediate visual: flip progress face into the completed image face.
     const card = document.querySelector(`[data-job-id="${job.id}"]`);
     var cleanupDelay = 960;
     if (card) {
-      const imgDiv = card.querySelector('.gi-img');
-      if (imgDiv) {
-        const placeholderHtml = imgDiv.innerHTML;
-        imgDiv.className = 'gi-img job-complete-flip';
-        imgDiv.setAttribute('onclick', `event.stopPropagation();CW.openJobLB('${escA(job.image)}','${escA(job.prompt_preview || '')}')`);
-        imgDiv.innerHTML =
-          `<div class="job-flip-scene">` +
-            `<div class="job-flip-face job-flip-front">${placeholderHtml}</div>` +
-            `<div class="job-flip-face job-flip-back">` +
-              `<img class="job-complete-img" src="${API}/api/images/${job.image}" loading="lazy" alt="">` +
-              `<div class="job-complete-wash"></div>` +
-            `</div>` +
-          `</div>`;
-        card.className = 'gi job-card done completing flip-complete';
-        setTimeout(function() {
-          if (!imgDiv.parentNode) return;
-          imgDiv.className = 'gi-img';
-          imgDiv.innerHTML = `<img src="${API}/api/images/${job.image}" loading="lazy" alt="">`;
-          card.classList.remove('completing', 'flip-complete');
-        }, cleanupDelay);
-      }
+      const frontHtml = card.innerHTML;
+      const wfTag = window.CW.getWFType ? window.CW.getWFType(job.workflow || '') : '';
+      const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
+      const displayPrompt = job.prompt_preview || (job.workflow ? job.workflow.replace('.json', '') : '出图完成');
+      const completeHtml =
+        `<div class="gi-img" onclick="event.stopPropagation();CW.openJobLB('${escA(job.image)}','${escA(job.prompt_preview || '')}', this)">` +
+          `<img src="${API}/api/images/${job.image}" loading="lazy" alt="">` +
+          tagBadge +
+        `</div>` +
+        `<div class="gi-info">` +
+          `<div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>` +
+          `<div class="gi-meta"><span>${CW.icon("clock")} 刚刚</span>` +
+            `<div class="gi-meta-row">` +
+              `<span>${CW.icon("timer")} ${_fmtElapsed(job.elapsed || 0)}</span>` +
+              `<span>${CW.icon("ruler")} ${job.width && job.height ? job.width + '×' + job.height : '—'}</span>` +
+            `</div></div>` +
+          (job.seed ? `<div class="gi-seed">${CW.icon("sprout")} ${escH(String(job.seed))}</div>` : '') +
+        `</div>`;
+      card.className = 'gi job-card done completing flip-complete job-card-complete-flip';
+      card.innerHTML =
+        `<div class="job-card-flip-scene">` +
+          `<div class="job-card-flip-face job-card-flip-front">${frontHtml}</div>` +
+          `<div class="job-card-flip-face job-card-flip-back">${completeHtml}<div class="job-complete-wash"></div></div>` +
+        `</div>`;
+      setTimeout(function() {
+        if (!card.parentNode) return;
+        card.classList.remove('completing', 'flip-complete', 'job-card-complete-flip');
+        card.innerHTML = completeHtml;
+      }, cleanupDelay);
     }
     setTimeout(function() {
+      _promoteCompletedJobToHistory(job);
       delete jobs[job.id];
-      window.CW.loadHistory();
+      renderGallery();
+      var historyPromise = window.CW.loadHistory ? window.CW.loadHistory() : null;
+      Promise.resolve(historyPromise).then(function() {
+        _refreshWorkflowCardsAfterJobDone(job);
+      });
     }, cleanupDelay);
   }
 
@@ -282,10 +341,10 @@ function _galleryChildKey(el) {
     return '';
   }
 
-function _stableGalleryHTML(html) {
+  function _stableGalleryHTML(html) {
     return String(html || '')
       .replace(/\sdata-hist-idx="[^"]*"/g, '')
-      .replace(/CW\.fillFormFromHistory\(\d+\)/g, 'CW.fillFormFromHistory(#)')
+      .replace(/CW\.fillFormFromHistory\(\d+(?:,\s*'[^']*')?\)/g, 'CW.fillFormFromHistory(#)')
       .replace(/CW\.openLB\(\d+\)/g, 'CW.openLB(#)');
   }
 
@@ -342,19 +401,22 @@ function _renderHistCard(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
     const mainText1 = _historyItemType(h);
     const mainCls1 = _typeClass(mainText1, h.workflow);
+    const displayPrompt = _historyDisplayPrompt(h);
+    const sensitiveCls = _isSensitivePreview(h, displayPrompt) ? ' gi-sensitive' : '';
     const tagBadge = mainText1 ? `<div class="gi-type-badge ${mainCls1}">${mainText1}</div>` : '';
     const typeCls1 = mainCls1 ? 'gi-type-' + mainCls1.replace('wf-tag-', '') : '';
+    const histKey = _histKey(h);
 
-	    return `<div class="gi ${typeCls1}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(_histKey(h))}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i})">
-	      <div class="gi-img" onclick="event.stopPropagation();CW.openLB(${i})">
+	    return `<div class="gi ${typeCls1}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
+	      <div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();CW.openLB(${i})">
 	        <img src="${imgSrc}" loading="lazy" alt="">
 	        ${_favoriteBadgeHtml(h)}
 	        ${tagBadge}
         ${canDelete ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>` : ''}
       </div>
       <div class="gi-info">
-        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>
-        <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
+	        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i}, '${escA(histKey)}')" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>
+        <div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>
         <div class="gi-meta">
           <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
           <div class="gi-meta-row">
@@ -375,13 +437,7 @@ function _isAdminHistoryView() {
   }
 
 function _canDeleteHistoryItem(h) {
-    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
-      ? window.CW.auth.getCurrentUser()
-      : null;
-    if (user && user.role === 'admin') return true;
-    var uid = user && (user.sub || user.id);
-    var owner = h && h.user_id;
-    return !!(uid && owner && String(uid) === String(owner));
+    return !!_historyActionState(h).canDelete;
   }
 
 function _currentUserId() {
@@ -408,6 +464,36 @@ function _historyItemType(item) {
     var meta = (A._wfMeta || {})[workflow] || {};
     var tag = window.CW && CW.wfTag ? CW.wfTag(workflow, meta.tags) : null;
     return tag && tag.text ? tag.text : '';
+  }
+
+function _historyDisplayPrompt(item) {
+    if (!item) return '—';
+    var text = item.prompt || item.prompt_preview || '';
+    if (text) return text;
+    if (_historyItemType(item) === '放大') {
+      var fields = item.field_values || {};
+      var resolution = 0;
+      Object.keys(fields).some(function(key) {
+        var field = String(key).split('::').pop();
+        if (field !== 'resolution' && field !== 'max_resolution') return false;
+        resolution = parseInt(fields[key], 10) || 0;
+        return true;
+      });
+      if (resolution >= 3840) return '4K 放大';
+      if (resolution >= 1920) return '2K 放大';
+      return resolution > 0 ? (resolution + 'P 放大') : '放大';
+    }
+    return '—';
+  }
+
+  function _isSensitivePreview(item, displayPrompt) {
+    var text = [
+      displayPrompt,
+      item && item.prompt,
+      item && item.prompt_preview
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (!text) return false;
+    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸露|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
   }
 
 function _syncOwnerFilterButtons() {
@@ -491,7 +577,6 @@ function setHistoryTypeFilter(value) {
   function _hasActiveGalleryFilters() {
     return (_galleryFilters.owner && _galleryFilters.owner !== 'all') ||
       !!_galleryFilters.type ||
-      !!_galleryFilters.size ||
       !!_galleryFilters.style;
   }
 
@@ -531,6 +616,89 @@ function setHistoryTypeFilter(value) {
     });
   }
 
+  function _historySortTimestamp(item) {
+    if (!item) return 0;
+    var raw = item.time || item.created_at || item.completed_at || '';
+    if (!raw) return 0;
+    if (typeof raw === 'number') return raw;
+    var parsed = Date.parse(raw);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  function _sortHistoryItems(items) {
+    return (items || []).slice().sort(function(a, b) {
+      var tsDiff = _historySortTimestamp(b) - _historySortTimestamp(a);
+      if (tsDiff !== 0) return tsDiff;
+      var sortDiff = Number(b && b.sort_index || 0) - Number(a && a.sort_index || 0);
+      if (sortDiff !== 0) return sortDiff;
+      return String(b && b.id || '').localeCompare(String(a && a.id || ''));
+    });
+  }
+
+  function _pinHistoryId(id) {
+    id = String(id || '');
+    if (!id) return;
+    _pinnedHistoryIds = _pinnedHistoryIds.filter(function(x) { return x !== id; });
+    _pinnedHistoryIds.unshift(id);
+    _pinnedHistoryIds = _pinnedHistoryIds.slice(0, 8);
+  }
+
+  function _applyPinnedHistoryOrder(items) {
+    var arr = (items || []).slice();
+    if (!_pinnedHistoryIds.length) return arr;
+    var found = new Set(arr.map(function(item) { return String(item && item.id || ''); }));
+    _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) { return found.has(id); });
+    if (!_pinnedHistoryIds.length) return arr;
+    var pinRank = {};
+    _pinnedHistoryIds.forEach(function(id, idx) { pinRank[id] = idx; });
+    return arr.sort(function(a, b) {
+      var aid = String(a && a.id || '');
+      var bid = String(b && b.id || '');
+      var ap = Object.prototype.hasOwnProperty.call(pinRank, aid);
+      var bp = Object.prototype.hasOwnProperty.call(pinRank, bid);
+      if (ap || bp) {
+        if (ap && bp) return pinRank[aid] - pinRank[bid];
+        return ap ? -1 : 1;
+      }
+      return 0;
+    });
+  }
+
+  function _historyRecordFromJob(job) {
+    return {
+      id: job.id,
+      filename: job.image || '',
+      thumb: job.thumb || '',
+      workflow: job.workflow || '',
+      workflow_type: job.workflow_type || _historyItemType(job),
+      prompt: job.prompt_preview || '',
+      prompt_preview: job.prompt_preview || '',
+      seed: job.seed || '',
+      width: job.width || 0,
+      height: job.height || 0,
+      elapsed: job.elapsed || 0,
+      time: new Date().toISOString(),
+      user_id: job.user_id || '',
+      is_public: false,
+      field_values: job.fields || {}
+    };
+  }
+
+  function _promoteCompletedJobToHistory(job) {
+    if (!job || !job.id || !job.image) return;
+    var existingIdx = historyItems.findIndex(function(item) { return item && item.id === job.id; });
+    var item = existingIdx >= 0 ? Object.assign({}, historyItems[existingIdx], _historyRecordFromJob(job)) : _historyRecordFromJob(job);
+    if (existingIdx >= 0) historyItems.splice(existingIdx, 1);
+    _pinHistoryId(job.id);
+    _optimisticHistoryById[job.id] = item;
+    historyItems.unshift(item);
+    historyItems.splice(0, historyItems.length, ..._applyPinnedHistoryOrder(_sortHistoryItems(historyItems)));
+    _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+    if (_histVisibleCount <= 0) _histVisibleCount = Math.min(_batchSize(), historyItems.length);
+    else _histVisibleCount = Math.min(Math.max(_histVisibleCount, 1), historyItems.length);
+    _lastGalleryHash = '';
+  }
+
 function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.length + " filtered=" + _filteredHistory.length + " count=" + _histVisibleCount + " batch=" + _batchSize());
     const gallery = $('#gallery');
 
@@ -551,19 +719,26 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
 
     var html = '';
 
-    // ── Render all cards via unified functions ──
-    for (const j of jobCards) {
-      html += _renderJobCard(j);
-    }
-
-    // ── History items (lazy loaded) ──
+    // ── History items ──
     const filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     var histCountEl = $('#histCount');
     if (histCountEl) histCountEl.textContent = String(filteredArr.length) + ' / ' + String(historyItems.length);
     lbItems = filteredArr;
-    if (_isAdminHistoryView()) _histVisibleCount = filteredArr.length;
+    _histVisibleCount = filteredArr.length;
     const visibleItems = filteredArr.slice(0, _histVisibleCount);
+    var pinnedVisibleCount = 0;
     for (let i = 0; i < visibleItems.length; i++) {
+      if (_pinnedHistoryIds.indexOf(String(visibleItems[i] && visibleItems[i].id || '')) < 0) break;
+      html += _renderHistCard(visibleItems[i], i);
+      pinnedVisibleCount++;
+    }
+
+    // ── Active jobs stay high, but never above the image that just finished.
+    for (const j of jobCards) {
+      html += _renderJobCard(j);
+    }
+
+    for (let i = pinnedVisibleCount; i < visibleItems.length; i++) {
       html += _renderHistCard(visibleItems[i], i);
     }
 
@@ -587,7 +762,10 @@ function _galleryHash(jobsObj, histArr) {
     for (const j of Object.values(jobsObj)) {
       s += j.id + j.status + '|';
     }
-    return s + '::' + histArr.length;
+    var histSig = (histArr || []).slice(0, Math.max(_histVisibleCount || 0, 24)).map(function(item) {
+      return String(item && item.id || '');
+    }).join('|');
+    return s + '::' + histArr.length + '::' + histSig + '::pin:' + _pinnedHistoryIds.join(',');
   }
 function _appendNewHistoryCards() {
     const gallery = $('#gallery');
@@ -637,18 +815,21 @@ function _histCardHTML(h, i) {
     const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
     const mainText2 = _historyItemType(h);
     const mainCls2 = _typeClass(mainText2, h.workflow);
+    const displayPrompt = _historyDisplayPrompt(h);
+    const sensitiveCls = _isSensitivePreview(h, displayPrompt) ? ' gi-sensitive' : '';
     const tagBadge = mainText2 ? `<div class="gi-type-badge ${mainCls2}">${mainText2}</div>` : '';
     const typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
-    return `<div class="gi ${typeCls2}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(_histKey(h))}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i})">
-    <div class="gi-img lazy-img" onclick="event.stopPropagation();CW.openLB(${i})">
+    const histKey = _histKey(h);
+    return `<div class="gi ${typeCls2}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
+    <div class="gi-img lazy-img${sensitiveCls}" onclick="event.stopPropagation();CW.openLB(${i})">
       <img src="${imgSrc}" loading="lazy" alt="">
       ${_favoriteBadgeHtml(h)}
       ${tagBadge}
       ${canDelete ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>` : ''}
     </div>
     <div class="gi-info">
-      ${canEdit ? `<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i})" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>` : ''}
-      <div class="gi-prompt" title="${escA(h.prompt || '')}">${escH(h.prompt || '—')}</div>
+      ${canEdit ? `<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i}, '${escA(histKey)}')" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>` : ''}
+      <div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>
       <div class="gi-meta">
         <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
         <div class="gi-meta-row">
@@ -677,14 +858,6 @@ function _populateFilterOptions() {
       } catch(e) {}
     }
     _syncTypeFilterButtons();
-    var sizeSel = document.getElementById("gfSize");
-    if(sizeSel) {
-      sizeSel.innerHTML = '<option value="">全部尺寸</option>' +
-        '<option value="1K">1K (≤1024)</option>' +
-        '<option value="2K">2K (≤2048)</option>' +
-        '<option value="4K">4K (≤3840)</option>' +
-        '<option value="4K+">4K+ (>3840)</option>';
-    }
     var styleInput = document.getElementById("gfStyle");
     if(styleInput && styles.size > 0) {
       var dlId = 'styleDatalist';
@@ -711,15 +884,6 @@ function _filterHistory(arr) {
       if(_galleryFilters.type) {
         if(_historyItemType(j) !== _galleryFilters.type) return false;
       }
-      if(_galleryFilters.size) {
-        var maxDim = Math.max(j.width || 0, j.height || 0);
-        var sizeLevel = '';
-        if(maxDim <= 1024) sizeLevel = '1K';
-        else if(maxDim <= 2048) sizeLevel = '2K';
-        else if(maxDim <= 3840) sizeLevel = '4K';
-        else sizeLevel = '4K+';
-        if(sizeLevel !== _galleryFilters.size) return false;
-      }
       if(_galleryFilters.style) {
         var searchText = '';
         searchText += (j.prompt_preview || '').toLowerCase() + ' ';
@@ -745,7 +909,7 @@ function _filterHistory(arr) {
 
   _filteredHistory = [];
 
-  _galleryFilters = { owner: 'all', type: '', size: '', style: '' };
+  _galleryFilters = { owner: 'all', type: '', style: '' };
 function _ensureInitialBatch() {
     if (_histVisibleCount > 0) return;
     var initialItems = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
@@ -950,6 +1114,7 @@ function openLB(idx, sourceEl) {
   }
 
 	  function toggleLBFavorite() {
+	    if (!_historyActionState(_lbCurrentItem).canFavorite) return;
 	    if (!_lbCurrentItem) return;
 	    var key = _lbCurrentItem.id || _lbCurrentItem.filename || _lbCurrentItem.original || _lbCurrentItem.prompt;
 	    if (!key) return;
@@ -966,6 +1131,7 @@ function openLB(idx, sourceEl) {
 	  }
 
   function toggleLBShare() {
+    if (!_historyActionState(_lbCurrentItem).canShare) return;
     if (!_lbCurrentItem || !_lbCurrentItem.id) {
       if (window.CW && CW.toast) CW.toast('当前图片暂不支持快速分享', 'info');
       return;
@@ -990,7 +1156,7 @@ async function delHist(id) {
       if (window.CW && CW.toast) CW.toast('只能删除自己生成的内容，管理员可删除全部历史', 'info');
       return;
     }
-    if (!confirm('确认删除这张图片？')) return;
+    if (!confirm('确认将这张图片移入回收站？')) return;
     // Mark card as deleting immediately
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
     if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
@@ -1002,6 +1168,7 @@ async function delHist(id) {
       if (idx >= 0) historyItems.splice(idx, 1);
       _filteredHistory = _filterHistory(historyItems);
       renderGallery();
+      if (window.CW && CW.toast) CW.toast('已移入回收站', 'done');
     } catch (e) {
       console.error('delHist:', e);
       if (card) { card.classList.remove('deleting'); card.style.opacity = ''; card.style.pointerEvents = ''; }
@@ -1015,21 +1182,29 @@ async function loadHistory() {
       var authHeaders = window.CW.auth.getAuthHeaders();
       const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
       const scope = user && user.role === 'admin' ? 'all' : 'gallery';
-      const r = await fetch(`${API}/api/history?scope=${scope}&limit=200`, { headers: Object.assign({}, authHeaders) });
+      const r = await fetch(`${API}/api/history?scope=${scope}&limit=${HISTORY_FETCH_LIMIT}`, { headers: Object.assign({}, authHeaders) });
       const d = await _historyJsonOrThrow(r, '加载历史');
       console.log('[HIST] loadHistory resp', r.status, d && d.total, d && d.data && d.data.length);
+      var nextItems = _sortHistoryItems(d.data || []);
+      var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
+      _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) {
+        if (serverIds.has(String(id))) return false;
+        if (_optimisticHistoryById[id]) {
+          nextItems.unshift(_optimisticHistoryById[id]);
+          return true;
+        }
+        return false;
+      });
       historyItems.length = 0;
-      Array.prototype.push.apply(historyItems, d.data);
+      Array.prototype.push.apply(historyItems, _applyPinnedHistoryOrder(nextItems));
       _lastGalleryHash = '';
       _populateFilterOptions();
       _syncOwnerFilterButtons();
       _syncTypeFilterButtons();
       var el;
-      el = document.getElementById("gfSize");
-      _galleryFilters.size = el ? el.value : "";
       el = document.getElementById("gfStyle");
       _galleryFilters.style = el ? el.value.toLowerCase() : "";
-      _filteredHistory = _filterHistory(historyItems);
+      _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
       var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
       _histVisibleCount = prevVisibleCount > 0
         ? Math.min(Math.max(prevVisibleCount, _lastRenderedHistCount || 0), filteredArr.length)
@@ -1045,8 +1220,6 @@ function applyFilters() {
     _syncOwnerFilterButtons();
     _syncTypeFilterButtons();
     var el;
-    el = document.getElementById("gfSize");
-    _galleryFilters.size = el ? el.value : "";
     el = document.getElementById("gfStyle");
     _galleryFilters.style = el ? el.value.toLowerCase() : "";
     _filteredHistory = _filterHistory(historyItems);
@@ -1057,12 +1230,10 @@ function applyFilters() {
   }
 
 function clearFilters() {
-    _galleryFilters = { owner: "all", type: "", size: "", style: "" };
+    _galleryFilters = { owner: "all", type: "", style: "" };
     _syncOwnerFilterButtons();
     _syncTypeFilterButtons();
     var el;
-    el = document.getElementById("gfSize");
-    if (el) el.value = "";
     el = document.getElementById("gfStyle");
     if (el) el.value = "";
     _filteredHistory = _filterHistory(historyItems);
@@ -1104,10 +1275,13 @@ function renderGallery() {
       var authHeaders = window.CW.auth.getAuthHeaders();
       const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
       const scope = user && user.role === 'admin' ? 'all' : 'gallery';
-      const r = await fetch(`${API}/api/history?scope=${scope}&limit=200`, { headers: Object.assign({}, authHeaders) });
+      const r = await fetch(`${API}/api/history?scope=${scope}&limit=${HISTORY_FETCH_LIMIT}`, { headers: Object.assign({}, authHeaders) });
       const d = await _historyJsonOrThrow(r, '加载历史');
+      var nextItems = _sortHistoryItems(d.data || []);
+      var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
+      _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) { return !serverIds.has(String(id)); });
       historyItems.length = 0;
-      Array.prototype.push.apply(historyItems, d.data);
+      Array.prototype.push.apply(historyItems, _applyPinnedHistoryOrder(nextItems));
     } catch (e) { console.error("loadHistoryNoRender:", e); }
   }
 	  window.CW.loadHistoryNoRender = loadHistoryNoRender;
@@ -1118,6 +1292,7 @@ function renderGallery() {
 	  };
   window.CW._renderJobCard = _renderJobCard;
   window.CW._patchJobCard = _patchJobCard;
+  window.CW.refreshWorkflowPreviewFromJob = _refreshWorkflowPreviewFromJob;
   window.CW._onJobDone = _onJobDone;
   window.CW._onJobError = _onJobError;
 

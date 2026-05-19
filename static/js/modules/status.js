@@ -7,10 +7,11 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var jobs = A.jobs, API = A.API;
 
-  function _setCurrentTarget(inst) {
+  function _setCurrentTarget(inst, manual) {
     if (!inst) return;
     A.currentTargetInstance = inst.name || '';
     A.currentTargetNodeId = inst.node_id || '';
+    A.manualTargetInstance = !!manual;
   }
 
   function _getCurrentTarget(instances) {
@@ -24,9 +25,42 @@
     }
     if (!selected && instances.length) {
       selected = instances[0];
-      _setCurrentTarget(selected);
+      _setCurrentTarget(selected, false);
     }
     return selected;
+  }
+
+  function _activeJobProgress() {
+    var vals = Object.values(jobs || {});
+    var best = null;
+    for (var i = 0; i < vals.length; i++) {
+      var job = vals[i] || {};
+      var status = job.status || '';
+      if (status === 'done' || status === 'error' || status === 'history') continue;
+      var pct = job.progress ? Number(job.progress.pct) : 0;
+      if (!isFinite(pct)) pct = 0;
+      if (status === 'downloading') pct = Math.max(pct, 98);
+      best = Math.max(best == null ? 0 : best, pct);
+    }
+    return best == null ? null : Math.max(0, Math.min(100, Math.round(best)));
+  }
+
+  function syncComfyServiceButton() {
+    var activePct = _activeJobProgress();
+    var comfyBtn = $('#svcComfyUI');
+    var comfyState = $('#comfyState');
+    var bar = $('#statusbar');
+    if (activePct == null) {
+      if (comfyBtn) comfyBtn.classList.remove('running');
+      if (bar && bar.dataset.instanceState === 'running') bar.dataset.instanceState = 'idle';
+      return;
+    }
+    if (bar) bar.dataset.instanceState = 'running';
+    if (comfyBtn) {
+      comfyBtn.classList.remove('pending', 'off');
+      comfyBtn.classList.add('on', 'running');
+    }
+    if (comfyState) comfyState.textContent = '出图中 ' + activePct + '%';
   }
 
 async function pollStatus() {
@@ -46,15 +80,22 @@ function updateServices(d) {
     const bar = $('#statusbar');
     const anyRunning = insts.some(function(inst) { return (inst.queue_running || 0) > 0; });
     const anyPending = insts.some(function(inst) { return (inst.queue_pending || 0) > 0; });
-    if (bar) bar.dataset.instanceState = anyRunning ? 'running' : anyPending ? 'pending' : 'idle';
-    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (target && target.up ? 'on' : 'off');
+    const runningInst = (target && (target.queue_running || 0) > 0)
+      ? target
+      : insts.find(function(inst) { return inst.up && (inst.queue_running || 0) > 0; });
+    var jobPct = _activeJobProgress();
+    var instPct = runningInst ? Math.max(0, Math.min(100, Math.round(Number(runningInst.progress || 0) || 0))) : 0;
+    var runningPct = jobPct == null ? instPct : Math.max(instPct, jobPct);
+    var localRunning = jobPct != null;
+    if (bar) bar.dataset.instanceState = (anyRunning || localRunning) ? 'running' : anyPending ? 'pending' : 'idle';
+    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (target && target.up ? 'on' : 'off') + ((anyRunning || localRunning) ? ' running' : anyPending ? ' pending' : '');
     if (comfyState) {
       var compactState = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
       var targetName = target ? (target.node_name || target.name || '目标实例') : '';
       var stateText = '';
       if (!target) stateText = '无可用实例';
       else if (!target.up) stateText = '已关闭';
-      else if ((target.queue_running || 0) > 0) stateText = '出图中';
+      else if (anyRunning || localRunning) stateText = '出图中 ' + runningPct + '%';
       else if ((target.queue_pending || 0) > 0) stateText = '排队中';
       else stateText = '待机';
       comfyState.textContent = compactState || !targetName ? stateText : targetName + ' ' + stateText;
@@ -322,8 +363,10 @@ function initServiceToggles() {
   window.CW.setTargetInstance = function(name, nodeId) {
     A.currentTargetInstance = name || '';
     A.currentTargetNodeId = nodeId || '';
+    A.manualTargetInstance = !!name;
     pollStatus();
     _refreshInstCards();
   };
   window.CW.pollStatus = pollStatus;
+  window.CW.syncComfyServiceButton = syncComfyServiceButton;
 })();
