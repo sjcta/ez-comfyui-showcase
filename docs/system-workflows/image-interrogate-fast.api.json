@@ -1,0 +1,90 @@
+{
+  "description": "Fast local image prompt interrogation API workflow. Replace __IMAGE_FILENAME__ with a ComfyUI input filename before POST /prompt.",
+  "prompt": {
+    "1": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "__IMAGE_FILENAME__"
+      }
+    },
+    "2": {
+      "class_type": "WD14Tagger|pysssss",
+      "inputs": {
+        "image": [
+          "1",
+          0
+        ],
+        "model": "wd-v1-4-moat-tagger-v2",
+        "threshold": 0.35,
+        "character_threshold": 0.85,
+        "replace_underscore": true,
+        "trailing_comma": false,
+        "exclude_tags": ""
+      }
+    },
+    "3": {
+      "class_type": "ShowText|pysssss",
+      "inputs": {
+        "text": [
+          "2",
+          0
+        ]
+      }
+    },
+    "4": {
+      "class_type": "ImageScale",
+      "inputs": {
+        "image": [
+          "1",
+          0
+        ],
+        "upscale_method": "lanczos",
+        "width": 768,
+        "height": 768,
+        "crop": "center"
+      }
+    },
+    "5": {
+      "class_type": "DownloadAndLoadFlorence2Model",
+      "inputs": {
+        "model": "MiaoshouAI/Florence-2-base-PromptGen-v2.0",
+        "precision": "fp16",
+        "attention": "sdpa"
+      }
+    },
+    "6": {
+      "class_type": "Florence2Run",
+      "inputs": {
+        "image": [
+          "4",
+          0
+        ],
+        "florence2_model": [
+          "5",
+          0
+        ],
+        "text_input": "",
+        "task": "prompt_gen_mixed_caption",
+        "fill_mask": true,
+        "keep_model_loaded": false,
+        "max_new_tokens": 512,
+        "num_beams": 3,
+        "do_sample": false,
+        "seed": 1
+      }
+    },
+    "7": {
+      "class_type": "ShowText|pysssss",
+      "inputs": {
+        "text": [
+          "6",
+          2
+        ]
+      }
+    }
+  },
+  "outputs": {
+    "wd14_tags": "outputs[\"3\"].text[0] or outputs[\"2\"].tags[0]",
+    "promptgen": "outputs[\"7\"].text[0]"
+  }
+}

@@ -7,7 +7,7 @@
   'use strict';
 
   var base = 'static/js';
-  var version = '1779032670';
+  var version = '1779033540';
   var runtimeApiBase = (location.protocol === 'file:')
     ? 'http://localhost:18000'
     : '';
@@ -124,9 +124,10 @@
     for (var i = 0; i < coreModules.length; i++) {
       await loadScript(coreModules[i]);
     }
-    if (window.CW._bootApp) window.CW._bootApp();
     if (window.CW.initCardManager) window.CW.initCardManager();
     if (window.CW.initPollManager) window.CW.initPollManager();
+    if (window.CW._bootApp) window.CW._bootApp();
+    if (window.CW.pollManager && window.CW.pollManager.start) window.CW.pollManager.start();
     var authReady = window.CW.authReady || Promise.resolve(null);
     authReady.then(function(user) {
       if (user && user.role) {

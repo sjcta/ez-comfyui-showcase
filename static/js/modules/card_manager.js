@@ -27,6 +27,55 @@
   var _galleryFilters = { owner: 'all', type: '', style: '' };
   var _renderTimer = null;
   var _cleanupTimer = null;
+  var _galleryBatchItems = {};
+
+  function _batchKey(item) {
+    if (!item) return '';
+    var count = Number(item.batch_count || 1);
+    var batchId = String(item.batch_id || '');
+    return count > 1 && batchId ? batchId : '';
+  }
+
+  function _batchIndex(item) {
+    var n = Number(item && item.batch_index);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function _batchCover(entry) {
+    return entry && entry.__isBatch ? entry.cover : entry;
+  }
+
+  function _galleryEntryKey(entry) {
+    if (entry && entry.__isBatch) return 'batch:' + entry.batch_id;
+    return String(entry && (entry.id || entry.filename || entry.original || '') || '');
+  }
+
+  function _groupHistoryForGallery(items) {
+    var out = [];
+    var map = {};
+    _galleryBatchItems = {};
+    (items || []).forEach(function(item) {
+      var key = _batchKey(item);
+      if (!key) {
+        out.push(item);
+        return;
+      }
+      if (!map[key]) {
+        map[key] = { __isBatch: true, id: 'batch:' + key, batch_id: key, batch_count: Number(item.batch_count || 1), cover: item, items: [] };
+        out.push(map[key]);
+      }
+      map[key].items.push(item);
+    });
+    Object.keys(map).forEach(function(key) {
+      var entry = map[key];
+      entry.items.sort(function(a, b) { return _batchIndex(a) - _batchIndex(b); });
+      entry.cover = entry.items[0] || entry.cover;
+      entry.batch_count = Math.max(entry.items.length, Number(entry.cover && entry.cover.batch_count || entry.batch_count || 1));
+      _galleryBatchItems[key] = entry.items;
+    });
+    if (window.__APP__) window.__APP__._galleryBatchItems = _galleryBatchItems;
+    return out;
+  }
 
   /**
    * CardManager class
@@ -38,7 +87,7 @@
 
   function _jobSortPriority(status) {
     if (status === 'queued') return 0;
-    if (status === 'preparing' || status === 'starting_comfyui') return 1;
+    if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 1;
     if (status === 'generating' || status === 'downloading') return 2;
     if (status === 'error') return 3;
     return 4;
@@ -193,7 +242,7 @@
     if (hasImage) {
       imgHtml = '<img src="' + imgSrc + '" loading="lazy" alt="">';
     } else {
-      if (j.status === 'generating' || j.status === 'preparing' || j.status === 'starting_comfyui' || j.status === 'downloading') {
+      if (j.status === 'generating' || j.status === 'preparing' || j.status === 'starting_comfyui' || j.status === 'submitting' || j.status === 'downloading') {
         imgHtml = '<div class="job-spinner"></div>';
       }
       if (j.status === 'queued') {
@@ -228,14 +277,14 @@
       '<div class="gi-img ' + (hasImage ? '' : 'job-placeholder') + '">' +
       imgHtml +
       (j.status === 'error' ? '<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob(\'' + escA(j.id) + '\')">重新尝试</button></div>' : '') +
-      '<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob(\'' + escA(j.id) + '\')" title="' + (j.status === 'generating' ? '取消' : '删除') + '"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' +
+      '<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob(\'' + escA(j.id) + '\')" title="' + (j.status === 'generating' ? '取消' : '删除') + '"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' +
       (tagHtml || instBadge ? '<div class="gi-tags-row">' + tagHtml + instBadge + '</div>' : '') +
       '</div>' +
       '<div class="gi-info" onclick="event.stopPropagation();CW.restoreJob(\'' + escA(j.id) + '\')">' +
-      (j.status === 'generating' ? '<div class="gi-progress-top"><div class="gi-progress-fill" style="width:' + (j.progress ? j.progress.pct : 0) + '%"></div></div>' : '') +
+      (j.status === 'generating' || j.status === 'submitting' ? '<div class="gi-progress-top"><div class="gi-progress-fill" style="width:' + (j.progress ? j.progress.pct : 0) + '%"></div></div>' : '') +
       (wfLabel ? '<div class="gi-wf-label" title="' + escA(wfLabel) + '">' + escH(wfLabel) + '</div>' : '') +
       '<div class="gi-prompt" title="' + escA(j.prompt_preview || label) + '">' + escH(j.prompt_preview || label) + '</div>' +
-      (j.status !== 'generating' ? '<div class="gi-meta">' +
+      (j.status !== 'generating' && j.status !== 'submitting' ? '<div class="gi-meta">' +
         (j.queued_at ? '<span>' + (window.CW.icon ? CW.icon('clock') : '') + ' ' + j.queued_at + '</span>' : '') +
         '<div class="gi-meta-row">' +
         (j.elapsed ? '<span>' + (window.CW.icon ? CW.icon('timer') : '') + ' ' + Math.round(j.elapsed) + '秒</span>' : '') +
@@ -249,6 +298,10 @@
    * Render a history card
    */
   CardManager.prototype._renderHistCard = function (h, i) {
+    var entry = h;
+    h = _batchCover(entry);
+    var isBatch = !!(entry && entry.__isBatch);
+    var batchCount = isBatch ? Number(entry.batch_count || (entry.items && entry.items.length) || 1) : 1;
     var user = window.CW.auth && window.CW.auth.getCurrentUser ? window.CW.auth.getCurrentUser() : null;
     var canEdit = !!user;
     var canDelete = _canDeleteHistoryItem(h);
@@ -260,13 +313,17 @@
     var tagBadge = mainText1 ? '<div class="gi-type-badge ' + mainCls1 + '">' + mainText1 + '</div>' : '';
     var typeCls1 = mainCls1 ? 'gi-type-' + mainCls1.replace('wf-tag-', '') : '';
     var histKey = _histKey(h);
+    var entryKey = _galleryEntryKey(entry);
+    var openAction = isBatch ? "CW.openBatchLB('" + escA(entry.batch_id) + "', this)" : 'CW.openLB(' + i + ', this)';
+    var batchBadge = isBatch ? '<div class="gi-batch-badge">×' + batchCount + '</div>' : '';
 
-		    return '<div class="gi ' + typeCls1 + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
-	      '<div class="gi-img' + sensitiveCls + '" onclick="event.stopPropagation();CW.openLB(' + i + ', this)">' +
+		    return '<div class="gi ' + typeCls1 + (isBatch ? ' gi-batch-stack' : '') + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(entryKey || histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
+	      '<div class="gi-img' + sensitiveCls + '" onclick="event.stopPropagation();' + openAction + '">' +
 	      '<img src="' + imgSrc + '" loading="lazy" alt="">' +
 	      _favoriteBadgeHtml(h) +
 	      tagBadge +
-	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' : '') +
+	      batchBadge +
+	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' : '') +
 	      '</div>' +
 	      '<div class="gi-info">' +
 		      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
@@ -434,7 +491,7 @@
       _histVisibleCount = Math.min(_batchSize(), initialItems.length);
     }
 
-    // Active jobs (queued, preparing, starting_comfyui, generating, downloading)
+    // Active jobs (queued, preparing, starting_comfyui, submitting, generating, downloading)
     var activeJobs = Object.values(jobs).filter(function (j) { return j.status !== 'done' && j.status !== 'error'; });
     // Error jobs (kept briefly for visibility)
     var errorJobs = Object.values(jobs).filter(function (j) { return j.status === 'error'; });
@@ -454,21 +511,22 @@
 
     // ── History items ──
     var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+    var displayArr = _groupHistoryForGallery(filteredArr);
     var histCountEl = $('#histCount');
     if (histCountEl) histCountEl.textContent = String(filteredArr.length) + ' / ' + String(historyItems.length);
     // Update lbItems for lightbox (used by history.js)
-    if (window.__APP__) window.__APP__._lbItems = filteredArr;
-    _histVisibleCount = filteredArr.length;
-    var visibleItems = filteredArr.slice(0, _histVisibleCount);
+    if (window.__APP__) window.__APP__._lbItems = displayArr;
+    _histVisibleCount = displayArr.length;
+    var visibleItems = displayArr.slice(0, _histVisibleCount);
     for (var hi = 0; hi < visibleItems.length; hi++) {
       html += this._renderHistCard(visibleItems[hi], hi);
     }
 
-    if (historyItems.length > _histVisibleCount) {
+    if (displayArr.length > _histVisibleCount) {
       html += '<div class="masonry-sentinel" id="masonrySentinel"></div>';
     }
 
-    if (jobCards.length === 0 && filteredArr.length === 0) {
+    if (jobCards.length === 0 && displayArr.length === 0) {
       html = '<div class="empty-hint"><div class="eh-icon">' + (window.CW.icon ? CW.icon('image', 32) : '') + '</div><p>暂无历史</p><p class="hint-sub">出图后自动出现在这里</p></div>';
     }
 
@@ -662,7 +720,7 @@
     if (_sentinelObs) _sentinelObs.disconnect();
     _sentinelObs = new IntersectionObserver(
       function (entries) {
-        var activeItems = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+        var activeItems = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
         if (entries[0].isIntersecting && _histVisibleCount < activeItems.length) {
           _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), activeItems.length);
           _appendNewHistoryCards();
@@ -678,7 +736,7 @@
     if (!gallery) return;
     var sentinel = gallery.querySelector('.masonry-sentinel');
     var prevCount = _lastRenderedHistCount;
-    var filteredArr2 = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+    var filteredArr2 = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
     var newCount = Math.min(_histVisibleCount, filteredArr2.length);
     if (newCount <= prevCount) {
       if (sentinel) _attachSentinel();
@@ -715,6 +773,10 @@
   }
 
   function _histCardHTML(h, i) {
+    var entry = h;
+    h = _batchCover(entry);
+    var isBatch = !!(entry && entry.__isBatch);
+    var batchCount = isBatch ? Number(entry.batch_count || (entry.items && entry.items.length) || 1) : 1;
     var canEdit = !!(window.CW && window.CW.auth && window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser());
     var canDelete = _canDeleteHistoryItem(h);
     var imgSrc = h.thumb ? API + '/api/thumbs/' + h.thumb : API + '/api/images/' + h.filename;
@@ -725,12 +787,16 @@
     var tagBadge = mainText2 ? '<div class="gi-type-badge ' + mainCls2 + '">' + mainText2 + '</div>' : '';
     var typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
     var histKey = _histKey(h);
-    return '<div class="gi ' + typeCls2 + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
-	      '<div class="gi-img lazy-img' + sensitiveCls + '" onclick="event.stopPropagation();CW.openLB(' + i + ', this)">' +
+    var entryKey = _galleryEntryKey(entry);
+    var openAction = isBatch ? "CW.openBatchLB('" + escA(entry.batch_id) + "', this)" : 'CW.openLB(' + i + ', this)';
+    var batchBadge = isBatch ? '<div class="gi-batch-badge">×' + batchCount + '</div>' : '';
+    return '<div class="gi ' + typeCls2 + (isBatch ? ' gi-batch-stack' : '') + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(entryKey || histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
+	      '<div class="gi-img lazy-img' + sensitiveCls + '" onclick="event.stopPropagation();' + openAction + '">' +
 	      '<img src="' + imgSrc + '" loading="lazy" alt="">' +
 	      _favoriteBadgeHtml(h) +
 	      tagBadge +
-	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg></button>' : '') +
+	      batchBadge +
+	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' : '') +
 	      '</div>' +
 	      '<div class="gi-info">' +
 	      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +

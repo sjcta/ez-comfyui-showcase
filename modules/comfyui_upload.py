@@ -37,6 +37,20 @@ def _local_input_path(input_dir: str, image_name: str) -> str:
     return candidate
 
 
+def _local_reference_path(input_dir: str, image_name: str) -> str:
+    input_path = _local_input_path(input_dir, image_name)
+    if os.path.isfile(input_path):
+        return input_path
+
+    normalized = image_name.replace("\\", "/").lstrip("/")
+    data_root = os.path.dirname(os.path.abspath(input_dir))
+    output_root = os.path.abspath(os.path.join(data_root, "outputs"))
+    output_path = os.path.abspath(os.path.join(output_root, normalized))
+    if os.path.commonpath([output_root, output_path]) != output_root:
+        raise RuntimeError(f"非法参考图片路径: {image_name}")
+    return output_path
+
+
 def upload_image_to_comfyui(base_url: str, image_path: str, image_name: str) -> dict:
     """Upload one image to ComfyUI's input folder via /upload/image."""
     boundary = f"----ez-comfyui-{uuid.uuid4().hex}"
@@ -88,7 +102,7 @@ def upload_image_to_comfyui(base_url: str, image_path: str, image_name: str) -> 
 def ensure_workflow_images_available(workflow: dict[str, Any], input_dir: str, base_url: str) -> None:
     """Upload local LoadImage files to the selected remote ComfyUI instance."""
     for image_name in workflow_load_images(workflow):
-        image_path = _local_input_path(input_dir, image_name)
+        image_path = _local_reference_path(input_dir, image_name)
         if not os.path.isfile(image_path):
             continue
         try:

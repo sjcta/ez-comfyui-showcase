@@ -30,7 +30,7 @@
     return selected;
   }
 
-  function _activeJobProgress() {
+  function _activeJobState() {
     var vals = Object.values(jobs || {});
     var best = null;
     for (var i = 0; i < vals.length; i++) {
@@ -40,9 +40,33 @@
       var pct = job.progress ? Number(job.progress.pct) : 0;
       if (!isFinite(pct)) pct = 0;
       if (status === 'downloading') pct = Math.max(pct, 98);
-      best = Math.max(best == null ? 0 : best, pct);
+      if (!best || pct >= best.pct) {
+        best = {
+          pct: pct,
+          instance: job.instance || '',
+          node_id: job.target_node_id || job.node_id || '',
+          status: status,
+        };
+      }
     }
-    return best == null ? null : Math.max(0, Math.min(100, Math.round(best)));
+    if (!best) return null;
+    best.pct = Math.max(0, Math.min(100, Math.round(best.pct)));
+    return best;
+  }
+
+  function _activeJobProgress() {
+    var state = _activeJobState();
+    return state ? state.pct : null;
+  }
+
+  function _findInstanceForJob(instances, jobState) {
+    if (!jobState || !jobState.instance) return null;
+    return (instances || []).find(function(inst) {
+      return inst.name === jobState.instance &&
+        (!jobState.node_id || inst.node_id === jobState.node_id);
+    }) || (instances || []).find(function(inst) {
+      return inst.name === jobState.instance;
+    }) || null;
   }
 
   function syncComfyServiceButton() {
@@ -80,30 +104,36 @@ function updateServices(d) {
     const bar = $('#statusbar');
     const anyRunning = insts.some(function(inst) { return (inst.queue_running || 0) > 0; });
     const anyPending = insts.some(function(inst) { return (inst.queue_pending || 0) > 0; });
+    var activeJob = _activeJobState();
     const runningInst = (target && (target.queue_running || 0) > 0)
       ? target
       : insts.find(function(inst) { return inst.up && (inst.queue_running || 0) > 0; });
-    var jobPct = _activeJobProgress();
+    var activeInst = _findInstanceForJob(insts, activeJob) || runningInst;
+    var displayTarget = activeInst || target;
+    var jobPct = activeJob ? activeJob.pct : null;
     var instPct = runningInst ? Math.max(0, Math.min(100, Math.round(Number(runningInst.progress || 0) || 0))) : 0;
     var runningPct = jobPct == null ? instPct : Math.max(instPct, jobPct);
     var localRunning = jobPct != null;
     if (bar) bar.dataset.instanceState = (anyRunning || localRunning) ? 'running' : anyPending ? 'pending' : 'idle';
-    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (target && target.up ? 'on' : 'off') + ((anyRunning || localRunning) ? ' running' : anyPending ? ' pending' : '');
+    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (displayTarget && (displayTarget.up || localRunning || anyRunning) ? 'on' : 'off') + ((anyRunning || localRunning) ? ' running' : anyPending ? ' pending' : '');
     if (comfyState) {
       var compactState = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
-      var targetName = target ? (target.node_name || target.name || '目标实例') : '';
+      var targetName = displayTarget ? (displayTarget.node_name || displayTarget.name || '目标实例') : '';
       var stateText = '';
-      if (!target) stateText = '无可用实例';
-      else if (!target.up) stateText = '已关闭';
-      else if (anyRunning || localRunning) stateText = '出图中 ' + runningPct + '%';
-      else if ((target.queue_pending || 0) > 0) stateText = '排队中';
+      if (anyRunning || localRunning) stateText = '出图中 ' + runningPct + '%';
+      else if (!displayTarget) stateText = '无可用实例';
+      else if (!displayTarget.up) stateText = '已关闭';
+      else if ((displayTarget.queue_pending || 0) > 0) stateText = '排队中';
       else stateText = '待机';
-      comfyState.textContent = compactState || !targetName ? stateText : targetName + ' ' + stateText;
+      comfyState.textContent = (anyRunning || localRunning || compactState || !targetName)
+        ? stateText
+        : targetName + ' ' + stateText;
     }
   }
 
 function updateGPU(g, instances) {
-    const target = _getCurrentTarget(instances || []);
+    const active = _findInstanceForJob(instances || [], _activeJobState());
+    const target = active || _getCurrentTarget(instances || []);
     const gpu = target && target.gpu ? target.gpu : g;
     const fill = $('#vramFill');
     if (!fill) return;

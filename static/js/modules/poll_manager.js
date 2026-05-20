@@ -26,7 +26,10 @@
     this.ws = null;
     this._pollTimer = null;
     this._timerTick = null;
+    this._wsPingInterval = null;
     this._httpPolling = false;
+    this._httpPollInFlight = false;
+    this._resumeHandler = null;
     this._stopped = false;
   }
 
@@ -42,6 +45,7 @@
 
     // ── HTTP polling (3s) — fallback when WS is missing ──
     self._startHTTPPoll();
+    self._bindResumeEvents();
 
     // ── Timer ticker (1s) — live elapsed timers ──
     if (!self._timerTick) {
@@ -69,8 +73,45 @@
       clearInterval(self._timerTick);
       self._timerTick = null;
     }
+    if (self._wsPingInterval) {
+      clearInterval(self._wsPingInterval);
+      self._wsPingInterval = null;
+    }
+    if (self._resumeHandler) {
+      if (typeof document !== 'undefined' && document.removeEventListener) {
+        document.removeEventListener('visibilitychange', self._resumeHandler);
+      }
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('focus', self._resumeHandler);
+      }
+      self._resumeHandler = null;
+    }
     self._httpPolling = false;
+    self._httpPollInFlight = false;
   };
+
+  PollManager.prototype._bindResumeEvents = function () {
+    var self = this;
+    if (self._resumeHandler) return;
+    self._resumeHandler = function () {
+      if (self._stopped) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      self._connectWS();
+      self._doHTTPPoll(true);
+    };
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', self._resumeHandler);
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('focus', self._resumeHandler);
+    }
+  };
+
+  function _jobNeedsHistoryRefresh(job) {
+    if (!job) return false;
+    var status = job.status || '';
+    return status !== 'done' && status !== 'error' && status !== 'history';
+  }
 
   /**
    * WebSocket 连接
@@ -126,6 +167,7 @@
     };
 
     // Keepalive: send ping every 30s
+    if (self._wsPingInterval) clearInterval(self._wsPingInterval);
     self._wsPingInterval = setInterval(function () {
       if (self.ws && self.ws.readyState === WebSocket.OPEN) {
         try { self.ws.send('ping'); } catch (e) {}
@@ -145,11 +187,15 @@
       var shortId = job.id ? job.id.slice(-6) : '';
       var wfTag = window.CW.getWFType ? window.CW.getWFType(job.workflow) : '';
       var typeLabel = wfTag ? wfTag.text : '';
+      var toastByStatus = {
+        queued: ['排队中', 'queued'],
+        generating: ['出图中', 'generating'],
+        done: ['结束出图', 'done'],
+        error: ['失败', 'error']
+      };
       try {
-        if (window.CW.toast) {
-          var toastTypes = { queued: 'queued', generating: 'generating', downloading: 'queued', done: 'done', error: 'error' };
-          var tType = toastTypes[job.status] || 'info';
-          window.CW.toast(shortId + ' ' + typeLabel + ' ' + (job.status === 'downloading' ? '拉取图片' : (job.status === 'queued' ? '排队中' : (job.status === 'generating' ? '出图中' : (job.status === 'done' ? '结束出图' : (job.status === 'error' ? '失败' : job.status))))), tType);
+        if (window.CW.toast && toastByStatus[job.status]) {
+          window.CW.toast(shortId + ' ' + typeLabel + ' ' + toastByStatus[job.status][0], toastByStatus[job.status][1]);
         }
       } catch (e) {}
     }
@@ -193,19 +239,24 @@
     self._doHTTPPoll();
   };
 
-  PollManager.prototype._doHTTPPoll = function () {
+  PollManager.prototype._doHTTPPoll = function (immediate) {
     var self = this;
     if (self._stopped) {
       self._httpPolling = false;
       return;
     }
+    if (self._httpPollInFlight) return;
+    if (immediate && self._pollTimer) {
+      clearTimeout(self._pollTimer);
+      self._pollTimer = null;
+    }
 
-    // Only poll if there are active jobs
-    if (!self._hasActiveJobs()) {
+    if (!window.CW.auth || !window.CW.auth.isLoggedIn || !window.CW.auth.isLoggedIn()) {
       self._pollTimer = setTimeout(function () { self._doHTTPPoll(); }, 3000);
       return;
     }
 
+    self._httpPollInFlight = true;
     window.CW.auth.apiFetch(API + '/api/jobs')
       .then(function (r) { return r.json(); })
       .then(function (serverJobs) {
@@ -219,6 +270,7 @@
 
         var needRerender = false;
         var doneOrErrorProcessed = false;
+        var historyRefresh = false;
 
         for (var id in serverMap) {
           if (!serverMap.hasOwnProperty(id)) continue;
@@ -262,6 +314,7 @@
         // Cleanup stale jobs (server no longer tracks them)
         for (var cleanId in jobs) {
           if (jobs.hasOwnProperty(cleanId) && !serverMap[cleanId]) {
+            if (_jobNeedsHistoryRefresh(jobs[cleanId])) historyRefresh = true;
             delete jobs[cleanId];
             needRerender = true;
           }
@@ -269,6 +322,13 @@
 
         if (doneOrErrorProcessed) {
           if (needRerender && window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+        } else if (historyRefresh) {
+          if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+          if (window.CW.loadHistory) {
+            Promise.resolve(window.CW.loadHistory()).catch(function(e) {
+              console.warn('[PollManager] loadHistory after stale job failed:', e && e.message ? e.message : e);
+            });
+          }
         } else if (needRerender) {
           if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
         }
@@ -277,6 +337,7 @@
         // Silently fail — WS should be the primary channel
       })
       .then(function () {
+        self._httpPollInFlight = false;
         if (!self._stopped) {
           self._pollTimer = setTimeout(function () { self._doHTTPPoll(); }, 3000);
         }
@@ -321,6 +382,9 @@
   function _initPollManager() {
     if (window.CW.pollManager) return;
     window.CW.pollManager = new PollManager();
+    window.CW.onJobUpdate = function(job) {
+      window.CW.pollManager.onJobUpdate(job);
+    };
   }
 
   window.CW.initPollManager = _initPollManager;

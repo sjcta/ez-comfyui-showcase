@@ -349,10 +349,7 @@ async function doGenerate() {
         queued_at: new Date().toLocaleTimeString('en-GB'),
       };
       try {
-        var wfTag = window.CW && CW.getWFType ? CW.getWFType(A.currentWF) : null;
-        var typeLabel = wfTag ? wfTag.text : '';
-        var shortId = String(d.job_id || '').slice(-6);
-        if (window.CW && CW.toast) CW.toast((shortId ? shortId + ' ' : '') + typeLabel + ' 开始出图', 'generating');
+        if (window.CW && CW.toast) CW.toast('排队中', 'queued');
       } catch (e) {}
       // Trigger onJobUpdate to kick off active job polling
       window.CW.onJobUpdate(jobs[d.job_id]);

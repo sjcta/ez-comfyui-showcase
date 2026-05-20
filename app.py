@@ -220,13 +220,74 @@ def _friendly_generation_error(err: Exception) -> str:
 
 # ── Runtime connection state ──
 _connected_nodes: dict[str, bool] = {}  # node_id -> connected (default True if missing)
-ACTIVE_JOB_STATUSES = {"dispatching", "queued", "starting_comfyui", "preparing", "generating", "downloading"}
+ACTIVE_JOB_STATUSES = {
+    "dispatching",
+    "queued",
+    "starting_comfyui",
+    "preparing",
+    "submitting",
+    "generating",
+    "downloading",
+}
+JOB_STAGE_TIMEOUTS = {
+    "dispatching": 120,
+    "queued": 600,
+    "starting_comfyui": 360,
+    "preparing": 180,
+    "submitting": 90,
+    "generating": 1200,
+    "downloading": 240,
+}
+JOB_STAGE_TIMEOUT_MESSAGES = {
+    "dispatching": "任务调度超时",
+    "queued": "排队超时",
+    "starting_comfyui": "实例启动超时",
+    "preparing": "准备阶段超时",
+    "submitting": "提交阶段超时",
+    "generating": "生成阶段超时（长时间无进度）",
+    "downloading": "拉取图片超时",
+}
 
 def _is_node_connected(nid: str) -> bool:
     return _connected_nodes.get(nid, True)
 
 def _job_is_active_for_instance(job: dict, instance_name: str) -> bool:
     return job.get("instance") == instance_name and job.get("status") in ACTIVE_JOB_STATUSES
+
+
+def _job_last_activity_ts(job: dict) -> float:
+    for key in ("last_update", "submitted_at", "generating_at", "created_at_ts"):
+        try:
+            ts = float(job.get(key) or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if ts > 0:
+            return ts
+    return 0
+
+
+def _job_stuck_state(job: dict, now: float | None = None) -> tuple[bool, float, int]:
+    status = str(job.get("status") or "")
+    timeout = JOB_STAGE_TIMEOUTS.get(status, 600)
+    last = _job_last_activity_ts(job)
+    if not last or status in ("done", "error", "cancelled"):
+        return False, 0.0, timeout
+    now = now or time.time()
+    age = max(0.0, now - last)
+    return age > timeout, age, timeout
+
+
+def _finalize_stuck_job(job_id: str, job: dict, now: float | None = None) -> None:
+    now = now or time.time()
+    status = str(job.get("status") or "")
+    _stuck, age, timeout = _job_stuck_state(job, now=now)
+    message = JOB_STAGE_TIMEOUT_MESSAGES.get(status, "任务超时")
+    job["status"] = "error"
+    job["message"] = f"{message}（{int(age)}秒无状态变化，阈值{int(timeout)}秒）"
+    job["last_update"] = now
+    task = _job_tasks.pop(job_id, None)
+    if task and not task.done():
+        task.cancel()
 
 def _resolve_secret_value(value: str) -> str:
     """Resolve config secrets. Use env:NAME in JSON to avoid storing cleartext."""
@@ -384,9 +445,14 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
         ok = _run_cmd(["systemctl", "--user", action, svc])
 
     if ok:
-        add_log("info", "instance", f"[{node_name}] {inst_name} {action}ed", details=action)
+        action_text = {"stop": "stopped"}.get(action, f"{action}ed")
+        add_log("info", "instance", f"[{node_name}] {inst_name} {action_text}", details=action)
         if action in ("start", "restart", "force-restart"):
             _instance_start_grace[inst_name] = time.time()
+        elif action == "stop":
+            _instance_last_active[inst_name] = 0
+            _instance_group[inst_name] = ""
+            _instance_start_grace.pop(inst_name, None)
     else:
         add_log("warn", "instance", f"[{node_name}] {inst_name} {action} FAILED", details=action)
     return ok
@@ -837,6 +903,15 @@ def _init_gen_db():
         conn.execute("ALTER TABLE generations ADD COLUMN deleted_by TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
+    for ddl in (
+        "ALTER TABLE generations ADD COLUMN batch_id TEXT DEFAULT ''",
+        "ALTER TABLE generations ADD COLUMN batch_index INTEGER DEFAULT 0",
+        "ALTER TABLE generations ADD COLUMN batch_count INTEGER DEFAULT 1",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_meta (
             filename TEXT PRIMARY KEY,
@@ -914,6 +989,8 @@ def _init_auth_db():
 
 def _gen_db_to_record(row: dict) -> dict:
     """Transform a SQLite generations row to the JSON record format used by the frontend."""
+    if not isinstance(row, dict):
+        row = dict(row)
     seed_val = str(row["seed"]) if row.get("seed") else ""
     deleted_at = row.get("deleted_at", "") or ""
     params = {}
@@ -944,6 +1021,9 @@ def _gen_db_to_record(row: dict) -> dict:
         "deleted_at": deleted_at,
         "deleted_by": row.get("deleted_by", "") or "",
         "sort_index": row.get("history_rowid", 0),
+        "batch_id": row.get("batch_id", "") or "",
+        "batch_index": row.get("batch_index", 0) or 0,
+        "batch_count": row.get("batch_count", 1) or 1,
     }
 
 
@@ -996,8 +1076,8 @@ def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
         conn = sqlite3.connect(GEN_DB)
         conn.execute(
             """INSERT OR REPLACE INTO generations
-               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public, batch_id, batch_index, batch_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record["id"],
                 record.get("workflow", ""),
@@ -1012,6 +1092,9 @@ def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
                 json.dumps(record.get("field_values", {}), ensure_ascii=False),
                 user_id,
                 1 if record.get("is_public") else 0,
+                record.get("batch_id", "") or "",
+                int(record.get("batch_index", 0) or 0),
+                int(record.get("batch_count", 1) or 1),
             ),
         )
         conn.commit()
@@ -1407,6 +1490,10 @@ async def _idle_instance_watcher():
             if now - last > IDLE_TIMEOUT:
                 node = _get_node_by_id(inst.get("_node_id", ""))
                 if node:
+                    if not _check_service_active(node, inst):
+                        _instance_last_active[name] = 0
+                        _instance_group[name] = ""
+                        continue
                     add_log("warn", "idle", f"Stopping idle {name} ({now - last:.0f}s idle)")
                     _run_instance_action(node, inst, "stop")
 
@@ -1462,28 +1549,27 @@ def _check_service_active(node: dict, instance: dict) -> bool:
     return False
 
 async def _stuck_job_watcher():
-    """Kill jobs stuck >10min without status change. Stop its instance."""
+    """Fail jobs that exceed their current stage timeout and release their instance."""
     while True:
         await asyncio.sleep(60)
         now = time.time()
         for jid, j in list(jobs.items()):
-            if j.get("status") in ("done", "error"):
+            stuck, age, _timeout = _job_stuck_state(j, now=now)
+            if not stuck:
                 continue
-            last_up = j.get("last_update", j.get("generating_at", 0))
-            if last_up and now - last_up > 600:  # 10 minutes
-                j["status"] = "error"
-                j["message"] = "任务超时（10分钟无状态变化）"
-                print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {now-last_up:.0f}s)")
-                add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
-                inst_name = j.get("instance", "")
-                if inst_name:
-                    for inst in _get_enabled_instances():
-                        if inst["name"] == inst_name:
-                            node = _get_node_by_id(inst.get("_node_id", ""))
-                            if node:
-                                _run_instance_action(node, inst, "stop")
-                            break
-                asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
+            _finalize_stuck_job(jid, j, now=now)
+            print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {age:.0f}s)")
+            add_log("warn", "stuck", f"Killed job idle {age:.0f}s", jid)
+            inst_name = j.get("instance", "")
+            if inst_name:
+                for inst in _get_enabled_instances():
+                    if inst["name"] == inst_name:
+                        node = _get_node_by_id(inst.get("_node_id", ""))
+                        if node:
+                            _run_instance_action(node, inst, "stop")
+                        break
+            save_jobs()
+            asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
 
 
 
@@ -2659,35 +2745,42 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             _extra = jobs[job_id].get("ws_error", "") if job_id in jobs else ""
             raise TimeoutError(f"出图失败{' ('+_extra[:100]+')' if _extra else ''}")
 
-        filename = None
-        src = ""
+        sources = []
         if downloaded:
-            src = downloaded[0]
-            filename = os.path.basename(src)
-        if not filename:
+            for path in downloaded:
+                if path and os.path.isfile(path):
+                    sources.append((path, os.path.basename(path)))
+        if not sources:
             try:
                 hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
                 if pid in hist:
                     for node_out in hist[pid].get("outputs", {}).values():
                         for img in node_out.get("images", []):
-                            filename = img["filename"]
-                            break
-                        if filename:
-                            break
+                            filename = img.get("filename", "")
+                            if not filename:
+                                continue
+                            src = os.path.join(OUTPUT_DIR, filename)
+                            if not os.path.isfile(src):
+                                matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
+                                if matches:
+                                    src = matches[0]
+                            if os.path.isfile(src):
+                                sources.append((src, filename))
             except Exception as e:
                 raise RuntimeError(_friendly_generation_error(e))
         if job_id not in jobs or jobs[job_id].get("status") == "error":
             return False, pid or ""
-        if not filename:
+        deduped = []
+        seen_paths = set()
+        for src, filename in sources:
+            real_path = os.path.abspath(src)
+            if real_path in seen_paths or not os.path.isfile(src):
+                continue
+            seen_paths.add(real_path)
+            deduped.append((src, filename or os.path.basename(src)))
+        sources = deduped
+        if not sources:
             raise RuntimeError("未找到输出图片")
-
-        # Prefer local OUTPUT_DIR (files were downloaded there via _download_remote_images_sync)
-        if not src:
-            src = os.path.join(OUTPUT_DIR, filename)
-        if not os.path.isfile(src):
-            matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
-            if matches:
-                src = matches[0]
 
         gen_user_id = jobs[job_id].get("user_id", "anonymous") if job_id in jobs else "anonymous"
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -2702,14 +2795,8 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             if m:
                 n = int(m.group(1))
                 if n >= seq: seq = n + 1
-        hist_name = f"{wf_basename}_{seq:04d}.png"
-        # Save to OUTPUT_DIR/{user_id}/{YYYY-MM-DD}/
         output_subdir = os.path.join(OUTPUT_DIR, subdir)
         os.makedirs(output_subdir, exist_ok=True)
-        shutil.copy2(src, os.path.join(output_subdir, hist_name))
-
-        rel_path = f"{subdir}/{hist_name}"
-        actual_w, actual_h = get_image_size(rel_path)
 
         prompt_text = infer_generation_label(
             os.path.basename(workflow_path),
@@ -2717,30 +2804,52 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             _workflow_primary_type(os.path.basename(workflow_path)),
         )
 
-        thumb_rel = make_thumbnail(rel_path) or ""
-        record = {
-            "id": job_id, "filename": rel_path,
-            "original": filename,
-            "workflow": os.path.basename(workflow_path),
-            "prompt": prompt_text, "seed": str(seed),
-            "width": actual_w or img_width, "height": actual_h or img_height,
-            "elapsed": round(elapsed, 1),
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "thumb": thumb_rel,
-            "field_values": field_values,
-            "user_id": gen_user_id,
-        }
-        history.insert(0, record)
+        batch_count = len(sources)
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        records = []
+        for idx, (src, filename) in enumerate(sources):
+            hist_name = f"{wf_basename}_{seq + idx:04d}.png"
+            shutil.copy2(src, os.path.join(output_subdir, hist_name))
+            rel_path = f"{subdir}/{hist_name}"
+            actual_w, actual_h = get_image_size(rel_path)
+            thumb_rel = make_thumbnail(rel_path) or ""
+            records.append({
+                "id": job_id if idx == 0 else f"{job_id}_{idx + 1:02d}",
+                "filename": rel_path,
+                "original": filename,
+                "workflow": os.path.basename(workflow_path),
+                "prompt": prompt_text, "seed": str(seed),
+                "width": actual_w or img_width, "height": actual_h or img_height,
+                "elapsed": round(elapsed, 1),
+                "time": created_at,
+                "thumb": thumb_rel,
+                "field_values": field_values,
+                "user_id": gen_user_id,
+                "batch_id": job_id if batch_count > 1 else "",
+                "batch_index": idx,
+                "batch_count": batch_count,
+            })
+        for record in reversed(records):
+            history.insert(0, record)
         save_history()
         # Also write to SQLite with user_id
         gen_user_id = ""
         if job_id in jobs:
             gen_user_id = jobs[job_id].get("user_id", "")
-        _insert_generation(record, elapsed, user_id=gen_user_id)
+        for record in reversed(records):
+            _insert_generation(record, elapsed, user_id=gen_user_id)
 
+        cover = records[0]
         jobs[job_id].update(
             status="done", message=f"完成 ({elapsed:.1f}s)",
-            image=rel_path, thumb=thumb_rel, elapsed=round(elapsed, 1),
+            image=cover.get("filename", ""),
+            thumb=cover.get("thumb", ""),
+            images=[record.get("filename", "") for record in records],
+            thumbs=[record.get("thumb", "") for record in records],
+            batch_id=job_id if batch_count > 1 else "",
+            batch_count=batch_count,
+            batch_items=records,
+            elapsed=round(elapsed, 1),
         )
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -2949,9 +3058,9 @@ def api_status(current_user: dict | None = Depends(get_current_user_optional)):
         q_size = _get_instance_queue_size(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
-        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
-        q_run = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching")])
-        q_pend = len([j for j in inst_jobs if j["status"] == "preparing"])
+        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
+        q_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
+        q_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
         instances.append({
             "name": name,
             "url": inst["url"],
@@ -3009,7 +3118,7 @@ def api_comfyui(action: str, current_user: dict = Depends(require_admin)):
             _instance_group[inst["name"]] = ""
             results.append(f"{inst['name']} 已停止")
             for jid, jb in list(jobs.items()):
-                if jb.get("instance") == inst["name"] and jb.get("status") in ("generating", "dispatching", "preparing"):
+                if jb.get("instance") == inst["name"] and jb.get("status") in ACTIVE_JOB_STATUSES:
                     jb["status"] = "error"
                     jb["message"] = "实例已停止"
         return {"ok": True, "msg": "; ".join(results)}
@@ -3786,6 +3895,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
     workflow_type = _workflow_primary_type(req.workflow)
     prompt_preview = infer_generation_label(req.workflow, req.fields, workflow_type)[:200]
+    now_ts = time.time()
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
         "workflow": req.workflow, "seed": str(seed),
@@ -3796,6 +3906,8 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "preferred_instance": req.preferred_instance or "",
         "preferred_node_id": req.preferred_node_id or "",
         "queued_at": datetime.now().strftime("%H:%M:%S"),
+        "created_at_ts": now_ts,
+        "last_update": now_ts,
         "user_id": user_id,
     }
     add_log("info", "queue", f"Job queued: {req.workflow}", job_id)

@@ -71,6 +71,27 @@ function syncClearPromptButton() {
   if (actions) actions.classList.toggle('has-content', hasText);
 }
 
+function _isGenerationStartToast(message, type) {
+  return /开始出图/.test(String(message || '')) &&
+    (type === 'generating' || type === 'queued' || type === 'info' || !type);
+}
+
+function _isGenerationStatusToastAllowed(message, type) {
+  var text = String(message || '');
+  if (type === 'done' || type === 'error') return true;
+  if (type === 'queued') return /排队中/.test(text);
+  if (type === 'generating') return /出图中/.test(text);
+  return false;
+}
+
+function _isGenerationStatusToast(message, type) {
+  var text = String(message || '');
+  if (type === 'queued' || type === 'generating') return true;
+  if (_isGenerationStartToast(text, type)) return true;
+  if ((type === 'done' && /结束出图/.test(text)) || (type === 'error' && /失败/.test(text))) return true;
+  return /(排队中|出图中|拉取图片|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
+}
+
 function showToast(message, type) {
   var container = _ensureToastContainer();
   type = type || 'info';
@@ -80,8 +101,12 @@ function showToast(message, type) {
     danger: 'error',
     loading: 'generating'
   };
-	  var resolvedType = aliases[type] || type;
-		  var iconMap = {
+		  var resolvedType = aliases[type] || type;
+  if (_isGenerationStatusToast(message, resolvedType) && !_isGenerationStatusToastAllowed(message, resolvedType)) {
+    return;
+  }
+  var generationSlot = _isGenerationStatusToast(message, resolvedType);
+				  var iconMap = {
 		    info: 'info',
 		    queued: 'clock',
 		    generating: 'loader',
@@ -94,13 +119,15 @@ function showToast(message, type) {
   // Dedup: remove existing toast with same message
   var existing = container.querySelectorAll('.toast');
   for (var ei = 0; ei < existing.length; ei++) {
-    if (existing[ei].textContent.indexOf(message) >= 0) {
+    if ((generationSlot && existing[ei].getAttribute && existing[ei].getAttribute('data-toast-scope') === 'generation') ||
+        existing[ei].textContent.indexOf(message) >= 0) {
       existing[ei].parentNode.removeChild(existing[ei]);
-      break;
+      if (!generationSlot) break;
     }
   }
   var t = document.createElement('div');
 	  t.className = 'toast toast-' + resolvedType;
+  if (generationSlot && t.setAttribute) t.setAttribute('data-toast-scope', 'generation');
 	  t.innerHTML = ''
 	    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon(iconMap[resolvedType] || 'bell', 16) : '') + '</span>'
 	    + '<span class="toast-content">'

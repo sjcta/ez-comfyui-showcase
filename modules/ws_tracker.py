@@ -46,6 +46,10 @@ class PromptStartTimeout(TimeoutError):
         self.timeout = timeout
 
 
+class PromptSubmitError(RuntimeError):
+    """Raised when ComfyUI rejects the prompt before it enters the queue."""
+
+
 # ── HTTP 辅助函数（纯同步，通过 asyncio.to_thread 调用） ────────────────
 
 import urllib.request
@@ -310,7 +314,7 @@ class WSTracker:
             if ws:
                 await ws.close()
             self._log("error", "ws", f"提交 prompt 失败: {e}", self._job_id)
-            return TrackResult(ok=False, prompt_id="", elapsed=time.time() - self._start_time)
+            raise PromptSubmitError(str(e)) from e
 
         self._log("info", "ws", f"Prompt 已提交: {self._prompt_id[-12:]}", self._job_id)
 
@@ -495,7 +499,7 @@ class WSTracker:
                 self._prompt_id = resp.get("prompt_id", "")
             except Exception as e:
                 self._log("error", "http", f"HTTP fallback prompt 提交失败: {e}", self._job_id)
-                return TrackResult(ok=False, prompt_id="", elapsed=time.time() - self._start_time)
+                raise PromptSubmitError(str(e)) from e
 
         return await self._http_poll_track(timeout)
 

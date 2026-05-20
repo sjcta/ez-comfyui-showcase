@@ -526,12 +526,14 @@
       var shortId = job.id.slice(-6);
       var wfTag = getWFType(job.workflow);
       var typeLabel = wfTag ? wfTag.text : '';
+      var toastByStatus = {
+        queued: ['排队中', 'queued'],
+        generating: ['出图中', 'generating'],
+        done: ['结束出图', 'done'],
+        error: ['失败', 'error']
+      };
       try {
-        if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + ' 排队中', 'queued');
-        else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + ' 出图中', 'generating');
-        else if (job.status === 'downloading') showToast(shortId + ' ' + typeLabel + ' 拉取图片', 'queued');
-        else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 结束出图', 'done');
-        else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + ' 失败', 'error');
+        if (toastByStatus[job.status]) showToast(shortId + ' ' + typeLabel + ' ' + toastByStatus[job.status][0], toastByStatus[job.status][1]);
       } catch(e) {}
     }
     jobs[job.id] = job;
@@ -780,31 +782,34 @@
 
 function init() {
   console.log("[BOOT] init function");
+    var unifiedPoller = window.CW && window.CW.pollManager;
     var statusPoller = (window.CW && window.CW.pollStatus && window.CW.pollStatus !== pollStatus)
       ? window.CW.pollStatus
       : pollStatus;
     statusPoller();
     setInterval(statusPoller, 5000);
-    setInterval(() => {
-      if (ws && ws.readyState === 1) ws.send('ping');
-    }, 30000);
-    if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
-      window.CW.authReady.finally(function() {
+    if (!unifiedPoller) {
+      setInterval(() => {
+        if (ws && ws.readyState === 1) ws.send('ping');
+      }, 30000);
+      if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
+        window.CW.authReady.finally(function() {
+          pollJobs();
+        });
+      } else {
         pollJobs();
-      });
-    } else {
-      pollJobs();
+      }
+      setInterval(function() {
+        pollJobs();
+      }, 5000);
+      connectWS();
     }
-    setInterval(function() {
-      pollJobs();
-    }, 5000);
-    connectWS();
     initServiceToggles();
     window.CW.initAdvToggle && window.CW.initAdvToggle();
     window.CW.initRatioGrid && window.CW.initRatioGrid();
     window.CW.initOverlayUpload && window.CW.initOverlayUpload();
     window.CW.initResizeHandle && window.CW.initResizeHandle();
-    setInterval(tickTimers, 1000);
+    if (!unifiedPoller) setInterval(tickTimers, 1000);
     if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
   // Clear button clears prompt and focuses input
   // (always visible — toggled in HTML)

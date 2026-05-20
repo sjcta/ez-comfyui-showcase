@@ -14,6 +14,7 @@ import glob
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import time
@@ -28,7 +29,7 @@ from modules.prompt_labels import infer_generation_label
 from modules.step_calculator import StepCalculator
 from modules.comfyui_upload import ensure_workflow_images_available
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
-from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout
+from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
 
 
 def _friendly_generation_error(err: Exception) -> str:
@@ -243,7 +244,7 @@ class JobRunner:
                 name = inst.get("name", "")
                 if not name:
                     return 0
-                active_status = {"dispatching", "queued", "starting_comfyui", "preparing", "generating", "downloading"}
+                active_status = {"dispatching", "queued", "starting_comfyui", "preparing", "submitting", "generating", "downloading"}
                 return sum(
                     1
                     for jid, job in self._jobs.items()
@@ -404,10 +405,11 @@ class JobRunner:
 
             # ── Phase 6: WS 追踪出图 ───────────────────────────────
             self._add_log("info", "generate", "Starting generation", job_id)
-            self._jobs[job_id]["status"] = "generating"
-            self._jobs[job_id]["message"] = "出图中..."
-            self._jobs[job_id]["progress"] = {"pct": 18}
-            self._jobs[job_id]["generating_at"] = time.time()
+            self._jobs[job_id]["status"] = "submitting"
+            self._jobs[job_id]["message"] = "提交工作流..."
+            self._jobs[job_id]["progress"] = {"pct": 12}
+            self._jobs[job_id]["submitted_at"] = time.time()
+            self._jobs[job_id]["last_update"] = time.time()
             self._save_jobs()
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
@@ -424,6 +426,12 @@ class JobRunner:
                 self._jobs[job_id]["message"] = msg
                 self._jobs[job_id]["progress"] = {"pct": int(pct)}
                 self._jobs[job_id]["last_update"] = time.time()
+                if self._jobs[job_id].get("status") == "submitting" and msg not in (
+                    "提交工作流...",
+                    "等待实例开始执行...",
+                ):
+                    self._jobs[job_id]["status"] = "generating"
+                    self._jobs[job_id]["generating_at"] = time.time()
                 if pid:
                     self._jobs[job_id]["prompt_id"] = pid
                 self._save_jobs()
@@ -474,6 +482,10 @@ class JobRunner:
                     )
                     return
                 raise TimeoutError("提交工作流多次无响应，实例容器或设备可能异常")
+            except PromptSubmitError as submit_err:
+                self._add_log("error", "wstrack", f"Prompt submit rejected: {submit_err}", job_id)
+                self._jobs[job_id]["ws_error"] = str(submit_err)[:500]
+                raise RuntimeError(_friendly_generation_error(submit_err))
             except Exception as _ws_err:
                 self._add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
                 self._jobs[job_id]["ws_error"] = str(_ws_err)[:300]
@@ -758,8 +770,7 @@ class JobRunner:
         if not prompt_id and job_id in self._jobs:
             prompt_id = self._jobs[job_id].get("prompt_id", "") or ""
 
-        filename = None
-        src = ""
+        sources: list[tuple[str, str]] = []
 
         downloaded = await asyncio.to_thread(
             self._download_images,
@@ -769,44 +780,53 @@ class JobRunner:
             self._output_dir,
         )
         if downloaded:
-            src = downloaded[0]
-            filename = os.path.basename(src)
+            for path in downloaded:
+                if path and os.path.isfile(path):
+                    sources.append((path, os.path.basename(path)))
 
-        if not filename:
+        if not sources:
             last_history_error = None
             for _wait in range(30):
                 try:
                     hist = self._comfyui_get(f"/history/{prompt_id}", inst_url)
                     if isinstance(hist, dict) and prompt_id in hist:
+                        found: list[tuple[str, str]] = []
                         for node_out in hist[prompt_id].get("outputs", {}).values():
                             for img in node_out.get("images", []):
-                                filename = img["filename"]
-                                break
-                            if filename:
-                                break
-                        if filename:
+                                filename = img.get("filename", "")
+                                if not filename:
+                                    continue
+                                src_path = os.path.join(self._output_dir, filename)
+                                if not os.path.isfile(src_path):
+                                    for root, _dirs, files in os.walk(self._output_dir):
+                                        if filename in files:
+                                            src_path = os.path.join(root, filename)
+                                            break
+                                if os.path.isfile(src_path):
+                                    found.append((src_path, filename))
+                        if found:
+                            sources = found
                             break
                 except Exception as e:
                     last_history_error = e
                 import time as _t
                 _t.sleep(1)
 
-            if not filename and last_history_error:
+            if not sources and last_history_error:
                 raise RuntimeError(_friendly_generation_error(last_history_error))
 
-        if not filename:
+        deduped: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+        for src_path, original_name in sources:
+            real_path = os.path.abspath(src_path)
+            if real_path in seen_paths or not os.path.isfile(src_path):
+                continue
+            seen_paths.add(real_path)
+            deduped.append((src_path, original_name or os.path.basename(src_path)))
+        sources = deduped
+
+        if not sources:
             raise RuntimeError(f"未找到输出图片 (prompt={prompt_id[:12]})")
-
-        if not src:
-            src = os.path.join(self._output_dir, filename)
-        if not os.path.isfile(src):
-            for root, _dirs, files in os.walk(self._output_dir):
-                if filename in files:
-                    src = os.path.join(root, filename)
-                    break
-
-        if not os.path.isfile(src):
-            raise RuntimeError(f"输出图片未找到: {filename}")
 
         date_str = datetime.now().strftime("%Y-%m-%d")
         owner = user_id or "anonymous"
@@ -815,53 +835,69 @@ class JobRunner:
         existing = glob.glob(os.path.join(self._output_dir, subdir, f"{wf_basename}_*.png"))
         seq = 1
         for p in existing:
-            import re
             m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.png$", os.path.basename(p))
             if m:
                 seq = max(seq, int(m.group(1)) + 1)
-        hist_name = f"{wf_basename}_{seq:04d}.png"
-        rel_path = f"{subdir}/{hist_name}"
-        dst = os.path.join(self._output_dir, rel_path)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(src, dst)
-
-        actual_w, actual_h = self._get_image_size(rel_path)
 
         prompt_text = infer_generation_label(
             os.path.basename(workflow_path),
             field_values,
         )
 
-        record = {
-            "id": job_id,
-            "filename": rel_path,
-            "original": filename,
-            "workflow": os.path.basename(workflow_path),
-            "prompt": prompt_text,
-            "seed": str(seed),
-            "width": actual_w or img_width,
-            "height": actual_h or img_height,
-            "elapsed": round(elapsed, 1),
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "thumb": self._make_thumbnail(rel_path) or "",
-            "field_values": field_values,
-            "user_id": user_id or "",
-            "is_public": False,
-        }
-        self._history.insert(0, record)
+        batch_count = len(sources)
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        records: list[dict] = []
+        for idx, (src, original_name) in enumerate(sources):
+            hist_name = f"{wf_basename}_{seq + idx:04d}.png"
+            rel_path = f"{subdir}/{hist_name}"
+            dst = os.path.join(self._output_dir, rel_path)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+
+            actual_w, actual_h = self._get_image_size(rel_path)
+            record_id = job_id if idx == 0 else f"{job_id}_{idx + 1:02d}"
+            records.append({
+                "id": record_id,
+                "filename": rel_path,
+                "original": original_name,
+                "workflow": os.path.basename(workflow_path),
+                "prompt": prompt_text,
+                "seed": str(seed),
+                "width": actual_w or img_width,
+                "height": actual_h or img_height,
+                "elapsed": round(elapsed, 1),
+                "time": created_at,
+                "thumb": self._make_thumbnail(rel_path) or "",
+                "field_values": field_values,
+                "user_id": user_id or "",
+                "is_public": False,
+                "batch_id": job_id if batch_count > 1 else "",
+                "batch_index": idx,
+                "batch_count": batch_count,
+            })
+
+        for record in reversed(records):
+            self._history.insert(0, record)
         self._save_history()
         # 同步写入 SQLite
-        try:
-            self._insert_gen(record, round(elapsed, 1), user_id=user_id or "")
-        except Exception:
-            pass
+        for record in reversed(records):
+            try:
+                self._insert_gen(record, round(elapsed, 1), user_id=user_id or "")
+            except Exception:
+                pass
 
         if job_id in self._jobs:
+            cover = records[0]
             self._jobs[job_id].update(
                 status="done",
                 message=f"完成 ({elapsed:.1f}s)",
-                image=rel_path,
-                thumb=record.get("thumb", ""),
+                image=cover.get("filename", ""),
+                thumb=cover.get("thumb", ""),
+                images=[record.get("filename", "") for record in records],
+                thumbs=[record.get("thumb", "") for record in records],
+                batch_id=job_id if batch_count > 1 else "",
+                batch_count=batch_count,
+                batch_items=records,
                 elapsed=round(elapsed, 1),
                 progress={"pct": 100},
             )

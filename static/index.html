@@ -13,7 +13,7 @@ if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1779032670"></script>
+<script src="static/js/module_loader.js?v=1779033543"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -354,13 +354,14 @@ if (location.protocol === 'file:') {
     <button class="lb-action-btn lb-share" id="lbShareBtn" type="button" title="快速分享" onclick="if(window.CW&&CW.toggleLBShare) CW.toggleLBShare()">
       <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-share"/></svg>
     </button>
+    <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    </a>
   </div>
   <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)" title="上一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-  <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-  </a>
   <div class="lb-stage" id="lbStage">
     <img id="lbImg" src="" alt="">
+    <img id="lbFullImg" src="" alt="" aria-hidden="true">
   </div>
   <div class="lb-loading" id="lbLoading" style="display:none">加载中...</div>
   <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)" title="下一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></button>

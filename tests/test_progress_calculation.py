@@ -1,12 +1,48 @@
 import asyncio
 import unittest
+from unittest import mock
 
 from modules.step_calculator import StepCalculator
 from modules.time_estimator import TimeEstimator
-from modules.ws_tracker import WSTracker, PromptStartTimeout
+from modules.ws_tracker import WSTracker, PromptStartTimeout, PromptSubmitError
 
 
 class ProgressCalculationTests(unittest.TestCase):
+    def test_prompt_submit_error_is_raised_with_details(self):
+        workflow = {
+            "1": {
+                "class_type": "SaveImage",
+                "inputs": {},
+            },
+        }
+        step_info = StepCalculator().calculate(workflow)
+        tracker = WSTracker(
+            job_id="job-submit-error-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+
+        class FakeWS:
+            async def close(self):
+                pass
+
+        async def fake_connect(*_args, **_kwargs):
+            return FakeWS()
+
+        async def run_submit_error():
+            with mock.patch("modules.ws_tracker.websockets.client.connect", side_effect=fake_connect):
+                with mock.patch(
+                    "modules.ws_tracker._http_post",
+                    side_effect=RuntimeError("HTTP Error 400: validation failed"),
+                ):
+                    with self.assertRaises(PromptSubmitError) as ctx:
+                        await tracker.track(timeout=1)
+            self.assertIn("validation failed", str(ctx.exception))
+
+        asyncio.run(run_submit_error())
+
     def test_prompt_start_timeout_raises_before_long_ws_timeout(self):
         workflow = {
             "1": {
