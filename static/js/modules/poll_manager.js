@@ -348,6 +348,7 @@
               // In-place patch via CardManager
               var cm = window.CW.cardManager;
               if (cm) cm.patchJobCard(sj);
+              if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
             }
           } else if (sj.status === 'generating') {
             // First progress info
@@ -355,6 +356,7 @@
               jobs[id] = sj;
               var cm2 = window.CW.cardManager;
               if (cm2) cm2.patchJobCard(sj);
+              if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
             }
           }
         }

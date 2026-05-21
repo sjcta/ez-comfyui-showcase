@@ -7,13 +7,16 @@ from modules.prompt_optimizer import (
     STRUCTURED_PROMPT_JSON_SCHEMA,
     _normalize_optimized_text,
     build_qwen_prompt_optimizer_workflow,
+    build_qwen_prompt_language_switch_workflow,
     build_qwen_prompt_translator_workflow,
     build_superprompt_workflow,
     clean_user_prompt,
     extract_show_text,
     normalize_interrogated_chinese_prompt,
+    normalize_language_switch_prompt,
     normalize_translated_prompt,
     parse_prompt_optimizer_output,
+    run_prompt_language_switcher,
 )
 
 
@@ -71,6 +74,31 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertIn("Do not include the original English prompt", workflow["1"]["inputs"]["text"])
         self.assertEqual(workflow["2"]["inputs"]["text"], ["1", 0])
 
+    def test_build_qwen_prompt_language_switch_workflow_targets_english(self):
+        workflow = build_qwen_prompt_language_switch_workflow("切成片的西瓜", "en")
+
+        self.assertEqual(workflow["1"]["class_type"], "Qwen3_VQA")
+        self.assertIn("Translate the following image-generation prompt into English", workflow["1"]["inputs"]["text"])
+        self.assertIn("keep a valid JSON object with the same keys and structure", workflow["1"]["inputs"]["text"])
+        self.assertIn("切成片的西瓜", workflow["1"]["inputs"]["text"])
+        self.assertEqual(workflow["1"]["inputs"]["model"], "Qwen3-VL-4B-Instruct")
+        self.assertEqual(workflow["1"]["inputs"]["quantization"], "4bit")
+        self.assertTrue(workflow["1"]["inputs"]["keep_model_loaded"])
+        self.assertEqual(workflow["2"]["inputs"]["text"], ["1", 0])
+
+    def test_build_qwen_prompt_language_switch_workflow_raises_json_token_budget(self):
+        prompt = json.dumps(
+            {
+                "subject": "切成片的西瓜",
+                "important_details": ["白色瓷盘", "夏日自然光", "突出果肉纹理"],
+                "constraints": ["不要文字", "不要手部"],
+            },
+            ensure_ascii=False,
+        )
+        workflow = build_qwen_prompt_language_switch_workflow(prompt, "en", max_new_tokens=256)
+
+        self.assertGreaterEqual(workflow["1"]["inputs"]["max_new_tokens"], 1024)
+
     def test_extract_show_text_prefers_output_text_from_target_node(self):
         history = {
             "outputs": {
@@ -112,7 +140,9 @@ class PromptOptimizerTests(unittest.TestCase):
         parsed = parse_prompt_optimizer_output(text, "切成片的西瓜")
         structured_json = json.loads(parsed["structured_prompt_json"])
 
-        self.assertEqual(parsed["optimized_prompt"], "切成片的西瓜，白色瓷盘，夏日自然光")
+        self.assertIn("西瓜", parsed["optimized_prompt"])
+        self.assertIn("白色瓷盘", parsed["optimized_prompt"])
+        self.assertIn("突出果肉纹理", parsed["optimized_prompt"])
         self.assertEqual(parsed["structured_prompt"]["version"], "ez-prompt-json-v1")
         self.assertEqual(parsed["structured_prompt"]["subject"], "西瓜")
         self.assertIn('"subject": "西瓜"', parsed["structured_prompt_json"])
@@ -184,6 +214,33 @@ class PromptOptimizerTests(unittest.TestCase):
         )
         self.assertEqual(structured_json["action"], "坐在床前，面对大窗户，直视镜头，神情宁静")
 
+    def test_plain_prompt_uses_richer_structured_fields_when_keyword_is_sparse(self):
+        text = """{
+          "keyword_prompt": "低角度仰拍，展现广阔峡谷，前景风化岩石，背景无垠沙漠，浅蓝天空，棕米色调",
+          "structured_prompt": {
+            "subject": "峡谷岩壁，风化岩石前景，无垠沙漠背景",
+            "action": "静止展现自然地貌，低角度仰拍增强纵深",
+            "scene": "广阔峡谷，浅蓝天空，地平线远处，荒芜植被稀疏",
+            "composition": "低角度仰拍，岩石前景，岩壁占据画面主体，沙漠延伸至远方",
+            "lighting": "自然日光，柔和阴影，强调纹理与轮廓",
+            "style": "写实风景，自然主义摄影风格，强调地质细节与空间感",
+            "color_palette": "棕色与米色为主，浅蓝天空，低饱和度，强调荒芜与宁静",
+            "materials_textures": ["砂岩表面风化纹理，深邃裂隙，粗粝质感"],
+            "important_details": [
+              "低角度仰拍，增强纵深与透视感",
+              "地平线清晰可见",
+              "植被稀疏，强调荒芜感"
+            ]
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "峡谷风景")
+
+        self.assertIn("自然日光", parsed["optimized_prompt"])
+        self.assertIn("砂岩表面风化纹理", parsed["optimized_prompt"])
+        self.assertIn("地平线清晰可见", parsed["optimized_prompt"])
+        self.assertGreater(len(parsed["optimized_prompt"]), len("低角度仰拍，展现广阔峡谷，前景风化岩石，背景无垠沙漠，浅蓝天空，棕米色调"))
+
     def test_parse_prompt_optimizer_output_falls_back_for_plain_text(self):
         parsed = parse_prompt_optimizer_output("黑猫警长，经典中国动画风格，正义警察猫角色", "黑猫警长")
 
@@ -207,6 +264,105 @@ class PromptOptimizerTests(unittest.TestCase):
         text = "赛博朋克城市夜景，35mm lens，Unreal Engine，浅景深，高对比霓虹光。"
 
         self.assertEqual(normalize_translated_prompt(text), text)
+
+    def test_normalize_language_switch_prompt_removes_english_label(self):
+        self.assertEqual(
+            normalize_language_switch_prompt("English: sliced watermelon, white ceramic plate", "en"),
+            "sliced watermelon, white ceramic plate",
+        )
+
+    def test_normalize_language_switch_prompt_preserves_json_shape(self):
+        text = """```json
+        {
+          "subject": "sliced watermelon",
+          "important_details": ["white ceramic plate", "natural light"]
+        }
+        ```"""
+
+        normalized = normalize_language_switch_prompt(text, "en")
+        parsed = json.loads(normalized)
+
+        self.assertEqual(parsed["subject"], "sliced watermelon")
+        self.assertEqual(parsed["important_details"], ["white ceramic plate", "natural light"])
+        self.assertIn('\n  "subject"', normalized)
+
+    def test_normalize_language_switch_prompt_fills_missing_json_fields_from_source(self):
+        source = json.dumps(
+            {
+                "subject": "切成片的西瓜",
+                "important_details": ["白色瓷盘", "夏日自然光", "突出果肉纹理"],
+                "constraints": ["不要文字", "不要手部"],
+            },
+            ensure_ascii=False,
+        )
+        translated = json.dumps(
+            {
+                "subject": "sliced watermelon",
+                "important_details": ["white ceramic plate"],
+            },
+            ensure_ascii=False,
+        )
+
+        normalized = normalize_language_switch_prompt(translated, "en", source_prompt=source)
+        parsed = json.loads(normalized)
+
+        self.assertEqual(parsed["subject"], "sliced watermelon")
+        self.assertEqual(parsed["important_details"], ["white ceramic plate", "夏日自然光", "突出果肉纹理"])
+        self.assertEqual(parsed["constraints"], ["不要文字", "不要手部"])
+
+    def test_run_prompt_language_switcher_translates_json_leaves_when_group_output_is_not_json(self):
+        source = {
+            "intent": "写实肖像摄影，强调人物与环境的和谐与宁静氛围",
+            "subject": "年轻女子，十七八岁，棕色长发，白皙肤色",
+            "important_details": ["佩戴精致项链", "身穿白色露肩连衣裙"],
+        }
+        responses = {
+            "p1": "portrait photography, calm bedroom atmosphere",
+            "p2": "realistic portrait photography, emphasizing harmony between the person and environment",
+            "p3": "young woman, seventeen or eighteen years old, brown long hair, fair skin",
+            "p4": "wearing a delicate necklace",
+            "p5": "wearing a white off-shoulder dress",
+        }
+        prompt_ids = []
+
+        def fake_post(path, payload, base_url):
+            prompt_id = "p" + str(len(prompt_ids) + 1)
+            prompt_ids.append(prompt_id)
+            return {"prompt_id": prompt_id}
+
+        def fake_get(path, base_url):
+            prompt_id = path.rsplit("/", 1)[-1]
+            return {
+                prompt_id: {
+                    "status": {"completed": True},
+                    "outputs": {"2": {"text": [responses[prompt_id]]}},
+                }
+            }
+
+        result = run_prompt_language_switcher(
+            json.dumps(source, ensure_ascii=False),
+            "en",
+            "http://prompt",
+            fake_post,
+            fake_get,
+            poll_interval=0,
+        )
+        parsed = json.loads(result["translated_prompt"])
+
+        self.assertEqual(result["format"], "json")
+        self.assertEqual(prompt_ids, ["p1", "p2", "p3", "p4", "p5"])
+        self.assertEqual(
+            list(parsed.keys()),
+            ["intent", "subject", "important_details"],
+        )
+        self.assertEqual(
+            parsed["subject"],
+            "young woman, seventeen or eighteen years old, brown long hair, fair skin",
+        )
+        self.assertEqual(
+            parsed["important_details"],
+            ["wearing a delicate necklace", "wearing a white off-shoulder dress"],
+        )
 
     def test_normalize_interrogated_chinese_prompt_removes_english_tag_tail(self):
         text = (
@@ -265,6 +421,192 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertEqual(result["structured_prompt"]["subject"], "watermelon")
         self.assertIn("subject", result["structured_prompt_json"])
 
+    def test_api_prompt_translate_auto_targets_english_for_chinese_prompt(self):
+        calls = []
+        old_runner = app.run_prompt_language_switcher
+        old_instances = app._get_enabled_instances
+        old_picker = app._pick_ready_aux_instance
+        try:
+            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
+            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+
+            def fake_runner(prompt, target_language, base_url, post, get, **kwargs):
+                calls.append((prompt, target_language, base_url))
+                return {
+                    "ok": True,
+                    "provider": "qwen",
+                    "target_language": target_language,
+                    "translated_prompt": "sliced watermelon, white ceramic plate",
+                    "prompt_en": "sliced watermelon, white ceramic plate",
+                }
+
+            app.run_prompt_language_switcher = fake_runner
+            result = app.api_prompt_translate(
+                app.PromptTranslateRequest(prompt="切成片的西瓜"),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app.run_prompt_language_switcher = old_runner
+            app._get_enabled_instances = old_instances
+            app._pick_ready_aux_instance = old_picker
+
+        self.assertEqual(calls, [("切成片的西瓜", "en", "http://prompt")])
+        self.assertEqual(result["translated_prompt"], "sliced watermelon, white ceramic plate")
+        self.assertEqual(result["target_language"], "en")
+
+    def test_api_prompt_translate_reuses_cached_pair_and_reverse(self):
+        calls = []
+        old_runner = app.run_prompt_language_switcher
+        old_instances = app._get_enabled_instances
+        old_picker = app._pick_ready_aux_instance
+        app._PROMPT_TRANSLATE_CACHE.clear()
+        try:
+            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
+            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+
+            def fake_runner(prompt, target_language, base_url, post, get, **kwargs):
+                calls.append((prompt, target_language, base_url))
+                return {
+                    "ok": True,
+                    "provider": "qwen",
+                    "target_language": target_language,
+                    "translated_prompt": "sliced watermelon, white ceramic plate",
+                    "prompt_en": "sliced watermelon, white ceramic plate",
+                }
+
+            app.run_prompt_language_switcher = fake_runner
+            first = app.api_prompt_translate(
+                app.PromptTranslateRequest(prompt="切成片的西瓜"),
+                current_user={"sub": "u1", "role": "user"},
+            )
+            second = app.api_prompt_translate(
+                app.PromptTranslateRequest(prompt="切成片的西瓜"),
+                current_user={"sub": "u1", "role": "user"},
+            )
+            reverse = app.api_prompt_translate(
+                app.PromptTranslateRequest(prompt="sliced watermelon, white ceramic plate"),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app.run_prompt_language_switcher = old_runner
+            app._get_enabled_instances = old_instances
+            app._pick_ready_aux_instance = old_picker
+            app._PROMPT_TRANSLATE_CACHE.clear()
+
+        self.assertEqual(calls, [("切成片的西瓜", "en", "http://prompt")])
+        self.assertFalse(first["cached"])
+        self.assertTrue(second["cached"])
+        self.assertEqual(second["translated_prompt"], "sliced watermelon, white ceramic plate")
+        self.assertTrue(reverse["cached"])
+        self.assertEqual(reverse["target_language"], "zh")
+        self.assertEqual(reverse["translated_prompt"], "切成片的西瓜")
+
+    def test_api_prompt_translate_preserves_json_prompt_format(self):
+        calls = []
+        old_runner = app.run_prompt_language_switcher
+        old_instances = app._get_enabled_instances
+        old_picker = app._pick_ready_aux_instance
+        app._PROMPT_TRANSLATE_CACHE.clear()
+        try:
+            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
+            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+
+            def fake_runner(prompt, target_language, base_url, post, get, **kwargs):
+                calls.append((prompt, target_language, base_url))
+                return {
+                    "ok": True,
+                    "provider": "qwen",
+                    "target_language": target_language,
+                    "translated_prompt": json.dumps(
+                        {
+                            "subject": "sliced watermelon",
+                            "important_details": ["white ceramic plate"],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    "prompt_en": "",
+                }
+
+            app.run_prompt_language_switcher = fake_runner
+            result = app.api_prompt_translate(
+                app.PromptTranslateRequest(prompt='{"subject":"切成片的西瓜"}'),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app.run_prompt_language_switcher = old_runner
+            app._get_enabled_instances = old_instances
+            app._pick_ready_aux_instance = old_picker
+            app._PROMPT_TRANSLATE_CACHE.clear()
+
+        self.assertEqual(calls, [('{"subject":"切成片的西瓜"}', "en", "http://prompt")])
+        self.assertEqual(result["format"], "json")
+        parsed = json.loads(result["translated_prompt"])
+        self.assertEqual(parsed["subject"], "sliced watermelon")
+        self.assertEqual(parsed["important_details"], ["white ceramic plate"])
+
+    def test_api_prompt_interrogate_adds_structured_json_when_available(self):
+        optimize_calls = []
+        old_instances = app._get_enabled_instances
+        old_picker = app._pick_ready_aux_instance
+        old_resolve = app._resolve_input_image_path
+        old_prepare = app.prepare_interrogate_image
+        old_build = app.build_image_interrogate_workflow
+        old_ensure = app.ensure_workflow_images_available
+        old_interrogator = app.run_image_interrogator
+        old_translator = app.run_prompt_translator
+        old_optimizer = app.run_prompt_optimizer
+        old_mark = app._mark_aux_instance_active
+        try:
+            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
+            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._resolve_input_image_path = lambda image: "/tmp/input.png"
+            app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
+            app.build_image_interrogate_workflow = lambda image: {"1": {"class_type": "LoadImage"}}
+            app.ensure_workflow_images_available = lambda workflow, input_dir, inst_url: None
+            app.run_image_interrogator = lambda *args, **kwargs: {
+                "ok": True,
+                "provider": "comfyui-wd14-florence",
+                "prompt": "A futuristic sports car on a winding mountain road.",
+            }
+            app.run_prompt_translator = lambda *args, **kwargs: {
+                "provider": "qwen",
+                "prompt_zh": "一辆未来主义超跑在蜿蜒山路上。",
+            }
+
+            def fake_optimizer(prompt, base_url, post, get, **kwargs):
+                optimize_calls.append((prompt, base_url))
+                return {
+                    "provider": "qwen-json",
+                    "optimized_prompt": "未来主义超跑，蜿蜒山路",
+                    "structured_prompt": {"subject": "未来主义超跑"},
+                    "structured_prompt_json": "{\"subject\":\"未来主义超跑\"}",
+                }
+
+            app.run_prompt_optimizer = fake_optimizer
+            app._mark_aux_instance_active = lambda inst: None
+            result = app.api_prompt_interrogate(
+                app.PromptInterrogateRequest(image="sample.png"),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app._get_enabled_instances = old_instances
+            app._pick_ready_aux_instance = old_picker
+            app._resolve_input_image_path = old_resolve
+            app.prepare_interrogate_image = old_prepare
+            app.build_image_interrogate_workflow = old_build
+            app.ensure_workflow_images_available = old_ensure
+            app.run_image_interrogator = old_interrogator
+            app.run_prompt_translator = old_translator
+            app.run_prompt_optimizer = old_optimizer
+            app._mark_aux_instance_active = old_mark
+
+        self.assertEqual(optimize_calls, [("一辆未来主义超跑在蜿蜒山路上。", "http://prompt")])
+        self.assertEqual(result["prompt_zh"], "一辆未来主义超跑在蜿蜒山路上。")
+        self.assertEqual(result["structured_prompt"]["subject"], "未来主义超跑")
+        self.assertIn("subject", result["structured_prompt_json"])
+        self.assertEqual(result["structured_provider"], "qwen-json")
+
     def test_prompt_aux_instances_are_split_from_generation_pool(self):
         instances = [
             {"name": "A", "url": "http://comfy-a", "roles": ["generation"]},
@@ -280,6 +622,34 @@ class PromptOptimizerTests(unittest.TestCase):
             [inst["name"] for inst in app._get_prompt_aux_instances(instances)],
             ["Prompt", "Caption"],
         )
+
+    def test_prompt_aux_instances_are_hidden_from_regular_user_instance_list(self):
+        old_load_nodes = app._load_nodes
+        old_connected = app._is_node_connected
+        try:
+            app._load_nodes = lambda: [
+                {
+                    "id": "n1",
+                    "name": "Node",
+                    "host": "127.0.0.1",
+                    "enabled": True,
+                    "shared": True,
+                    "instances": [
+                        {"name": "A", "port": 8190, "roles": ["generation"]},
+                        {"name": "Prompt", "port": 8191, "roles": ["prompt_aux"]},
+                    ],
+                }
+            ]
+            app._is_node_connected = lambda node_id: True
+
+            regular = app._get_enabled_instances_for_user({"id": "u1", "sub": "u1", "role": "user"})
+            admin = app._get_enabled_instances_for_user({"id": "admin", "sub": "admin", "role": "admin"})
+        finally:
+            app._load_nodes = old_load_nodes
+            app._is_node_connected = old_connected
+
+        self.assertEqual([inst["name"] for inst in regular], ["A"])
+        self.assertEqual([inst["name"] for inst in admin], ["A", "Prompt"])
 
     def test_pick_ready_aux_instance_only_uses_reserved_prompt_pool(self):
         old_ready = app._ensure_aux_instance_ready

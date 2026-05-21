@@ -6,6 +6,70 @@
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs, jobFields = A.jobFields, historyItems = A.historyItems;
+  var PROMPT_TRANSLATION_CACHE_KEY = 'cw_prompt_translation_cache_v1';
+  var _promptTranslationCache = _loadPromptTranslationCache();
+
+  function _normalizePromptCacheText(text) {
+    return String(text || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function _detectPromptTargetLanguage(text) {
+    return /[\u4e00-\u9fff]/.test(String(text || '')) ? 'en' : 'zh';
+  }
+
+  function _looksLikeJsonPrompt(text) {
+    try {
+      return !!JSON.parse(String(text || '').trim());
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function _promptTranslationCacheKey(text, target) {
+    return String(target || '') + '\n' + _normalizePromptCacheText(text);
+  }
+
+  function _loadPromptTranslationCache() {
+    try {
+      var raw = sessionStorage.getItem(PROMPT_TRANSLATION_CACHE_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function _savePromptTranslationCache() {
+    try {
+      var keys = Object.keys(_promptTranslationCache);
+      if (keys.length > 160) {
+        keys.slice(0, keys.length - 160).forEach(function(key) { delete _promptTranslationCache[key]; });
+      }
+      sessionStorage.setItem(PROMPT_TRANSLATION_CACHE_KEY, JSON.stringify(_promptTranslationCache));
+    } catch (e) {}
+  }
+
+  function _getPromptTranslationCache(text, target) {
+    var entry = _promptTranslationCache[_promptTranslationCacheKey(text, target)];
+    return entry && entry.text ? String(entry.text).trim() : '';
+  }
+
+  function _rememberPromptTranslationPair(source, targetLang, translated) {
+    var src = String(source || '').trim();
+    var dst = String(translated || '').trim();
+    var lang = targetLang === 'zh' ? 'zh' : 'en';
+    if (!src || !dst || src === dst) return;
+    _promptTranslationCache[_promptTranslationCacheKey(src, lang)] = { text: dst, ts: Date.now() };
+    _promptTranslationCache[_promptTranslationCacheKey(dst, lang === 'en' ? 'zh' : 'en')] = { text: src, ts: Date.now() };
+    _savePromptTranslationCache();
+  }
+
+  function registerPromptTranslationPair(promptZh, promptEn) {
+    var zh = String(promptZh || '').trim();
+    var en = String(promptEn || '').trim();
+    if (!zh || !en) return;
+    _rememberPromptTranslationPair(zh, 'en', en);
+  }
 
 function initRatioGrid() {
     // Ratio buttons are created dynamically by renderQuickForm - guard
@@ -86,6 +150,68 @@ function _getManualSeedValue() {
     if (!value) return null;
     var seed = parseInt(value, 10);
     return Number.isFinite(seed) ? seed : null;
+  }
+
+function _hasRestorableSeedFieldValues(values) {
+    return Object.keys(values || {}).some(function(key) {
+      return /::(?:seed|noise_seed)$/.test(key);
+    });
+  }
+
+function _normalizeFieldMeta(fields, workflowName) {
+    var normalized = (fields || []).map(function(f) {
+      return {
+        key: f.key || (f.node_id + '::' + f.field),
+        node_id: f.node_id,
+        class_type: f.class_type,
+        field: f.field,
+        zone: f.zone,
+        visible: f.visible !== false,
+        type: f.type,
+        label: f.label,
+        value: f.value,
+        options: f.options,
+        step: f.step,
+        min: f.min,
+        max: f.max,
+      };
+    });
+    A._wfFieldMeta = normalized;
+    A._wfFieldWorkflow = workflowName || A.currentWF || '';
+    window.__APP__._wfFieldMeta = normalized;
+    window.__APP__._wfFieldWorkflow = A._wfFieldWorkflow;
+    return normalized;
+  }
+
+function _numberAttr(name, value) {
+    return value === undefined || value === null || value === ''
+      ? ''
+      : ' ' + name + '="' + escA(String(value)) + '"';
+  }
+
+function _hasCurrentFieldCache() {
+    return !!(A._wfFieldMeta && A._wfFieldMeta.length && A._wfFieldWorkflow === A.currentWF);
+  }
+
+async function _getSubmitFieldsMeta() {
+    if (_hasCurrentFieldCache()) return A._wfFieldMeta;
+    try {
+      var fr = await fetch(`${API}/api/workflows/${encodeURIComponent(A.currentWF)}/fields`);
+      if (!fr.ok) throw new Error('字段读取失败');
+      var fd = await fr.json();
+      return _normalizeFieldMeta(fd.fields || [], A.currentWF);
+    } catch (e) {
+      if (_hasCurrentFieldCache()) return A._wfFieldMeta;
+      throw e;
+    }
+  }
+
+function _isPromptSubmitField(f) {
+    if (!f) return false;
+    var cls = String(f.class_type || '');
+    var zone = f.zone || 'advanced';
+    if (zone === 'user_input' && (f.type === 'textarea' || cls.indexOf('TextEncode') >= 0)) return true;
+    return !f.zone && cls === 'CLIPTextEncode' && f.field === 'text';
   }
 
 function toggleSeedRandom(btnEl) {
@@ -251,8 +377,8 @@ async function fillFormFromHistory(idx, key) {
         }
       }
     }
-    // Restore seed (covers old items without field_values, and ensures actual seed is used)
-    if (h.seed) {
+    // Restore seed only for old records that do not have workflow seed fields.
+    if (h.seed && !_hasRestorableSeedFieldValues(h.field_values || {})) {
       const seedInput = _getSeedInput();
       if (seedInput) seedInput.value = h.seed;
       _setSeedRandomEnabled(true);
@@ -319,12 +445,6 @@ async function restoreJob(jobId) {
       }
       if (typeof highlightRatio === 'function') highlightRatio(j.width, j.height);
     }
-    // Restore seed
-    if (j.seed) {
-      const seedEl = _getSeedInput() || document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
-      if (seedEl) seedEl.value = j.seed;
-      _setSeedRandomEnabled(true);
-    }
     // Restore advanced fields from server fields data
     if (j.fields && typeof j.fields === 'object') {
       for (const [k, v] of Object.entries(j.fields)) {
@@ -332,6 +452,12 @@ async function restoreJob(jobId) {
         const el = $(`#advFields [data-key="${k}"]`);
         if (el) el.value = v;
       }
+    }
+    // Restore seed only for old job records that do not have workflow seed fields.
+    if (j.seed && !_hasRestorableSeedFieldValues(j.fields || {})) {
+      const seedEl = _getSeedInput() || document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
+      if (seedEl) seedEl.value = j.seed;
+      _setSeedRandomEnabled(true);
     }
   }
 
@@ -354,21 +480,18 @@ async function doGenerate() {
     const snapshot = { prompt, width: ($('#widthInput') || {}).value || 0, height: ($('#heightInput') || {}).value || 0, adv: {} };
 
     try {
-      const fr = await fetch(`${API}/api/workflows/${encodeURIComponent(A.currentWF)}/fields`);
-      const fd = await fr.json();
-      for (const f of fd.fields || []) {
+      await _waitForRefImageUpload();
+      const submitFieldsMeta = await _getSubmitFieldsMeta();
+      let promptFieldCount = 0;
+      for (const f of submitFieldsMeta || []) {
         // Pre-set default value for this field (including hidden)
         fields[f.node_id + '::' + f.field] = f.value;
         const zone = f.zone || 'advanced';
         const key = `${f.node_id}::${f.field}`;
         // Text-encode in user_input zone → main prompt
-        if (zone === 'user_input' && (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode')))) {
+        if (_isPromptSubmitField(f)) {
           fields[key] = prompt;
-          continue;
-        }
-        // Unzoned fallback
-        if (!f.zone && f.class_type === 'CLIPTextEncode' && f.field === 'text') {
-          fields[key] = prompt;
+          promptFieldCount += 1;
           continue;
         }
         // LatentImage size
@@ -387,8 +510,15 @@ async function doGenerate() {
           continue;
         }
       }
+      if (prompt && $('#promptInput') && promptFieldCount === 0) {
+        throw new Error('未找到可提交的提示词字段，请重新选择工作流后再出图');
+      }
     } catch (e) {
       console.error(e);
+      alert('出图失败: ' + (e.message || '提示词字段读取失败'));
+      btn.disabled = false;
+      btn.innerHTML = CW.icon('play') + ' 出图';
+      return;
     }
 
     $$('#advFields [data-key]').forEach((el) => {
@@ -403,8 +533,8 @@ async function doGenerate() {
         fields,
         width: parseInt(($('#widthInput') || {}).value) || 0,
         height: parseInt(($('#heightInput') || {}).value) || 0,
-        preferred_instance: A.manualTargetInstance ? (A.currentTargetInstance || '') : '',
-        preferred_node_id: A.manualTargetInstance ? (A.currentTargetNodeId || '') : '',
+        preferred_instance: '',
+        preferred_node_id: '',
       };
       if (!_isSeedRandomEnabled() && manualSeed === null) throw new Error('请输入种子数字，或开启随机种子');
       if (!_isSeedRandomEnabled()) requestBody.seed = manualSeed;
@@ -427,8 +557,8 @@ async function doGenerate() {
         prompt_preview: _quickGenerationLabel(),
         width: parseInt(($('#widthInput') || {}).value) || 0,
         height: parseInt(($('#heightInput') || {}).value) || 0,
-        preferred_instance: A.manualTargetInstance ? (A.currentTargetInstance || '') : '',
-        preferred_node_id: A.manualTargetInstance ? (A.currentTargetNodeId || '') : '',
+        preferred_instance: '',
+        preferred_node_id: '',
         queued_at: new Date().toLocaleTimeString('en-GB'),
       };
       try {
@@ -490,6 +620,59 @@ async function optimizePrompt() {
   }
 
 
+async function translatePromptLanguage() {
+    var input = $('#promptInput');
+    var btn = $('#translatePromptBtn');
+    if (!input) return;
+    var raw = (input.value || '').trim();
+    if (!raw) {
+      if (window.CW && CW.toast) CW.toast('先输入提示词', 'warn');
+      input.focus();
+      return;
+    }
+    var targetLanguage = _detectPromptTargetLanguage(raw);
+    var cachedTranslation = _getPromptTranslationCache(raw, targetLanguage);
+    if (cachedTranslation) {
+      _setPromptInputValue(cachedTranslation);
+      if (window.CW && typeof CW.clearPromptOptimizationVariants === 'function') CW.clearPromptOptimizationVariants();
+      if (window.CW && CW.toast) CW.toast(targetLanguage === 'en' ? '已快速切换为英文提示词' : '已快速切换为中文提示词', 'ok');
+      return;
+    }
+    var oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 翻译中';
+    }
+    try {
+      var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+      var response = await fetcher(API + '/api/prompt/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: raw, target_language: targetLanguage })
+      });
+      var data = await response.json().catch(function() { return {}; });
+      if (!response.ok) throw new Error(data.detail || data.message || '提示词翻译失败');
+      var translated = String(data.translated_prompt || data.prompt_zh || data.prompt_en || '').trim();
+      if (!translated) throw new Error('翻译结果为空');
+      _rememberPromptTranslationPair(raw, data.target_language || targetLanguage, translated);
+	      _setPromptInputValue(translated);
+      if (window.CW && typeof CW.clearPromptOptimizationVariants === 'function') CW.clearPromptOptimizationVariants();
+      if (window.CW && CW.toast) CW.toast(data.target_language === 'en' ? '已切换为英文提示词' : '已切换为中文提示词', 'ok');
+    } catch (e) {
+      console.warn('[translatePromptLanguage] failed:', e);
+      if (window.CW && CW.toast) CW.toast(e.message || '提示词翻译失败', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-loading');
+        btn.innerHTML = oldHtml || ((window.CW && CW.icon ? CW.icon('globe') : '') + ' 中英切换');
+      }
+      if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+    }
+  }
+
+
 var _promptInterrogateRunning = false;
 
   function _setPromptInterrogateLoading(isLoading, label) {
@@ -502,7 +685,7 @@ var _promptInterrogateRunning = false;
       if (isLoading) {
         btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' ' + (label || '反推中');
       } else if (btn.id === 'interrogatePromptBtn') {
-        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">用图片反推</span>';
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span>';
       } else {
         btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
       }
@@ -532,6 +715,9 @@ var _promptInterrogateRunning = false;
       }
     }).catch(function(e) {
       console.warn('[interrogatePromptFromImage] failed:', e);
+      if (window.CW && typeof CW.clearPromptInterrogateToast === 'function') {
+        CW.clearPromptInterrogateToast();
+      }
       if (window.CW && CW.toast) CW.toast(e.message || '图片反推失败', 'error');
     }).finally(function() {
       _promptInterrogateRunning = false;
@@ -573,7 +759,7 @@ async function interrogatePromptFromImage() {
           '<div class="prompt-interrogate-upload" id="promptInterrogateZone">' +
             '<div class="img-upload-placeholder"><span>' + (window.CW && CW.icon ? CW.icon('upload', 26) : '') + '</span><span>点击或拖入图片</span></div>' +
             '<img id="promptInterrogatePreview" class="img-upload-preview hidden" alt="">' +
-            '<input type="file" id="promptInterrogateFile" accept="image/*" class="hidden">' +
+            '<input type="file" id="promptInterrogateFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden">' +
           '</div>' +
           '<div class="prompt-interrogate-actions">' +
             '<button class="prompt-tool-btn" type="button" id="promptInterrogateRunBtn" disabled>' + (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推</button>' +
@@ -701,16 +887,16 @@ function renderQuickForm(fields) {
       if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
-        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="用图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">用图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="提示词优化" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">提示词优化</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="提示词优化" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">提示词优化</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
         quickImageRendered = true;
-        html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
+        html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden"></div></div>';
       } else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'width') { hasLatentW = true; latentW = f.value || 1024; }
       else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'height') { hasLatentH = true; latentH = f.value || 1024; }
     }
     if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage && !quickImageRendered) {
-      html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
+      html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden"></div></div>';
     }
     // Restore saved prompt text after DOM rebuild
     if (_savedPrompt) {
@@ -723,9 +909,9 @@ function renderQuickForm(fields) {
       var presets = [[1024,1024,'1:1','22px','22px'],[1536,1024,'3:2','26px','17px'],[1920,1080,'16:9','28px','16px'],[1536,1152,'4:3','24px','18px'],[1152,1536,'3:4','18px','24px'],[1024,1536,'2:3','16px','24px'],[1080,1920,'9:16','14px','24px']];
       for (var pi = 0; pi < presets.length; pi++) {
         var p = presets[pi];
-        html += '<button class="ratio-btn' + (p[0]===sw&&p[1]===sh?' active':'') + '" data-w="' + p[0] + '" data-h="' + p[1] + '" title="' + p[0] + 'x' + p[1] + '"><span class="ratio-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label">' + p[2] + '</span></button>';
+        html += '<button class="ratio-btn' + (p[0]===sw&&p[1]===sh?' active':'') + '" data-w="' + p[0] + '" data-h="' + p[1] + '" title="' + p[0] + '×' + p[1] + '"><span class="ratio-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label">' + p[2] + '</span></button>';
       }
-      html += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="64" min="256" max="2048"><span class="sep-dim">x</span><input type="number" id="heightInput" value="' + sh + '" step="64" min="256" max="2048"></div></div>';
+      html += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="64" min="256" max="2048"><span class="sep-dim" aria-label="乘以">×</span><input type="number" id="heightInput" value="' + sh + '" step="64" min="256" max="2048"></div></div>';
       container.innerHTML = html;
       window.CW.initRatioGrid && window.CW.initRatioGrid();
       window.CW.highlightRatio && CW.highlightRatio(sw, sh);
@@ -820,7 +1006,7 @@ function renderAdvFields(fields) {
           html += `<label class="toggle-label bool-toggle"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === 'true' ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label>`;
           break;
         case 'seed':
-          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}" oninput="CW.setSeedRandomEnabled(false)"><button type="button" class="btn-dice seed-random-toggle is-active" data-seed-random="1" aria-pressed="true" title="随机种子" aria-label="随机种子" onclick="CW.toggleSeedRandom(this)">${CW.icon('shuffle')}</button></div>`;
+          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"${_numberAttr('min', f.min)}${_numberAttr('max', f.max)}${_numberAttr('step', f.step || 1)} oninput="CW.setSeedRandomEnabled(false)"><button type="button" class="btn-dice seed-random-toggle is-active" data-seed-random="1" aria-pressed="true" title="随机种子" aria-label="随机种子" onclick="CW.toggleSeedRandom(this)">${CW.icon('shuffle')}</button></div>`;
           break;
         case 'number': {
           const step = f.step || 1,
@@ -853,14 +1039,19 @@ function toggleGenForm() {
   }
 
 var _refImageInited = false;
+var _refImageUploadPromise = null;
+var _refImageUploadToken = 0;
 function _resetRefImage() {
     _refImageInited = false;
+    _refImageUploadPromise = null;
+    _refImageUploadToken += 1;
     var preview = $('#refImagePreview');
     var placeholder = $('#refImagePlaceholder');
     var valueInput = $('#refImageValue');
     if (preview) { preview.src = ''; preview.style.display = 'none'; }
     if (placeholder) placeholder.style.display = '';
     if (valueInput) valueInput.value = '';
+    _setRefImageUploading(false);
   }
 
 var __curZone = null;
@@ -889,6 +1080,59 @@ var __curZone = null;
     return upload.then(_parseUploadResponse);
   }
 
+  function _setRefImageUploading(uploading) {
+    var zone = $('#refImageZone');
+    if (!zone) return;
+    if (uploading) {
+      if (zone.setAttribute) zone.setAttribute('data-uploading', '1');
+      else if (zone.dataset) zone.dataset.uploading = '1';
+    } else if (zone.removeAttribute) {
+      zone.removeAttribute('data-uploading');
+    } else if (zone.dataset) {
+      delete zone.dataset.uploading;
+    }
+  }
+
+  async function _waitForRefImageUpload() {
+    if (!_refImageUploadPromise) return;
+    if (window.CW && CW.toast) CW.toast('参考图仍在上传，完成后继续提交', 'info');
+    try {
+      await _refImageUploadPromise;
+    } catch (e) {
+      throw new Error('参考图仍在上传失败，请重新上传后再出图');
+    }
+  }
+
+  function _applyUploadedRefImage(file, fileInput, zone, preview, valueInput, placeholder) {
+    if (!file) return Promise.resolve(null);
+    var token = ++_refImageUploadToken;
+    if (valueInput) valueInput.value = '';
+    if (preview) {
+      preview.src = '';
+      preview.style.display = 'none';
+    }
+    if (placeholder) placeholder.style.display = '';
+    _setRefImageUploading(true);
+    var upload = _uploadRefImage(file).then(function(d) {
+      if (token !== _refImageUploadToken) return d;
+      if (valueInput) valueInput.value = d.filename;
+      if (preview) {
+        preview.src = API + '/api/input-image/' + encodeURIComponent(d.filename);
+        preview.style.display = '';
+      }
+      if (placeholder) placeholder.style.display = 'none';
+      return d;
+    }).finally(function() {
+      if (token === _refImageUploadToken) {
+        _refImageUploadPromise = null;
+        _setRefImageUploading(false);
+      }
+      if (fileInput) fileInput.value = '';
+    });
+    _refImageUploadPromise = upload;
+    return upload;
+  }
+
   function _initRefImageZone() {
     if (_refImageInited) return;
     _refImageInited = true;
@@ -906,20 +1150,16 @@ var __curZone = null;
       if (!fileInput.files.length) return;
       var file = fileInput.files[0];
       try {
-        var d = await _uploadRefImage(file);
-        valueInput.value = d.filename;
-        if (preview) {
-          preview.src = API + '/api/input-image/' + encodeURIComponent(d.filename);
-          preview.style.display = '';
-        }
-        if (placeholder) placeholder.style.display = 'none';
+        await _applyUploadedRefImage(file, fileInput, zone, preview, valueInput, placeholder);
       } catch (e) {
         alert('upload fail: ' + e.message);
       }
-      fileInput.value = '';
     });
     if (preview) {
       preview.addEventListener('click', function() {
+        _refImageUploadPromise = null;
+        _refImageUploadToken += 1;
+        _setRefImageUploading(false);
         preview.src = '';
         preview.style.display = 'none';
         if (placeholder) placeholder.style.display = '';
@@ -939,13 +1179,7 @@ var __curZone = null;
       var file = e.dataTransfer.files[0];
       if (!file) return;
       try {
-        var d = await _uploadRefImage(file);
-        valueInput.value = d.filename;
-        if (preview) {
-          preview.src = API + '/api/input-image/' + encodeURIComponent(d.filename);
-          preview.style.display = '';
-        }
-        if (placeholder) placeholder.style.display = 'none';
+        await _applyUploadedRefImage(file, fileInput, zone, preview, valueInput, placeholder);
       } catch (e) {
         alert('upload fail: ' + e.message);
       }
@@ -962,6 +1196,8 @@ function renderQuickGen() {
   window.CW.fillFormFromHistory = fillFormFromHistory;
   window.CW.doGenerate = doGenerate;
   window.CW.optimizePrompt = optimizePrompt;
+  window.CW.translatePromptLanguage = translatePromptLanguage;
+  window.CW.registerPromptTranslationPair = registerPromptTranslationPair;
   window.CW.clearPromptOptimizationVariants = _clearPromptOptimizationVariants;
   window.CW.interrogatePromptFromImage = interrogatePromptFromImage;
   window.CW.openPromptInterrogateModal = openPromptInterrogateModal;

@@ -30,24 +30,83 @@
   // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
   var _wfCardDownX = 0, _wfCardDownY = 0, _wfCardMoved = false;
 
-  function _latestWorkflowPreviews(items) {
+  function _latestWorkflowPreviewItems(items) {
     var previews = {};
     items = items || historyItems;
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
       var wf = item.workflow || '';
       if (!wf || previews[wf]) continue;
-      if (item.thumb) previews[wf] = API + '/api/thumbs/' + item.thumb;
-      else if (item.filename) previews[wf] = API + '/api/images/' + item.filename;
+      if (item.thumb || item.filename) previews[wf] = item;
     }
     return previews;
   }
 
-  function _workflowPreviewUrl(fname, meta, latestPreviews) {
-    latestPreviews = latestPreviews || _latestWorkflowPreviews();
-    if (latestPreviews[fname]) return latestPreviews[fname];
-    if (meta && meta.thumbnail) return API + '/api/workflows/thumbnail/' + meta.thumbnail;
+  function _workflowPreviewImageUrl(item) {
+    if (!item) return '';
+    if (item.thumb) return API + '/api/thumbs/' + item.thumb;
+    if (item.filename) return API + '/api/images/' + item.filename;
+    if (item.image) return API + '/api/images/' + item.image;
     return '';
+  }
+
+  function _isSensitiveWorkflowPreview(item, displayPrompt) {
+    var text = [
+      displayPrompt,
+      item && item.prompt,
+      item && item.prompt_preview
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (!text) return false;
+    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
+  }
+
+  function _workflowPreviewInfo(fname, meta, latestPreviews) {
+    latestPreviews = latestPreviews || _latestWorkflowPreviewItems();
+    var item = latestPreviews[fname] || null;
+    var src = _workflowPreviewImageUrl(item);
+    if (src) {
+      return {
+        src: src,
+        sensitive: _isSensitiveWorkflowPreview(item, item.prompt || item.prompt_preview || ''),
+      };
+    }
+    if (meta && meta.thumbnail) {
+      return {
+        src: API + '/api/workflows/thumbnail/' + meta.thumbnail,
+        sensitive: false,
+      };
+    }
+    return { src: '', sensitive: false };
+  }
+
+  function _workflowPreviewMarkup(info) {
+    return info && info.src
+      ? '<img src="' + escA(info.src) + '" loading="lazy" alt="" draggable="false">'
+      : '<div class="wf-card-icon">' + CW.icon('workflow') + '</div>';
+  }
+
+  function refreshWorkflowPreviewFromJob(job) {
+    if (!job || !job.workflow || !job.image) return;
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    var currentUid = currentUser && (currentUser.sub || currentUser.id);
+    if (currentUser && job.user_id && String(job.user_id) !== String(currentUid || '')) return;
+    if (!currentUser && job.user_id) return;
+
+    var info = _workflowPreviewInfo(job.workflow, null, {});
+    info.src = _workflowPreviewImageUrl({
+      thumb: job.thumb || '',
+      filename: job.image || '',
+      image: job.image || '',
+    });
+    info.sensitive = _isSensitiveWorkflowPreview(job, job.prompt_preview || job.prompt || '');
+    var cards = document.querySelectorAll('.wf-card[data-name]');
+    cards.forEach(function(card) {
+      if (card.getAttribute('data-name') !== job.workflow) return;
+      var preview = card.querySelector('.wf-card-preview');
+      if (!preview) return;
+      preview.classList.toggle('wf-sensitive', !!info.sensitive);
+      preview.innerHTML = _workflowPreviewMarkup(info);
+    });
   }
 
   async function _loadWorkflowPreviewItems() {
@@ -67,6 +126,13 @@
 
   function _workflowManagerThumbUrl(meta) {
     return meta && meta.thumbnail ? API + '/api/workflows/thumbnail/' + meta.thumbnail : '';
+  }
+
+  function workflowDisplayName(fname, meta) {
+    meta = meta || ((A._wfMeta || {})[fname] || {});
+    var custom = String((meta && meta.name) || '').trim();
+    if (custom) return custom;
+    return String(fname || '').replace(/\.json$/i, '');
   }
 
   window.CW._wfCardDown = function(e) {
@@ -106,7 +172,7 @@ function downloadWf(fname) {
 function openWfDel(fname) {
     A._wfDelFilename = fname;
     const meta = A._wfMeta[fname] || {};
-    const displayName = meta.name || fname.replace('.json', '');
+    const displayName = workflowDisplayName(fname, meta);
     $('#wfDelMsg').textContent = `确定要删除工作流「${displayName}」吗？此操作不可撤销。`;
     $('#wfDelModal').classList.add('open');
   }
@@ -133,7 +199,7 @@ function onWfThumbClick(fname) {
 
 async function saveWfEdit() {
     if (!A._wfEditFilename) return;
-    const name = $('#wfEditName').value.trim() || A._wfEditFilename.replace('.json', '');
+    const name = $('#wfEditName').value.trim();
     const tags = [...$('#wfEditTags').querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
     try {
       const r = await authFetch(API + '/api/workflows/meta/' + encodeURIComponent(A._wfEditFilename), {
@@ -237,8 +303,8 @@ function openWfEdit(fname) {
       return;
     }
     A._wfEditFilename = fname;
-    $('#wfEditTitle').textContent = '编辑 ' + (meta.name || fname.replace('.json', ''));
-    $('#wfEditName').value = meta.name || fname.replace('.json', '');
+    $('#wfEditTitle').textContent = '编辑 ' + workflowDisplayName(fname, meta);
+    $('#wfEditName').value = String(meta.name || '').trim();
     // Render tags
     const tagsDiv = $('#wfEditTags');
     tagsDiv.innerHTML = '';
@@ -320,7 +386,7 @@ function _tagCls(t) {
       entries = entries.filter(function(e) {
         var fname = String(e[0] || '').toLowerCase();
         var meta = e[1] || {};
-        var display = String(meta.name || '').toLowerCase();
+        var display = workflowDisplayName(e[0], meta).toLowerCase();
         var tags = (meta.tags || []).join(' ').toLowerCase();
         return fname.indexOf(q) >= 0 || display.indexOf(q) >= 0 || tags.indexOf(q) >= 0;
       });
@@ -427,7 +493,7 @@ function renderWfGrid() {
     for (var _mi = 0; _mi < entries.length; _mi++) {
       var fname = entries[_mi][0], meta = entries[_mi][1];
       var canManage = !!(isAdmin || (currentUid && String(meta.owner_id || '') === currentUid));
-      const displayName = meta.name || fname.replace('.json', '');
+      const displayName = workflowDisplayName(fname, meta);
       const tags = meta.tags || [];
       const thumbUrl = _workflowManagerThumbUrl(meta);
       const sharedTag = meta.shared ? '<span class="wf-mgr-tag res">共享</span>' : '';
@@ -747,14 +813,15 @@ async function selectWF(name) {
     var genTitle = $('#genTitle');
     var genForm = $('#genForm');
     var genFooter = $('.gen-footer');
+    var displayName = workflowDisplayName(name, A._wfMeta[name] || {});
     if (genTitle) {
       var genTitleText = $('#genTitleText');
       genTitle.style.display = '';
       genTitle.classList.add('is-open');
       if (genTitleText) {
-        genTitleText.textContent = name.replace('.json', '') + ' 快速出图';
+        genTitleText.textContent = displayName + ' 快速出图';
       } else {
-        genTitle.textContent = name.replace('.json', '') + ' 快速出图';
+        genTitle.textContent = displayName + ' 快速出图';
       }
       var genArrow = $('#genArrow');
       if (genArrow) genArrow.textContent = '\u25B4';
@@ -768,7 +835,7 @@ async function selectWF(name) {
       genFooter.classList.add('mobile-open');
     }
     const ws = $('#wfSummary');
-    if (ws) ws.textContent = name.replace('.json', '');
+    if (ws) ws.textContent = displayName;
     try {
       // Preserve uploaded reference image
       var _savedRefVal = $('#refImageValue')?.value || '';
@@ -776,12 +843,13 @@ async function selectWF(name) {
       const r = await authFetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
       const fields = d.fields || [];
+      window.__APP__._wfFieldWorkflow = name;
       window.__APP__._wfFieldMeta = fields.map((f) => ({
         key: f.node_id + '::' + f.field,
         node_id: f.node_id,
         class_type: f.class_type,
         field: f.field,
-        zone: f.zone || 'advanced',
+        zone: f.zone,
         visible: f.visible !== false,
         type: f.type,
         label: f.label,
@@ -838,7 +906,7 @@ async function loadWorkflows() {
       }
       // Count history items per workflow + find latest current-user preview per workflow
       const wfCounts = {};
-      const latestPreviews = _latestWorkflowPreviews(previewItems);
+      const latestPreviews = _latestWorkflowPreviewItems(previewItems);
       for (const h of previewItems) {
         const wf = h.workflow || '';
         wfCounts[wf] = (wfCounts[wf] || 0) + 1;
@@ -868,20 +936,18 @@ async function loadWorkflows() {
       let cards = wfs
         .map((w) => {
           const meta = A._wfMeta[w.name] || {};
-          const displayName = meta.name || w.name.replace('.json', '');
+          const displayName = workflowDisplayName(w.name, meta);
           const count = wfCounts[w.name] || 0;
-          const previewSrc = _workflowPreviewUrl(w.name, meta, latestPreviews);
-          const previewImg = previewSrc
-            ? `<img src="${previewSrc}" loading="lazy" alt="" draggable="false">`
-            : `<div class="wf-card-icon">${CW.icon('workflow')}</div>`;
+          const previewInfo = _workflowPreviewInfo(w.name, meta, latestPreviews);
+          const previewImg = _workflowPreviewMarkup(previewInfo);
           const catText = wfTagMap[w.name] || '其他';
           const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
             `<span class="wf-tag ${_tagColor(t)} wf-tag-sm">${escH(t)}</span>`
           ).join('');
           return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onmousedown="CW._wfCardDown(event)" onclick="if(!CW._wfCheckMove(event))CW.selectWF('${escA(w.name)}')">
-        <div class="wf-card-preview">${previewImg}</div>
+        <div class="wf-card-preview${previewInfo.sensitive ? ' wf-sensitive' : ''}">${previewImg}</div>
         <div class="wf-card-body">
-          <div class="wf-card-name" title="${escA(w.name)}">
+          <div class="wf-card-name" title="${escA(displayName)}">
             <span class="wf-card-name-text">${escH(displayName)}</span>
             ${extraTags}
           </div>
@@ -1078,6 +1144,7 @@ window.CW.delVersion = delVersion;
   window.CW.onAddWfTag = onAddWfTag;
   window.CW.onWfThumbUpload = onWfThumbUpload;
   window.CW.onWfThumbClick = onWfThumbClick;
+  window.CW.workflowDisplayName = workflowDisplayName;
   window.CW.downloadWf = downloadWf;
   window.CW.openWfDel = openWfDel;
   window.CW.closeWfDel = closeWfDel;
@@ -1308,6 +1375,7 @@ window.CW.delVersion = delVersion;
 
   window.CW.switchTab = switchTab;
   window.CW.loadWorkflows = loadWorkflows;
+  window.CW.refreshWorkflowPreviewFromJob = refreshWorkflowPreviewFromJob;
   window.CW.setMgrFilter = setMgrFilter;
   window.CW.onWfMgrDeviceChange = onWfMgrDeviceChange;
   window.CW.manualSyncWorkflows = manualSyncWorkflows;

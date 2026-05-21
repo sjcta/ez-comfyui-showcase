@@ -61,10 +61,25 @@ start_service() {
 
 stop_service() {
   if is_loaded; then
-    launchctl bootout "$DOMAIN/$LABEL"
-    echo "$APP_NAME stopped."
+    if launchctl bootout "$DOMAIN/$LABEL"; then
+      echo "$APP_NAME stopped."
+    else
+      echo "Failed to stop $APP_NAME." >&2
+      return 1
+    fi
   else
     echo "$APP_NAME is not loaded."
+  fi
+}
+
+restart_service() {
+  write_plist
+  if is_loaded; then
+    launchctl kickstart -k "$DOMAIN/$LABEL"
+    echo "$APP_NAME restarted at http://127.0.0.1:$PORT/"
+    echo "Service: $LABEL"
+  else
+    start_service
   fi
 }
 
@@ -96,8 +111,7 @@ case "$ACTION" in
     stop_service
     ;;
   restart)
-    stop_service || true
-    start_service
+    restart_service
     ;;
   status)
     status_service

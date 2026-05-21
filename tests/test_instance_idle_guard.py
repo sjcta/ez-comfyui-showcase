@@ -2,9 +2,28 @@ import unittest
 from unittest import mock
 
 import app
+from modules.job_runner import _filter_retry_instances
 
 
 class InstanceIdleGuardTest(unittest.TestCase):
+    def test_i2i_retry_keeps_strict_b_lane_after_b_submit_stall(self):
+        instances = [{"name": "A"}, {"name": "B"}]
+
+        kept = _filter_retry_instances(
+            instances,
+            "i2i-FireRed-Edit-8step.json",
+            {"B"},
+        )
+
+        self.assertEqual([inst["name"] for inst in kept], ["A", "B"])
+
+    def test_non_strict_retry_can_exclude_failed_instance(self):
+        instances = [{"name": "A"}, {"name": "B"}]
+
+        kept = _filter_retry_instances(instances, "other-workflow.json", {"B"})
+
+        self.assertEqual([inst["name"] for inst in kept], ["A"])
+
     def test_starting_comfyui_job_counts_as_active_for_idle_guard(self):
         job = {"instance": "A", "status": "starting_comfyui"}
 

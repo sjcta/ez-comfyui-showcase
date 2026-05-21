@@ -752,7 +752,11 @@
   function _historyWorkflowDisplayName(item) {
     var workflow = item && item.workflow ? String(item.workflow) : '';
     var meta = (A._wfMeta || {})[workflow] || {};
-    return meta.name || workflow.replace('.json', '') || '未命名工作流';
+    if (window.CW && CW.workflowDisplayName) {
+      return CW.workflowDisplayName(workflow, meta) || '未命名工作流';
+    }
+    var custom = String(meta.name || '').trim();
+    return custom || workflow.replace(/\.json$/i, '') || '未命名工作流';
   }
 
   function _historyUsername(item) {
@@ -948,6 +952,7 @@
       var promptOpen = !!_expandedHistoryPrompts[h.id];
       var favoriteKey = _historyFavoriteKey(h);
       var isFavorited = !!(favoriteKey && _historyFavorites[favoriteKey]);
+      var canDeleteItem = _canDeleteHistoryItem(h);
       var deletedBadge = h.is_deleted || h.deleted_at
         ? '<span class="account-deleted-badge">' + (window.CW && CW.icon ? CW.icon('trash-2', 13) : '') + ' 已删除' + (h.deleted_at ? '：' + escH(h.deleted_at) : '') + '</span>'
         : '';
@@ -959,11 +964,12 @@
             (isFavorited ? ' 已收藏' : ' 收藏') +
           '</button>' +
           '<button class="wf-mgr-btn account-action-btn share-state-btn ' + (h.is_public ? 'is-shared' : 'is-private') + '" type="button" title="' + (h.is_public ? '点击取消共享' : '点击设为共享') + '" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (window.CW && CW.icon ? CW.icon('share') : '') + (h.is_public ? ' 已共享' : ' 未共享') + '</button>' +
-          '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>' + (window.CW && CW.icon ? CW.icon('download') : '') + ' 下载</a>';
+          '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>' + (window.CW && CW.icon ? CW.icon('download') : '') + ' 下载</a>' +
+          (canDeleteItem ? '<button class="account-hist-quick-delete" type="button" title="删除" aria-label="删除" onclick="event.stopPropagation();CW.auth.deleteHistoryItem(\'' + escA(h.id) + '\')">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + '</button>' : '');
       return '<div class="account-hist-row' + (isAdmin ? ' is-admin' : '') + (trashMode ? ' is-deleted' : '') + '">' +
-        '<input type="checkbox" class="hist-select" value="' + escA(h.id) + '">' +
+        (trashMode ? '' : '<input type="checkbox" class="hist-select" value="' + escA(h.id) + '">') +
         '<div class="account-hist-preview">' +
-          '<button class="account-hist-thumb" type="button" title="悬停查看完整预览，点击打开原图" onmouseenter="CW.auth.showHistoryHoverPreview(\'' + escA(imageUrl) + '\', this)" onmouseleave="CW.auth.hideHistoryHoverPreview()" onclick="window.open(\'' + escA(imageUrl) + '\', \'_blank\', \'noopener\')">' +
+          '<button class="account-hist-thumb" type="button" title="悬停查看缩略预览，点击打开原图" onmouseenter="CW.auth.showHistoryHoverPreview(\'' + escA(thumbUrl) + '\', this)" onmouseleave="CW.auth.hideHistoryHoverPreview()" onclick="window.open(\'' + escA(imageUrl) + '\', \'_blank\', \'noopener\')">' +
             '<img src="' + escA(thumbUrl) + '" alt="' + escA(h.filename || '') + '">' +
           '</button>' +
         '</div>' +
@@ -992,10 +998,12 @@
           '<div class="account-history-toolbar">' +
             '<input class="auth-input account-history-search" id="historySearchInput" placeholder="筛选文件名、工作流、用户、提示词" value="' + escA(_historyFilters.query) + '">' +
             (isAdmin ? '<select class="user-role account-history-user-filter" id="historyUserFilter"><option value="">全部用户</option>' + _historyUserOptions(items).map(function(u) { return '<option value="' + escA(u.id) + '"' + (_historyFilters.user === u.id ? ' selected' : '') + '>' + escH(u.label) + '</option>'; }).join('') + '</select>' : '') +
-            '<div class="account-history-filter-segments" role="group" aria-label="分享状态筛选">' +
-              '<button class="account-history-filter-btn' + (_historyFilters.share === 'all' ? ' active' : '') + '" type="button" data-share-filter="all">全部</button>' +
-              '<button class="account-history-filter-btn' + (_historyFilters.share === 'shared' ? ' active' : '') + '" type="button" data-share-filter="shared">已分享</button>' +
-              '<button class="account-history-filter-btn' + (_historyFilters.share === 'private' ? ' active' : '') + '" type="button" data-share-filter="private">未分享</button>' +
+            '<div class="account-history-filter-segments" aria-label="历史筛选">' +
+              '<div class="account-history-share-filter-group" role="group" aria-label="分享状态筛选">' +
+                '<button class="account-history-filter-btn' + (_historyFilters.share === 'all' ? ' active' : '') + '" type="button" data-share-filter="all">全部</button>' +
+                '<button class="account-history-filter-btn' + (_historyFilters.share === 'shared' ? ' active' : '') + '" type="button" data-share-filter="shared">已分享</button>' +
+                '<button class="account-history-filter-btn' + (_historyFilters.share === 'private' ? ' active' : '') + '" type="button" data-share-filter="private">未分享</button>' +
+              '</div>' +
               '<button class="account-history-filter-btn account-history-favorite-filter' + (_historyFilters.favorite ? ' active' : '') + '" type="button" data-favorite-filter="' + (_historyFilters.favorite ? 'on' : 'off') + '">已收藏</button>' +
             '</div>' +
           '</div>' +
@@ -1003,7 +1011,7 @@
             '<span class="account-history-count">显示 ' + escH(String(filtered.length)) + ' / ' + escH(String(activeTotal)) + ' 条</span>' +
             '<div class="account-batch-actions-right">' +
               (trashMode
-                ? '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.restoreSelected()">' + (window.CW && CW.icon ? CW.icon('refresh-cw') : '') + ' 恢复选中</button><button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.permanentDeleteSelected()">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' 彻底删除</button><button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.clearTrash()">' + (window.CW && CW.icon ? CW.icon('x-circle') : '') + ' 清空回收站</button>'
+                ? '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.restoreAllTrash()">' + (window.CW && CW.icon ? CW.icon('refresh-cw') : '') + ' 全部恢复</button><button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.clearTrash()">' + (window.CW && CW.icon ? CW.icon('x-circle') : '') + ' 清空回收站</button>'
                 : '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.downloadSelected()">' + (window.CW && CW.icon ? CW.icon('download') : '') + ' 批量下载</button><button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.deleteSelected()">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' 批量删除</button>') +
             '</div>' +
           '</div>' +
@@ -1137,6 +1145,29 @@
     });
   }
 
+  function deleteHistoryItem(id) {
+    if (!id) return;
+    var item = (_historyCache || []).find(function(entry) { return String(entry.id) === String(id); });
+    if (item && !_canDeleteHistoryItem(item)) return CW.toast('只能删除自己生成的内容', 'info');
+    apiFetch(API + '/api/history/' + encodeURIComponent(id), { method: 'DELETE' })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '删除失败'); });
+        return r.json();
+      })
+      .then(function(d) {
+        var deletedAt = (d && d.deleted_at) || new Date().toISOString().slice(0, 19).replace('T', ' ');
+        _historyCache = (_historyCache || []).map(function(entry) {
+          if (String(entry.id) !== String(id)) return entry;
+          return Object.assign({}, entry, { is_deleted: true, deleted_at: entry.deleted_at || deletedAt });
+        });
+        CW.toast('已移入回收站', 'done');
+        _renderHistoryFromCache();
+        _syncMyHistory();
+        if (CW.loadHistory) CW.loadHistory();
+      })
+      .catch(function(e) { CW.toast(e.message || '删除失败', 'error'); });
+  }
+
   function _postHistoryBatch(url, ids) {
     return apiFetch(API + url, {
       method: 'POST',
@@ -1161,6 +1192,23 @@
         return Object.assign({}, item, { is_deleted: false, deleted_at: '', deleted_by: '' });
       });
       CW.toast('已恢复', 'done');
+      _renderHistoryFromCache();
+      _syncMyHistory();
+      if (CW.loadHistory) CW.loadHistory();
+    }).catch(function(e) { CW.toast(e.message, 'error'); });
+  }
+
+  function restoreAllTrash() {
+    var allowed = (_historyCache || []).filter(function(item) {
+      return item && (item.is_deleted || item.deleted_at) && _matchHistoryFilter(item) && _canDeleteHistoryItem(item);
+    }).map(function(item) { return String(item.id); });
+    if (!allowed.length) return CW.toast('没有可恢复的记录', 'info');
+    _postHistoryBatch('/api/history/batch-restore', allowed).then(function() {
+      _historyCache = (_historyCache || []).map(function(item) {
+        if (allowed.indexOf(String(item.id)) < 0) return item;
+        return Object.assign({}, item, { is_deleted: false, deleted_at: '', deleted_by: '' });
+      });
+      CW.toast('已全部恢复', 'done');
       _renderHistoryFromCache();
       _syncMyHistory();
       if (CW.loadHistory) CW.loadHistory();
@@ -1277,8 +1325,10 @@
     isHistoryFavorited: isHistoryFavorited,
     copyHistoryPrompt: copyHistoryPrompt,
     copyHistoryPromptById: copyHistoryPromptById,
+    deleteHistoryItem: deleteHistoryItem,
     deleteSelected: deleteSelected,
     restoreSelected: restoreSelected,
+    restoreAllTrash: restoreAllTrash,
     permanentDeleteSelected: permanentDeleteSelected,
     restoreHistoryItem: restoreHistoryItem,
     permanentDeleteHistoryItem: permanentDeleteHistoryItem,

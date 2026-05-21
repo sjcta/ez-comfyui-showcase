@@ -15,14 +15,17 @@ class HistoryApiTest(unittest.TestCase):
         self._old_auth_db = app.AUTH_DB
         self._old_output_dir = app.OUTPUT_DIR
         self._old_history_dir = app.HISTORY_DIR
+        self._old_comfyui_input = app.COMFYUI_INPUT
         self._old_history = list(app.history)
         self._old_logs = list(app._log_buffer)
         app.GEN_DB = os.path.join(self._tmp.name, "generation.db")
         app.AUTH_DB = os.path.join(self._tmp.name, "auth.db")
         app.OUTPUT_DIR = os.path.join(self._tmp.name, "outputs")
         app.HISTORY_DIR = os.path.join(self._tmp.name, "history")
+        app.COMFYUI_INPUT = os.path.join(self._tmp.name, "input")
         os.makedirs(app.OUTPUT_DIR, exist_ok=True)
         os.makedirs(app.HISTORY_DIR, exist_ok=True)
+        os.makedirs(app.COMFYUI_INPUT, exist_ok=True)
         app.history = []
         app._log_buffer[:] = []
         app._init_gen_db()
@@ -32,6 +35,7 @@ class HistoryApiTest(unittest.TestCase):
         app.AUTH_DB = self._old_auth_db
         app.OUTPUT_DIR = self._old_output_dir
         app.HISTORY_DIR = self._old_history_dir
+        app.COMFYUI_INPUT = self._old_comfyui_input
         app.history = self._old_history
         app._log_buffer[:] = self._old_logs
         self._tmp.cleanup()
@@ -161,6 +165,64 @@ class HistoryApiTest(unittest.TestCase):
         self.assertFalse(os.path.exists(image_path))
         trash = app.api_history(limit=10, scope="trash", current_user=user)
         self.assertEqual(trash["total"], 0)
+
+    def test_permanent_delete_removes_uploaded_source_image_when_unreferenced(self):
+        image_path = os.path.join(app.OUTPUT_DIR, "hist-1.png")
+        source_rel = "u1/2026-05-18/uploaded.png"
+        source_path = os.path.join(app.COMFYUI_INPUT, source_rel)
+        os.makedirs(os.path.dirname(source_path), exist_ok=True)
+        with open(image_path, "wb") as f:
+            f.write(b"image")
+        with open(source_path, "wb") as f:
+            f.write(b"source")
+        app._insert_generation(
+            {
+                "id": "hist-1",
+                "workflow": "i2i-test.json",
+                "filename": "hist-1.png",
+                "time": "2026-05-18 12:00:00",
+                "field_values": {"41::image": source_rel},
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+        user = {"sub": "u1", "role": "user"}
+        app.api_history_delete("hist-1", current_user=user)
+
+        result = app.api_history_permanent_delete("hist-1", current_user=user)
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(os.path.exists(image_path))
+        self.assertFalse(os.path.exists(source_path))
+
+    def test_permanent_delete_keeps_uploaded_source_image_used_by_other_history(self):
+        source_rel = "u1/2026-05-18/shared.png"
+        source_path = os.path.join(app.COMFYUI_INPUT, source_rel)
+        os.makedirs(os.path.dirname(source_path), exist_ok=True)
+        with open(source_path, "wb") as f:
+            f.write(b"source")
+        for item_id in ("hist-1", "hist-2"):
+            image_path = os.path.join(app.OUTPUT_DIR, item_id + ".png")
+            with open(image_path, "wb") as f:
+                f.write(b"image")
+            app._insert_generation(
+                {
+                    "id": item_id,
+                    "workflow": "i2i-test.json",
+                    "filename": item_id + ".png",
+                    "time": "2026-05-18 12:00:00",
+                    "field_values": {"41::image": source_rel},
+                },
+                elapsed=3,
+                user_id="u1",
+            )
+        user = {"sub": "u1", "role": "user"}
+        app.api_history_delete("hist-1", current_user=user)
+
+        result = app.api_history_permanent_delete("hist-1", current_user=user)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(os.path.exists(source_path))
 
     def test_image_routes_read_only_from_output_dir(self):
         output_image = os.path.join(app.OUTPUT_DIR, "u1", "2026-05-18", "hist-1.png")

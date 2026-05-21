@@ -2,6 +2,8 @@
 
 Multi-instance ComfyUI Web Management & Generation Platform.
 
+Current version: **v4.2.1**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
+
 Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel generation ComfyUI instances (A:8190 / B:8189) plus an isolated prompt auxiliary instance (Prompt:8191) behind an intelligent scheduler.
 
 ---
@@ -95,6 +97,7 @@ python3 app.py --port 9091
 
 | Version | Highlights |
 |---------|-----------|
+| v4.2.1 | 小版本修正 — JSON 提示词中英切换稳定化、启动脚本 restart 修复、提示词助手与历史/状态 UI 累积修正 |
 | v3.16 | 当前稳定版 — 三段式 UI + 双实例调度 + GPU 监控 |
 | v3.15 | 模块化重构，JS 拆分为 6 个 ES6 模块 |
 | v3.14 | Strict Mode 兼容，跨模块共享状态修复 |

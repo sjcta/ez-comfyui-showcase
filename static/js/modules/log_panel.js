@@ -11,6 +11,34 @@
   var _logPanelPos = null;
   var _expandedLogGroups = {};
 
+  function _logClearStorageKey() {
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser ? window.CW.auth.getCurrentUser() : null;
+    var uid = user && (user.id || user.sub || user.username);
+    return 'cw_log_clear_after:' + (uid || 'guest');
+  }
+
+  function _getLogClearAfter() {
+    try {
+      return parseFloat(localStorage.getItem(_logClearStorageKey()) || '0') || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function _setLogClearAfter(ts) {
+    try {
+      localStorage.setItem(_logClearStorageKey(), String(ts || 0));
+    } catch (e) {}
+  }
+
+  function _filterLogEntriesAfterClear(entries) {
+    var clearAfter = _getLogClearAfter();
+    if (!clearAfter) return entries || [];
+    return (entries || []).filter(function(entry) {
+      return Number(entry && entry.ts || 0) > clearAfter;
+    });
+  }
+
   function _isMobileLogViewport() {
     return window.matchMedia('(max-width: 900px)').matches;
   }
@@ -24,6 +52,7 @@
         return data;
       });
     }).then(function(entries) {
+      entries = _filterLogEntriesAfterClear(entries);
       window.CW._logEntries = entries;
       var body = document.getElementById('logBody');
       if (body) {
@@ -296,6 +325,7 @@
   };
 
   window.CW._onLog = function(entry) {
+    if (Number(entry && entry.ts || 0) <= _getLogClearAfter()) return;
     window.CW._logEntries = window.CW._logEntries || [];
     var key = _logEntryKey(entry);
     for (var i = 0; i < window.CW._logEntries.length; i++) {
@@ -325,6 +355,7 @@
   };
 
   window.CW.clearLog = function() {
+    _setLogClearAfter(Date.now() / 1000);
     window.CW._logEntries = [];
     var body = document.getElementById('logBody');
     if (body) body.innerHTML = '';

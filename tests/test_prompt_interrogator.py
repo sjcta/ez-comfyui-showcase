@@ -16,7 +16,14 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertEqual(workflow["1"]["class_type"], "LoadImage")
         self.assertEqual(workflow["1"]["inputs"]["image"], "u1/2026-05-20/ref.png")
         self.assertEqual(workflow["2"]["class_type"], "WD14Tagger|pysssss")
-        self.assertEqual(workflow["6"]["class_type"], "Florence2Run")
+        self.assertEqual(workflow["5"]["class_type"], "Qwen3_VQA")
+        self.assertEqual(workflow["5"]["inputs"]["image"], ["4", 0])
+        self.assertEqual(workflow["5"]["inputs"]["model"], "Qwen3-VL-4B-Instruct")
+        self.assertEqual(workflow["5"]["inputs"]["quantization"], "4bit")
+        self.assertIn("structured_prompt_en", workflow["5"]["inputs"]["text"])
+        self.assertIn("必须包含以下四个顶层键", workflow["5"]["inputs"]["text"])
+        self.assertTrue(workflow["5"]["inputs"]["keep_model_loaded"])
+        self.assertEqual(workflow["6"]["class_type"], "ShowText|pysssss")
 
     def test_extract_interrogate_result_prefers_promptgen_and_keeps_wd14_metadata(self):
         entry = {
@@ -69,6 +76,90 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertEqual(result["prompt"], "")
         self.assertEqual(result["promptgen"], "")
         self.assertIn("1girl", result["wd14_tags"])
+
+    def test_extract_interrogate_result_parses_bilingual_qwen_json(self):
+        entry = {
+            "outputs": {
+                "3": {"text": ["car, road, mountain"]},
+                "6": {
+                    "text": [
+                        [
+                            """{
+                          "keyword_prompt": "未来主义超跑，蜿蜒山路，金色日落，薄雾山峦",
+                          "english_prompt": "futuristic hypercar, winding mountain road, golden sunset, misty mountains",
+                          "structured_prompt": {
+                            "subject": "未来主义超跑",
+                            "scene": "蜿蜒山路，薄雾山峦",
+                            "lighting": "金色日落光"
+                          },
+                          "structured_prompt_en": {
+                            "subject": "futuristic hypercar",
+                            "scene": "winding mountain road, misty mountains",
+                            "lighting": "golden sunset light"
+                          }
+                        }"""
+                        ]
+                    ]
+                },
+            }
+        }
+
+        result = extract_interrogate_result(entry)
+
+        self.assertEqual(result["prompt"], "未来主义超跑，蜿蜒山路，金色日落，薄雾山峦")
+        self.assertEqual(result["prompt_zh"], "未来主义超跑，蜿蜒山路，金色日落，薄雾山峦")
+        self.assertEqual(result["prompt_en"], "futuristic hypercar, winding mountain road, golden sunset, misty mountains")
+        self.assertIn('"subject": "未来主义超跑"', result["structured_prompt_json"])
+        self.assertIn('"subject": "futuristic hypercar"', result["structured_prompt_json_en"])
+
+    def test_extract_interrogate_result_builds_plain_prompt_from_richer_json(self):
+        entry = {
+            "outputs": {
+                "3": {"text": ["1girl, neon, portrait"]},
+                "6": {
+                    "text": [
+                        """{
+                          "keyword_prompt": "霓虹灯效女性肖像",
+                          "english_prompt": "neon female portrait",
+                          "structured_prompt": {
+                            "subject": "女性面部特写",
+                            "action": "凝视镜头",
+                            "scene": "室内",
+                            "composition": "正面特写，聚焦面部",
+                            "lighting": "粉红色霓虹灯光照射，冷色调背景",
+                            "style": "赛博朋克风格",
+                            "color_palette": "粉红色与青蓝色调",
+                            "important_details": [
+                              "发饰为发光珊瑚状装饰",
+                              "耳环为发光椭圆形",
+                              "颈间缠绕发光灯串"
+                            ]
+                          },
+                          "structured_prompt_en": {
+                            "subject": "female facial close-up",
+                            "action": "gazing at the camera",
+                            "composition": "front-facing close-up, face in sharp focus",
+                            "lighting": "pink neon lighting, cool-toned background",
+                            "style": "cyberpunk style",
+                            "important_details": [
+                              "glowing coral-like hair ornament",
+                              "glowing oval earrings"
+                            ]
+                          }
+                        }"""
+                    ]
+                },
+            }
+        }
+
+        result = extract_interrogate_result(entry)
+
+        self.assertIn("女性面部特写", result["prompt"])
+        self.assertIn("粉红色霓虹灯光照射", result["prompt"])
+        self.assertIn("发饰为发光珊瑚状装饰", result["prompt"])
+        self.assertNotEqual(result["prompt"], "霓虹灯效女性肖像")
+        self.assertIn("female facial close-up", result["prompt_en"])
+        self.assertIn("pink neon lighting", result["prompt_en"])
 
     def test_prepare_interrogate_image_downscales_large_upload(self):
         try:

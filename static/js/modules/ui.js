@@ -65,8 +65,14 @@ function syncClearPromptButton() {
   var inp = $('#promptInput');
   var clearBtn = $('#clearPromptBtn');
   var optimizeBtn = $('#optimizePromptBtn');
-  if (!clearBtn && !optimizeBtn) return;
+  var translateBtn = $('#translatePromptBtn');
+  if (!clearBtn && !optimizeBtn && !translateBtn) return;
   var hasText = !!(inp && inp.value.trim());
+  if (translateBtn) {
+    translateBtn.classList.remove('hidden');
+    translateBtn.classList.toggle('is-compact-disabled', !hasText);
+    translateBtn.disabled = !hasText;
+  }
   if (clearBtn) {
     clearBtn.classList.remove('hidden');
     clearBtn.classList.toggle('is-compact-disabled', !hasText);
@@ -159,6 +165,10 @@ function _removePromptInterrogateToast() {
   return container;
 }
 
+function clearPromptInterrogateToast() {
+  _removePromptInterrogateToast();
+}
+
 function showPromptInterrogatePendingToast() {
   var container = _removePromptInterrogateToast();
   if (container.classList) container.classList.add('has-prompt-result-active');
@@ -173,7 +183,7 @@ function showPromptInterrogatePendingToast() {
     + '<button class="toast-close" type="button" title="关闭">×</button>';
   var closeBtn = t.querySelector('.toast-close');
   if (closeBtn) closeBtn.addEventListener('click', function () {
-    if (t.parentNode) t.parentNode.removeChild(t);
+    clearPromptInterrogateToast();
   });
   container.appendChild(t);
 }
@@ -190,7 +200,29 @@ function showPromptResultToast(prompt, meta) {
   var promptEn = String((meta && (meta.prompt_en || meta.english_prompt)) || (_hasChinese(text) ? '' : text) || '').trim();
   var promptZh = _cleanPromptResultChinese(String((meta && (meta.prompt_zh || meta.zh_prompt || meta.chinese_prompt || meta.translated_prompt)) || (_hasChinese(text) ? text : '') || '').trim());
   var currentLang = promptZh ? 'zh' : 'en';
-  var currentText = currentLang === 'zh' ? promptZh : (promptEn || text);
+  function stringifyStructured(value) {
+    if (!value) return '';
+    if (typeof value === 'string') return value.trim();
+    try { return JSON.stringify(value, null, 2); } catch (err) { return ''; }
+  }
+  var structuredJson = '';
+  var structuredSource = meta && (meta.structured_prompt_json || meta.prompt_json || meta.json_prompt || meta.structured_prompt);
+  structuredJson = stringifyStructured(structuredSource);
+  var structuredJsonEn = stringifyStructured(meta && (meta.structured_prompt_json_en || meta.english_prompt_json || meta.json_prompt_en || meta.structured_prompt_en));
+  var hasStructuredJson = !!structuredJson;
+  var currentFormat = 'text';
+  function getPromptText() {
+    return currentLang === 'zh' ? promptZh : (promptEn || text);
+  }
+  function getStructuredText() {
+    if (currentLang === 'en' && structuredJsonEn) return structuredJsonEn;
+    return structuredJson;
+  }
+  function canShowLanguage() {
+    if (currentFormat === 'json') return !!(structuredJson && structuredJsonEn);
+    return !!(promptZh && promptEn);
+  }
+  var currentText = getPromptText();
   function langLabel(lang) { return lang === 'zh' ? '中文' : 'English'; }
   t.innerHTML = ''
     + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon('check-circle', 16) : '') + '</span>'
@@ -198,11 +230,17 @@ function showPromptResultToast(prompt, meta) {
     +   '<span class="toast-title">反推完成</span>'
     +   '<span class="prompt-result-panel">'
     +     '<span class="prompt-result-meta">' + escH(provider || '图片反推提示词') + '</span>'
-    +     '<span class="prompt-result-body" data-lang="' + escA(currentLang) + '">' + escH(currentText) + '</span>'
+    +     '<span class="prompt-result-body" data-lang="' + escA(currentLang) + '" data-format="text">' + escH(currentText) + '</span>'
     +     '<span class="prompt-result-controls">'
-    +       '<span class="prompt-result-language' + (promptZh && promptEn ? '' : ' hidden') + '">'
+    +       '<span class="prompt-result-control-left">'
+    +         '<span class="prompt-result-format' + (hasStructuredJson ? '' : ' hidden') + '">'
+    +           '<button class="prompt-result-format-btn active" type="button" data-format="text">纯词汇</button>'
+    +           '<button class="prompt-result-format-btn" type="button" data-format="json">JSON格式</button>'
+    +         '</span>'
+    +         '<span class="prompt-result-language' + (promptZh && promptEn ? '' : ' hidden') + '">'
     +         '<button class="prompt-result-lang-btn' + (currentLang === 'zh' ? ' active' : '') + '" type="button" data-lang="zh">中文</button>'
     +         '<button class="prompt-result-lang-btn' + (currentLang === 'en' ? ' active' : '') + '" type="button" data-lang="en">English</button>'
+    +         '</span>'
     +       '</span>'
     +       '<span class="prompt-result-copy-row">'
     +         '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="copy">复制到输入框</button>'
@@ -226,15 +264,33 @@ function showPromptResultToast(prompt, meta) {
   }
   function setLanguage(lang) {
     currentLang = (lang === 'zh' && promptZh) ? 'zh' : 'en';
-    currentText = currentLang === 'zh' ? promptZh : (promptEn || text);
+    currentText = currentFormat === 'json' ? getStructuredText() : getPromptText();
     var body = t.querySelector('.prompt-result-body');
     if (body) {
       body.textContent = currentText;
-      body.setAttribute('data-lang', currentLang);
+      body.setAttribute('data-lang', currentFormat === 'json' ? currentLang : currentLang);
     }
     var langBtns = t.querySelectorAll('.prompt-result-lang-btn');
     for (var li = 0; li < langBtns.length; li++) {
       langBtns[li].classList.toggle('active', langBtns[li].getAttribute('data-lang') === currentLang);
+    }
+  }
+  function setFormat(format) {
+    currentFormat = (format === 'json' && hasStructuredJson) ? 'json' : 'text';
+    currentText = currentFormat === 'json' ? getStructuredText() : getPromptText();
+    var body = t.querySelector('.prompt-result-body');
+    if (body) {
+      body.textContent = currentText;
+      body.setAttribute('data-format', currentFormat);
+      body.setAttribute('data-lang', currentLang);
+    }
+    var formatBtns = t.querySelectorAll('.prompt-result-format-btn');
+    for (var fi = 0; fi < formatBtns.length; fi++) {
+      formatBtns[fi].classList.toggle('active', formatBtns[fi].getAttribute('data-format') === currentFormat);
+    }
+    var langBox = t.querySelector('.prompt-result-language');
+    if (langBox) {
+      langBox.classList.toggle('hidden', !canShowLanguage());
     }
   }
   var closeBtn = t.querySelector('.toast-close');
@@ -243,6 +299,12 @@ function showPromptResultToast(prompt, meta) {
   });
   var viewBtn = t.querySelector('[data-action="view"]');
   var copyBtn = t.querySelector('[data-action="copy"]');
+  var formatButtons = t.querySelectorAll('.prompt-result-format-btn');
+  for (var fbi = 0; fbi < formatButtons.length; fbi++) {
+    formatButtons[fbi].addEventListener('click', function () {
+      setFormat(this.getAttribute('data-format'));
+    });
+  }
   var langButtons = t.querySelectorAll('.prompt-result-lang-btn');
   for (var bi = 0; bi < langButtons.length; bi++) {
     langButtons[bi].addEventListener('click', function () {
@@ -256,10 +318,13 @@ function showPromptResultToast(prompt, meta) {
     if (copyBtn) copyBtn.classList.remove('hidden');
     viewBtn.classList.add('hidden');
   });
-  if (copyBtn) copyBtn.addEventListener('click', function () {
-    var input = $('#promptInput');
-    if (input) {
-      input.value = currentText;
+	  if (copyBtn) copyBtn.addEventListener('click', function () {
+	    var input = $('#promptInput');
+	    if (window.CW && typeof CW.registerPromptTranslationPair === 'function') {
+	      CW.registerPromptTranslationPair(promptZh, promptEn);
+	    }
+	    if (input) {
+	      input.value = currentText;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.focus();
     }
@@ -428,5 +493,6 @@ function initAdvToggle() {
   window.CW.toast = showToast;
   window.CW.showPromptInterrogatePendingToast = showPromptInterrogatePendingToast;
   window.CW.showPromptResultToast = showPromptResultToast;
+  window.CW.clearPromptInterrogateToast = clearPromptInterrogateToast;
   window.CW.syncClearPromptButton = syncClearPromptButton;
 })();

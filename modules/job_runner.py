@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 from modules.instance_manager import InstanceManager
-from modules.instance_picker import pick_best_instance
+from modules.instance_picker import pick_best_instance, strict_preferred_instance_name
 from modules.prompt_labels import infer_generation_label
 from modules.step_calculator import StepCalculator
 from modules.comfyui_upload import ensure_workflow_images_available
@@ -39,6 +39,18 @@ def _friendly_generation_error(err: Exception) -> str:
     if "timed out" in text or "TimeoutError" in text:
         return "ComfyUI 响应超时，请稍后重试"
     return text[:200]
+
+
+def _filter_retry_instances(instances: list[dict], workflow_name: str, failed_instances: set[str]) -> list[dict]:
+    if not failed_instances or len(failed_instances) >= len(instances):
+        return instances
+    strict_preferred = strict_preferred_instance_name(workflow_name)
+    if strict_preferred:
+        return [
+            inst for inst in instances
+            if inst.get("name") == strict_preferred or inst.get("name") not in failed_instances
+        ]
+    return [inst for inst in instances if inst.get("name") not in failed_instances]
 
 
 class JobRunner:
@@ -203,15 +215,18 @@ class JobRunner:
                 # 降级：从 inst_mgr 获取
                 pass
             failed_instances = set(self._jobs[job_id].get("failed_instances", []))
-            if failed_instances and len(failed_instances) < len(instances):
-                instances = [
-                    inst for inst in instances
-                    if inst.get("name") not in failed_instances
-                ]
+            instances = _filter_retry_instances(instances, workflow_name, failed_instances)
+            strict_preferred = strict_preferred_instance_name(workflow_name)
             if preferred_node_id:
                 instances = [inst for inst in instances if inst.get("_node_id") == preferred_node_id]
             if preferred_instance:
                 preferred_match = next((inst for inst in instances if inst.get("name") == preferred_instance), None)
+                if preferred_match:
+                    instance = preferred_match
+                else:
+                    instance = None
+            elif strict_preferred:
+                preferred_match = next((inst for inst in instances if inst.get("name") == strict_preferred), None)
                 if preferred_match:
                     instance = preferred_match
                 else:

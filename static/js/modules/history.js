@@ -162,7 +162,9 @@ function _attachSentinel() {
 
     // ── Badge ──
     const wfMeta = A._wfMeta[j.workflow] || {};
-    const wfLabel = wfMeta.name || (j.workflow || '').replace('.json', '');
+    const wfLabel = window.CW && CW.workflowDisplayName
+      ? CW.workflowDisplayName(j.workflow || '', wfMeta)
+      : (String(wfMeta.name || '').trim() || (j.workflow || '').replace(/\.json$/i, ''));
     const wfTag = window.CW.getWFType(j.workflow || '');
     const tagHtml = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
     const instBadge = j.instance ? `<div class="gi-inst-badge">#${escH(j.instance)}</div>` : '';
@@ -233,20 +235,9 @@ function _attachSentinel() {
   }
 
   function _refreshWorkflowPreviewFromJob(job) {
-    if (!job || !job.workflow || !job.image) return;
-    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
-    var currentUid = currentUser && (currentUser.sub || currentUser.id);
-    if (currentUser && job.user_id && String(job.user_id) !== String(currentUid || '')) return;
-    if (!currentUser && job.user_id) return;
-
-    var imgSrc = job.thumb ? (API + '/api/thumbs/' + job.thumb) : (API + '/api/images/' + job.image);
-    var cards = document.querySelectorAll('.wf-card[data-name]');
-    cards.forEach(function(card) {
-      if (card.getAttribute('data-name') !== job.workflow) return;
-      var preview = card.querySelector('.wf-card-preview');
-      if (!preview) return;
-      preview.innerHTML = '<img src="' + escA(imgSrc) + '" loading="lazy" alt="" draggable="false">';
-    });
+    if (window.CW && typeof CW.refreshWorkflowPreviewFromJob === 'function') {
+      CW.refreshWorkflowPreviewFromJob(job);
+    }
   }
 
   function _refreshWorkflowCardsAfterJobDone(job) {
@@ -406,7 +397,8 @@ function _renderHistCard(h, i) {
     const isBatch = !!(entry && entry.__isBatch);
     const batchCount = isBatch ? Number(entry.batch_count || (entry.items && entry.items.length) || 1) : 1;
     const canDelete = _canDeleteHistoryItem(h);
-    const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
+    const imgSrc = _historyImageSrc(h);
+    const batchStackImages = _batchStackImages(entry, h);
     const mainText1 = _historyItemType(h);
     const mainCls1 = _typeClass(mainText1, h.workflow);
     const displayPrompt = _historyDisplayPrompt(h);
@@ -422,14 +414,17 @@ function _renderHistCard(h, i) {
 
 	    return `<div class="gi ${typeCls1}${isBatch ? ' gi-batch-stack' : ''}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(entryKey || histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
 	      <div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();${openAction}">
+	        ${batchStackImages}
 	        <img src="${imgSrc}" loading="lazy" alt="">
 	        ${_favoriteBadgeHtml(h)}
 	        ${tagBadge}
-	        ${batchBadge}
         ${canDelete ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>` : ''}
       </div>
       <div class="gi-info">
+	        <div class="gi-info-actions">
+	          ${batchBadge}
 	        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i}, '${escA(histKey)}')" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>
+	        </div>
         <div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>
         <div class="gi-meta">
           <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
@@ -719,6 +714,23 @@ function setHistoryTypeFilter(value) {
     return entry && entry.__isBatch ? entry.cover : entry;
   }
 
+  function _historyImageSrc(item) {
+    if (!item) return '';
+    return item.thumb ? `${API}/api/thumbs/${item.thumb}` : (item.filename ? `${API}/api/images/${item.filename}` : '');
+  }
+
+  function _batchStackImages(entry, cover) {
+    if (!(entry && entry.__isBatch && Array.isArray(entry.items))) return '';
+    return entry.items
+      .filter(function(item) { return item && item !== cover && (item.thumb || item.filename); })
+      .slice(0, 2)
+      .map(function(item, idx) {
+        var src = _historyImageSrc(item);
+        return src ? `<img class="gi-batch-layer gi-batch-layer-${idx + 1}" src="${escA(src)}" loading="lazy" alt="">` : '';
+      })
+      .join('');
+  }
+
   function _galleryEntryKey(entry) {
     if (entry && entry.__isBatch) return 'batch:' + entry.batch_id;
     return String(entry && (entry.id || entry.filename || entry.original || '') || '');
@@ -923,7 +935,8 @@ function _histCardHTML(h, i) {
     const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
     const canEdit = !!user;
     const canDelete = _canDeleteHistoryItem(h);
-    const imgSrc = h.thumb ? `${API}/api/thumbs/${h.thumb}` : `${API}/api/images/${h.filename}`;
+    const imgSrc = _historyImageSrc(h);
+    const batchStackImages = _batchStackImages(entry, h);
     const mainText2 = _historyItemType(h);
     const mainCls2 = _typeClass(mainText2, h.workflow);
     const displayPrompt = _historyDisplayPrompt(h);
@@ -936,14 +949,17 @@ function _histCardHTML(h, i) {
     var batchBadge = isBatch ? `<div class="gi-batch-badge">×${batchCount}</div>` : '';
     return `<div class="gi ${typeCls2}${isBatch ? ' gi-batch-stack' : ''}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(entryKey || histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
     <div class="gi-img lazy-img${sensitiveCls}" onclick="event.stopPropagation();${openAction}">
+      ${batchStackImages}
       <img src="${imgSrc}" loading="lazy" alt="">
       ${_favoriteBadgeHtml(h)}
       ${tagBadge}
-      ${batchBadge}
       ${canDelete ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${h.id}')" title="删除"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>` : ''}
     </div>
     <div class="gi-info">
+      <div class="gi-info-actions">
+        ${batchBadge}
       ${canEdit ? `<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i}, '${escA(histKey)}')" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>` : ''}
+      </div>
       <div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>
       <div class="gi-meta">
         <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
@@ -1567,6 +1583,11 @@ async function delHist(id) {
       if (idx >= 0) historyItems.splice(idx, 1);
       _filteredHistory = _filterHistory(historyItems);
       renderGallery();
+      if (window.CW && typeof CW.loadWorkflows === 'function') {
+        Promise.resolve(CW.loadWorkflows()).catch(function(err) {
+          console.warn('refresh workflow previews after delete failed:', err && err.message ? err.message : err);
+        });
+      }
       _clearHistoryDeleteFocus();
       if (window.CW && CW.toast) CW.toast('已移入回收站', 'done');
     } catch (e) {
@@ -1690,10 +1711,9 @@ function renderGallery() {
 	  window.CW.forceGalleryRerender = function() {
 	    _lastGalleryHash = '';
 	    renderGallery();
-	  };
+  };
   window.CW._renderJobCard = _renderJobCard;
   window.CW._patchJobCard = _patchJobCard;
-  window.CW.refreshWorkflowPreviewFromJob = _refreshWorkflowPreviewFromJob;
   window.CW._onJobDone = _onJobDone;
   window.CW._onJobError = _onJobError;
 

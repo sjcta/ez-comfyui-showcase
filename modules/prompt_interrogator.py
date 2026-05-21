@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import ast
+import json
 import difflib
 import os
 import re
@@ -10,13 +12,34 @@ import time
 import uuid
 from typing import Any, Callable
 
+from modules.prompt_optimizer import parse_prompt_optimizer_output
+
 
 INTERROGATE_MAX_IMAGE_SIDE = 1280
 INTERROGATE_MAX_IMAGE_PIXELS = 1_600_000
 
+QWEN_IMAGE_INTERROGATE_TEMPLATE = (
+    "你是图片反推提示词助手。根据输入图片直接生成适合文生图/图生图的提示词。"
+    "必须只输出一个有效 JSON 对象，不要 markdown，不要解释，不要省略必填键。"
+    "JSON 必须包含以下四个顶层键：keyword_prompt, english_prompt, structured_prompt, structured_prompt_en。"
+    "格式示例："
+    '{"keyword_prompt":"中文纯词汇提示词","english_prompt":"English plain keyword prompt",'
+    '"structured_prompt":{"subject":"...","action":"...","scene":"...",'
+    '"composition":"...","lighting":"...","style":"...","color_palette":"...",'
+    '"materials_textures":[],"important_details":[],"visible_text":[],"constraints":[]},'
+    '"structured_prompt_en":{"subject":"...","action":"...","scene":"...",'
+    '"composition":"...","lighting":"...","style":"...","color_palette":"...",'
+    '"materials_textures":[],"important_details":[],"visible_text":[],"constraints":[]}}。'
+    "硬性要求：keyword_prompt 必须是中文；english_prompt 必须是英文；"
+    "structured_prompt 必须是中文 JSON；structured_prompt_en 必须是英文 JSON，二者字段含义一致；"
+    "两个 structured 对象只保留图中能确定或高度可信的视觉信息，省略未知、空字符串和空数组；"
+    "不要加入图中没有的人物、翅膀、文字、品牌或物体；不要重复整段 keyword_prompt；"
+    "描述主体、构图、光线、材质、颜色、风格和必要细节。"
+)
+
 
 def build_image_interrogate_workflow(image_filename: str) -> dict[str, dict[str, Any]]:
-    """Build the fast WD14 + Florence PromptGen ComfyUI API prompt."""
+    """Build a fast single-VLM image interrogation workflow with WD14 metadata fallback."""
     image_name = str(image_filename or "").replace("\\", "/").lstrip("/")
     return {
         "1": {
@@ -50,31 +73,24 @@ def build_image_interrogate_workflow(image_filename: str) -> dict[str, dict[str,
             },
         },
         "5": {
-            "class_type": "DownloadAndLoadFlorence2Model",
+            "class_type": "Qwen3_VQA",
             "inputs": {
-                "model": "MiaoshouAI/Florence-2-base-PromptGen-v2.0",
-                "precision": "fp16",
+                "image": ["4", 0],
+                "text": QWEN_IMAGE_INTERROGATE_TEMPLATE,
+                "model": "Qwen3-VL-4B-Instruct",
+                "quantization": "4bit",
+                "keep_model_loaded": True,
+                "temperature": 0.15,
+                "max_new_tokens": 768,
+                "min_pixels": 3136,
+                "max_pixels": 802816,
+                "seed": 1,
                 "attention": "sdpa",
             },
         },
         "6": {
-            "class_type": "Florence2Run",
-            "inputs": {
-                "image": ["4", 0],
-                "florence2_model": ["5", 0],
-                "text_input": "",
-                "task": "prompt_gen_mixed_caption",
-                "fill_mask": True,
-                "keep_model_loaded": False,
-                "max_new_tokens": 512,
-                "num_beams": 3,
-                "do_sample": False,
-                "seed": 1,
-            },
-        },
-        "7": {
             "class_type": "ShowText|pysssss",
-            "inputs": {"text": ["6", 2]},
+            "inputs": {"text": ["5", 0]},
         },
     }
 
@@ -165,6 +181,8 @@ def _text_output(outputs: dict[str, Any], node_id: str) -> str:
     node_out = outputs.get(str(node_id), {})
     text = node_out.get("text") if isinstance(node_out, dict) else None
     if isinstance(text, list) and text:
+        if isinstance(text[0], list) and text[0]:
+            return str(text[0][0]).strip()
         return str(text[0]).strip()
     if isinstance(text, str):
         return text.strip()
@@ -251,14 +269,123 @@ def _clean_promptgen_text(text: str) -> str:
     return "\n\n".join(cleaned_blocks).strip()
 
 
-def extract_interrogate_result(history_entry: dict[str, Any]) -> dict[str, str]:
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    normalized = str(text or "").strip()
+    normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s*```$", "", normalized)
+    candidates = [normalized]
+    start = normalized.find("{")
+    end = normalized.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(normalized[start : end + 1])
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            try:
+                parsed = ast.literal_eval(candidate)
+            except Exception:
+                continue
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, list) and parsed:
+            for item in parsed:
+                if isinstance(item, dict):
+                    return item
+                nested = _extract_json_object(str(item))
+                if nested:
+                    return nested
+    return None
+
+
+def _parse_structured_interrogate_text(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    parsed_json = _extract_json_object(raw) or {}
+    structured_zh = parsed_json.get("structured_prompt") or parsed_json.get("structured_prompt_zh")
+    if isinstance(structured_zh, dict):
+        zh_payload = {
+            "keyword_prompt": parsed_json.get("keyword_prompt") or parsed_json.get("prompt_zh") or "",
+            "structured_prompt": structured_zh,
+        }
+        parsed = parse_prompt_optimizer_output(json.dumps(zh_payload, ensure_ascii=False), "")
+    else:
+        parsed = parse_prompt_optimizer_output(raw, "")
+    keyword_prompt = str(
+        parsed.get("optimized_prompt")
+        or parsed_json.get("keyword_prompt")
+        or parsed_json.get("prompt_zh")
+        or parsed_json.get("chinese_prompt")
+        or ""
+    ).strip()
+    result: dict[str, Any] = {
+        "prompt": keyword_prompt,
+        "structured_prompt": parsed.get("structured_prompt"),
+        "structured_prompt_json": parsed.get("structured_prompt_json"),
+    }
+    english = str(
+        parsed_json.get("english_prompt")
+        or parsed_json.get("prompt_en")
+        or parsed_json.get("english")
+        or ""
+    ).strip()
+    if english:
+        result["prompt_en"] = english
+    structured_en = parsed_json.get("structured_prompt_en") or parsed_json.get("structured_prompt_english")
+    if isinstance(structured_en, dict):
+        en_payload = {
+            "keyword_prompt": english or str(parsed_json.get("keyword_prompt") or "").strip(),
+            "structured_prompt": structured_en,
+        }
+        parsed_en = parse_prompt_optimizer_output(json.dumps(en_payload, ensure_ascii=False), english or "")
+        if parsed_en.get("optimized_prompt"):
+            result["prompt_en"] = parsed_en.get("optimized_prompt")
+        if parsed_en.get("structured_prompt"):
+            result["structured_prompt_en"] = parsed_en.get("structured_prompt")
+        if parsed_en.get("structured_prompt_json"):
+            result["structured_prompt_json_en"] = parsed_en.get("structured_prompt_json")
+    return {key: value for key, value in result.items() if value}
+
+
+def extract_interrogate_result(history_entry: dict[str, Any]) -> dict[str, Any]:
     """Extract prompt candidates from a ComfyUI interrogation history entry."""
     outputs = history_entry.get("outputs", {}) if isinstance(history_entry, dict) else {}
     wd14 = _text_output(outputs, "3") or _tag_output(outputs, "2")
-    promptgen = _clean_promptgen_text(_text_output(outputs, "7"))
+    structured_raw = _text_output(outputs, "6")
+    structured = _parse_structured_interrogate_text(structured_raw)
+    structured_prompt = str(structured.get("prompt") or "").strip()
+    promptgen = structured_prompt or _clean_promptgen_text(_text_output(outputs, "7"))
     wd14_as_prompt = "" if _is_tag_like_prompt_line(wd14) else wd14
     prompt = promptgen or wd14_as_prompt
-    return {"prompt": prompt, "promptgen": promptgen, "wd14_tags": wd14}
+    result: dict[str, Any] = {
+        "prompt": prompt,
+        "promptgen": promptgen,
+        "wd14_tags": wd14,
+        "structured_raw": structured_raw,
+    }
+    if promptgen:
+        result["prompt_zh"] = promptgen
+    if structured.get("prompt_en"):
+        result["prompt_en"] = structured["prompt_en"]
+    if structured.get("structured_prompt"):
+        result["structured_prompt"] = structured["structured_prompt"]
+    if structured.get("structured_prompt_json"):
+        result["structured_prompt_json"] = structured["structured_prompt_json"]
+    if structured.get("structured_prompt_en"):
+        result["structured_prompt_en"] = structured["structured_prompt_en"]
+    if structured.get("structured_prompt_json_en"):
+        result["structured_prompt_json_en"] = structured["structured_prompt_json_en"]
+    return result
+
+
+def _provider_for_result(result: dict[str, Any]) -> str:
+    if result.get("structured_prompt_json") or result.get("structured_raw"):
+        return "comfyui-qwen3-vl"
+    return "comfyui-wd14"
 
 
 def run_image_interrogator(
@@ -289,7 +416,7 @@ def run_image_interrogator(
             if status.get("completed", False):
                 result = extract_interrogate_result(entry)
                 if result["prompt"]:
-                    return {"ok": True, "provider": "comfyui-wd14-florence", "prompt_id": prompt_id, **result}
+                    return {"ok": True, "provider": _provider_for_result(result), "prompt_id": prompt_id, **result}
                 raise RuntimeError("ComfyUI image interrogation completed without text output")
             if status.get("status_str") == "error":
                 messages = status.get("messages", [])

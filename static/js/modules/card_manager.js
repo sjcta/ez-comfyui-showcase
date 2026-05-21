@@ -45,6 +45,22 @@
     return entry && entry.__isBatch ? entry.cover : entry;
   }
 
+  function _historyImageSrc(item) {
+    if (!item) return '';
+    return item.thumb ? API + '/api/thumbs/' + item.thumb : (item.filename ? API + '/api/images/' + item.filename : '');
+  }
+
+  function _batchStackImages(entry, cover) {
+    if (!(entry && entry.__isBatch && Array.isArray(entry.items))) return '';
+    var extras = entry.items.filter(function(item) {
+      return item && item !== cover && (item.thumb || item.filename);
+    }).slice(0, 2);
+    return extras.map(function(item, idx) {
+      var src = _historyImageSrc(item);
+      return src ? '<img class="gi-batch-layer gi-batch-layer-' + (idx + 1) + '" src="' + escA(src) + '" loading="lazy" alt="">' : '';
+    }).join('');
+  }
+
   function _galleryEntryKey(entry) {
     if (entry && entry.__isBatch) return 'batch:' + entry.batch_id;
     return String(entry && (entry.id || entry.filename || entry.original || '') || '');
@@ -261,7 +277,9 @@
 
     // ── Badge ──
     var wfMeta = (A._wfMeta || {})[j.workflow] || {};
-    var wfLabel = wfMeta.name || (j.workflow ? j.workflow.replace('.json', '') : '');
+    var wfLabel = window.CW && CW.workflowDisplayName
+      ? CW.workflowDisplayName(j.workflow || '', wfMeta)
+      : (String(wfMeta.name || '').trim() || (j.workflow ? j.workflow.replace(/\.json$/i, '') : ''));
     var wfTag = window.CW.getWFType ? window.CW.getWFType(j.workflow || '') : '';
     var tagHtml = wfTag ? '<div class="gi-type-badge ' + wfTag.cls + '">' + wfTag.text + '</div>' : '';
     var instBadge = j.instance ? '<div class="gi-inst-badge">#' + escH(j.instance) + '</div>' : '';
@@ -305,7 +323,8 @@
     var user = window.CW.auth && window.CW.auth.getCurrentUser ? window.CW.auth.getCurrentUser() : null;
     var canEdit = !!user;
     var canDelete = _canDeleteHistoryItem(h);
-    var imgSrc = h.thumb ? API + '/api/thumbs/' + h.thumb : API + '/api/images/' + h.filename;
+    var imgSrc = _historyImageSrc(h);
+    var batchStackImages = _batchStackImages(entry, h);
     var mainText1 = _historyItemType(h);
     var mainCls1 = _typeClass(mainText1, h.workflow);
     var displayPrompt = _historyDisplayPrompt(h);
@@ -319,14 +338,16 @@
 
 		    return '<div class="gi ' + typeCls1 + (isBatch ? ' gi-batch-stack' : '') + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(entryKey || histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
 	      '<div class="gi-img' + sensitiveCls + '" onclick="event.stopPropagation();' + openAction + '">' +
+	      batchStackImages +
 	      '<img src="' + imgSrc + '" loading="lazy" alt="">' +
 	      _favoriteBadgeHtml(h) +
 	      tagBadge +
-	      batchBadge +
 	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' : '') +
 	      '</div>' +
 	      '<div class="gi-info">' +
+	      '<div class="gi-info-actions">' + batchBadge +
 		      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
+	      '</div>' +
 	      '<div class="gi-prompt" title="' + escA(displayPrompt) + '">' + escH(displayPrompt) + '</div>' +
       '<div class="gi-meta">' +
       '<span>' + (window.CW.icon ? CW.icon('clock') : '') + ' ' + _fmtTime(h.time) + '</span>' +
@@ -792,7 +813,8 @@
     var batchCount = isBatch ? Number(entry.batch_count || (entry.items && entry.items.length) || 1) : 1;
     var canEdit = !!(window.CW && window.CW.auth && window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser());
     var canDelete = _canDeleteHistoryItem(h);
-    var imgSrc = h.thumb ? API + '/api/thumbs/' + h.thumb : API + '/api/images/' + h.filename;
+    var imgSrc = _historyImageSrc(h);
+    var batchStackImages = _batchStackImages(entry, h);
     var mainText2 = _historyItemType(h);
     var mainCls2 = _typeClass(mainText2, h.workflow);
     var displayPrompt = _historyDisplayPrompt(h);
@@ -805,14 +827,16 @@
     var batchBadge = isBatch ? '<div class="gi-batch-badge">×' + batchCount + '</div>' : '';
     return '<div class="gi ' + typeCls2 + (isBatch ? ' gi-batch-stack' : '') + '" data-wf="' + escA(h.workflow || '') + '" data-hist-id="' + escA(entryKey || histKey) + '" data-hist-idx="' + i + '" data-favorited="' + (_isHistoryFavorited(h) ? '1' : '0') + '" onclick="CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')">' +
 	      '<div class="gi-img lazy-img' + sensitiveCls + '" onclick="event.stopPropagation();' + openAction + '">' +
+	      batchStackImages +
 	      '<img src="' + imgSrc + '" loading="lazy" alt="">' +
 	      _favoriteBadgeHtml(h) +
 	      tagBadge +
-	      batchBadge +
 	      (canDelete ? '<button class="gi-del" onclick="event.stopPropagation();CW.delHist(\'' + h.id + '\')" title="删除"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' : '') +
 	      '</div>' +
 	      '<div class="gi-info">' +
+	      '<div class="gi-info-actions">' + batchBadge +
 	      (canEdit ? '<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(' + i + ', \'' + escA(histKey) + '\')" title="复刻出图" aria-label="复刻出图">' + (window.CW.icon ? CW.icon('copy') : '') + '</button>' : '') +
+	      '</div>' +
 	      '<div class="gi-prompt" title="' + escA(displayPrompt) + '">' + escH(displayPrompt) + '</div>' +
       '<div class="gi-meta">' +
       '<span>' + (window.CW.icon ? CW.icon('clock') : '') + ' ' + _fmtTime(h.time) + '</span>' +

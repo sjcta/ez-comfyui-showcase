@@ -29,6 +29,14 @@ def extract_model_group(workflow_name: str) -> str:
     return ModelGroup.extract_model_group(workflow_name)
 
 
+def strict_preferred_instance_name(workflow_name: str) -> str:
+    """Return the fixed routing lane for workflows that must not spill over."""
+    profile = _workflow_profile(workflow_name)
+    if profile.get("strict_preferred"):
+        return str(profile.get("preferred") or "")
+    return ""
+
+
 async def pick_best_instance(
     instances: list[dict],
     workflow_name: str = "",
@@ -44,7 +52,7 @@ async def pick_best_instance(
 
     选择规则:
     1. 工作流类型只作为偏好，不再直接短路返回。
-       T2I 偏 A，I2I/放大/视频等高显存任务偏 B。
+       T2I/放大 固定优先 A，I2I/视频 固定优先 B。
     2. 同时考虑远端 ComfyUI 队列和调用方注入的本地等待队列。
     3. 同模型组/空模型组优先，但忙碌实例会被惩罚，避免所有任务堆到 A。
 
@@ -93,6 +101,12 @@ async def pick_best_instance(
                 return match
 
     profile = _workflow_profile(workflow_name)
+    strict_preferred = profile.get("strict_preferred")
+    preferred = str(profile.get("preferred") or "")
+    if strict_preferred and preferred:
+        match = _find_instance(available, preferred)
+        if match:
+            return match
     ranked = sorted(
         available,
         key=lambda inst: _instance_score(inst, queue_sizes, wf_group, group_getter, profile),
@@ -119,9 +133,10 @@ def _workflow_profile(workflow_name: str) -> dict:
         pressure = 3
     elif "upscale" in lower or "seedvr" in lower:
         kind = "upscale"
-        preferred = "B"
+        preferred = "A"
         pressure = 3
-    return {"kind": kind, "preferred": preferred, "pressure": pressure}
+    strict_preferred = kind in {"t2i", "i2i", "upscale", "video"}
+    return {"kind": kind, "preferred": preferred, "pressure": pressure, "strict_preferred": strict_preferred}
 
 
 def _has_token(text: str, token: str) -> bool:

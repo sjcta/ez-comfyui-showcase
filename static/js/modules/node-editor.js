@@ -428,7 +428,8 @@ function closeNodeEditor() {
   }
 function openNodeEditor(fname) {
     _nodeEditorFname = fname;
-    $('#nodeEditorTitle').textContent = '节点编辑: ' + fname.replace('.json', '');
+    var displayName = window.CW && CW.workflowDisplayName ? CW.workflowDisplayName(fname) : fname.replace(/\.json$/i, '');
+    $('#nodeEditorTitle').textContent = '节点编辑: ' + displayName;
     Promise.all([
       fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/analyze').then(function (r) {
         return r.json();

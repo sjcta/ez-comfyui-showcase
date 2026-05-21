@@ -8,6 +8,7 @@ import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, sock
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
 import websockets.client
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -33,11 +34,28 @@ import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner
 from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
 from modules.prompt_labels import infer_generation_label
-from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_optimizer, run_prompt_translator
+from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult
+
+APP_ROOT = Path(__file__).resolve().parent
+VERSION_FILE = APP_ROOT / "VERSION"
+
+
+def _read_app_version() -> str:
+    override = os.environ.get("EZ_COMFYUI_VERSION", "").strip()
+    if override:
+        return override
+    try:
+        version = VERSION_FILE.read_text("utf-8").strip()
+    except Exception:
+        version = ""
+    return version or "v0.0.0"
+
+
+APP_VERSION = _read_app_version()
 
 # ── Auth config
 AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "auth.db")
@@ -257,6 +275,43 @@ def _job_is_active_for_instance(job: dict, instance_name: str) -> bool:
     return job.get("instance") == instance_name and job.get("status") in ACTIVE_JOB_STATUSES
 
 
+def _current_job_for_instance(instance_name: str) -> dict | None:
+    active_jobs = [
+        job
+        for job in jobs.values()
+        if _job_is_active_for_instance(job, instance_name)
+    ]
+    if not active_jobs:
+        return None
+    status_rank = {
+        "downloading": 6,
+        "generating": 5,
+        "submitting": 4,
+        "preparing": 3,
+        "starting_comfyui": 2,
+        "queued": 1,
+        "dispatching": 0,
+    }
+    return max(
+        active_jobs,
+        key=lambda job: (
+            status_rank.get(job.get("status"), 0),
+            _job_last_activity_ts(job),
+        ),
+    )
+
+
+def _job_progress_pct(job: dict | None) -> int:
+    if not job:
+        return 0
+    prog = job.get("progress", {}) or {}
+    pct = prog.get("pct", 0) if isinstance(prog, dict) else 0
+    try:
+        return max(0, min(100, int(pct)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _job_last_activity_ts(job: dict) -> float:
     for key in ("last_update", "submitted_at", "generating_at", "created_at_ts"):
         try:
@@ -429,6 +484,12 @@ def _get_generation_instances(instances: list[dict] | None = None) -> list[dict]
     return [inst for inst in pool if not _is_prompt_aux_instance(inst)]
 
 
+def _can_view_instance(inst: dict, current_user: dict | None = None) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    return not _is_prompt_aux_instance(inst)
+
+
 def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[dict]:
     """Return enabled instances visible to the current user."""
     instances = []
@@ -445,6 +506,8 @@ def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[di
             continue
         for inst in normalized.get("instances", []):
             if not inst.get("enabled", True):
+                continue
+            if not _can_view_instance(inst, current_user):
                 continue
             full = dict(inst)
             full["_node_id"] = normalized["id"]
@@ -1712,7 +1775,7 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
     yield
 
-app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
+app = FastAPI(title="Ez ComfyUI Showcase", version=APP_VERSION, lifespan=lifespan)
 
 @app.post("/api/nodes/{nid}/connect")
 def _api_node_connect(nid: str, current_user: dict = Depends(require_admin)):
@@ -2160,15 +2223,81 @@ def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, out
 
 
 # ── Multi-instance routing ──────────────────────────────────────────────
-def _get_instance_queue_size(base_url: str) -> int:
-    """Return number of pending + running jobs on a ComfyUI instance."""
+def _queue_prompt_id(item) -> str:
+    if isinstance(item, list) and len(item) > 1:
+        return str(item[1] or "")
+    if isinstance(item, dict):
+        return str(item.get("prompt_id") or item.get("id") or "")
+    return ""
+
+
+def _get_instance_queue_counts(base_url: str) -> dict:
+    """Return remote ComfyUI queue counts for one instance."""
     try:
         q = comfyui_get("/queue", base_url=base_url)
-        running = len(q.get("queue_running", []))
-        pending = len(q.get("queue_pending", []))
-        return running + pending
+        running_items = q.get("queue_running", []) or []
+        pending_items = q.get("queue_pending", []) or []
+        running = len(running_items)
+        pending = len(pending_items)
+        return {
+            "running": running,
+            "pending": pending,
+            "total": running + pending,
+            "running_prompt_ids": [pid for pid in (_queue_prompt_id(item) for item in running_items) if pid],
+            "pending_prompt_ids": [pid for pid in (_queue_prompt_id(item) for item in pending_items) if pid],
+        }
     except Exception:
-        return 999  # unreachable → lowest priority
+        return {"running": 0, "pending": 0, "total": 999, "running_prompt_ids": [], "pending_prompt_ids": []}
+
+
+def _get_instance_queue_size(base_url: str) -> int:
+    """Return number of pending + running jobs on a ComfyUI instance."""
+    return _get_instance_queue_counts(base_url)["total"]
+
+
+_untracked_remote_cleanup_at: dict[str, float] = {}
+
+
+def _active_prompt_ids_for_instance(instance_name: str) -> set[str]:
+    return {
+        str(job.get("prompt_id") or "")
+        for job in jobs.values()
+        if _job_is_active_for_instance(job, instance_name) and job.get("prompt_id")
+    }
+
+
+def _untracked_remote_prompt_ids(instance_name: str, remote_queue: dict) -> list[str]:
+    known = _active_prompt_ids_for_instance(instance_name)
+    remote_ids = list(remote_queue.get("running_prompt_ids") or []) + list(remote_queue.get("pending_prompt_ids") or [])
+    return [pid for pid in remote_ids if pid and pid not in known]
+
+
+def _cleanup_untracked_remote_prompts(inst: dict, remote_queue: dict) -> list[str]:
+    """Reject remote ComfyUI prompts that are not tracked by this frontend/backend job system."""
+    prompt_ids = _untracked_remote_prompt_ids(inst.get("name", ""), remote_queue)
+    if not prompt_ids:
+        return []
+    key = f"{inst.get('name', '')}:{','.join(prompt_ids)}"
+    now = time.time()
+    if now - _untracked_remote_cleanup_at.get(key, 0) < 15:
+        return prompt_ids
+    _untracked_remote_cleanup_at[key] = now
+    base_url = inst.get("url", "")
+    try:
+        comfyui_post("/queue", {"delete": prompt_ids}, base_url=base_url)
+    except Exception:
+        pass
+    try:
+        comfyui_post("/interrupt", {}, base_url=base_url)
+    except Exception:
+        pass
+    add_log(
+        "warn",
+        "queue",
+        f"已拒绝未追踪远端任务: {inst.get('name', '')}",
+        details=",".join(prompt_ids),
+    )
+    return prompt_ids
 
 
 async def pick_best_instance(workflow_name: str = "") -> dict:
@@ -2226,10 +2355,61 @@ EDITABLE_FIELDS = {
         "image": {"type": "image", "label": "参考图片"},
     },
     "SeedVR2VideoUpscaler": {
-        "seed":       {"type": "seed",   "label": "超分种子"},
+        "seed":       {"type": "seed",   "label": "超分种子", "min": 0, "max": 4294967295},
         "resolution": {"type": "number", "label": "超分分辨率", "min": 512, "max": 8192, "step": 64},
     },
 }
+
+
+def _looks_like_seed_field(ct: str, title: str, field: str) -> bool:
+    field_l = str(field or "").lower()
+    title_l = str(title or "").lower().replace("_", " ")
+    ct_l = str(ct or "").lower()
+    if field_l in ("seed", "noise_seed"):
+        return True
+    if field_l != "value":
+        return False
+    return "seed" in title_l or "seed" in ct_l
+
+
+def _seed_limits_for_field(class_type: str, field: str) -> tuple[int, int] | None:
+    if class_type == "SeedVR2VideoUpscaler" and field == "seed":
+        return (0, 4294967295)
+    return None
+
+
+def _normalize_seed_value_for_field(class_type: str, field: str, value):
+    limits = _seed_limits_for_field(class_type, field)
+    if not limits:
+        return value
+    try:
+        seed = int(value)
+    except (TypeError, ValueError):
+        return value
+    mn, mx = limits
+    if seed < mn:
+        return mn
+    if seed > mx:
+        span = mx - mn + 1
+        return mn + ((seed - mn) % span)
+    return seed
+
+
+def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
+    normalized = dict(field_values or {})
+    for key, value in list(normalized.items()):
+        if "::" not in key:
+            continue
+        nid, field = key.split("::", 1)
+        node = wf.get(nid, {})
+        if not isinstance(node, dict):
+            continue
+        normalized[key] = _normalize_seed_value_for_field(
+            str(node.get("class_type") or ""),
+            field,
+            value,
+        )
+    return normalized
 
 
 def _resolve_link(wf: dict, value, depth: int = 0):
@@ -2302,18 +2482,23 @@ def analyze_workflow(path: str) -> dict:
             elif isinstance(fv, int):
                 ui_type = "number"
             ef_extra = {}
+            seed_like = _looks_like_seed_field(ct, title, fk)
             if ct in EDITABLE_FIELDS and fk in EDITABLE_FIELDS[ct]:
                 ef = EDITABLE_FIELDS[ct][fk]
                 ui_type = ef.get("type", ui_type)
                 for k in ("options", "step", "min", "max"):
                     if k in ef:
                         ef_extra[k] = ef[k]
+            elif seed_like:
+                ui_type = "seed"
             zone, visible = _auto_classify(ct, fk, fv)
+            if seed_like:
+                zone, visible = "advanced", True
             field_entry = {
                 "key": f"{nid}::{fk}",
                 "field": fk,
                 "type": ui_type,
-                "label": fk,
+                "label": title if seed_like and fk == "value" else fk,
                 "value": fv,
                 "zone": zone,
                 "visible": visible,
@@ -2503,6 +2688,20 @@ def _parse_legacy(path: str) -> dict:
                         "class_type": ct, "field": fk,
                         "value": val, **fm,
                     })
+        for fk, val in inputs.items():
+            if ct in EDITABLE_FIELDS and fk in EDITABLE_FIELDS[ct]:
+                continue
+            if not _looks_like_seed_field(ct, title, fk):
+                continue
+            if isinstance(val, list):
+                val = _resolve_link(wf, val)
+            fields.append({
+                "node_id": nid, "node_title": title,
+                "class_type": ct, "field": fk,
+                "value": val,
+                "type": "seed",
+                "label": title if fk == "value" else "种子",
+            })
     summary = model_name or Path(path).stem.replace("-", " ").replace("_", " ")
     return {"fields": fields, "summary": summary, "model": model_name}
 
@@ -2536,6 +2735,7 @@ def _parse_with_config(path: str, config: dict) -> dict:
             val = _resolve_link(wf, val)
         ftype = field_cfg.get("type", "")
         fextra = {}
+        seed_like = _looks_like_seed_field(ct, title, fname)
         if ct in EDITABLE_FIELDS and fname in EDITABLE_FIELDS[ct]:
             ef = EDITABLE_FIELDS[ct][fname]
             if not ftype:
@@ -2543,6 +2743,8 @@ def _parse_with_config(path: str, config: dict) -> dict:
             for k in ("options", "step", "min", "max"):
                 if k in ef:
                     fextra[k] = ef[k]
+        if seed_like:
+            ftype = "seed"
         if not ftype:
             ftype = "text"
         for k in ("options", "step", "min", "max"):
@@ -2553,8 +2755,8 @@ def _parse_with_config(path: str, config: dict) -> dict:
             "class_type": ct, "field": fname,
             "value": val,
             "type": ftype,
-            "label": field_cfg.get("label", fname),
-            "zone": field_cfg.get("zone", "user_input"),
+            "label": title if seed_like and fname == "value" else field_cfg.get("label", fname),
+            "zone": "advanced" if seed_like else field_cfg.get("zone", "user_input"),
             "visible": field_cfg.get("visible", True),
             "order": field_cfg.get("order", 0),
             **fextra,
@@ -3236,6 +3438,70 @@ class PromptOptimizeRequest(BaseModel):
     max_new_tokens: int = 384
 
 
+class PromptTranslateRequest(BaseModel):
+    prompt: str
+    target_language: str = ""
+    max_new_tokens: int | None = None
+
+
+_PROMPT_TRANSLATE_CACHE: OrderedDict[tuple[str, str], dict] = OrderedDict()
+_PROMPT_TRANSLATE_CACHE_MAX = 160
+_PROMPT_TRANSLATE_CACHE_TTL = 6 * 3600
+
+
+def _prompt_translate_cache_key(prompt: str, target: str) -> tuple[str, str]:
+    normalized = re.sub(r"\s+", " ", str(prompt or "").strip())
+    return (target, normalized)
+
+
+def _prompt_translate_cache_get(prompt: str, target: str) -> dict | None:
+    key = _prompt_translate_cache_key(prompt, target)
+    entry = _PROMPT_TRANSLATE_CACHE.get(key)
+    if not entry:
+        return None
+    if time.time() - float(entry.get("ts", 0)) > _PROMPT_TRANSLATE_CACHE_TTL:
+        _PROMPT_TRANSLATE_CACHE.pop(key, None)
+        return None
+    _PROMPT_TRANSLATE_CACHE.move_to_end(key)
+    cached = dict(entry.get("data") or {})
+    cached["cached"] = True
+    cached["instance"] = cached.get("instance") or "cache"
+    return cached
+
+
+def _prompt_translate_cache_put(prompt: str, target: str, result: dict) -> None:
+    translated = str((result or {}).get("translated_prompt") or "").strip()
+    if not prompt or not target or not translated:
+        return
+    data = dict(result or {})
+    data["cached"] = True
+    _PROMPT_TRANSLATE_CACHE[_prompt_translate_cache_key(prompt, target)] = {"ts": time.time(), "data": data}
+    _PROMPT_TRANSLATE_CACHE.move_to_end(_prompt_translate_cache_key(prompt, target))
+    reverse_target = "zh" if target == "en" else "en"
+    reverse = {
+        "ok": True,
+        "provider": "prompt-translate-cache",
+        "original_prompt": translated,
+        "target_language": reverse_target,
+        "translated_prompt": str(prompt or "").strip(),
+        "prompt_en": str(prompt or "").strip() if reverse_target == "en" else "",
+        "prompt_zh": str(prompt or "").strip() if reverse_target == "zh" else "",
+        "cached": True,
+        "instance": "cache",
+    }
+    _PROMPT_TRANSLATE_CACHE[_prompt_translate_cache_key(translated, reverse_target)] = {"ts": time.time(), "data": reverse}
+    _PROMPT_TRANSLATE_CACHE.move_to_end(_prompt_translate_cache_key(translated, reverse_target))
+    while len(_PROMPT_TRANSLATE_CACHE) > _PROMPT_TRANSLATE_CACHE_MAX:
+        _PROMPT_TRANSLATE_CACHE.popitem(last=False)
+
+
+def _is_json_object_text(text: str) -> bool:
+    try:
+        return isinstance(json.loads(str(text or "").strip()), dict)
+    except Exception:
+        return False
+
+
 class PromptInterrogateRequest(BaseModel):
     image: str
 
@@ -3248,6 +3514,11 @@ class PromptInterrogateRequest(BaseModel):
 async def index():
     html_path = Path(__file__).parent / "static" / "index.html"
     return HTMLResponse(html_path.read_text("utf-8")) if html_path.is_file() else HTMLResponse("<h1>index.html missing</h1>", 500)
+
+
+@app.get("/api/version")
+def api_version():
+    return {"version": APP_VERSION}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3265,13 +3536,25 @@ def api_status(
     node_gpu = _gpu_stats_for_status_node(visible_instances, target_node_id, target_instance)
     for inst in visible_instances:
         node_id = inst.get("_node_id", "")
-        q_size = _get_instance_queue_size(inst["url"])
+        remote_queue = _get_instance_queue_counts(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
         is_prompt_aux = _is_prompt_aux_instance(inst)
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
-        q_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
-        q_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
+        local_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
+        local_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
+        untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
+        q_run = max(local_run, remote_queue["running"])
+        q_pend = max(local_pend, remote_queue["pending"])
+        q_size = max(remote_queue["total"], q_run + q_pend)
+        current_job = _current_job_for_instance(name)
+        remote_untracked_running = bool(untracked_remote_ids) and not current_job
+        current_workflow = ""
+        current_label = ""
+        if current_job:
+            current_workflow = (current_job.get("workflow") or "").replace(".json", "")
+            prompt_preview = current_job.get("prompt_preview", "")
+            current_label = prompt_preview[:60] if prompt_preview else current_workflow
         instances.append({
             "name": name,
             "port": inst.get("port"),
@@ -3285,10 +3568,17 @@ def api_status(
             "queue": q_size,
             "queue_running": q_run,
             "queue_pending": q_pend,
+            "progress": _job_progress_pct(current_job),
+            "progress_known": bool(current_job),
+            "remote_untracked_running": remote_untracked_running,
+            "remote_running_prompt_ids": untracked_remote_ids or remote_queue.get("running_prompt_ids", []),
+            "current_workflow": current_workflow,
+            "current_prompt": current_label,
             "loaded_group": grp,
             "gpu": node_gpu.get(node_id, _empty_gpu_stats("VRAM 未获取到")),
         })
     return {
+        "version": APP_VERSION,
         "comfyui": any(i["up"] for i in instances),
         "instances": instances,
         "comfyui_pid": comfyui_pid(),
@@ -3401,22 +3691,26 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
         node_id = inst.get("_node_id", "")
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
+        remote_queue = _get_instance_queue_counts(inst["url"])
         inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
-        queue_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
-        queue_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
+        local_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
+        local_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
+        queue_running = max(local_running, remote_queue["running"])
+        queue_pending = max(local_pending, remote_queue["pending"])
+        queue_total = max(remote_queue["total"], queue_running + queue_pending)
         grp = _instance_group.get(name, "")
-        current_job = next((j for j in jobs.values() if _job_is_active_for_instance(j, name)), None)
+        is_prompt_aux = _is_prompt_aux_instance(inst)
+        current_job = _current_job_for_instance(name)
+        untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
+        remote_untracked_running = bool(untracked_remote_ids) and not current_job
         current_label = ""
         current_workflow = ""
-        current_progress = 0
         pending_workflows = []
         if current_job:
             workflow_name = (current_job.get("workflow") or "").replace(".json", "")
             current_workflow = workflow_name
             prompt_preview = current_job.get("prompt_preview", "")
             current_label = prompt_preview[:60] if prompt_preview else workflow_name
-            prog = current_job.get("progress", {}) or {}
-            current_progress = prog.get("pct", 0) if isinstance(prog, dict) else 0
         for j in jobs.values():
             if j.get("instance") == name and j.get("status") in ("queued", "preparing", "starting_comfyui"):
                 wf = (j.get("workflow") or "").replace(".json", "")
@@ -3427,8 +3721,14 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             "node_id": inst.get("_node_id", ""),
             "node_name": inst.get("_node_name", ""),
             "node_connection": inst.get("_node_connection", "local"),
+            "role": "prompt_aux" if is_prompt_aux else "generation",
+            "prompt_aux": is_prompt_aux,
+            "queue": queue_total,
             "queue_running": queue_running, "queue_pending": queue_pending,
-            "progress": current_progress,
+            "progress": _job_progress_pct(current_job),
+            "progress_known": bool(current_job),
+            "remote_untracked_running": remote_untracked_running,
+            "remote_running_prompt_ids": untracked_remote_ids or remote_queue.get("running_prompt_ids", []),
             "current_workflow": current_workflow,
             "pending_workflows": pending_workflows,
             "current_prompt": current_label, "loaded_group": grp,
@@ -3733,14 +4033,80 @@ def api_workflow_dir_remove(path: str, current_user: dict = Depends(require_admi
 
 # ── Image Upload ────────────────────────────────────────────────────
 
+_UPLOAD_PASSTHROUGH_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+_UPLOAD_NORMALIZE_IMAGE_EXTS = {".tif", ".tiff", ".gif", ".jfif", ".jpe", ".avif", ".heic", ".heif", ""}
+_UPLOAD_ALLOWED_IMAGE_EXTS = _UPLOAD_PASSTHROUGH_IMAGE_EXTS | _UPLOAD_NORMALIZE_IMAGE_EXTS
+_UPLOAD_FORMAT_EXTS = {
+    "PNG": {".png"},
+    "JPEG": {".jpg", ".jpeg"},
+    "WEBP": {".webp"},
+    "BMP": {".bmp"},
+}
+_UPLOAD_SAFE_PASSTHROUGH_MODES = {"RGB", "RGBA", "L", "LA", "P"}
+
+
+def _register_optional_image_openers() -> None:
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except Exception:
+        pass
+
+
+def _decode_uploaded_image(content: bytes):
+    try:
+        from PIL import Image, ImageOps
+    except Exception as e:
+        raise HTTPException(400, f"Image validation unavailable: {e}") from e
+    _register_optional_image_openers()
+    try:
+        with Image.open(BytesIO(content)) as img:
+            source_format = str(img.format or "").upper()
+            try:
+                img.seek(0)
+            except Exception:
+                pass
+            img.load()
+            img = ImageOps.exif_transpose(img)
+            return img.copy(), source_format
+    except Exception as e:
+        raise HTTPException(400, f"Invalid image file: {e}") from e
+
+
+def _png_bytes_from_image(img) -> bytes:
+    if img.mode == "P":
+        img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+    elif img.mode == "LA":
+        img = img.convert("RGBA")
+    elif img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGB")
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
+def _normalize_uploaded_image_content(filename: str, content: bytes) -> tuple[str, bytes]:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _UPLOAD_ALLOWED_IMAGE_EXTS:
+        raise HTTPException(400, f"Unsupported image format: {ext}")
+    img, source_format = _decode_uploaded_image(content)
+    expected_exts = _UPLOAD_FORMAT_EXTS.get(source_format, set())
+    can_passthrough = (
+        ext in _UPLOAD_PASSTHROUGH_IMAGE_EXTS
+        and ext in expected_exts
+        and img.mode in _UPLOAD_SAFE_PASSTHROUGH_MODES
+    )
+    if can_passthrough:
+        return ext, content
+    return ".png", _png_bytes_from_image(img)
+
+
 @app.post("/api/upload-image")
 async def api_upload_image(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file")
-    ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
-    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-        raise HTTPException(400, f"Unsupported image format: {ext}")
+    ext, content = _normalize_uploaded_image_content(file.filename or "", content)
     unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}{ext}"
     user_dir = _user_id(current_user) or "anonymous"
     date_dir = datetime.now().strftime("%Y-%m-%d")
@@ -4103,6 +4469,53 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
     return result
 
 
+@app.post("/api/prompt/translate")
+def api_prompt_translate(req: PromptTranslateRequest, current_user: dict = Depends(get_current_user)):
+    prompt = str(req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt is required")
+    target = str(req.target_language or "").strip().lower()
+    if target not in ("zh", "en"):
+        target = "en" if re.search(r"[\u4e00-\u9fff]", prompt) else "zh"
+    cached = _prompt_translate_cache_get(prompt, target)
+    if cached:
+        add_log("info", "prompt_translate", f"Prompt translation cache hit to {target}", details=f"user={_user_id(current_user)}")
+        return cached
+    instances = _get_enabled_instances()
+    if not instances:
+        raise HTTPException(503, "No enabled ComfyUI instances available")
+    try:
+        inst = _pick_ready_aux_instance(instances, "prompt_translate", timeout=180)
+        result = run_prompt_language_switcher(
+            prompt,
+            target,
+            inst.get("url", COMFYUI_URL),
+            comfyui_post,
+            comfyui_get,
+            timeout=180,
+            poll_interval=1,
+            max_new_tokens=req.max_new_tokens,
+        )
+        _mark_aux_instance_active(inst)
+    except TimeoutError as e:
+        add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(504, f"提示词翻译超时: {e}") from e
+    except RuntimeError as e:
+        add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
+        status_code = 503 if "提示词独立实例" in str(e) else 500
+        raise HTTPException(status_code, f"提示词翻译失败: {e}") from e
+    except Exception as e:
+        add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"提示词翻译失败: {e}") from e
+    result["instance"] = inst.get("name", "")
+    result["cached"] = False
+    if _is_json_object_text(result.get("translated_prompt", "")):
+        result["format"] = "json"
+    _prompt_translate_cache_put(prompt, target, result)
+    add_log("info", "prompt_translate", f"Prompt translated to {result.get('target_language', target)}", details=f"user={_user_id(current_user)}")
+    return result
+
+
 @app.post("/api/prompt/interrogate")
 def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = Depends(get_current_user)):
     image = str(req.image or "").replace("\\", "/").lstrip("/")
@@ -4131,7 +4544,7 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
         _mark_aux_instance_active(inst)
         result["image_preprocess"] = prepared_image
         prompt_text = str(result.get("prompt") or "").strip()
-        if prompt_text:
+        if prompt_text and not result.get("prompt_zh"):
             try:
                 translated = run_prompt_translator(
                     prompt_text,
@@ -4149,6 +4562,29 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
                     result["translator_provider"] = translated.get("provider", "")
             except Exception as translate_error:
                 add_log("warn", "prompt_interrogate", f"Prompt Chinese translation skipped: {translate_error}", details=f"user={_user_id(current_user)}")
+        if prompt_text and not result.get("structured_prompt_json"):
+            source_prompt = str(result.get("prompt_zh") or prompt_text).strip()
+            if source_prompt:
+                try:
+                    structured = run_prompt_optimizer(
+                        source_prompt,
+                        inst_url,
+                        comfyui_post,
+                        comfyui_get,
+                        timeout=180,
+                        poll_interval=1,
+                        max_new_tokens=384,
+                    )
+                    if structured.get("structured_prompt_json"):
+                        result["structured_prompt_json"] = structured.get("structured_prompt_json")
+                    if structured.get("structured_prompt"):
+                        result["structured_prompt"] = structured.get("structured_prompt")
+                    if structured.get("optimized_prompt"):
+                        result["structured_optimized_prompt"] = structured.get("optimized_prompt")
+                    if structured.get("provider"):
+                        result["structured_provider"] = structured.get("provider")
+                except Exception as structure_error:
+                    add_log("warn", "prompt_interrogate", f"Prompt JSON structure skipped: {structure_error}", details=f"user={_user_id(current_user)}")
     except TimeoutError as e:
         add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(504, f"图片反推超时: {e}") from e
@@ -4182,7 +4618,8 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     try:
         with open(path) as f:
             wf_check = json.load(f)
-        for key, val in req.fields.items():
+        normalized_fields = _normalize_workflow_field_values(wf_check, req.fields)
+        for key, val in normalized_fields.items():
             if "::" not in key:
                 continue
             nid, field = key.split("::", 1)
@@ -4203,7 +4640,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         raise HTTPException(400, f"工作流校验失败: {e}") from e
 
     workflow_type = _workflow_primary_type(req.workflow)
-    prompt_preview = infer_generation_label(req.workflow, req.fields, workflow_type)[:200]
+    prompt_preview = infer_generation_label(req.workflow, normalized_fields, workflow_type)[:200]
     now_ts = time.time()
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
@@ -4211,7 +4648,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "workflow_type": workflow_type,
         "prompt_preview": prompt_preview,
         "width": req.width, "height": req.height,
-        "fields": req.fields,
+        "fields": normalized_fields,
         "preferred_instance": req.preferred_instance or "",
         "preferred_node_id": req.preferred_node_id or "",
         "queued_at": datetime.now().strftime("%H:%M:%S"),
@@ -4222,7 +4659,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
 
     _job_queue.put_nowait((
-        job_id, path, req.fields, seed, vllm_was, req.width, req.height, user_id,
+        job_id, path, normalized_fields, seed, vllm_was, req.width, req.height, user_id,
         req.preferred_instance or "", req.preferred_node_id or ""
     ))
     return {"job_id": job_id, "seed": seed}
@@ -4297,6 +4734,12 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     path = _resolve_workflow(wf, entry)
     if not path:
         raise HTTPException(404, "Workflow not found")
+    try:
+        with open(path) as f:
+            wf_check = json.load(f)
+        fields = _normalize_workflow_field_values(wf_check, fields)
+    except Exception:
+        pass
 
     del jobs[job_id]
 
@@ -4432,7 +4875,7 @@ def api_history_delete(item_id: str, current_user: dict = Depends(get_current_us
 
 def _history_owner_check(conn, item_id: str, current_user: dict, allow_deleted: bool = False):
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at FROM generations WHERE id=?", (item_id,)).fetchone()
+    row = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE id=?", (item_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Record not found")
     if current_user.get("role") != "admin" and row["user_id"] != current_user.get("sub"):
@@ -4442,9 +4885,74 @@ def _history_owner_check(conn, item_id: str, current_user: dict, allow_deleted: 
     return row
 
 
-def _delete_history_files(row) -> None:
-    image_path = row["image_path"] if row and "image_path" in row.keys() else ""
-    thumb_path = row["thumb_path"] if row and "thumb_path" in row.keys() else ""
+def _history_row_value(row, key: str, default=""):
+    if not row:
+        return default
+    try:
+        if key in row.keys():
+            return row[key]
+    except AttributeError:
+        if isinstance(row, dict):
+            return row.get(key, default)
+    return default
+
+
+def _history_input_image_refs(row) -> set[str]:
+    params = _history_row_value(row, "params", "")
+    if isinstance(params, str):
+        params = _json_loads_safe(params, {})
+    if not isinstance(params, dict):
+        return set()
+    refs: set[str] = set()
+    image_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+    for key, value in params.items():
+        if not isinstance(value, str):
+            continue
+        field = str(key).split("::", 1)[-1].lower()
+        if not (field.startswith("image") or field == "upload"):
+            continue
+        rel = value.replace("\\", "/").lstrip("/")
+        if rel.lower().endswith(image_exts):
+            refs.add(rel)
+    return refs
+
+
+def _history_input_ref_path(rel_path: str, user_id: str) -> str:
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    if not safe:
+        return ""
+    parts = safe.split("/")
+    owner = user_id or "anonymous"
+    if len(parts) < 3 or parts[0] != owner or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1]):
+        return ""
+    root = os.path.abspath(COMFYUI_INPUT)
+    path = os.path.abspath(os.path.join(root, safe))
+    if os.path.commonpath([root, path]) != root:
+        raise HTTPException(400, "Invalid image path")
+    return path
+
+
+def _history_input_ref_in_use(conn, rel_path: str, item_id: str, excluding_ids: set[str] | None = None) -> bool:
+    if not conn or not rel_path:
+        return False
+    target = rel_path.replace("\\", "/").lstrip("/")
+    excluded = {str(item_id)}
+    if excluding_ids:
+        excluded.update(str(x) for x in excluding_ids)
+    rows = conn.execute("SELECT id, params FROM generations").fetchall()
+    for other in rows:
+        if str(_history_row_value(other, "id", "")) in excluded:
+            continue
+        if target in _history_input_image_refs(other):
+            return True
+    return False
+
+
+def _delete_history_files(row, conn=None, excluding_ids: set[str] | None = None) -> None:
+    image_path = _history_row_value(row, "image_path", "")
+    thumb_path = _history_row_value(row, "thumb_path", "")
+    item_id = _history_row_value(row, "id", "")
+    user_id = _history_row_value(row, "user_id", "")
     candidates = []
     if image_path:
         candidates.append(_safe_rel_path(OUTPUT_DIR, image_path))
@@ -4452,6 +4960,10 @@ def _delete_history_files(row) -> None:
         candidates.append(_safe_rel_path(OUTPUT_DIR, thumb_guess))
     if thumb_path:
         candidates.append(_safe_rel_path(OUTPUT_DIR, thumb_path))
+    for rel in _history_input_image_refs(row):
+        if _history_input_ref_in_use(conn, rel, item_id, excluding_ids):
+            continue
+        candidates.append(_history_input_ref_path(rel, user_id))
     seen = set()
     for path in candidates:
         if not path or path in seen:
@@ -4463,7 +4975,7 @@ def _delete_history_files(row) -> None:
 
 def _purge_history_record(conn, item_id: str, current_user: dict) -> bool:
     row = _history_owner_check(conn, item_id, current_user, allow_deleted=True)
-    _delete_history_files(row)
+    _delete_history_files(row, conn)
     conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
     global history
     history = [h for h in history if h.get("id") != item_id]
@@ -4545,16 +5057,15 @@ def api_history_clear_trash(current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     if current_user.get("role") == "admin":
-        rows = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at FROM generations WHERE COALESCE(deleted_at, '') != ''").fetchall()
+        rows = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE COALESCE(deleted_at, '') != ''").fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, image_path, thumb_path, user_id, deleted_at FROM generations WHERE user_id=? AND COALESCE(deleted_at, '') != ''",
+            "SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE user_id=? AND COALESCE(deleted_at, '') != ''",
             (current_user.get("sub", ""),),
         ).fetchall()
-    deleted_ids = []
+    deleted_ids = [row["id"] for row in rows]
     for row in rows:
-        _delete_history_files(row)
-        deleted_ids.append(row["id"])
+        _delete_history_files(row, conn, set(deleted_ids))
     if deleted_ids:
         placeholders = ",".join("?" for _ in deleted_ids)
         conn.execute(f"DELETE FROM generations WHERE id IN ({placeholders})", deleted_ids)
@@ -4974,7 +5485,11 @@ def api_nodes_list(current_user: dict = Depends(get_current_user)):
     for node in nodes:
         if not _can_view_node(node, current_user):
             continue
-        inst_statuses = [_get_instance_status(node, inst) for inst in node.get("instances", [])]
+        visible_node_instances = [
+            inst for inst in node.get("instances", [])
+            if _can_view_instance(inst, current_user)
+        ]
+        inst_statuses = [_get_instance_status(node, inst) for inst in visible_node_instances]
         http_up = any(s["http_up"] for s in inst_statuses)
         ssh_ok = _check_node_ssh(node)
 
