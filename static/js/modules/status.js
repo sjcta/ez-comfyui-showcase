@@ -69,6 +69,14 @@
     }) || null;
   }
 
+  function _safeVramMessage(gpu) {
+    var msg = String((gpu && gpu.message) || '').trim();
+    if (!msg) return 'VRAM 未上报';
+    var rawError = /(connection\s+closed|permission\s+denied|connection\s+refused|timed?\s*out|no\s+route|host\s+key|known_hosts|port\s+\d+|ssh:|sshpass|stderr)/i;
+    if (rawError.test(msg)) return 'VRAM 暂不可用';
+    return msg.length > 24 ? 'VRAM 暂不可用' : msg;
+  }
+
   function syncComfyServiceButton() {
     var activePct = _activeJobProgress();
     var comfyBtn = $('#svcComfyUI');
@@ -89,7 +97,13 @@
 
 async function pollStatus() {
     try {
-      const r = await fetch(`${API}/api/status`);
+      var qs = new URLSearchParams();
+      var activeJob = _activeJobState();
+      if (activeJob && activeJob.node_id) qs.set('target_node_id', activeJob.node_id);
+      else if (A.currentTargetNodeId) qs.set('target_node_id', A.currentTargetNodeId);
+      if (activeJob && activeJob.instance) qs.set('target_instance', activeJob.instance);
+      else if (A.currentTargetInstance) qs.set('target_instance', A.currentTargetInstance);
+      const r = await fetch(`${API}/api/status${qs.toString() ? '?' + qs.toString() : ''}`);
       const d = await r.json();
       updateServices(d);
       updateGPU(d.gpu, d.instances || []);
@@ -155,7 +169,7 @@ function updateGPU(g, instances) {
       var compactVram = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
       vramText.textContent = total > 0
         ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB${compactVram ? '' : ` (${pct}%)`} · ${temp} °C`
-        : (target ? `${target.node_name || target.name} ${gpu && gpu.message ? gpu.message : '未上报 VRAM'}` : '无可用设备');
+        : (target ? `${target.node_name || target.name} ${_safeVramMessage(gpu)}` : '无可用设备');
     }
     if ($('#gpuTemp')) $('#gpuTemp').textContent = '';
     if ($('#gpuUtil')) $('#gpuUtil').textContent = '';

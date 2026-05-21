@@ -113,6 +113,29 @@
     return status !== 'done' && status !== 'error' && status !== 'history';
   }
 
+  function _currentUserId() {
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    return user && (user.sub || user.id || user.user_id) ? String(user.sub || user.id || user.user_id) : '';
+  }
+
+  function _authToken() {
+    try { return localStorage.getItem('v4_token') || ''; } catch (e) { return ''; }
+  }
+
+  function _isJobVisibleToCurrentUser(job) {
+    if (!job) return false;
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    if (user && user.role === 'admin') return true;
+    var owner = String(job.user_id || '');
+    if (!owner) return true;
+    var uid = _currentUserId();
+    return !!uid && owner === uid;
+  }
+
   /**
    * WebSocket 连接
    */
@@ -130,6 +153,11 @@
       var base = location.pathname.replace(/\/+$/, '');
       wsTarget = proto + '://' + location.host + base + '/ws';
     }
+    var token = _authToken();
+    if (token) {
+      wsTarget += (wsTarget.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token);
+    }
+    self._wsAuthToken = token;
     try {
       self.ws = new WebSocket(wsTarget);
     } catch (e) {
@@ -175,11 +203,30 @@
     }, 30000);
   };
 
+  PollManager.prototype.reconnect = function () {
+    var old = this.ws;
+    this.ws = null;
+    if (old) {
+      old.onclose = null;
+      try { old.close(); } catch (e) {}
+    }
+    this._connectWS();
+    this._doHTTPPoll(true);
+  };
+
   /**
    * WS 推送回调 / HTTP fallback 统一入口
    * 处理 job 状态变更 → 触发 Toast / Gallery render / patch
    */
   PollManager.prototype.onJobUpdate = function (job) {
+    if (!job || !job.id) return;
+    if (!_isJobVisibleToCurrentUser(job)) {
+      if (jobs[job.id]) {
+        delete jobs[job.id];
+        if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      }
+      return;
+    }
     var prev = jobs[job.id];
 
     // ── Toast on status change ──
@@ -265,6 +312,7 @@
         // Build lookup
         var serverMap = {};
         for (var i = 0; i < serverJobs.length; i++) {
+          if (!_isJobVisibleToCurrentUser(serverJobs[i])) continue;
           serverMap[serverJobs[i].id] = serverJobs[i];
         }
 
@@ -350,6 +398,7 @@
   PollManager.prototype._hasActiveJobs = function () {
     var vals = Object.values(jobs);
     for (var i = 0; i < vals.length; i++) {
+      if (!_isJobVisibleToCurrentUser(vals[i])) continue;
       var s = vals[i].status;
       if (s !== 'done' && s !== 'error' && s !== 'history') return true;
     }

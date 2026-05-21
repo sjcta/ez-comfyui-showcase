@@ -58,16 +58,27 @@ function initResizeHandle() {
 function clearPrompt() {
   var inp = $('#promptInput');
   if (inp) { inp.value = ''; inp.dispatchEvent(new Event('input')); inp.focus(); }
+  if (window.CW && typeof CW.clearPromptOptimizationVariants === 'function') CW.clearPromptOptimizationVariants();
 }
 
 function syncClearPromptButton() {
   var inp = $('#promptInput');
-  var btn = $('#clearPromptBtn');
-  if (!btn) return;
+  var clearBtn = $('#clearPromptBtn');
+  var optimizeBtn = $('#optimizePromptBtn');
+  if (!clearBtn && !optimizeBtn) return;
   var hasText = !!(inp && inp.value.trim());
-  btn.classList.remove('hidden');
-  btn.classList.toggle('is-invisible', !hasText);
-  var actions = btn.closest ? btn.closest('.prompt-actions') : null;
+  if (clearBtn) {
+    clearBtn.classList.remove('hidden');
+    clearBtn.classList.toggle('is-compact-disabled', !hasText);
+    clearBtn.disabled = !hasText;
+  }
+  if (optimizeBtn) {
+    optimizeBtn.classList.remove('hidden');
+    optimizeBtn.classList.toggle('is-compact-disabled', !hasText);
+    optimizeBtn.disabled = !hasText;
+  }
+  var anchor = clearBtn || optimizeBtn;
+  var actions = anchor && anchor.closest ? anchor.closest('.prompt-actions') : null;
   if (actions) actions.classList.toggle('has-content', hasText);
 }
 
@@ -90,6 +101,173 @@ function _isGenerationStatusToast(message, type) {
   if (_isGenerationStartToast(text, type)) return true;
   if ((type === 'done' && /结束出图/.test(text)) || (type === 'error' && /失败/.test(text))) return true;
   return /(排队中|出图中|拉取图片|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
+}
+
+function _hasChinese(text) {
+  return /[\u3400-\u9fff]/.test(String(text || ''));
+}
+
+function _cleanPromptResultChinese(text) {
+  var cleaned = String(text || '').trim();
+  if (!cleaned || !_hasChinese(cleaned)) return cleaned;
+  cleaned = cleaned.replace(/\s*(?:英文|英语|English|Original(?:\s+prompt)?|Prompt|Source|原文|原始提示词)\s*[:：][\s\S]*$/i, '').trim();
+  var lines = cleaned.split(/\r?\n/);
+  var kept = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    if (!_hasChinese(line) && /[A-Za-z][A-Za-z'’.-]*(?:\s+[A-Za-z][A-Za-z'’.-]*){5,}/.test(line)) continue;
+    if (_hasChinese(line)) {
+      line = line.replace(/(^|[\s。！？；;，,、])[A-Za-z][A-Za-z'’.-]*(?:\s+[A-Za-z][A-Za-z'’.-]*){5,}[\s\S]*$/, '$1').replace(/[ ，,；;。]+$/, '。').trim();
+      line = _dropEnglishPromptFragments(line);
+    }
+    if (line) kept.push(line);
+  }
+  return kept.join('\n').trim();
+}
+
+function _dropEnglishPromptFragments(line) {
+  var text = String(line || '').trim();
+  if (!text || !_hasChinese(text)) return text;
+  text = text.replace(/([。！？!?])\s*[A-Za-z0-9][A-Za-z0-9'’._+/-]*(?:[\s,，、；;]+[A-Za-z0-9][A-Za-z0-9'’._+/-]*)+\s*$/g, '$1').trim();
+  var pieces = text.split(/[，,、；;]/);
+  var kept = [];
+  for (var i = 0; i < pieces.length; i++) {
+    var piece = pieces[i].trim().replace(/^[，,、；;\s]+|[，,、；;\s]+$/g, '');
+    if (!piece) continue;
+    if (!_hasChinese(piece)) {
+      if (/[A-Za-z][A-Za-z0-9'’._+/-]*/.test(piece)) continue;
+      kept.push(piece);
+      continue;
+    }
+    piece = piece.replace(/\s+[A-Za-z0-9][A-Za-z0-9'’._+/-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’._+/-]*){0,4}\s*$/g, '').trim();
+    if (piece) kept.push(piece);
+  }
+  return kept.join('，').trim();
+}
+
+function _removePromptInterrogateToast() {
+  var container = _ensureToastContainer();
+  var existing = container.querySelectorAll('.toast');
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getAttribute && existing[i].getAttribute('data-toast-scope') === 'prompt-interrogate') {
+      existing[i].parentNode.removeChild(existing[i]);
+      if (container.classList) container.classList.remove('has-prompt-result-expanded');
+    }
+  }
+  if (container.classList) container.classList.remove('has-prompt-result-active');
+  return container;
+}
+
+function showPromptInterrogatePendingToast() {
+  var container = _removePromptInterrogateToast();
+  if (container.classList) container.classList.add('has-prompt-result-active');
+  var t = document.createElement('div');
+  t.className = 'toast toast-info toast-prompt-result prompt-result-toast prompt-result-pending is-persistent';
+  if (t.setAttribute) t.setAttribute('data-toast-scope', 'prompt-interrogate');
+  t.innerHTML = ''
+    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon('loader', 16) : '') + '</span>'
+    + '<span class="toast-content">'
+    +   '<span class="toast-title">图片反推中</span>'
+    + '</span>'
+    + '<button class="toast-close" type="button" title="关闭">×</button>';
+  var closeBtn = t.querySelector('.toast-close');
+  if (closeBtn) closeBtn.addEventListener('click', function () {
+    if (t.parentNode) t.parentNode.removeChild(t);
+  });
+  container.appendChild(t);
+}
+
+function showPromptResultToast(prompt, meta) {
+  var text = String(prompt || '').trim();
+  if (!text) return;
+  var container = _removePromptInterrogateToast();
+  if (container.classList) container.classList.add('has-prompt-result-active');
+  var t = document.createElement('div');
+  t.className = 'toast toast-done toast-prompt-result prompt-result-toast is-persistent is-collapsed';
+  if (t.setAttribute) t.setAttribute('data-toast-scope', 'prompt-interrogate');
+  var provider = meta && meta.provider ? String(meta.provider) : '';
+  var promptEn = String((meta && (meta.prompt_en || meta.english_prompt)) || (_hasChinese(text) ? '' : text) || '').trim();
+  var promptZh = _cleanPromptResultChinese(String((meta && (meta.prompt_zh || meta.zh_prompt || meta.chinese_prompt || meta.translated_prompt)) || (_hasChinese(text) ? text : '') || '').trim());
+  var currentLang = promptZh ? 'zh' : 'en';
+  var currentText = currentLang === 'zh' ? promptZh : (promptEn || text);
+  function langLabel(lang) { return lang === 'zh' ? '中文' : 'English'; }
+  t.innerHTML = ''
+    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon('check-circle', 16) : '') + '</span>'
+    + '<span class="toast-content">'
+    +   '<span class="toast-title">反推完成</span>'
+    +   '<span class="prompt-result-panel">'
+    +     '<span class="prompt-result-meta">' + escH(provider || '图片反推提示词') + '</span>'
+    +     '<span class="prompt-result-body" data-lang="' + escA(currentLang) + '">' + escH(currentText) + '</span>'
+    +     '<span class="prompt-result-controls">'
+    +       '<span class="prompt-result-language' + (promptZh && promptEn ? '' : ' hidden') + '">'
+    +         '<button class="prompt-result-lang-btn' + (currentLang === 'zh' ? ' active' : '') + '" type="button" data-lang="zh">中文</button>'
+    +         '<button class="prompt-result-lang-btn' + (currentLang === 'en' ? ' active' : '') + '" type="button" data-lang="en">English</button>'
+    +       '</span>'
+    +       '<span class="prompt-result-copy-row">'
+    +         '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="copy">复制到输入框</button>'
+    +       '</span>'
+    +     '</span>'
+    +   '</span>'
+    + '</span>'
+    + '<span class="prompt-result-actions">'
+    +   '<button class="prompt-result-action" type="button" data-action="view">点击查看</button>'
+    + '</span>'
+    + '<button class="toast-close" type="button" title="关闭">×</button>';
+  function setContainerExpanded(expanded) {
+    if (container && container.classList) {
+      container.classList.toggle('has-prompt-result-expanded', !!expanded);
+    }
+  }
+  function closePromptResultToast() {
+    setContainerExpanded(false);
+    if (container && container.classList) container.classList.remove('has-prompt-result-active');
+    if (t.parentNode) t.parentNode.removeChild(t);
+  }
+  function setLanguage(lang) {
+    currentLang = (lang === 'zh' && promptZh) ? 'zh' : 'en';
+    currentText = currentLang === 'zh' ? promptZh : (promptEn || text);
+    var body = t.querySelector('.prompt-result-body');
+    if (body) {
+      body.textContent = currentText;
+      body.setAttribute('data-lang', currentLang);
+    }
+    var langBtns = t.querySelectorAll('.prompt-result-lang-btn');
+    for (var li = 0; li < langBtns.length; li++) {
+      langBtns[li].classList.toggle('active', langBtns[li].getAttribute('data-lang') === currentLang);
+    }
+  }
+  var closeBtn = t.querySelector('.toast-close');
+  if (closeBtn) closeBtn.addEventListener('click', function () {
+    closePromptResultToast();
+  });
+  var viewBtn = t.querySelector('[data-action="view"]');
+  var copyBtn = t.querySelector('[data-action="copy"]');
+  var langButtons = t.querySelectorAll('.prompt-result-lang-btn');
+  for (var bi = 0; bi < langButtons.length; bi++) {
+    langButtons[bi].addEventListener('click', function () {
+      setLanguage(this.getAttribute('data-lang'));
+    });
+  }
+  if (viewBtn) viewBtn.addEventListener('click', function () {
+    t.classList.add('is-expanded');
+    t.classList.remove('is-collapsed');
+    setContainerExpanded(true);
+    if (copyBtn) copyBtn.classList.remove('hidden');
+    viewBtn.classList.add('hidden');
+  });
+  if (copyBtn) copyBtn.addEventListener('click', function () {
+    var input = $('#promptInput');
+    if (input) {
+      input.value = currentText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    }
+    if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+    t.classList.add('is-copied');
+    closePromptResultToast();
+  });
+  container.appendChild(t);
 }
 
 function showToast(message, type) {
@@ -248,5 +426,7 @@ function initAdvToggle() {
   window.CW.initResizeHandle = initResizeHandle;
   window.CW.initDragScroll = initDragScroll;
   window.CW.toast = showToast;
+  window.CW.showPromptInterrogatePendingToast = showPromptInterrogatePendingToast;
+  window.CW.showPromptResultToast = showPromptResultToast;
   window.CW.syncClearPromptButton = syncClearPromptButton;
 })();

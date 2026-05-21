@@ -261,9 +261,9 @@ function _attachSentinel() {
   function _onJobDone(job) {
     if (!job.image) return; // Wait for image to arrive
     _refreshWorkflowPreviewFromJob(job);
-    // Immediate visual: flip progress face into the completed image face.
+    // Immediate visual: blur the progress card away while the finished image card fades in.
     const card = document.querySelector(`[data-job-id="${job.id}"]`);
-    var cleanupDelay = 960;
+    var cleanupDelay = 980;
     if (card) {
       const frontHtml = card.innerHTML;
       const wfTag = window.CW.getWFType ? window.CW.getWFType(job.workflow || '') : '';
@@ -286,15 +286,15 @@ function _attachSentinel() {
             `</div></div>` +
           (job.seed ? `<div class="gi-seed">${CW.icon("sprout")} ${escH(String(job.seed))}</div>` : '') +
         `</div>`;
-      card.className = 'gi job-card done completing flip-complete job-card-complete-flip';
+      card.className = 'gi job-card done completing job-card-complete-blurfade';
       card.innerHTML =
-        `<div class="job-card-flip-scene">` +
-          `<div class="job-card-flip-face job-card-flip-front">${frontHtml}</div>` +
-          `<div class="job-card-flip-face job-card-flip-back">${completeHtml}<div class="job-complete-wash"></div></div>` +
+        `<div class="job-card-complete-transition">` +
+          `<div class="job-card-complete-old">${frontHtml}</div>` +
+          `<div class="job-card-complete-new">${completeHtml}</div>` +
         `</div>`;
       setTimeout(function() {
         if (!card.parentNode) return;
-        card.classList.remove('completing', 'flip-complete', 'job-card-complete-flip');
+        card.classList.remove('completing', 'job-card-complete-blurfade');
         card.innerHTML = completeHtml;
       }, cleanupDelay);
     }
@@ -454,11 +454,36 @@ function _canDeleteHistoryItem(h) {
     return !!_historyActionState(h).canDelete;
   }
 
+function _clearHistoryDeleteFocus() {
+    var active = document.activeElement;
+    if (active && active.blur && active.classList && active.classList.contains('gi-del')) {
+      active.blur();
+    }
+    requestAnimationFrame(function() {
+      var current = document.activeElement;
+      if (current && current.blur && current.classList && current.classList.contains('gi-del')) {
+        current.blur();
+      }
+    });
+  }
+
 function _currentUserId() {
     var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
       ? window.CW.auth.getCurrentUser()
       : null;
-    return user && (user.sub || user.id) ? String(user.sub || user.id) : '';
+    return user && (user.sub || user.id || user.user_id) ? String(user.sub || user.id || user.user_id) : '';
+  }
+
+function _isJobVisibleToCurrentUser(job) {
+    if (!job) return false;
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    if (user && user.role === 'admin') return true;
+    var owner = String(job.user_id || '');
+    if (!owner) return true;
+    var uid = _currentUserId();
+    return !!uid && owner === uid;
   }
 
 function _typeClass(typeText, workflowName) {
@@ -507,7 +532,7 @@ function _historyDisplayPrompt(item) {
       item && item.prompt_preview
     ].filter(Boolean).join(' ').toLowerCase();
     if (!text) return false;
-    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸露|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
+    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
   }
 
 function _syncOwnerFilterButtons() {
@@ -792,9 +817,9 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     _ensureInitialBatch();
 
     // Active jobs (queued, preparing, starting_comfyui, submitting, generating)
-    const activeJobs = Object.values(jobs).filter((j) => j.status !== 'done' && j.status !== 'error');
+    const activeJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter((j) => j.status !== 'done' && j.status !== 'error');
     // Error jobs (kept briefly for visibility)
-    const errorJobs = Object.values(jobs).filter((j) => j.status === 'error');
+    const errorJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter((j) => j.status === 'error');
 
     const jobCards = _sortJobCards([...activeJobs, ...errorJobs]);
 
@@ -805,6 +830,11 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
 
     var html = '';
 
+    // ── Job cards always stay before history cards, even after history deletes/rebuilds.
+    for (const j of jobCards) {
+      html += _renderJobCard(j);
+    }
+
     // ── History items ──
     const filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     const displayArr = _groupHistoryForGallery(filteredArr);
@@ -814,20 +844,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
     if (window.__APP__) window.__APP__._lbItems = displayArr;
     _histVisibleCount = displayArr.length;
     const visibleItems = displayArr.slice(0, _histVisibleCount);
-    var pinnedVisibleCount = 0;
     for (let i = 0; i < visibleItems.length; i++) {
-      var cover = _batchCover(visibleItems[i]);
-      if (_pinnedHistoryIds.indexOf(String(cover && cover.id || '')) < 0) break;
-      html += _renderHistCard(visibleItems[i], i);
-      pinnedVisibleCount++;
-    }
-
-    // ── Active jobs stay high, but never above the image that just finished.
-    for (const j of jobCards) {
-      html += _renderJobCard(j);
-    }
-
-    for (let i = pinnedVisibleCount; i < visibleItems.length; i++) {
       html += _renderHistCard(visibleItems[i], i);
     }
 
@@ -849,7 +866,7 @@ function _renderGalleryImpl() { console.log("[DEBUG] hist=" + historyItems.lengt
 function _galleryHash(jobsObj, histArr) {
     // Only structural changes trigger full rebuild: job added/removed, status transitions, history items added/removed
     var s = '';
-    for (const j of Object.values(jobsObj)) {
+    for (const j of Object.values(jobsObj).filter(_isJobVisibleToCurrentUser)) {
       s += j.id + j.status + '|';
     }
     var histSig = (histArr || []).slice(0, Math.max(_histVisibleCount || 0, 24)).map(function(item) {
@@ -1532,6 +1549,7 @@ function openBatchLB(batchId, sourceEl) {
   }
 
 async function delHist(id) {
+    _clearHistoryDeleteFocus();
     var item = historyItems.find(function(h) { return h.id === id; });
     if (!_canDeleteHistoryItem(item)) {
       if (window.CW && CW.toast) CW.toast('只能删除自己生成的内容，管理员可删除全部历史', 'info');
@@ -1549,6 +1567,7 @@ async function delHist(id) {
       if (idx >= 0) historyItems.splice(idx, 1);
       _filteredHistory = _filterHistory(historyItems);
       renderGallery();
+      _clearHistoryDeleteFocus();
       if (window.CW && CW.toast) CW.toast('已移入回收站', 'done');
     } catch (e) {
       console.error('delHist:', e);

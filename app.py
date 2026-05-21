@@ -31,7 +31,9 @@ from modules.comfyui_upload import ensure_workflow_images_available
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner
+from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
 from modules.prompt_labels import infer_generation_label
+from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_optimizer, run_prompt_translator
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
@@ -1170,6 +1172,23 @@ def get_current_user_optional(request: Request) -> dict | None:
         return None
 
 
+def _get_user_from_token(token: str | None) -> dict | None:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        conn = sqlite3.connect(AUTH_DB)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT role, disabled FROM users WHERE id=?", (payload.get("sub", ""),)).fetchone()
+        conn.close()
+        if not row or row["disabled"]:
+            return None
+        payload["role"] = row["role"] or "user"
+        return payload
+    except Exception:
+        return None
+
+
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     """Require an authenticated administrator for privileged local operations."""
     if current_user.get("role") != "admin" and _get_user_role(current_user.get("sub", "")) != "admin":
@@ -1407,6 +1426,7 @@ jobs: dict[str, dict] = {}
 _job_tasks: dict[str, asyncio.Task] = {}
 history: list[dict] = []
 ws_clients: list[WebSocket] = []
+ws_client_users: dict[WebSocket, dict] = {}
 gpu_cache: dict = {"ts": 0, "data": None}
 node_gpu_cache: dict = {}
 
@@ -1741,7 +1761,7 @@ def get_gpu_stats() -> dict:
     return data
 
 
-def _empty_gpu_stats(message: str = "") -> dict:
+def _empty_gpu_stats(message: str = "", detail: str = "") -> dict:
     return {
         "vram_used_mb": 0,
         "vram_total_mb": 0,
@@ -1749,6 +1769,7 @@ def _empty_gpu_stats(message: str = "") -> dict:
         "temp_c": 0,
         "util_pct": 0,
         "message": message,
+        "detail": detail,
     }
 
 
@@ -1772,6 +1793,7 @@ def _parse_nvidia_smi_stats(out: str) -> dict:
         "temp_c": temp,
         "util_pct": util,
         "message": "",
+        "detail": "",
     }
 
 
@@ -1816,7 +1838,7 @@ def _run_remote_gpu_query(node: dict) -> dict:
     ])
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
     if r.returncode != 0:
-        return _empty_gpu_stats((r.stderr or "VRAM 未获取到").strip()[:120])
+        return _empty_gpu_stats("VRAM 暂不可用", (r.stderr or "VRAM 未获取到").strip()[:240])
     data = _parse_nvidia_smi_stats(r.stdout)
     if data.get("vram_total_mb", 0) > 0:
         return data
@@ -1824,7 +1846,8 @@ def _run_remote_gpu_query(node: dict) -> dict:
     mem = subprocess.run(mem_cmd, capture_output=True, text=True, timeout=8)
     if mem.returncode == 0:
         return _parse_meminfo_stats(mem.stdout, data)
-    data["message"] = (mem.stderr or data.get("message") or "VRAM 未获取到").strip()[:120]
+    data["message"] = data.get("message") or "VRAM 暂不可用"
+    data["detail"] = (mem.stderr or data.get("detail") or "VRAM 未获取到").strip()[:240]
     return data
 
 
@@ -1847,9 +1870,27 @@ def get_node_gpu_stats(node: dict | None) -> dict:
     try:
         data = _run_remote_gpu_query(node)
     except Exception as e:
-        data = _empty_gpu_stats(str(e)[:120])
+        data = _empty_gpu_stats("VRAM 暂不可用", str(e)[:240])
     node_gpu_cache[key] = {"ts": now, "data": data}
     return data
+
+
+def _select_status_node_id(instances: list[dict], target_node_id: str = "", target_instance: str = "") -> str:
+    visible_node_ids = {inst.get("_node_id", "") for inst in instances}
+    if target_node_id and target_node_id in visible_node_ids:
+        return target_node_id
+    if target_instance:
+        for inst in instances:
+            if inst.get("name") == target_instance:
+                return inst.get("_node_id", "")
+    return instances[0].get("_node_id", "") if instances else ""
+
+
+def _gpu_stats_for_status_node(instances: list[dict], target_node_id: str = "", target_instance: str = "") -> dict[str, dict]:
+    node_id = _select_status_node_id(instances, target_node_id, target_instance)
+    if not node_id:
+        return {}
+    return {node_id: get_node_gpu_stats(_get_node_by_id(node_id))}
 
 
 def comfyui_up(base_url: str = None) -> bool:
@@ -2396,15 +2437,42 @@ def _parse_with_config(path: str, config: dict) -> dict:
 #  Broadcast
 # ══════════════════════════════════════════════════════════════════════════
 
+def _ws_payload_owner(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    msg_type = data.get("type")
+    if msg_type == "job_update":
+        job = data.get("job") or {}
+        return str(job.get("user_id") or "")
+    if msg_type == "job_cancelled":
+        job_id = str(data.get("job_id") or "")
+        job = jobs.get(job_id) or {}
+        return str(job.get("user_id") or "")
+    return ""
+
+
+def _ws_client_can_receive(client_user: dict | None, data: dict) -> bool:
+    owner = _ws_payload_owner(data)
+    if not owner:
+        return True
+    if _is_admin_user(client_user):
+        return True
+    client_user_id = _user_id(client_user or {})
+    return bool(client_user_id and client_user_id == owner)
+
+
 async def broadcast(data: dict):
     dead = []
     for ws in ws_clients:
+        if not _ws_client_can_receive(ws_client_users.get(ws), data):
+            continue
         try:
             await ws.send_json(data)
         except Exception:
             dead.append(ws)
     for ws in dead:
         ws_clients.remove(ws)
+        ws_client_users.pop(ws, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3033,6 +3101,15 @@ class GenerateRequest(BaseModel):
     preferred_node_id: str = ""
 
 
+class PromptOptimizeRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 384
+
+
+class PromptInterrogateRequest(BaseModel):
+    image: str
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  API: Page
 # ══════════════════════════════════════════════════════════════════════════
@@ -3048,13 +3125,16 @@ async def index():
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/status")
-def api_status(current_user: dict | None = Depends(get_current_user_optional)):
+def api_status(
+    target_node_id: str = "",
+    target_instance: str = "",
+    current_user: dict | None = Depends(get_current_user_optional),
+):
     instances = []
-    node_gpu = {}
-    for inst in _get_enabled_instances_for_user(current_user):
+    visible_instances = _get_enabled_instances_for_user(current_user)
+    node_gpu = _gpu_stats_for_status_node(visible_instances, target_node_id, target_instance)
+    for inst in visible_instances:
         node_id = inst.get("_node_id", "")
-        if node_id not in node_gpu:
-            node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
         q_size = _get_instance_queue_size(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
@@ -3180,12 +3260,11 @@ def api_gpu_kill(req: dict, current_user: dict = Depends(require_admin)):
 @app.get("/api/comfyui/status")
 def api_comfyui_status(current_user: dict | None = Depends(get_current_user_optional)):
     result = []
-    node_gpu = {}
-    for inst in _get_enabled_instances_for_user(current_user):
+    visible_instances = _get_enabled_instances_for_user(current_user)
+    node_gpu = _gpu_stats_for_status_node(visible_instances)
+    for inst in visible_instances:
         name = inst["name"]
         node_id = inst.get("_node_id", "")
-        if node_id not in node_gpu:
-            node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
         inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
@@ -3854,6 +3933,92 @@ def api_workflow_delete(name: str, current_user: dict = Depends(get_current_user
 # ══════════════════════════════════════════════════════════════════════════
 #  API: Generation
 # ══════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/prompt/optimize")
+def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends(get_current_user)):
+    prompt = str(req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt is required")
+    instances = _get_enabled_instances()
+    if not instances:
+        raise HTTPException(503, "No enabled ComfyUI instances available")
+    inst = min(instances, key=lambda item: _get_instance_queue_size(item.get("url", "")))
+    try:
+        result = run_prompt_optimizer(
+            prompt,
+            inst.get("url", COMFYUI_URL),
+            comfyui_post,
+            comfyui_get,
+            timeout=300,
+            poll_interval=1,
+            max_new_tokens=req.max_new_tokens,
+        )
+    except TimeoutError as e:
+        add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(504, f"提示词优化超时: {e}") from e
+    except Exception as e:
+        add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"提示词优化失败: {e}") from e
+    result["instance"] = inst.get("name", "")
+    add_log("info", "prompt_optimize", f"Prompt optimized by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+    return result
+
+
+@app.post("/api/prompt/interrogate")
+def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = Depends(get_current_user)):
+    image = str(req.image or "").replace("\\", "/").lstrip("/")
+    if not image:
+        raise HTTPException(400, "Image is required")
+    if not _resolve_input_image_path(image):
+        raise HTTPException(404, "Image not found")
+    instances = _get_enabled_instances()
+    if not instances:
+        raise HTTPException(503, "No enabled ComfyUI instances available")
+    inst = min(instances, key=lambda item: _get_instance_queue_size(item.get("url", "")))
+    inst_url = inst.get("url", COMFYUI_URL)
+    try:
+        prepared_image = prepare_interrogate_image(image, COMFYUI_INPUT)
+        image_for_interrogate = prepared_image.get("filename") or image
+        workflow = build_image_interrogate_workflow(image_for_interrogate)
+        ensure_workflow_images_available(workflow, COMFYUI_INPUT, inst_url)
+        result = run_image_interrogator(
+            image_for_interrogate,
+            inst_url,
+            comfyui_post,
+            comfyui_get,
+            timeout=180,
+            poll_interval=1,
+        )
+        result["image_preprocess"] = prepared_image
+        prompt_text = str(result.get("prompt") or "").strip()
+        if prompt_text:
+            try:
+                translated = run_prompt_translator(
+                    prompt_text,
+                    inst_url,
+                    comfyui_post,
+                    comfyui_get,
+                    timeout=90,
+                    poll_interval=1,
+                    max_new_tokens=192,
+                )
+                prompt_zh = normalize_interrogated_chinese_prompt(translated.get("prompt_zh", ""))
+                if prompt_zh:
+                    result["prompt_zh"] = prompt_zh
+                    result["prompt_en"] = prompt_text
+                    result["translator_provider"] = translated.get("provider", "")
+            except Exception as translate_error:
+                add_log("warn", "prompt_interrogate", f"Prompt Chinese translation skipped: {translate_error}", details=f"user={_user_id(current_user)}")
+    except TimeoutError as e:
+        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(504, f"图片反推超时: {e}") from e
+    except Exception as e:
+        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"图片反推失败: {e}") from e
+    result["instance"] = inst.get("name", "")
+    add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+    return result
+
 
 @app.post("/api/generate")
 def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict = Depends(get_current_user)):
@@ -4564,8 +4729,10 @@ def api_user_delete(user_id: str, current_user: dict = Depends(require_admin)):
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    ws_user = _get_user_from_token(ws.query_params.get("token"))
     await ws.accept()
     ws_clients.append(ws)
+    ws_client_users[ws] = ws_user or {}
     try:
         while True:
             data = await ws.receive_text()
@@ -4576,6 +4743,7 @@ async def ws_endpoint(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+        ws_client_users.pop(ws, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════

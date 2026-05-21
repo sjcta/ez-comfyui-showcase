@@ -1037,6 +1037,7 @@ function init() {
     if (window.CW.loadWorkflows) window.CW.loadWorkflows();
     if (window.CW.loadHistory) window.CW.loadHistory();
     if (window.CW.pollStatus) window.CW.pollStatus();
+    if (window.CW.pollManager && window.CW.pollManager.reconnect) window.CW.pollManager.reconnect();
   };
   window.CW._bootApp = function() {
     if (window.CW.__appBooted) return;

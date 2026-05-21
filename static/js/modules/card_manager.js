@@ -406,7 +406,7 @@
     if (!job.image) return;
     if (window.CW.refreshWorkflowPreviewFromJob) window.CW.refreshWorkflowPreviewFromJob(job);
     var card = document.querySelector('[data-job-id="' + job.id + '"]');
-    var cleanupDelay = 960;
+    var cleanupDelay = 980;
     if (card) {
       var frontHtml = card.innerHTML;
       var wfTag = window.CW.getWFType ? window.CW.getWFType(job.workflow || '') : '';
@@ -426,15 +426,15 @@
             '</div></div>' +
           (job.seed ? '<div class="gi-seed">' + (window.CW.icon ? CW.icon('sprout') : '') + ' ' + escH(String(job.seed)) + '</div>' : '') +
         '</div>';
-      card.className = 'gi job-card done completing flip-complete job-card-complete-flip';
+      card.className = 'gi job-card done completing job-card-complete-blurfade';
       card.innerHTML =
-        '<div class="job-card-flip-scene">' +
-          '<div class="job-card-flip-face job-card-flip-front">' + frontHtml + '</div>' +
-          '<div class="job-card-flip-face job-card-flip-back">' + completeHtml + '<div class="job-complete-wash"></div></div>' +
+        '<div class="job-card-complete-transition">' +
+          '<div class="job-card-complete-old">' + frontHtml + '</div>' +
+          '<div class="job-card-complete-new">' + completeHtml + '</div>' +
         '</div>';
       setTimeout(function() {
         if (!card.parentNode) return;
-        card.classList.remove('completing', 'flip-complete', 'job-card-complete-flip');
+        card.classList.remove('completing', 'job-card-complete-blurfade');
         card.innerHTML = completeHtml;
       }, cleanupDelay);
     }
@@ -492,9 +492,9 @@
     }
 
     // Active jobs (queued, preparing, starting_comfyui, submitting, generating, downloading)
-    var activeJobs = Object.values(jobs).filter(function (j) { return j.status !== 'done' && j.status !== 'error'; });
+    var activeJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter(function (j) { return j.status !== 'done' && j.status !== 'error'; });
     // Error jobs (kept briefly for visibility)
-    var errorJobs = Object.values(jobs).filter(function (j) { return j.status === 'error'; });
+    var errorJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter(function (j) { return j.status === 'error'; });
     var jobCards = _sortJobCards(activeJobs.concat(errorJobs));
 
     // ── Hash check ──
@@ -551,6 +551,7 @@
     for (var key in jobsObj) {
       if (jobsObj.hasOwnProperty(key)) {
         var j = jobsObj[key];
+        if (!_isJobVisibleToCurrentUser(j)) continue;
         s += j.id + j.status + '|';
       }
     }
@@ -565,7 +566,19 @@
     var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
       ? window.CW.auth.getCurrentUser()
       : null;
-    return user && (user.sub || user.id) ? String(user.sub || user.id) : '';
+    return user && (user.sub || user.id || user.user_id) ? String(user.sub || user.id || user.user_id) : '';
+  }
+
+  function _isJobVisibleToCurrentUser(job) {
+    if (!job) return false;
+    var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
+      ? window.CW.auth.getCurrentUser()
+      : null;
+    if (user && user.role === 'admin') return true;
+    var owner = String(job.user_id || '');
+    if (!owner) return true;
+    var uid = _currentUserId();
+    return !!uid && owner === uid;
   }
 
   function _typeClass(typeText, workflowName) {
@@ -614,7 +627,7 @@
       item && item.prompt_preview
     ].filter(Boolean).join(' ').toLowerCase();
     if (!text) return false;
-    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸露|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
+    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
   }
 
   function _syncOwnerFilterButtons() {

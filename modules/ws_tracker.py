@@ -571,6 +571,8 @@ class WSTracker:
             return
 
         nid = str(node_id)
+        if self._current_node_id and self._current_node_id != nid:
+            self._mark_node_completed(self._current_node_id)
         cls = self._node_types.get(nid, "")
         self._current_node_id = nid
         self._current_node_cls = cls
@@ -662,20 +664,7 @@ class WSTracker:
             if cls:
                 self._current_node_id = node_id
                 self._current_node_cls = cls
-                if (
-                    node_id not in self._completed_node_ids
-                    and cls not in NodeCategoryDict.SAMPLER
-                    and (cls not in NodeCategoryDict.UPSCALE or node_id in self._step_info.time_estimates)
-                ):
-                    weight = self._step_info.node_weights.get(node_id, 1.0)
-                    if weight > 0:
-                        previous = self._time_node_units.get(node_id, 0.0)
-                        self._completed_units += max(0.0, weight - previous)
-                        self._time_node_units[node_id] = weight
-                    self._completed_node_ids.add(node_id)
-                    entered = self._node_entered_at.pop(node_id, None)
-                    if entered and node_id in self._step_info.time_estimates:
-                        TimeEstimator.record(cls, max(0.0, time.time() - entered))
+                self._mark_node_completed(node_id)
                 self._log("info", "done", f"[{cls}] Completed ({self._calc_pct():.0f}%)", self._job_id)
 
         pct = self._calc_pct()
@@ -684,6 +673,28 @@ class WSTracker:
             "message": self._build_status_message(pct),
             "current_node": self._current_node_cls,
         })
+
+    def _mark_node_completed(self, node_id: str) -> None:
+        """Mark a non-progress-reporting node done once ComfyUI moves past it."""
+        node_id = str(node_id or "")
+        if not node_id or node_id in self._completed_node_ids:
+            return
+        cls = self._node_types.get(node_id, "")
+        if (
+            not cls
+            or cls in NodeCategoryDict.SAMPLER
+            or (cls in NodeCategoryDict.UPSCALE and node_id not in self._step_info.time_estimates)
+        ):
+            return
+        weight = self._step_info.node_weights.get(node_id, 1.0)
+        if weight > 0:
+            previous = self._time_node_units.get(node_id, 0.0)
+            self._completed_units += max(0.0, weight - previous)
+            self._time_node_units[node_id] = weight
+        self._completed_node_ids.add(node_id)
+        entered = self._node_entered_at.pop(node_id, None)
+        if entered and node_id in self._step_info.time_estimates:
+            TimeEstimator.record(cls, max(0.0, time.time() - entered))
 
     def _handle_error(self, data: dict) -> None:
         """处理 execution_error 消息。

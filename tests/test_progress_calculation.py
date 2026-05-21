@@ -130,6 +130,71 @@ class ProgressCalculationTests(unittest.TestCase):
         self.assertGreater(save_done, save_started)
         self.assertEqual(workflow_done, 100)
 
+    def test_normal_nodes_are_counted_when_execution_advances_without_executed_event(self):
+        workflow = {
+            "60": {"class_type": "PrimitiveInt", "inputs": {"value": 2}},
+            "30": {"class_type": "EmptyLatentImage", "inputs": {}},
+            "64": {"class_type": "VAELoader", "inputs": {}},
+            "65": {"class_type": "CLIPLoader", "inputs": {}},
+            "67": {"class_type": "UNETLoader", "inputs": {}},
+            "68": {"class_type": "CLIPTextEncode", "inputs": {}},
+            "29": {"class_type": "ConditioningZeroOut", "inputs": {}},
+            "27": {"class_type": "KSampler", "inputs": {"steps": 8, "denoise": 1.0}},
+            "31": {"class_type": "VAEDecode", "inputs": {"samples": ["27", 0]}},
+            "71": {"class_type": "ImageScaleBy", "inputs": {"image": ["31", 0]}},
+            "72": {"class_type": "VAEEncode", "inputs": {"pixels": ["71", 0]}},
+            "35": {"class_type": "KSampler", "inputs": {"steps": 2, "denoise": 0.25}},
+            "37": {"class_type": "VAEDecode", "inputs": {"samples": ["35", 0]}},
+            "40": {"class_type": "ImageScaleBy", "inputs": {"image": ["37", 0]}},
+            "61": {"class_type": "SaveImage", "inputs": {"images": ["40", 0]}},
+        }
+        step_info = StepCalculator().calculate(workflow)
+        self.assertEqual(step_info.node_weights["60"], 0.0)
+        tracker = WSTracker(
+            job_id="job-executing-transition-progress-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+
+        async def run_sequence():
+            for nid in ("64", "30", "65", "68", "29", "67", "27"):
+                await tracker._handle_executing({"node": nid}, step_info.total_units, step_info.node_weights)
+            first_sampler_started = tracker._calc_pct()
+            await tracker._handle_progress({"node": "27", "value": 8, "max": 8}, step_info.total_units, step_info.node_weights)
+            first_sampler_done = tracker._calc_pct()
+
+            for nid in ("31", "71", "72", "35"):
+                await tracker._handle_executing({"node": nid}, step_info.total_units, step_info.node_weights)
+            second_sampler_started = tracker._calc_pct()
+            await tracker._handle_progress({"node": "35", "value": 2, "max": 2}, step_info.total_units, step_info.node_weights)
+            second_sampler_done = tracker._calc_pct()
+
+            for nid in ("37", "40", "61"):
+                await tracker._handle_executing({"node": nid}, step_info.total_units, step_info.node_weights)
+            save_started = tracker._calc_pct()
+            await tracker._handle_executing({"node": None}, step_info.total_units, step_info.node_weights)
+            workflow_done = tracker._calc_pct()
+            return first_sampler_started, first_sampler_done, second_sampler_started, second_sampler_done, save_started, workflow_done
+
+        (
+            first_sampler_started,
+            first_sampler_done,
+            second_sampler_started,
+            second_sampler_done,
+            save_started,
+            workflow_done,
+        ) = asyncio.run(run_sequence())
+
+        self.assertGreater(first_sampler_started, 29)
+        self.assertGreater(first_sampler_done, 70)
+        self.assertGreater(second_sampler_started, first_sampler_done)
+        self.assertGreater(second_sampler_done, 88)
+        self.assertGreater(save_started, second_sampler_done)
+        self.assertLess(save_started, 100)
+        self.assertEqual(workflow_done, 100)
+
     def test_seedvr_upscale_uses_time_estimated_progress(self):
         workflow = {
             "1": {

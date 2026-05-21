@@ -54,6 +54,52 @@ function scaleDim(w, h, maxSide = 1920) {
     return [Math.max(sw, 256), Math.max(sh, 256)];
   }
 
+function _setPromptInputValue(value) {
+    var pi = $('#promptInput');
+    if (!pi) return null;
+    pi.value = value || '';
+    pi.dispatchEvent(new Event('input', { bubbles: true }));
+    if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+    return pi;
+  }
+
+function _clearPromptOptimizationVariants() {
+    var old = $('#promptOptimizeVariants');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+  }
+
+function _showPromptOptimizationVariants(data) {
+    var optimized = String((data && (data.optimized_prompt || data.cleaned_prompt)) || '').trim();
+    var structured = String((data && data.structured_prompt_json) || '').trim();
+    if (!optimized || !structured) {
+      _clearPromptOptimizationVariants();
+      return;
+    }
+    var btn = $('#optimizePromptBtn');
+    var actions = btn && btn.closest ? btn.closest('.prompt-actions') : null;
+    if (!actions) return;
+    _clearPromptOptimizationVariants();
+    var panel = document.createElement('div');
+    panel.id = 'promptOptimizeVariants';
+    panel.className = 'prompt-variant-panel';
+    panel.innerHTML = ''
+      + '<button class="prompt-variant-btn active" type="button" data-kind="text">纯词汇</button>'
+      + '<button class="prompt-variant-btn" type="button" data-kind="json">JSON格式</button>';
+    var buttons = panel.querySelectorAll('.prompt-variant-btn');
+    function activate(kind) {
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].classList.toggle('active', buttons[i].getAttribute('data-kind') === kind);
+      }
+      _setPromptInputValue(kind === 'json' ? structured : optimized);
+    }
+    for (var j = 0; j < buttons.length; j++) {
+      buttons[j].addEventListener('click', function() {
+        activate(this.getAttribute('data-kind') || 'text');
+      });
+    }
+    actions.appendChild(panel);
+  }
+
 function _quickGenerationLabel() {
     var prompt = ($('#promptInput') || {}).value || '';
     if (prompt.trim()) return prompt.slice(0, 300);
@@ -142,8 +188,7 @@ async function fillFormFromHistory(idx, key) {
       console.warn('[fillFormFromHistory] no match for workflow:', h.workflow, '— restoring common fields only');
     }
     if (h.prompt) {
-      var pi = $('#promptInput');
-      if (pi) pi.value = h.prompt;
+      _setPromptInputValue(h.prompt);
     }
     // Scale dimensions to fit within 1920, proportional, divisible by 64
     if (h.width && h.height) {
@@ -186,7 +231,7 @@ async function restoreJob(jobId) {
     // Try local snapshot first (submitted this session)
     const snap = jobFields[jobId];
     if (snap) {
-      if (snap.prompt) { var pi = $('#promptInput'); if (pi) pi.value = snap.prompt; }
+      if (snap.prompt) { _setPromptInputValue(snap.prompt); }
       if (snap.width) { var wi = $('#widthInput'); if (wi) wi.value = snap.width; }
       if (snap.height) { var hi = $('#heightInput'); if (hi) hi.value = snap.height; }
       for (const [k, v] of Object.entries(snap.adv || {})) {
@@ -229,8 +274,7 @@ async function restoreJob(jobId) {
     }
     // Restore prompt
     if (j.prompt_preview) {
-      var pi = $('#promptInput');
-      if (pi) pi.value = j.prompt_preview;
+      _setPromptInputValue(j.prompt_preview);
     }
     // Restore dimensions
     if (j.width && j.height) {
@@ -363,6 +407,232 @@ async function doGenerate() {
   }
 
 
+async function optimizePrompt() {
+    var input = $('#promptInput');
+    var btn = $('#optimizePromptBtn');
+    if (!input) return;
+    var raw = (input.value || '').trim();
+    if (!raw) {
+      if (window.CW && CW.toast) CW.toast('先输入提示词', 'warn');
+      input.focus();
+      return;
+    }
+    var oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 优化中';
+    }
+    try {
+      var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+      var response = await fetcher(API + '/api/prompt/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: raw, max_new_tokens: 384 })
+      });
+      var data = await response.json().catch(function() { return {}; });
+      if (!response.ok) throw new Error(data.detail || data.message || '提示词优化失败');
+      var optimized = String(data.optimized_prompt || data.cleaned_prompt || '').trim();
+      if (!optimized) throw new Error('优化结果为空');
+      window.CW.lastPromptOptimization = data;
+      _setPromptInputValue(optimized);
+      _showPromptOptimizationVariants(data);
+      if (window.CW && CW.toast) CW.toast(data.structured_prompt_json ? '提示词已优化，JSON 版本已生成' : '提示词已优化', 'ok');
+    } catch (e) {
+      console.warn('[optimizePrompt] failed:', e);
+      if (window.CW && CW.toast) CW.toast(e.message || '提示词优化失败', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-loading');
+        btn.innerHTML = oldHtml || ((window.CW && CW.icon ? CW.icon('zap') : '') + ' 优化');
+      }
+    }
+  }
+
+
+var _promptInterrogateRunning = false;
+
+  function _setPromptInterrogateLoading(isLoading, label) {
+    var buttons = [$('#interrogatePromptBtn'), $('#promptInterrogateRunBtn')];
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      if (!btn) continue;
+      btn.disabled = !!isLoading;
+      btn.classList.toggle('is-loading', !!isLoading);
+      if (isLoading) {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' ' + (label || '反推中');
+      } else if (btn.id === 'interrogatePromptBtn') {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">用图片反推</span>';
+      } else {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+      }
+    }
+  }
+
+  function _startPromptInterrogateTask(refVal) {
+    if (!refVal) return;
+    if (_promptInterrogateRunning) {
+      if (window.CW && CW.toast) CW.toast('图片反推正在后台运行', 'info');
+      return;
+    }
+    _promptInterrogateRunning = true;
+    _setPromptInterrogateLoading(true, '后台反推中');
+    if (window.CW && CW.closePromptInterrogateModal) CW.closePromptInterrogateModal();
+    if (window.CW && typeof CW.showPromptInterrogatePendingToast === 'function') {
+      CW.showPromptInterrogatePendingToast();
+    } else if (window.CW && CW.toast) {
+      CW.toast('后台努力反推中，请稍后……', 'info');
+    }
+    _runPromptInterrogate(refVal).then(function(result) {
+      var prompt = result && result.prompt ? result.prompt : '';
+      if (window.CW && typeof CW.showPromptResultToast === 'function') {
+        CW.showPromptResultToast(prompt, result && result.data ? result.data : {});
+      } else if (window.CW && CW.toast) {
+        CW.toast('反推完成', 'done');
+      }
+    }).catch(function(e) {
+      console.warn('[interrogatePromptFromImage] failed:', e);
+      if (window.CW && CW.toast) CW.toast(e.message || '图片反推失败', 'error');
+    }).finally(function() {
+      _promptInterrogateRunning = false;
+      _setPromptInterrogateLoading(false);
+    });
+  }
+
+async function interrogatePromptFromImage() {
+    var refVal = ($('#refImageValue') || {}).value || '';
+    openPromptInterrogateModal(refVal);
+  }
+
+  async function _runPromptInterrogate(refVal) {
+    var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+    var response = await fetcher(API + '/api/prompt/interrogate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: refVal })
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error(data.detail || data.message || '图片反推失败');
+    var prompt = String(data.prompt || data.promptgen || data.wd14_tags || '').trim();
+    if (!prompt) throw new Error('反推结果为空');
+    return { prompt: prompt, data: data };
+  }
+
+  function openPromptInterrogateModal(initialImage) {
+    if (!window.CW || !CW.auth || !CW.auth.isLoggedIn || !CW.auth.isLoggedIn()) {
+      if (window.CW && CW.auth && CW.auth.showLogin) CW.auth.showLogin();
+      return;
+    }
+    var old = document.getElementById('promptInterrogateModal');
+    if (old) old.remove();
+    var html = '<div class="v4-overlay prompt-interrogate-modal" id="promptInterrogateModal" onclick="if(event.target===this)CW.closePromptInterrogateModal()">' +
+      '<div class="v4-card narrow prompt-interrogate-card">' +
+        '<div class="auth-modal-header"><span class="auth-modal-title">' + (window.CW && CW.icon ? CW.icon('image', 18) : '') + '图片反推提示词</span>' +
+        '<button class="auth-modal-close" type="button" onclick="CW.closePromptInterrogateModal()">×</button></div>' +
+        '<div class="auth-modal-body">' +
+          '<div class="prompt-interrogate-upload" id="promptInterrogateZone">' +
+            '<div class="img-upload-placeholder"><span>' + (window.CW && CW.icon ? CW.icon('upload', 26) : '') + '</span><span>点击或拖入图片</span></div>' +
+            '<img id="promptInterrogatePreview" class="img-upload-preview hidden" alt="">' +
+            '<input type="file" id="promptInterrogateFile" accept="image/*" class="hidden">' +
+          '</div>' +
+          '<div class="prompt-interrogate-actions">' +
+            '<button class="prompt-tool-btn" type="button" id="promptInterrogateRunBtn" disabled>' + (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    var modal = document.getElementById('promptInterrogateModal');
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        if (modal) modal.classList.add('open');
+      });
+    });
+    _initPromptInterrogateModal(initialImage);
+  }
+
+  function closePromptInterrogateModal() {
+    var modal = document.getElementById('promptInterrogateModal');
+    if (!modal) return;
+    modal.classList.remove('open');
+    setTimeout(function() {
+      if (modal.parentNode) modal.parentNode.removeChild(modal);
+    }, 300);
+  }
+
+  function _initPromptInterrogateModal(initialImage) {
+    var zone = $('#promptInterrogateZone');
+    var fileInput = $('#promptInterrogateFile');
+    var preview = $('#promptInterrogatePreview');
+    var runBtn = $('#promptInterrogateRunBtn');
+    var uploadedName = String(initialImage || '').trim();
+    if (!zone || !fileInput || !runBtn) return;
+
+    if (uploadedName) {
+      if (preview) {
+        preview.src = API + '/api/input-image/' + encodeURIComponent(uploadedName);
+        preview.style.display = '';
+        preview.classList.remove('hidden');
+      }
+      var ph = zone.querySelector('.img-upload-placeholder');
+      if (ph) ph.style.display = 'none';
+      runBtn.disabled = false;
+    }
+
+    async function useFile(file) {
+      if (!file) return;
+      runBtn.disabled = true;
+      runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 上传中';
+      runBtn.classList.add('is-loading');
+      try {
+        var d = await _uploadRefImage(file);
+        uploadedName = d.filename;
+        if (preview) {
+          preview.src = API + '/api/input-image/' + encodeURIComponent(uploadedName);
+          preview.style.display = '';
+          preview.classList.remove('hidden');
+        }
+        var ph = zone.querySelector('.img-upload-placeholder');
+        if (ph) ph.style.display = 'none';
+        runBtn.disabled = false;
+        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+      } catch (e) {
+        if (window.CW && CW.toast) CW.toast(e.message || '图片上传失败', 'error');
+        runBtn.disabled = true;
+        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+      } finally {
+        runBtn.classList.remove('is-loading');
+        fileInput.value = '';
+      }
+    }
+
+    zone.addEventListener('click', function(e) {
+      if (e.target && e.target.tagName === 'IMG') return;
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', function() {
+      useFile(fileInput.files && fileInput.files[0]);
+    });
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      zone.classList.add('dragover');
+    });
+    zone.addEventListener('dragleave', function() {
+      zone.classList.remove('dragover');
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      useFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    runBtn.addEventListener('click', async function() {
+      if (!uploadedName) return;
+      _startPromptInterrogateTask(uploadedName);
+    });
+  }
+
+
   // Shared across modules via __APP__
   var _wfFieldMeta = window.__APP__._wfFieldMeta || [];
   window.__APP__._wfFieldMeta = _wfFieldMeta;
@@ -392,7 +662,7 @@ function renderQuickForm(fields) {
       if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
-        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label><div class="prompt-actions"><button id="clearPromptBtn" class="clear-btn is-invisible" type="button" onclick="CW.clearPrompt()">清除文字</button></div></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div></div>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="用图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">用图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="提示词优化" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">提示词优化</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
         quickImageRendered = true;
@@ -652,6 +922,11 @@ function renderQuickGen() {
   window.CW.restoreJob = restoreJob;
   window.CW.fillFormFromHistory = fillFormFromHistory;
   window.CW.doGenerate = doGenerate;
+  window.CW.optimizePrompt = optimizePrompt;
+  window.CW.clearPromptOptimizationVariants = _clearPromptOptimizationVariants;
+  window.CW.interrogatePromptFromImage = interrogatePromptFromImage;
+  window.CW.openPromptInterrogateModal = openPromptInterrogateModal;
+  window.CW.closePromptInterrogateModal = closePromptInterrogateModal;
   window.CW.renderAdvFields = renderAdvFields;
   window.CW.renderQuickGen = renderQuickGen;
   window.CW.renderQuickForm = renderQuickForm;
