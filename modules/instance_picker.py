@@ -9,6 +9,7 @@ Ez ComfyUI v4.0 重构。
 依赖: config.py (ModelGroup)
 """
 
+import re
 from typing import Callable
 
 from modules.config import ModelGroup
@@ -28,6 +29,14 @@ def extract_model_group(workflow_name: str) -> str:
     return ModelGroup.extract_model_group(workflow_name)
 
 
+def strict_preferred_instance_name(workflow_name: str) -> str:
+    """Return the fixed routing lane for workflows that must not spill over."""
+    profile = _workflow_profile(workflow_name)
+    if profile.get("strict_preferred"):
+        return str(profile.get("preferred") or "")
+    return ""
+
+
 async def pick_best_instance(
     instances: list[dict],
     workflow_name: str = "",
@@ -42,9 +51,10 @@ async def pick_best_instance(
     调用方负责传入实例列表、健康检查和队列深度查询。
 
     选择规则:
-    1. 硬路由: T2I→A, I2I→B（仅偏好，不可用时回退）
-    2. 模型组亲和: 同组优先
-    3. 空闲亲和: 空闲 + 同组 > 空闲 + 无组 > 最短队列
+    1. 工作流类型只作为偏好，不再直接短路返回。
+       T2I/放大 固定优先 A，I2I/视频 固定优先 B。
+    2. 同时考虑远端 ComfyUI 队列和调用方注入的本地等待队列。
+    3. 同模型组/空模型组优先，但忙碌实例会被惩罚，避免所有任务堆到 A。
 
     Args:
         instances: 实例字典列表，需含 name/url 字段。
@@ -82,68 +92,88 @@ async def pick_best_instance(
     # ── 计算亲和信息 ───────────────────────────────────────────────────
     wf_group = extract_model_group(workflow_name) if workflow_name else ""
 
-    # ── Phase 0: T2I → A, I2I → B（硬路由偏好） ─────────────────────
-    if workflow_name:
-        lower = workflow_name.lower()
-        inst_a = _find_instance(available, "A")
-        inst_b = _find_instance(available, "B")
-
-        is_t2i = lower.startswith("t2i") or "_t2i" in lower or "-t2i" in lower
-        is_i2i = lower.startswith("i2i") or "_i2i" in lower or "-i2i" in lower
-
-        if is_t2i and inst_a:
-            return inst_a
-        if is_t2i and inst_b:
-            return inst_b
-        if is_i2i and inst_b:
-            return inst_b
-        if is_i2i and inst_a:
-            return inst_a
-
     # ── Phase 1: 亲和性匹配 ──────────────────────────────────────────
     if workflow_name:
         affinity_name = affinity_getter(workflow_name)
         if affinity_name:
             match = _find_instance(available, affinity_name)
-            if match:
+            if match and queue_sizes.get(match["name"], 0) == 0:
                 return match
 
-    # ── Phase 2: 空闲亲和行 ──────────────────────────────────────────
-    # 最优：空闲 + 同模型组
-    for inst in available:
-        sz = queue_sizes.get(inst["name"], 0)
-        ig = _get_instance_group(inst["name"], group_getter)
-        if sz == 0 and ig == wf_group:
-            return inst
+    profile = _workflow_profile(workflow_name)
+    strict_preferred = profile.get("strict_preferred")
+    preferred = str(profile.get("preferred") or "")
+    if strict_preferred and preferred:
+        match = _find_instance(available, preferred)
+        if match:
+            return match
+    ranked = sorted(
+        available,
+        key=lambda inst: _instance_score(inst, queue_sizes, wf_group, group_getter, profile),
+    )
+    return ranked[0]
 
-    # 次优：空闲 + 无加载组
-    for inst in available:
-        sz = queue_sizes.get(inst["name"], 0)
-        ig = _get_instance_group(inst["name"], group_getter)
-        if sz == 0 and not ig:
-            return inst
 
-    # ── Phase 3: 最短队列 ────────────────────────────────────────────
-    best: dict | None = None
-    best_load = 999
+def _workflow_profile(workflow_name: str) -> dict:
+    lower = (workflow_name or "").lower()
+    kind = "other"
+    preferred = ""
+    pressure = 2
+    if _has_token(lower, "t2i"):
+        kind = "t2i"
+        preferred = "A"
+        pressure = 1
+    elif _has_token(lower, "i2i"):
+        kind = "i2i"
+        preferred = "B"
+        pressure = 3
+    elif _has_token(lower, "t2v") or _has_token(lower, "i2v"):
+        kind = "video"
+        preferred = "B"
+        pressure = 3
+    elif "upscale" in lower or "seedvr" in lower:
+        kind = "upscale"
+        preferred = "A"
+        pressure = 3
+    strict_preferred = kind in {"t2i", "i2i", "upscale", "video"}
+    return {"kind": kind, "preferred": preferred, "pressure": pressure, "strict_preferred": strict_preferred}
 
-    # 优先选同组或空组
-    for inst in available:
-        load = queue_sizes.get(inst["name"], 0)
-        if load >= best_load:
-            continue
-        ig = _get_instance_group(inst["name"], group_getter)
-        if ig in (wf_group, ""):
-            best, best_load = inst, load
 
-    # 没有同组/空组匹配 → 选最短队列
-    if not best:
-        for inst in available:
-            load = queue_sizes.get(inst["name"], 0)
-            if load < best_load:
-                best, best_load = inst, load
+def _has_token(text: str, token: str) -> bool:
+    return bool(re.search(rf"(^|[-_]){re.escape(token)}($|[-_])", text or ""))
 
-    return best or available[0]
+
+def _instance_score(
+    inst: dict,
+    queue_sizes: dict[str, int],
+    workflow_group: str,
+    group_getter: Callable[[str], str] | None,
+    profile: dict,
+) -> tuple[float, int, str]:
+    name = inst.get("name", "")
+    load = queue_sizes.get(name, 0)
+    pressure = int(profile.get("pressure") or 2)
+    preferred = str(profile.get("preferred") or "")
+    score = float(load * (4 + pressure))
+
+    if preferred and name == preferred:
+        score -= 8 if pressure >= 3 else 3
+    elif preferred:
+        score += 2 if pressure >= 3 else 0
+
+    loaded_group = _get_instance_group(name, group_getter)
+    if workflow_group and loaded_group == workflow_group:
+        score -= 5
+    elif not loaded_group:
+        score -= 1
+    elif workflow_group:
+        score += 2
+
+    try:
+        order = int(inst.get("sort_order", 9999))
+    except (TypeError, ValueError):
+        order = 9999
+    return (score, order, name)
 
 
 def _find_instance(instances: list[dict], name: str) -> dict | None:

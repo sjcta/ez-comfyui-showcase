@@ -6,6 +6,70 @@
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs, jobFields = A.jobFields, historyItems = A.historyItems;
+  var PROMPT_TRANSLATION_CACHE_KEY = 'cw_prompt_translation_cache_v1';
+  var _promptTranslationCache = _loadPromptTranslationCache();
+
+  function _normalizePromptCacheText(text) {
+    return String(text || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function _detectPromptTargetLanguage(text) {
+    return /[\u4e00-\u9fff]/.test(String(text || '')) ? 'en' : 'zh';
+  }
+
+  function _looksLikeJsonPrompt(text) {
+    try {
+      return !!JSON.parse(String(text || '').trim());
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function _promptTranslationCacheKey(text, target) {
+    return String(target || '') + '\n' + _normalizePromptCacheText(text);
+  }
+
+  function _loadPromptTranslationCache() {
+    try {
+      var raw = sessionStorage.getItem(PROMPT_TRANSLATION_CACHE_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function _savePromptTranslationCache() {
+    try {
+      var keys = Object.keys(_promptTranslationCache);
+      if (keys.length > 160) {
+        keys.slice(0, keys.length - 160).forEach(function(key) { delete _promptTranslationCache[key]; });
+      }
+      sessionStorage.setItem(PROMPT_TRANSLATION_CACHE_KEY, JSON.stringify(_promptTranslationCache));
+    } catch (e) {}
+  }
+
+  function _getPromptTranslationCache(text, target) {
+    var entry = _promptTranslationCache[_promptTranslationCacheKey(text, target)];
+    return entry && entry.text ? String(entry.text).trim() : '';
+  }
+
+  function _rememberPromptTranslationPair(source, targetLang, translated) {
+    var src = String(source || '').trim();
+    var dst = String(translated || '').trim();
+    var lang = targetLang === 'zh' ? 'zh' : 'en';
+    if (!src || !dst || src === dst) return;
+    _promptTranslationCache[_promptTranslationCacheKey(src, lang)] = { text: dst, ts: Date.now() };
+    _promptTranslationCache[_promptTranslationCacheKey(dst, lang === 'en' ? 'zh' : 'en')] = { text: src, ts: Date.now() };
+    _savePromptTranslationCache();
+  }
+
+  function registerPromptTranslationPair(promptZh, promptEn) {
+    var zh = String(promptZh || '').trim();
+    var en = String(promptEn || '').trim();
+    if (!zh || !en) return;
+    _rememberPromptTranslationPair(zh, 'en', en);
+  }
 
 function initRatioGrid() {
     // Ratio buttons are created dynamically by renderQuickForm - guard
@@ -54,8 +118,184 @@ function scaleDim(w, h, maxSide = 1920) {
     return [Math.max(sw, 256), Math.max(sh, 256)];
   }
 
-async function fillFormFromHistory(idx) {
-    const h = historyItems[idx];
+function _setPromptInputValue(value) {
+    var pi = $('#promptInput');
+    if (!pi) return null;
+    pi.value = value || '';
+    pi.dispatchEvent(new Event('input', { bubbles: true }));
+    if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+    return pi;
+  }
+
+function _getSeedInput() {
+    return document.querySelector('.seed-group input[type="number"]');
+  }
+
+function _setSeedRandomEnabled(enabled) {
+    $$('.btn-dice[data-seed-random]').forEach(function(btn) {
+      btn.classList.toggle('is-active', !!enabled);
+      btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    });
+  }
+
+function _isSeedRandomEnabled() {
+    var btn = document.querySelector('.btn-dice[data-seed-random]');
+    return !!(btn && btn.classList.contains('is-active'));
+  }
+
+function _getManualSeedValue() {
+    var input = _getSeedInput();
+    if (!input) return null;
+    var value = String(input.value || '').trim();
+    if (!value) return null;
+    var seed = parseInt(value, 10);
+    return Number.isFinite(seed) ? seed : null;
+  }
+
+function _hasRestorableSeedFieldValues(values) {
+    return Object.keys(values || {}).some(function(key) {
+      return /::(?:seed|noise_seed)$/.test(key);
+    });
+  }
+
+function _normalizeFieldMeta(fields, workflowName) {
+    var normalized = (fields || []).map(function(f) {
+      return {
+        key: f.key || (f.node_id + '::' + f.field),
+        node_id: f.node_id,
+        class_type: f.class_type,
+        field: f.field,
+        zone: f.zone,
+        visible: f.visible !== false,
+        type: f.type,
+        label: f.label,
+        value: f.value,
+        options: f.options,
+        step: f.step,
+        min: f.min,
+        max: f.max,
+      };
+    });
+    A._wfFieldMeta = normalized;
+    A._wfFieldWorkflow = workflowName || A.currentWF || '';
+    window.__APP__._wfFieldMeta = normalized;
+    window.__APP__._wfFieldWorkflow = A._wfFieldWorkflow;
+    return normalized;
+  }
+
+function _numberAttr(name, value) {
+    return value === undefined || value === null || value === ''
+      ? ''
+      : ' ' + name + '="' + escA(String(value)) + '"';
+  }
+
+function _hasCurrentFieldCache() {
+    return !!(A._wfFieldMeta && A._wfFieldMeta.length && A._wfFieldWorkflow === A.currentWF);
+  }
+
+async function _getSubmitFieldsMeta() {
+    if (_hasCurrentFieldCache()) return A._wfFieldMeta;
+    try {
+      var fr = await fetch(`${API}/api/workflows/${encodeURIComponent(A.currentWF)}/fields`);
+      if (!fr.ok) throw new Error('字段读取失败');
+      var fd = await fr.json();
+      return _normalizeFieldMeta(fd.fields || [], A.currentWF);
+    } catch (e) {
+      if (_hasCurrentFieldCache()) return A._wfFieldMeta;
+      throw e;
+    }
+  }
+
+function _isPromptSubmitField(f) {
+    if (!f) return false;
+    var cls = String(f.class_type || '');
+    var zone = f.zone || 'advanced';
+    if (zone === 'user_input' && (f.type === 'textarea' || cls.indexOf('TextEncode') >= 0)) return true;
+    return !f.zone && cls === 'CLIPTextEncode' && f.field === 'text';
+  }
+
+function toggleSeedRandom(btnEl) {
+    var btn = btnEl || document.querySelector('.btn-dice[data-seed-random]');
+    if (!btn) return;
+    _setSeedRandomEnabled(!btn.classList.contains('is-active'));
+  }
+
+function _clearPromptOptimizationVariants() {
+    var old = $('#promptOptimizeVariants');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+  }
+
+function _showPromptOptimizationVariants(data) {
+    var optimized = String((data && (data.optimized_prompt || data.cleaned_prompt)) || '').trim();
+    var structured = String((data && data.structured_prompt_json) || '').trim();
+    if (!optimized || !structured) {
+      _clearPromptOptimizationVariants();
+      return;
+    }
+    var promptField = $('#promptInput');
+    var promptGroup = promptField && promptField.closest ? promptField.closest('.prompt-fg') : null;
+    var labelRow = promptGroup ? promptGroup.querySelector('.prompt-label-row') : null;
+    if (!labelRow) return;
+    _clearPromptOptimizationVariants();
+    var panel = document.createElement('div');
+    panel.id = 'promptOptimizeVariants';
+    panel.className = 'prompt-variant-panel';
+    panel.innerHTML = ''
+      + '<button class="prompt-variant-btn active" type="button" data-kind="text">纯词汇</button>'
+      + '<button class="prompt-variant-btn" type="button" data-kind="json">JSON格式</button>';
+    var buttons = panel.querySelectorAll('.prompt-variant-btn');
+    function activate(kind) {
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].classList.toggle('active', buttons[i].getAttribute('data-kind') === kind);
+      }
+      _setPromptInputValue(kind === 'json' ? structured : optimized);
+    }
+    for (var j = 0; j < buttons.length; j++) {
+      buttons[j].addEventListener('click', function() {
+        activate(this.getAttribute('data-kind') || 'text');
+      });
+    }
+    labelRow.appendChild(panel);
+  }
+
+function _quickGenerationLabel() {
+    var prompt = ($('#promptInput') || {}).value || '';
+    if (prompt.trim()) return prompt.slice(0, 300);
+    var meta = (A._wfMeta || {})[A.currentWF] || {};
+    var tags = meta.tags || [];
+    var typeTag = window.CW && CW.getWFType ? CW.getWFType(A.currentWF || '') : null;
+    var isUpscale = (typeTag && typeTag.text === '放大') || tags.indexOf('放大') >= 0 || /upscale|seedvr/i.test(A.currentWF || '');
+    if (!isUpscale) return '';
+    var resolution = 0;
+    var fields = A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      if (f.field === 'resolution') {
+        var el = document.querySelector('#advFields [data-key="' + f.key + '"]');
+        resolution = parseInt((el && el.value) || f.value || 0, 10) || 0;
+        break;
+      }
+    }
+    if (resolution >= 3840) return '4K 放大';
+    if (resolution >= 1920) return '2K 放大';
+    return resolution > 0 ? (resolution + 'P 放大') : '放大';
+  }
+
+  function _historyKey(item) {
+    return String((item && (item.id || item.filename || item.thumb)) || '');
+  }
+
+  function _historyItemByKey(key) {
+    key = String(key || '');
+    if (!key) return null;
+    for (var i = 0; i < historyItems.length; i++) {
+      if (_historyKey(historyItems[i]) === key) return historyItems[i];
+    }
+    return null;
+  }
+
+async function fillFormFromHistory(idx, key) {
+    const h = _historyItemByKey(key) || historyItems[idx];
     if (!h) return;
     if (!h.workflow) return;
     // Always find and switch to the correct workflow + tab
@@ -93,13 +333,20 @@ async function fillFormFromHistory(idx) {
       // Only re-fetch fields if workflow actually changed
       if (targetWf !== A.currentWF) {
         await window.CW.selectWF(targetWf);
+      } else if (window.CW.highlightWF) {
+        window.CW.highlightWF();
       }
+      requestAnimationFrame(function() {
+        var card = Array.prototype.slice.call(document.querySelectorAll('.wf-card')).find(function(el) {
+          return el.dataset && el.dataset.name === targetWf;
+        });
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      });
     } else {
       console.warn('[fillFormFromHistory] no match for workflow:', h.workflow, '— restoring common fields only');
     }
     if (h.prompt) {
-      var pi = $('#promptInput');
-      if (pi) pi.value = h.prompt;
+      _setPromptInputValue(h.prompt);
     }
     // Scale dimensions to fit within 1920, proportional, divisible by 64
     if (h.width && h.height) {
@@ -124,16 +371,17 @@ async function fillFormFromHistory(idx) {
           var preview = document.querySelector('#refImagePreview');
           var ph = document.querySelector('#refImagePlaceholder');
           if (vInput) vInput.value = v;
-          if (preview) { preview.src = API + '/api/input-image/' + v; preview.style.display = ''; }
+          if (preview) { preview.src = API + '/api/input-image/' + encodeURIComponent(v); preview.style.display = ''; }
           if (ph) ph.style.display = 'none';
           break;
         }
       }
     }
-    // Restore seed (covers old items without field_values, and ensures actual seed is used)
-    if (h.seed) {
-      const seedInput = document.querySelector('.seed-group input');
+    // Restore seed only for old records that do not have workflow seed fields.
+    if (h.seed && !_hasRestorableSeedFieldValues(h.field_values || {})) {
+      const seedInput = _getSeedInput();
       if (seedInput) seedInput.value = h.seed;
+      _setSeedRandomEnabled(true);
     }
     document.querySelector('.col-left').scrollTop = 0;
   }
@@ -142,13 +390,14 @@ async function restoreJob(jobId) {
     // Try local snapshot first (submitted this session)
     const snap = jobFields[jobId];
     if (snap) {
-      if (snap.prompt) { var pi = $('#promptInput'); if (pi) pi.value = snap.prompt; }
+      if (snap.prompt) { _setPromptInputValue(snap.prompt); }
       if (snap.width) { var wi = $('#widthInput'); if (wi) wi.value = snap.width; }
       if (snap.height) { var hi = $('#heightInput'); if (hi) hi.value = snap.height; }
       for (const [k, v] of Object.entries(snap.adv || {})) {
         const el = $(`#advFields [data-key="${k}"]`);
         if (el) el.value = v;
       }
+      if (Object.keys(snap.adv || {}).some(function(k) { return k.endsWith('::seed'); })) _setSeedRandomEnabled(true);
       return;
     }
     // Fallback: restore from server job data
@@ -185,8 +434,7 @@ async function restoreJob(jobId) {
     }
     // Restore prompt
     if (j.prompt_preview) {
-      var pi = $('#promptInput');
-      if (pi) pi.value = j.prompt_preview;
+      _setPromptInputValue(j.prompt_preview);
     }
     // Restore dimensions
     if (j.width && j.height) {
@@ -197,11 +445,6 @@ async function restoreJob(jobId) {
       }
       if (typeof highlightRatio === 'function') highlightRatio(j.width, j.height);
     }
-    // Restore seed
-    if (j.seed) {
-      const seedEl = document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
-      if (seedEl) seedEl.value = j.seed;
-    }
     // Restore advanced fields from server fields data
     if (j.fields && typeof j.fields === 'object') {
       for (const [k, v] of Object.entries(j.fields)) {
@@ -209,6 +452,12 @@ async function restoreJob(jobId) {
         const el = $(`#advFields [data-key="${k}"]`);
         if (el) el.value = v;
       }
+    }
+    // Restore seed only for old job records that do not have workflow seed fields.
+    if (j.seed && !_hasRestorableSeedFieldValues(j.fields || {})) {
+      const seedEl = _getSeedInput() || document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
+      if (seedEl) seedEl.value = j.seed;
+      _setSeedRandomEnabled(true);
     }
   }
 
@@ -231,21 +480,18 @@ async function doGenerate() {
     const snapshot = { prompt, width: ($('#widthInput') || {}).value || 0, height: ($('#heightInput') || {}).value || 0, adv: {} };
 
     try {
-      const fr = await fetch(`${API}/api/workflows/${encodeURIComponent(A.currentWF)}/fields`);
-      const fd = await fr.json();
-      for (const f of fd.fields || []) {
+      await _waitForRefImageUpload();
+      const submitFieldsMeta = await _getSubmitFieldsMeta();
+      let promptFieldCount = 0;
+      for (const f of submitFieldsMeta || []) {
         // Pre-set default value for this field (including hidden)
         fields[f.node_id + '::' + f.field] = f.value;
         const zone = f.zone || 'advanced';
         const key = `${f.node_id}::${f.field}`;
         // Text-encode in user_input zone → main prompt
-        if (zone === 'user_input' && (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode')))) {
+        if (_isPromptSubmitField(f)) {
           fields[key] = prompt;
-          continue;
-        }
-        // Unzoned fallback
-        if (!f.zone && f.class_type === 'CLIPTextEncode' && f.field === 'text') {
-          fields[key] = prompt;
+          promptFieldCount += 1;
           continue;
         }
         // LatentImage size
@@ -264,8 +510,15 @@ async function doGenerate() {
           continue;
         }
       }
+      if (prompt && $('#promptInput') && promptFieldCount === 0) {
+        throw new Error('未找到可提交的提示词字段，请重新选择工作流后再出图');
+      }
     } catch (e) {
       console.error(e);
+      alert('出图失败: ' + (e.message || '提示词字段读取失败'));
+      btn.disabled = false;
+      btn.innerHTML = CW.icon('play') + ' 出图';
+      return;
     }
 
     $$('#advFields [data-key]').forEach((el) => {
@@ -274,18 +527,22 @@ async function doGenerate() {
     });
 
     try {
+      const manualSeed = _getManualSeedValue();
+      const requestBody = {
+        workflow: A.currentWF,
+        fields,
+        width: parseInt(($('#widthInput') || {}).value) || 0,
+        height: parseInt(($('#heightInput') || {}).value) || 0,
+        preferred_instance: '',
+        preferred_node_id: '',
+      };
+      if (!_isSeedRandomEnabled() && manualSeed === null) throw new Error('请输入种子数字，或开启随机种子');
+      if (!_isSeedRandomEnabled()) requestBody.seed = manualSeed;
       const authHeaders = window.CW.auth.getAuthHeaders();
       const r = await fetch(`${API}/api/generate`, {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
-        body: JSON.stringify({
-          workflow: A.currentWF,
-          fields,
-          width: parseInt(($('#widthInput') || {}).value) || 0,
-          height: parseInt(($('#heightInput') || {}).value) || 0,
-          preferred_instance: A.currentTargetInstance || '',
-          preferred_node_id: A.currentTargetNodeId || '',
-        }),
+        body: JSON.stringify(requestBody),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || '提交失败');
@@ -297,13 +554,16 @@ async function doGenerate() {
         message: '排队中...',
         workflow: A.currentWF,
         seed: String(d.seed),
-        prompt_preview: ($('#promptInput') || {}).value ? $('#promptInput').value.slice(0, 300) : '',
+        prompt_preview: _quickGenerationLabel(),
         width: parseInt(($('#widthInput') || {}).value) || 0,
         height: parseInt(($('#heightInput') || {}).value) || 0,
-        preferred_instance: A.currentTargetInstance || '',
-        preferred_node_id: A.currentTargetNodeId || '',
+        preferred_instance: '',
+        preferred_node_id: '',
         queued_at: new Date().toLocaleTimeString('en-GB'),
       };
+      try {
+        if (window.CW && CW.toast) CW.toast('排队中', 'queued');
+      } catch (e) {}
       // Trigger onJobUpdate to kick off active job polling
       window.CW.onJobUpdate(jobs[d.job_id]);
       window.CW.renderGallery();
@@ -313,6 +573,288 @@ async function doGenerate() {
       btn.disabled = false;
       btn.innerHTML = CW.icon('play') + ' 出图';
     }
+  }
+
+
+async function optimizePrompt() {
+    var input = $('#promptInput');
+    var btn = $('#optimizePromptBtn');
+    if (!input) return;
+    var raw = (input.value || '').trim();
+    if (!raw) {
+      if (window.CW && CW.toast) CW.toast('先输入提示词', 'warn');
+      input.focus();
+      return;
+    }
+    var oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 优化中';
+    }
+    try {
+      var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+      var response = await fetcher(API + '/api/prompt/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: raw, max_new_tokens: 384 })
+      });
+      var data = await response.json().catch(function() { return {}; });
+      if (!response.ok) throw new Error(data.detail || data.message || '提示词优化失败');
+      var optimized = String(data.optimized_prompt || data.cleaned_prompt || '').trim();
+      if (!optimized) throw new Error('优化结果为空');
+      window.CW.lastPromptOptimization = data;
+      _setPromptInputValue(optimized);
+      _showPromptOptimizationVariants(data);
+      if (window.CW && CW.toast) CW.toast(data.structured_prompt_json ? '提示词已优化，JSON 版本已生成' : '提示词已优化', 'ok');
+    } catch (e) {
+      console.warn('[optimizePrompt] failed:', e);
+      if (window.CW && CW.toast) CW.toast(e.message || '提示词优化失败', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-loading');
+        btn.innerHTML = oldHtml || ((window.CW && CW.icon ? CW.icon('zap') : '') + ' 优化');
+      }
+    }
+  }
+
+
+async function translatePromptLanguage() {
+    var input = $('#promptInput');
+    var btn = $('#translatePromptBtn');
+    if (!input) return;
+    var raw = (input.value || '').trim();
+    if (!raw) {
+      if (window.CW && CW.toast) CW.toast('先输入提示词', 'warn');
+      input.focus();
+      return;
+    }
+    var targetLanguage = _detectPromptTargetLanguage(raw);
+    var cachedTranslation = _getPromptTranslationCache(raw, targetLanguage);
+    if (cachedTranslation) {
+      _setPromptInputValue(cachedTranslation);
+      if (window.CW && typeof CW.clearPromptOptimizationVariants === 'function') CW.clearPromptOptimizationVariants();
+      if (window.CW && CW.toast) CW.toast(targetLanguage === 'en' ? '已快速切换为英文提示词' : '已快速切换为中文提示词', 'ok');
+      return;
+    }
+    var oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 翻译中';
+    }
+    try {
+      var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+      var response = await fetcher(API + '/api/prompt/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: raw, target_language: targetLanguage })
+      });
+      var data = await response.json().catch(function() { return {}; });
+      if (!response.ok) throw new Error(data.detail || data.message || '提示词翻译失败');
+      var translated = String(data.translated_prompt || data.prompt_zh || data.prompt_en || '').trim();
+      if (!translated) throw new Error('翻译结果为空');
+      _rememberPromptTranslationPair(raw, data.target_language || targetLanguage, translated);
+	      _setPromptInputValue(translated);
+      if (window.CW && typeof CW.clearPromptOptimizationVariants === 'function') CW.clearPromptOptimizationVariants();
+      if (window.CW && CW.toast) CW.toast(data.target_language === 'en' ? '已切换为英文提示词' : '已切换为中文提示词', 'ok');
+    } catch (e) {
+      console.warn('[translatePromptLanguage] failed:', e);
+      if (window.CW && CW.toast) CW.toast(e.message || '提示词翻译失败', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-loading');
+        btn.innerHTML = oldHtml || ((window.CW && CW.icon ? CW.icon('globe') : '') + ' 中英切换');
+      }
+      if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+    }
+  }
+
+
+var _promptInterrogateRunning = false;
+
+  function _setPromptInterrogateLoading(isLoading, label) {
+    var buttons = [$('#interrogatePromptBtn'), $('#promptInterrogateRunBtn')];
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      if (!btn) continue;
+      btn.disabled = !!isLoading;
+      btn.classList.toggle('is-loading', !!isLoading);
+      if (isLoading) {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' ' + (label || '反推中');
+      } else if (btn.id === 'interrogatePromptBtn') {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span>';
+      } else {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+      }
+    }
+  }
+
+  function _startPromptInterrogateTask(refVal) {
+    if (!refVal) return;
+    if (_promptInterrogateRunning) {
+      if (window.CW && CW.toast) CW.toast('图片反推正在后台运行', 'info');
+      return;
+    }
+    _promptInterrogateRunning = true;
+    _setPromptInterrogateLoading(true, '后台反推中');
+    if (window.CW && CW.closePromptInterrogateModal) CW.closePromptInterrogateModal();
+    if (window.CW && typeof CW.showPromptInterrogatePendingToast === 'function') {
+      CW.showPromptInterrogatePendingToast();
+    } else if (window.CW && CW.toast) {
+      CW.toast('后台努力反推中，请稍后……', 'info');
+    }
+    _runPromptInterrogate(refVal).then(function(result) {
+      var prompt = result && result.prompt ? result.prompt : '';
+      if (window.CW && typeof CW.showPromptResultToast === 'function') {
+        CW.showPromptResultToast(prompt, result && result.data ? result.data : {});
+      } else if (window.CW && CW.toast) {
+        CW.toast('反推完成', 'done');
+      }
+    }).catch(function(e) {
+      console.warn('[interrogatePromptFromImage] failed:', e);
+      if (window.CW && typeof CW.clearPromptInterrogateToast === 'function') {
+        CW.clearPromptInterrogateToast();
+      }
+      if (window.CW && CW.toast) CW.toast(e.message || '图片反推失败', 'error');
+    }).finally(function() {
+      _promptInterrogateRunning = false;
+      _setPromptInterrogateLoading(false);
+    });
+  }
+
+async function interrogatePromptFromImage() {
+    var refVal = ($('#refImageValue') || {}).value || '';
+    openPromptInterrogateModal(refVal);
+  }
+
+  async function _runPromptInterrogate(refVal) {
+    var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+    var response = await fetcher(API + '/api/prompt/interrogate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: refVal })
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error(data.detail || data.message || '图片反推失败');
+    var prompt = String(data.prompt || data.promptgen || data.wd14_tags || '').trim();
+    if (!prompt) throw new Error('反推结果为空');
+    return { prompt: prompt, data: data };
+  }
+
+  function openPromptInterrogateModal(initialImage) {
+    if (!window.CW || !CW.auth || !CW.auth.isLoggedIn || !CW.auth.isLoggedIn()) {
+      if (window.CW && CW.auth && CW.auth.showLogin) CW.auth.showLogin();
+      return;
+    }
+    var old = document.getElementById('promptInterrogateModal');
+    if (old) old.remove();
+    var html = '<div class="v4-overlay prompt-interrogate-modal" id="promptInterrogateModal" onclick="if(event.target===this)CW.closePromptInterrogateModal()">' +
+      '<div class="v4-card narrow prompt-interrogate-card">' +
+        '<div class="auth-modal-header"><span class="auth-modal-title">' + (window.CW && CW.icon ? CW.icon('image', 18) : '') + '图片反推提示词</span>' +
+        '<button class="auth-modal-close" type="button" onclick="CW.closePromptInterrogateModal()">×</button></div>' +
+        '<div class="auth-modal-body">' +
+          '<div class="prompt-interrogate-upload" id="promptInterrogateZone">' +
+            '<div class="img-upload-placeholder"><span>' + (window.CW && CW.icon ? CW.icon('upload', 26) : '') + '</span><span>点击或拖入图片</span></div>' +
+            '<img id="promptInterrogatePreview" class="img-upload-preview hidden" alt="">' +
+            '<input type="file" id="promptInterrogateFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden">' +
+          '</div>' +
+          '<div class="prompt-interrogate-actions">' +
+            '<button class="prompt-tool-btn" type="button" id="promptInterrogateRunBtn" disabled>' + (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    var modal = document.getElementById('promptInterrogateModal');
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        if (modal) modal.classList.add('open');
+      });
+    });
+    _initPromptInterrogateModal(initialImage);
+  }
+
+  function closePromptInterrogateModal() {
+    var modal = document.getElementById('promptInterrogateModal');
+    if (!modal) return;
+    modal.classList.remove('open');
+    setTimeout(function() {
+      if (modal.parentNode) modal.parentNode.removeChild(modal);
+    }, 300);
+  }
+
+  function _initPromptInterrogateModal(initialImage) {
+    var zone = $('#promptInterrogateZone');
+    var fileInput = $('#promptInterrogateFile');
+    var preview = $('#promptInterrogatePreview');
+    var runBtn = $('#promptInterrogateRunBtn');
+    var uploadedName = String(initialImage || '').trim();
+    if (!zone || !fileInput || !runBtn) return;
+
+    if (uploadedName) {
+      if (preview) {
+        preview.src = API + '/api/input-image/' + encodeURIComponent(uploadedName);
+        preview.style.display = '';
+        preview.classList.remove('hidden');
+      }
+      var ph = zone.querySelector('.img-upload-placeholder');
+      if (ph) ph.style.display = 'none';
+      runBtn.disabled = false;
+    }
+
+    async function useFile(file) {
+      if (!file) return;
+      runBtn.disabled = true;
+      runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 上传中';
+      runBtn.classList.add('is-loading');
+      try {
+        var d = await _uploadRefImage(file);
+        uploadedName = d.filename;
+        if (preview) {
+          preview.src = API + '/api/input-image/' + encodeURIComponent(uploadedName);
+          preview.style.display = '';
+          preview.classList.remove('hidden');
+        }
+        var ph = zone.querySelector('.img-upload-placeholder');
+        if (ph) ph.style.display = 'none';
+        runBtn.disabled = false;
+        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+      } catch (e) {
+        if (window.CW && CW.toast) CW.toast(e.message || '图片上传失败', 'error');
+        runBtn.disabled = true;
+        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+      } finally {
+        runBtn.classList.remove('is-loading');
+        fileInput.value = '';
+      }
+    }
+
+    zone.addEventListener('click', function(e) {
+      if (e.target && e.target.tagName === 'IMG') return;
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', function() {
+      useFile(fileInput.files && fileInput.files[0]);
+    });
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      zone.classList.add('dragover');
+    });
+    zone.addEventListener('dragleave', function() {
+      zone.classList.remove('dragover');
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      useFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    runBtn.addEventListener('click', async function() {
+      if (!uploadedName) return;
+      _startPromptInterrogateTask(uploadedName);
+    });
   }
 
 
@@ -330,7 +872,7 @@ function renderQuickForm(fields) {
     // Preserve prompt text across workflow switches
     var _savedPrompt = ($('#promptInput') || {}).value || '';
     var hasZones = fields.some(function(f) { return f.zone; });
-    var html = '', hasTextEncode = false, hasLoadImage = false;
+    var html = '', hasTextEncode = false, hasLoadImage = false, quickImageRendered = false;
     var hasLatentW = false, hasLatentH = false, latentW = 1024, latentH = 1024;
     for (var fi = 0; fi < fields.length; fi++) {
       var f = fields[fi], zone = f.zone || (hasZones ? 'hidden' : 'advanced');
@@ -345,15 +887,16 @@ function renderQuickForm(fields) {
       if (f.type === 'textarea' || (f.class_type && f.class_type.includes('TextEncode'))) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
-        html += '<div class="fg"><label>' + escH(labelText + nodeInfo) + '</label><div style="position:relative"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea><button id="clearPromptBtn" class="clear-btn" onclick="CW.clearPrompt()">清除文字</button></div></div>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="提示词优化" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">提示词优化</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
-        html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
+        quickImageRendered = true;
+        html += '<div class="ref-image-section"><label>' + escH(f.label || 'Reference Image') + '</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden"></div></div>';
       } else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'width') { hasLatentW = true; latentW = f.value || 1024; }
       else if (f.class_type && f.class_type.includes('LatentImage') && f.field === 'height') { hasLatentH = true; latentH = f.value || 1024; }
     }
-    if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage) {
-      html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*" class="hidden"></div></div>';
+    if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage && !quickImageRendered) {
+      html += '<div class="ref-image-section"><label>Reference Image</label><div class="img-upload-zone" id="refImageZone"><div id="refImagePlaceholder" class="img-upload-placeholder">Click or drag image</div><img id="refImagePreview" src="" class="img-upload-preview" class="hidden"><input type="hidden" id="refImageValue" value=""><input type="file" id="refImageFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden"></div></div>';
     }
     // Restore saved prompt text after DOM rebuild
     if (_savedPrompt) {
@@ -362,13 +905,13 @@ function renderQuickForm(fields) {
     }
     if (hasLatentW || hasLatentH) {
       var sw = hasLatentW ? latentW : 1024, sh = hasLatentH ? latentH : 1024;
-      html += '<div class="fg" id="sizeSection"><label>Size</label><div class="ratio-grid" id="ratioGrid">';
+      html += '<div class="fg" id="sizeSection"><label>出图比例</label><div class="ratio-grid" id="ratioGrid">';
       var presets = [[1024,1024,'1:1','22px','22px'],[1536,1024,'3:2','26px','17px'],[1920,1080,'16:9','28px','16px'],[1536,1152,'4:3','24px','18px'],[1152,1536,'3:4','18px','24px'],[1024,1536,'2:3','16px','24px'],[1080,1920,'9:16','14px','24px']];
       for (var pi = 0; pi < presets.length; pi++) {
         var p = presets[pi];
-        html += '<button class="ratio-btn' + (p[0]===sw&&p[1]===sh?' active':'') + '" data-w="' + p[0] + '" data-h="' + p[1] + '" title="' + p[0] + 'x' + p[1] + '"><span class="ratio-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label">' + p[2] + '</span></button>';
+        html += '<button class="ratio-btn' + (p[0]===sw&&p[1]===sh?' active':'') + '" data-w="' + p[0] + '" data-h="' + p[1] + '" title="' + p[0] + '×' + p[1] + '"><span class="ratio-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label">' + p[2] + '</span></button>';
       }
-      html += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="64" min="256" max="2048"><span class="sep-dim">x</span><input type="number" id="heightInput" value="' + sh + '" step="64" min="256" max="2048"></div></div>';
+      html += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="64" min="256" max="2048"><span class="sep-dim" aria-label="乘以">×</span><input type="number" id="heightInput" value="' + sh + '" step="64" min="256" max="2048"></div></div>';
       container.innerHTML = html;
       window.CW.initRatioGrid && window.CW.initRatioGrid();
       window.CW.highlightRatio && CW.highlightRatio(sw, sh);
@@ -377,6 +920,11 @@ function renderQuickForm(fields) {
     if (_savedPrompt) {
       var pi2 = $('#promptInput');
       if (pi2 && !pi2.value) pi2.value = _savedPrompt;
+    }
+    var promptInput = $('#promptInput');
+    if (promptInput && window.CW.syncClearPromptButton) {
+      promptInput.addEventListener('input', window.CW.syncClearPromptButton);
+      window.CW.syncClearPromptButton();
     }
     if (hasLoadImage) { _refImageInited = false; setTimeout(function() { _initRefImageZone(); }, 50); }
   }
@@ -455,10 +1003,10 @@ function renderAdvFields(fields) {
         }
         case 'toggle':
         case 'bool':
-          html += `<label class="toggle-label"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === true ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span></label>`;
+          html += `<label class="toggle-label bool-toggle"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === 'true' ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label>`;
           break;
         case 'seed':
-          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"><button type="button" class="btn-dice" onclick="CW.rndSeed(this)">${CW.icon('dice-1')}</button></div>`;
+          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"${_numberAttr('min', f.min)}${_numberAttr('max', f.max)}${_numberAttr('step', f.step || 1)} oninput="CW.setSeedRandomEnabled(false)"><button type="button" class="btn-dice seed-random-toggle is-active" data-seed-random="1" aria-pressed="true" title="随机种子" aria-label="随机种子" onclick="CW.toggleSeedRandom(this)">${CW.icon('shuffle')}</button></div>`;
           break;
         case 'number': {
           const step = f.step || 1,
@@ -477,20 +1025,33 @@ function renderAdvFields(fields) {
 
 function toggleGenForm() {
     const form = $('#genForm');
+    if (!form) return;
+    const footer = $('.gen-footer');
     const btn = $('#genToggleMobile');
-    const open = form.classList.toggle('mobile-open');
+    const title = $('#genTitle');
+    const arrow = $('#genArrow');
+    const open = !form.classList.contains('mobile-open');
+    form.classList.toggle('mobile-open', open);
+    if (footer) footer.classList.toggle('mobile-open', open);
+    if (title) title.classList.toggle('is-open', open);
+    if (arrow) arrow.textContent = open ? '\u25B4' : '\u25BE';
     if (btn) btn.innerHTML = open ? CW.icon('zap') + ' 收起 \u25B4' : CW.icon('zap') + ' 快速出图 \u25BE';
   }
 
 var _refImageInited = false;
+var _refImageUploadPromise = null;
+var _refImageUploadToken = 0;
 function _resetRefImage() {
     _refImageInited = false;
+    _refImageUploadPromise = null;
+    _refImageUploadToken += 1;
     var preview = $('#refImagePreview');
     var placeholder = $('#refImagePlaceholder');
     var valueInput = $('#refImageValue');
     if (preview) { preview.src = ''; preview.style.display = 'none'; }
     if (placeholder) placeholder.style.display = '';
     if (valueInput) valueInput.value = '';
+    _setRefImageUploading(false);
   }
 
 var __curZone = null;
@@ -519,6 +1080,59 @@ var __curZone = null;
     return upload.then(_parseUploadResponse);
   }
 
+  function _setRefImageUploading(uploading) {
+    var zone = $('#refImageZone');
+    if (!zone) return;
+    if (uploading) {
+      if (zone.setAttribute) zone.setAttribute('data-uploading', '1');
+      else if (zone.dataset) zone.dataset.uploading = '1';
+    } else if (zone.removeAttribute) {
+      zone.removeAttribute('data-uploading');
+    } else if (zone.dataset) {
+      delete zone.dataset.uploading;
+    }
+  }
+
+  async function _waitForRefImageUpload() {
+    if (!_refImageUploadPromise) return;
+    if (window.CW && CW.toast) CW.toast('参考图仍在上传，完成后继续提交', 'info');
+    try {
+      await _refImageUploadPromise;
+    } catch (e) {
+      throw new Error('参考图仍在上传失败，请重新上传后再出图');
+    }
+  }
+
+  function _applyUploadedRefImage(file, fileInput, zone, preview, valueInput, placeholder) {
+    if (!file) return Promise.resolve(null);
+    var token = ++_refImageUploadToken;
+    if (valueInput) valueInput.value = '';
+    if (preview) {
+      preview.src = '';
+      preview.style.display = 'none';
+    }
+    if (placeholder) placeholder.style.display = '';
+    _setRefImageUploading(true);
+    var upload = _uploadRefImage(file).then(function(d) {
+      if (token !== _refImageUploadToken) return d;
+      if (valueInput) valueInput.value = d.filename;
+      if (preview) {
+        preview.src = API + '/api/input-image/' + encodeURIComponent(d.filename);
+        preview.style.display = '';
+      }
+      if (placeholder) placeholder.style.display = 'none';
+      return d;
+    }).finally(function() {
+      if (token === _refImageUploadToken) {
+        _refImageUploadPromise = null;
+        _setRefImageUploading(false);
+      }
+      if (fileInput) fileInput.value = '';
+    });
+    _refImageUploadPromise = upload;
+    return upload;
+  }
+
   function _initRefImageZone() {
     if (_refImageInited) return;
     _refImageInited = true;
@@ -536,20 +1150,16 @@ var __curZone = null;
       if (!fileInput.files.length) return;
       var file = fileInput.files[0];
       try {
-        var d = await _uploadRefImage(file);
-        valueInput.value = d.filename;
-        if (preview) {
-          preview.src = API + '/api/input-image/' + d.filename;
-          preview.style.display = '';
-        }
-        if (placeholder) placeholder.style.display = 'none';
+        await _applyUploadedRefImage(file, fileInput, zone, preview, valueInput, placeholder);
       } catch (e) {
         alert('upload fail: ' + e.message);
       }
-      fileInput.value = '';
     });
     if (preview) {
       preview.addEventListener('click', function() {
+        _refImageUploadPromise = null;
+        _refImageUploadToken += 1;
+        _setRefImageUploading(false);
         preview.src = '';
         preview.style.display = 'none';
         if (placeholder) placeholder.style.display = '';
@@ -569,13 +1179,7 @@ var __curZone = null;
       var file = e.dataTransfer.files[0];
       if (!file) return;
       try {
-        var d = await _uploadRefImage(file);
-        valueInput.value = d.filename;
-        if (preview) {
-          preview.src = API + '/api/input-image/' + d.filename;
-          preview.style.display = '';
-        }
-        if (placeholder) placeholder.style.display = 'none';
+        await _applyUploadedRefImage(file, fileInput, zone, preview, valueInput, placeholder);
       } catch (e) {
         alert('upload fail: ' + e.message);
       }
@@ -591,9 +1195,18 @@ function renderQuickGen() {
   window.CW.restoreJob = restoreJob;
   window.CW.fillFormFromHistory = fillFormFromHistory;
   window.CW.doGenerate = doGenerate;
+  window.CW.optimizePrompt = optimizePrompt;
+  window.CW.translatePromptLanguage = translatePromptLanguage;
+  window.CW.registerPromptTranslationPair = registerPromptTranslationPair;
+  window.CW.clearPromptOptimizationVariants = _clearPromptOptimizationVariants;
+  window.CW.interrogatePromptFromImage = interrogatePromptFromImage;
+  window.CW.openPromptInterrogateModal = openPromptInterrogateModal;
+  window.CW.closePromptInterrogateModal = closePromptInterrogateModal;
   window.CW.renderAdvFields = renderAdvFields;
   window.CW.renderQuickGen = renderQuickGen;
   window.CW.renderQuickForm = renderQuickForm;
+  window.CW.toggleSeedRandom = toggleSeedRandom;
+  window.CW.setSeedRandomEnabled = _setSeedRandomEnabled;
   window.CW.initRatioGrid = initRatioGrid;
   window.CW.highlightRatio = highlightRatio;
 })();

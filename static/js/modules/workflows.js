@@ -22,10 +22,119 @@
 
   // ── Manager toolbar state ──
   var _mgrFilter = '';  // '' = all
+  var _mgrSearch = '';
   var _mgrSortBy = 'manual';
-  var _mgrDragIdx = -1;
+  var _mgrDragFname = '';
+  var _mgrDropFname = '';
+  var _mgrDropAfter = false;
   // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
   var _wfCardDownX = 0, _wfCardDownY = 0, _wfCardMoved = false;
+
+  function _latestWorkflowPreviewItems(items) {
+    var previews = {};
+    items = items || historyItems;
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i] || {};
+      var wf = item.workflow || '';
+      if (!wf || previews[wf]) continue;
+      if (item.thumb || item.filename) previews[wf] = item;
+    }
+    return previews;
+  }
+
+  function _workflowPreviewImageUrl(item) {
+    if (!item) return '';
+    if (item.thumb) return API + '/api/thumbs/' + item.thumb;
+    if (item.filename) return API + '/api/images/' + item.filename;
+    if (item.image) return API + '/api/images/' + item.image;
+    return '';
+  }
+
+  function _isSensitiveWorkflowPreview(item, displayPrompt) {
+    var text = [
+      displayPrompt,
+      item && item.prompt,
+      item && item.prompt_preview
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (!text) return false;
+    return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
+  }
+
+  function _workflowPreviewInfo(fname, meta, latestPreviews) {
+    latestPreviews = latestPreviews || _latestWorkflowPreviewItems();
+    var item = latestPreviews[fname] || null;
+    var src = _workflowPreviewImageUrl(item);
+    if (src) {
+      return {
+        src: src,
+        sensitive: _isSensitiveWorkflowPreview(item, item.prompt || item.prompt_preview || ''),
+      };
+    }
+    if (meta && meta.thumbnail) {
+      return {
+        src: API + '/api/workflows/thumbnail/' + meta.thumbnail,
+        sensitive: false,
+      };
+    }
+    return { src: '', sensitive: false };
+  }
+
+  function _workflowPreviewMarkup(info) {
+    return info && info.src
+      ? '<img src="' + escA(info.src) + '" loading="lazy" alt="" draggable="false">'
+      : '<div class="wf-card-icon">' + CW.icon('workflow') + '</div>';
+  }
+
+  function refreshWorkflowPreviewFromJob(job) {
+    if (!job || !job.workflow || !job.image) return;
+    var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    var currentUid = currentUser && (currentUser.sub || currentUser.id);
+    if (currentUser && job.user_id && String(job.user_id) !== String(currentUid || '')) return;
+    if (!currentUser && job.user_id) return;
+
+    var info = _workflowPreviewInfo(job.workflow, null, {});
+    info.src = _workflowPreviewImageUrl({
+      thumb: job.thumb || '',
+      filename: job.image || '',
+      image: job.image || '',
+    });
+    info.sensitive = _isSensitiveWorkflowPreview(job, job.prompt_preview || job.prompt || '');
+    var cards = document.querySelectorAll('.wf-card[data-name]');
+    cards.forEach(function(card) {
+      if (card.getAttribute('data-name') !== job.workflow) return;
+      var preview = card.querySelector('.wf-card-preview');
+      if (!preview) return;
+      preview.classList.toggle('wf-sensitive', !!info.sensitive);
+      preview.innerHTML = _workflowPreviewMarkup(info);
+    });
+  }
+
+  async function _loadWorkflowPreviewItems() {
+    var user = window.CW && CW.auth && typeof CW.auth.getCurrentUser === 'function'
+      ? CW.auth.getCurrentUser()
+      : null;
+    if (!user) return historyItems.slice();
+    try {
+      var r = await authFetch(API + '/api/history?scope=mine&limit=300');
+      var d = await r.json();
+      if (r.ok && d && d.ok) return d.data || [];
+    } catch (e) {
+      console.warn('workflow preview history failed:', e && e.message ? e.message : e);
+    }
+    return [];
+  }
+
+  function _workflowManagerThumbUrl(meta) {
+    return meta && meta.thumbnail ? API + '/api/workflows/thumbnail/' + meta.thumbnail : '';
+  }
+
+  function workflowDisplayName(fname, meta) {
+    meta = meta || ((A._wfMeta || {})[fname] || {});
+    var custom = String((meta && meta.name) || '').trim();
+    if (custom) return custom;
+    return String(fname || '').replace(/\.json$/i, '');
+  }
+
   window.CW._wfCardDown = function(e) {
     _wfCardDownX = e.clientX;
     _wfCardDownY = e.clientY;
@@ -63,7 +172,7 @@ function downloadWf(fname) {
 function openWfDel(fname) {
     A._wfDelFilename = fname;
     const meta = A._wfMeta[fname] || {};
-    const displayName = meta.name || fname.replace('.json', '');
+    const displayName = workflowDisplayName(fname, meta);
     $('#wfDelMsg').textContent = `确定要删除工作流「${displayName}」吗？此操作不可撤销。`;
     $('#wfDelModal').classList.add('open');
   }
@@ -90,7 +199,7 @@ function onWfThumbClick(fname) {
 
 async function saveWfEdit() {
     if (!A._wfEditFilename) return;
-    const name = $('#wfEditName').value.trim() || A._wfEditFilename.replace('.json', '');
+    const name = $('#wfEditName').value.trim();
     const tags = [...$('#wfEditTags').querySelectorAll('.wf-edit-tag-remove')].map((el) => el.dataset.tag);
     try {
       const r = await authFetch(API + '/api/workflows/meta/' + encodeURIComponent(A._wfEditFilename), {
@@ -194,8 +303,8 @@ function openWfEdit(fname) {
       return;
     }
     A._wfEditFilename = fname;
-    $('#wfEditTitle').textContent = '编辑 ' + (meta.name || fname.replace('.json', ''));
-    $('#wfEditName').value = meta.name || fname.replace('.json', '');
+    $('#wfEditTitle').textContent = '编辑 ' + workflowDisplayName(fname, meta);
+    $('#wfEditName').value = String(meta.name || '').trim();
     // Render tags
     const tagsDiv = $('#wfEditTags');
     tagsDiv.innerHTML = '';
@@ -255,18 +364,40 @@ function _tagCls(t) {
 
   function _mgrSortEntries(entries) {
     entries.sort(function(a, b) {
-      var oa = (a[1].sort_order != null) ? a[1].sort_order : 9999;
-      var ob = (b[1].sort_order != null) ? b[1].sort_order : 9999;
+      var oa = (a[1] && a[1].sort_order != null) ? Number(a[1].sort_order) : 9999;
+      var ob = (b[1] && b[1].sort_order != null) ? Number(b[1].sort_order) : 9999;
+      if (isNaN(oa)) oa = 9999;
+      if (isNaN(ob)) ob = 9999;
       if (oa !== ob) return oa - ob;
-      return a[0].localeCompare(b[0]);
+      return a[0].localeCompare(b[0], 'zh', { numeric: true, sensitivity: 'base' });
     });
     return entries;
+  }
+
+  function _mgrVisibleEntries() {
+    var entries = Object.entries(A._wfMeta || {});
+    if (_mgrFilter) {
+      entries = entries.filter(function(e) {
+        return _getPrimaryTag(e[0], e[1]) === _mgrFilter;
+      });
+    }
+    if (_mgrSearch) {
+      var q = _mgrSearch.toLowerCase();
+      entries = entries.filter(function(e) {
+        var fname = String(e[0] || '').toLowerCase();
+        var meta = e[1] || {};
+        var display = workflowDisplayName(e[0], meta).toLowerCase();
+        var tags = (meta.tags || []).join(' ').toLowerCase();
+        return fname.indexOf(q) >= 0 || display.indexOf(q) >= 0 || tags.indexOf(q) >= 0;
+      });
+    }
+    return _mgrSortEntries(entries);
   }
 
   function renderMgrFilterTabs() {
     var tabsEl = $('#wfMgrFilterTabs');
     if (!tabsEl) return;
-    var entries = Object.entries(A._wfMeta);
+    var entries = Object.entries(A._wfMeta || {});
     var tagCounts = {};
     tagCounts['全部'] = entries.length;
     for (var i = 0; i < entries.length; i++) {
@@ -309,13 +440,47 @@ function _tagCls(t) {
 
   function toggleMgrSortDir() {}
 
+function _patchWfMgrGrid(grid, html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var next = Array.prototype.slice.call(tpl.content.children);
+    var oldByKey = {};
+    Array.prototype.slice.call(grid.children).forEach(function(child) {
+      var key = child.getAttribute && child.getAttribute('data-fname');
+      if (key) oldByKey[key] = child;
+    });
+    next.forEach(function(newChild) {
+      var key = newChild.getAttribute('data-fname');
+      var oldChild = key ? oldByKey[key] : null;
+      if (oldChild) {
+        delete oldByKey[key];
+        if (oldChild.outerHTML !== newChild.outerHTML) {
+          oldChild.replaceWith(newChild);
+          newChild.classList.add('is-entering');
+          requestAnimationFrame(function() { newChild.classList.remove('is-entering'); });
+        } else {
+          grid.appendChild(oldChild);
+        }
+      } else {
+        newChild.classList.add('is-entering');
+        grid.appendChild(newChild);
+        requestAnimationFrame(function() { newChild.classList.remove('is-entering'); });
+      }
+    });
+    Object.keys(oldByKey).forEach(function(key) {
+      var oldChild = oldByKey[key];
+      oldChild.classList.add('is-exiting');
+      setTimeout(function() { if (oldChild.parentNode) oldChild.remove(); }, 180);
+    });
+  }
+
 function renderWfGrid() {
     const grid = $('#wfOverlayGrid');
     const empty = $('#wfOverlayEmpty');
     var currentUser = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
     var isAdmin = !!(currentUser && currentUser.role === 'admin');
     var currentUid = currentUser ? String(currentUser.sub || currentUser.id || '') : '';
-    var entries = Object.entries(A._wfMeta);
+    var entries = _mgrVisibleEntries();
     // removed
     if (!entries.length) {
       grid.innerHTML = '';
@@ -324,29 +489,20 @@ function renderWfGrid() {
     }
     empty.style.display = 'none';
 
-    // Filter by primary tag only
-    if (_mgrFilter) {
-      entries = entries.filter(function(e) {
-        return _getPrimaryTag(e[0], e[1]) === _mgrFilter;
-      });
-    }
-    // Sort
-    _mgrSortEntries(entries);
-
     let html = '';
     for (var _mi = 0; _mi < entries.length; _mi++) {
       var fname = entries[_mi][0], meta = entries[_mi][1];
       var canManage = !!(isAdmin || (currentUid && String(meta.owner_id || '') === currentUid));
-      const displayName = meta.name || fname.replace('.json', '');
+      const displayName = workflowDisplayName(fname, meta);
       const tags = meta.tags || [];
-      const thumbUrl = meta.thumbnail ? API + '/api/workflows/thumbnail/' + meta.thumbnail : '';
+      const thumbUrl = _workflowManagerThumbUrl(meta);
       const sharedTag = meta.shared ? '<span class="wf-mgr-tag res">共享</span>' : '';
       const tagHtml = tags.map(function(t) {
         return '<span class="wf-mgr-tag ' + _tagCls(t) + '">' + escH(t) + '</span>';
       }).join('');
       var _pcat = _getPrimaryTag(fname, meta);
-      html += '<div class="wf-mgr-card" data-fname="' + escA(fname) + '" data-idx="' + _mi + '" data-cat="' + escA(_pcat) + '">' +
-      '<div class="wf-mgr-drag" draggable="true" ondragstart="WF_MGR._mgrDragStart(event)" ondragover="WF_MGR._mgrDragOver(event)" ondrop="WF_MGR._mgrDrop(event)" ondragend="WF_MGR._mgrDragEnd(event)" ontouchstart="WF_MGR._touchDragStart(event)" ontouchmove="WF_MGR._touchDragMove(event)" ontouchend="WF_MGR._touchDragEnd(event)">⠿</div>' +
+      html += '<div class="wf-mgr-card" data-fname="' + escA(fname) + '" data-cat="' + escA(_pcat) + '" ondragover="WF_MGR._mgrDragOver(event)" ondragleave="WF_MGR._mgrDragLeave(event)" ondrop="WF_MGR._mgrDrop(event)">' +
+      (canManage ? '<div class="wf-mgr-drag" draggable="true" ondragstart="WF_MGR._mgrDragStart(event)" ondragend="WF_MGR._mgrDragEnd(event)" ontouchstart="WF_MGR._touchDragStart(event)" ontouchmove="WF_MGR._touchDragMove(event)" ontouchend="WF_MGR._touchDragEnd(event)" title="拖拽排序">⠿</div>' : '<div class="wf-mgr-drag is-disabled" title="无排序权限">⠿</div>') +
       '<div class="wf-mgr-card-thumb' + (canManage ? '' : ' is-readonly') + '"' + (canManage ? ' onclick="CW.onWfThumbClick(\'' + escA(fname) + '\')"' : '') + '>' +
         (thumbUrl ? '<img src="' + thumbUrl + '" alt="">' : '<div class="wf-mgr-card-thumb-placeholder">'+CW.icon('camera')+'</div>') +
       '</div>' +
@@ -365,7 +521,7 @@ function renderWfGrid() {
       '</div>' +
     '</div>';
     }
-    grid.innerHTML = html;
+    _patchWfMgrGrid(grid, html);
   }
 
   function _updateWfShareCard(fname) {
@@ -506,8 +662,8 @@ function closeWfMgr() {
   }
 
   function _syncSelectionBar() {
-    // Reload meta and refresh the selection bar tabs
-    if (window.CW.loadWorkflows) window.CW.loadWorkflows();
+    // Keep manager close lightweight; do not refresh history/workflow grids here.
+    renderMgrFilterTabs();
   }
 
 function openWfMgr() {
@@ -627,7 +783,7 @@ function highlightWF() {
 function _isInView(el, container) {
   var cr = el.getBoundingClientRect();
   var vr = container.getBoundingClientRect();
-  return cr.right <= vr.right && cr.left >= vr.left;
+  return cr.right <= vr.right && cr.left >= vr.left && cr.bottom <= vr.bottom && cr.top >= vr.top;
 }
 
 
@@ -648,7 +804,7 @@ async function selectWF(name) {
       var ac = $$('.wf-card.active')[0];
       if (ac) {
         if (grid && !_isInView(ac, grid)) {
-          ac.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+          ac.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'center' });
         }
       }
       if (grid) grid.style.scrollSnapType = snapType || '';
@@ -657,9 +813,18 @@ async function selectWF(name) {
     var genTitle = $('#genTitle');
     var genForm = $('#genForm');
     var genFooter = $('.gen-footer');
+    var displayName = workflowDisplayName(name, A._wfMeta[name] || {});
     if (genTitle) {
+      var genTitleText = $('#genTitleText');
       genTitle.style.display = '';
-      genTitle.textContent = name.replace('.json', '') + ' 快速出图';
+      genTitle.classList.add('is-open');
+      if (genTitleText) {
+        genTitleText.textContent = displayName + ' 快速出图';
+      } else {
+        genTitle.textContent = displayName + ' 快速出图';
+      }
+      var genArrow = $('#genArrow');
+      if (genArrow) genArrow.textContent = '\u25B4';
     }
     if (genForm) {
       genForm.style.display = '';
@@ -670,7 +835,7 @@ async function selectWF(name) {
       genFooter.classList.add('mobile-open');
     }
     const ws = $('#wfSummary');
-    if (ws) ws.textContent = name.replace('.json', '');
+    if (ws) ws.textContent = displayName;
     try {
       // Preserve uploaded reference image
       var _savedRefVal = $('#refImageValue')?.value || '';
@@ -678,12 +843,13 @@ async function selectWF(name) {
       const r = await authFetch(`${API}/api/workflows/${encodeURIComponent(name)}/fields`);
       const d = await r.json();
       const fields = d.fields || [];
+      window.__APP__._wfFieldWorkflow = name;
       window.__APP__._wfFieldMeta = fields.map((f) => ({
         key: f.node_id + '::' + f.field,
         node_id: f.node_id,
         class_type: f.class_type,
         field: f.field,
-        zone: f.zone || 'advanced',
+        zone: f.zone,
         visible: f.visible !== false,
         type: f.type,
         label: f.label,
@@ -712,7 +878,11 @@ async function selectWF(name) {
 
 async function loadWorkflows() {
     try {
-      const [r, metaR] = await Promise.all([authFetch(`${API}/api/workflows`), authFetch(`${API}/api/workflows/meta`)]);
+      const [r, metaR, previewItems] = await Promise.all([
+        authFetch(`${API}/api/workflows`),
+        authFetch(`${API}/api/workflows/meta`),
+        _loadWorkflowPreviewItems()
+      ]);
       const wfs = await r.json();
       try {
         A._wfMeta = await metaR.json();
@@ -734,13 +904,12 @@ async function loadWorkflows() {
           '<div class="wf-empty">无 workflow</div>';
         return;
       }
-      // Count history items per workflow + find latest thumb per workflow
+      // Count history items per workflow + find latest current-user preview per workflow
       const wfCounts = {};
-      const wfThumbs = {};
-      for (const h of historyItems) {
+      const latestPreviews = _latestWorkflowPreviewItems(previewItems);
+      for (const h of previewItems) {
         const wf = h.workflow || '';
         wfCounts[wf] = (wfCounts[wf] || 0) + 1;
-        if (!wfThumbs[wf] && h.thumb) wfThumbs[wf] = h.thumb;
       }
       // Build wfTagMap BEFORE card loop (first tag = primary category)
       const PRIORITY_TAGS = ['文生图', '图生图', '文生视频', '图生视频', '放大'];
@@ -767,21 +936,18 @@ async function loadWorkflows() {
       let cards = wfs
         .map((w) => {
           const meta = A._wfMeta[w.name] || {};
-          const displayName = meta.name || w.name.replace('.json', '');
+          const displayName = workflowDisplayName(w.name, meta);
           const count = wfCounts[w.name] || 0;
-          const thumb = wfThumbs[w.name];
-          const previewSrc = thumb ? `${API}/api/thumbs/${thumb}` : '';
-          const previewImg = previewSrc
-            ? `<img src="${previewSrc}" loading="lazy" alt="" draggable="false">`
-            : `<div class="wf-card-icon">${CW.icon('workflow')}</div>`;
+          const previewInfo = _workflowPreviewInfo(w.name, meta, latestPreviews);
+          const previewImg = _workflowPreviewMarkup(previewInfo);
           const catText = wfTagMap[w.name] || '其他';
           const extraTags = (wfAllTags[w.name] || []).filter(t => t !== catText).map(t =>
             `<span class="wf-tag ${_tagColor(t)} wf-tag-sm">${escH(t)}</span>`
           ).join('');
           return `<div class="wf-card" data-name="${escA(w.name)}" data-cat="${escH(catText)}" onmousedown="CW._wfCardDown(event)" onclick="if(!CW._wfCheckMove(event))CW.selectWF('${escA(w.name)}')">
-        <div class="wf-card-preview">${previewImg}</div>
+        <div class="wf-card-preview${previewInfo.sensitive ? ' wf-sensitive' : ''}">${previewImg}</div>
         <div class="wf-card-body">
-          <div class="wf-card-name" title="${escA(w.name)}">
+          <div class="wf-card-name" title="${escA(displayName)}">
             <span class="wf-card-name-text">${escH(displayName)}</span>
             ${extraTags}
           </div>
@@ -828,16 +994,18 @@ async function loadWorkflows() {
       }
       // Apply current tab filter
       _applyTabFilter();
-      // Restore last-used workflow from localStorage, fallback to first
-      let saved = '';
-      try {
-        saved = localStorage.getItem('cw:lastWF') || '';
-      } catch {}
+      var firstTextToImage = wfs.find(function(w) {
+        var meta = A._wfMeta[w.name] || {};
+        var tags = meta.tags || [];
+        var typeTag = window.CW.getWFType(w.name);
+        var mainTag = typeTag ? typeTag.text : (tags[0] || '');
+        return mainTag === '文生图';
+      });
       const target =
         A.currentWF && wfs.find((w) => w.name === A.currentWF)
           ? A.currentWF
-          : saved && wfs.find((w) => w.name === saved)
-            ? saved
+          : firstTextToImage
+            ? firstTextToImage.name
             : wfs[0].name;
       if (!A.currentWF || A.currentWF !== target) selectWF(target);
       else highlightWF();
@@ -942,8 +1110,9 @@ async function loadWfVersions(fname) {
   if (!window.CW) window.CW = {};
 
 function setMgrFilter(val) {
-    _mgrFilter = val || '';
+    _mgrSearch = (val || '').trim();
     renderMgrFilterTabs();
+    renderWfGrid();
 }
 
 function onWfMgrDeviceChange(deviceId) {
@@ -959,6 +1128,7 @@ function manualSyncWorkflows() {
 }
 
   window.CW.selectWF = selectWF;
+  window.CW.highlightWF = highlightWF;
   window.CW.loadWfVersions = loadWfVersions;
   window.CW.activateWfVersion = activateWfVersion;
 window.CW.delVersion = delVersion;
@@ -974,6 +1144,7 @@ window.CW.delVersion = delVersion;
   window.CW.onAddWfTag = onAddWfTag;
   window.CW.onWfThumbUpload = onWfThumbUpload;
   window.CW.onWfThumbClick = onWfThumbClick;
+  window.CW.workflowDisplayName = workflowDisplayName;
   window.CW.downloadWf = downloadWf;
   window.CW.openWfDel = openWfDel;
   window.CW.closeWfDel = closeWfDel;
@@ -986,37 +1157,67 @@ window.CW.delVersion = delVersion;
   // ── Drag-to-reorder (desktop + mobile touch) ──
   var WF_MGR = {};
   WF_MGR._mgrDragStart = function(e) {
-    _mgrDragIdx = parseInt(e.currentTarget.closest('.wf-mgr-card').dataset.idx);
+    var card = e.currentTarget.closest('.wf-mgr-card');
+    _mgrDragFname = card ? (card.dataset.fname || '') : '';
     e.currentTarget.style.opacity = '.4';
+    if (card) card.classList.add('is-dragging');
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(_mgrDragIdx));
+    e.dataTransfer.setData('text/plain', _mgrDragFname);
   };
   WF_MGR._mgrDragOver = function(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     var card = e.currentTarget.closest('.wf-mgr-card');
-    if (card) card.style.borderTop = '2px solid var(--accent)';
+    _mgrMarkDrop(card, e.clientY);
+  };
+  WF_MGR._mgrDragLeave = function(e) {
+    var card = e.currentTarget.closest('.wf-mgr-card');
+    if (card && !card.contains(e.relatedTarget)) _mgrClearDropMarks(card);
   };
   WF_MGR._mgrDrop = function(e) {
     e.preventDefault();
     var card = e.currentTarget.closest('.wf-mgr-card');
-    if (card) card.style.borderTop = '';
-    var targetIdx = parseInt(card ? card.dataset.idx : -1);
-    _mgrApplyReorder(targetIdx);
+    _mgrMarkDrop(card, e.clientY);
+    _mgrApplyReorder(_mgrDropFname, _mgrDropAfter);
   };
   WF_MGR._mgrDragEnd = function(e) {
-    _mgrDragIdx = -1;
+    _mgrDragFname = '';
+    _mgrDropFname = '';
+    _mgrDropAfter = false;
     e.currentTarget.style.opacity = '';
-    $$('.wf-mgr-card').forEach(function(c) { c.style.borderTop = ''; });
+    var card = e.currentTarget.closest('.wf-mgr-card');
+    if (card) card.classList.remove('is-dragging');
+    $$('.wf-mgr-card').forEach(_mgrClearDropMarks);
   };
 
   // Shared reorder logic
-  function _mgrApplyReorder(targetIdx) {
-    if (_mgrDragIdx === targetIdx || _mgrDragIdx < 0) return;
-    var entries = Object.entries(A._wfMeta);
+  function _mgrMarkDrop(card, clientY) {
+    if (!card || !_mgrDragFname) return;
+    var fname = card.dataset.fname || '';
+    if (!fname || fname === _mgrDragFname) return;
+    _mgrDropFname = fname;
+    var rect = card.getBoundingClientRect();
+    _mgrDropAfter = clientY > rect.top + rect.height / 2;
+    $$('.wf-mgr-card').forEach(_mgrClearDropMarks);
+    card.classList.add(_mgrDropAfter ? 'drop-after' : 'drop-before');
+  }
+
+  function _mgrClearDropMarks(card) {
+    if (!card) return;
+    card.classList.remove('drop-before', 'drop-after');
+  }
+
+  function _mgrApplyReorder(targetFname, placeAfter) {
+    var draggedFname = _mgrDragFname;
+    if (!draggedFname || !targetFname || draggedFname === targetFname) return;
+    var entries = Object.entries(A._wfMeta || {});
     _mgrSortEntries(entries);
-    var moved = entries.splice(_mgrDragIdx, 1)[0];
-    entries.splice(targetIdx, 0, moved);
+    var fromIdx = entries.findIndex(function(e) { return e[0] === draggedFname; });
+    if (fromIdx < 0) return;
+    var moved = entries.splice(fromIdx, 1)[0];
+    var targetIdx = entries.findIndex(function(e) { return e[0] === targetFname; });
+    if (targetIdx < 0) return;
+    entries.splice(targetIdx + (placeAfter ? 1 : 0), 0, moved);
     for (var i = 0; i < entries.length; i++) {
       var fn = entries[i][0];
       if (!A._wfMeta[fn]) A._wfMeta[fn] = {};
@@ -1027,13 +1228,28 @@ window.CW.delVersion = delVersion;
   }
 
   function _mgrSaveSortOrder(entries) {
-    fetch(API + '/api/workflows/meta/sort', {
+    authFetch(API + '/api/workflows/meta/sort', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(Object.fromEntries(
         entries.map(function(e, i) { return [e[0], i]; })
       ))
-    }).catch(function(err) { console.error('sort save failed:', err); });
+    }).then(function(r) {
+      if (!r.ok) {
+        return r.json().catch(function() { return {}; }).then(function(d) {
+          throw new Error(d.detail || '排序保存失败');
+        });
+      }
+      return r.json().catch(function() { return {}; });
+    }).then(function(d) {
+      if (d && d.meta) A._wfMeta = d.meta;
+      renderWfGrid();
+      loadWorkflows();
+    }).catch(function(err) {
+      console.error('sort save failed:', err);
+      if (window.CW && CW.toast) CW.toast(err.message || '排序保存失败', 'error');
+      loadWfMeta();
+    });
   }
 
   // Touch-based drag for mobile
@@ -1048,10 +1264,10 @@ window.CW.delVersion = delVersion;
     var card = handle.closest('.wf-mgr-card');
     if (!card) return;
     _touchDragEl = card;
-    _touchStartIdx = parseInt(card.dataset.idx);
+    _touchStartIdx = _mgrVisibleEntries().findIndex(function(e) { return e[0] === card.dataset.fname; });
     _touchStartY = e.touches[0].clientY;
     _touchTargetIdx = _touchStartIdx;
-    _mgrDragIdx = _touchStartIdx;
+    _mgrDragFname = card.dataset.fname || '';
     // Create ghost element
     _touchGhost = card.cloneNode(true);
     _touchGhost.style.position = 'fixed';
@@ -1079,9 +1295,8 @@ window.CW.delVersion = delVersion;
     if (!el) return;
     var targetCard = el.closest('.wf-mgr-card');
     if (targetCard && targetCard !== _touchDragEl) {
-      _touchTargetIdx = parseInt(targetCard.dataset.idx);
-      $$('.wf-mgr-card').forEach(function(c) { c.style.borderTop = ''; });
-      targetCard.style.borderTop = '2px solid var(--accent)';
+      _touchTargetIdx = _mgrVisibleEntries().findIndex(function(e) { return e[0] === targetCard.dataset.fname; });
+      _mgrMarkDrop(targetCard, y);
     }
   };
 
@@ -1094,12 +1309,14 @@ window.CW.delVersion = delVersion;
       _touchDragEl.style.opacity = '';
       _touchDragEl = null;
     }
-    $$('.wf-mgr-card').forEach(function(c) { c.style.borderTop = ''; });
+    $$('.wf-mgr-card').forEach(_mgrClearDropMarks);
     if (_touchTargetIdx !== _touchStartIdx && _touchTargetIdx >= 0) {
-      _mgrApplyReorder(_touchTargetIdx);
+      _mgrApplyReorder(_mgrDropFname, _mgrDropAfter);
     }
     _touchTargetIdx = -1;
-    _mgrDragIdx = -1;
+    _mgrDragFname = '';
+    _mgrDropFname = '';
+    _mgrDropAfter = false;
   };
 
   // Expose as window.WF_MGR too
@@ -1158,6 +1375,7 @@ window.CW.delVersion = delVersion;
 
   window.CW.switchTab = switchTab;
   window.CW.loadWorkflows = loadWorkflows;
+  window.CW.refreshWorkflowPreviewFromJob = refreshWorkflowPreviewFromJob;
   window.CW.setMgrFilter = setMgrFilter;
   window.CW.onWfMgrDeviceChange = onWfMgrDeviceChange;
   window.CW.manualSyncWorkflows = manualSyncWorkflows;

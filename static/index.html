@@ -13,7 +13,7 @@ if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1779024300"></script>
+<script src="static/js/module_loader.js?v=1779056000"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -296,16 +296,16 @@ if (location.protocol === 'file:') {
   <div class="col-left" id="colLeft"><div class="col-left-scroll" id="colLeftScroll">
 
     <div class="col-section-header">
-      <span>工作流选择</span>
+      <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg><span>工作流选择</span>
     </div>
     <div class="wf-tabs" id="wfTabs"></div>
     <div class="wf-grid" id="wfGrid"></div>
 
 
-    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-zap"/></svg> 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
+    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><span class="gen-title-main"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-zap"/></svg><span id="genTitleText">快速出图</span></span><span class="gen-arrow" id="genArrow" aria-hidden="true">▴</span></div>
     <div class="gen-form" id="genForm" style="display:none">
             <div id="quickFormFields"></div>
-      <button class="adv-toggle" id="advToggle"><span class="arrow">▸</span> 详细参数</button>
+      <button class="adv-toggle" id="advToggle"><svg class="cw-icon adv-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-settings-2"/></svg><span>详细参数</span><svg class="cw-icon arrow adv-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-chevron-right"/></svg></button>
       <div class="adv-body" id="advBody"><div id="advFields"></div></div>
     </div>
     
@@ -320,7 +320,7 @@ if (location.protocol === 'file:') {
   <!-- 中列：出图中 + 历史（瀑布流） -->
   <div class="col-center" id="colCenter">
     <div class="col-header">
-      <span class="col-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
+      <span class="col-title history-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
       <span class="ch-count" id="histCount"></span>
       <input class="gf-search" id="gfStyle" type="text" placeholder="搜索..." oninput="CW.applyFilters()">
     </div>
@@ -328,17 +328,13 @@ if (location.protocol === 'file:') {
       <div class="gf-segment" role="group" aria-label="图片归属筛选">
         <button class="gf-segment-btn active" type="button" data-owner-filter="all" onclick="CW.setHistoryOwnerFilter('all')">所有图片</button>
         <button class="gf-segment-btn" type="button" data-owner-filter="mine" onclick="CW.setHistoryOwnerFilter('mine')">我的图片</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="favorite" onclick="CW.setHistoryOwnerFilter('favorite')">我的收藏</button>
         <button class="gf-segment-btn" type="button" data-owner-filter="other" onclick="CW.setHistoryOwnerFilter('other')">其他</button>
       </div>
       <span class="gf-sep"></span>
       <div class="gf-segment gf-type-segment" role="group" aria-label="图片类型筛选">
         <button class="gf-segment-btn active" type="button" data-type-filter="" onclick="CW.setHistoryTypeFilter('')">全部类型</button>
       </div>
-      <span class="gf-sep"></span>
-      <select id="gfSize" onchange="CW.applyFilters()">
-        <option value="">全部尺寸</option>
-      </select>
-      <button class="gf-clear" onclick="CW.clearFilters()" title="清除"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="masonry" id="gallery"></div>
       </div>
@@ -358,13 +354,14 @@ if (location.protocol === 'file:') {
     <button class="lb-action-btn lb-share" id="lbShareBtn" type="button" title="快速分享" onclick="if(window.CW&&CW.toggleLBShare) CW.toggleLBShare()">
       <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-share"/></svg>
     </button>
+    <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    </a>
   </div>
   <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)" title="上一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-  <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-  </a>
   <div class="lb-stage" id="lbStage">
     <img id="lbImg" src="" alt="">
+    <img id="lbFullImg" src="" alt="" aria-hidden="true">
   </div>
   <div class="lb-loading" id="lbLoading" style="display:none">加载中...</div>
   <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)" title="下一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></button>
@@ -381,7 +378,6 @@ if (location.protocol === 'file:') {
       <button class="v4-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
     <div class="inst-popup-body">
-      <div class="inst-popup-note">集中查看实例状态、目标实例和 GPU 占用，实例卡片状态语义保持不变。</div>
       <div id="instCards"></div>
     </div>
   </div>

@@ -5,7 +5,18 @@
   'use strict';
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
-  var API = A.API, jobs = A.jobs;
+var API = A.API, jobs = A.jobs;
+
+function _ensureToastContainer() {
+  var container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  return container;
+}
 
 function initResizeHandle() {
     const handle = $('#resizeHandle');
@@ -47,16 +58,285 @@ function initResizeHandle() {
 function clearPrompt() {
   var inp = $('#promptInput');
   if (inp) { inp.value = ''; inp.dispatchEvent(new Event('input')); inp.focus(); }
+  if (window.CW && typeof CW.clearPromptOptimizationVariants === 'function') CW.clearPromptOptimizationVariants();
+}
+
+function syncClearPromptButton() {
+  var inp = $('#promptInput');
+  var clearBtn = $('#clearPromptBtn');
+  var optimizeBtn = $('#optimizePromptBtn');
+  var translateBtn = $('#translatePromptBtn');
+  if (!clearBtn && !optimizeBtn && !translateBtn) return;
+  var hasText = !!(inp && inp.value.trim());
+  if (translateBtn) {
+    translateBtn.classList.remove('hidden');
+    translateBtn.classList.toggle('is-compact-disabled', !hasText);
+    translateBtn.disabled = !hasText;
+  }
+  if (clearBtn) {
+    clearBtn.classList.remove('hidden');
+    clearBtn.classList.toggle('is-compact-disabled', !hasText);
+    clearBtn.disabled = !hasText;
+  }
+  if (optimizeBtn) {
+    optimizeBtn.classList.remove('hidden');
+    optimizeBtn.classList.toggle('is-compact-disabled', !hasText);
+    optimizeBtn.disabled = !hasText;
+  }
+  var anchor = clearBtn || optimizeBtn;
+  var actions = anchor && anchor.closest ? anchor.closest('.prompt-actions') : null;
+  if (actions) actions.classList.toggle('has-content', hasText);
+}
+
+function _isGenerationStartToast(message, type) {
+  return /开始出图/.test(String(message || '')) &&
+    (type === 'generating' || type === 'queued' || type === 'info' || !type);
+}
+
+function _isGenerationStatusToastAllowed(message, type) {
+  var text = String(message || '');
+  if (type === 'done' || type === 'error') return true;
+  if (type === 'queued') return /排队中/.test(text);
+  if (type === 'generating') return /出图中/.test(text);
+  return false;
+}
+
+function _isGenerationStatusToast(message, type) {
+  var text = String(message || '');
+  if (type === 'queued' || type === 'generating') return true;
+  if (_isGenerationStartToast(text, type)) return true;
+  if ((type === 'done' && /结束出图/.test(text)) || (type === 'error' && /失败/.test(text))) return true;
+  return /(排队中|出图中|拉取图片|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
+}
+
+function _hasChinese(text) {
+  return /[\u3400-\u9fff]/.test(String(text || ''));
+}
+
+function _cleanPromptResultChinese(text) {
+  var cleaned = String(text || '').trim();
+  if (!cleaned || !_hasChinese(cleaned)) return cleaned;
+  cleaned = cleaned.replace(/\s*(?:英文|英语|English|Original(?:\s+prompt)?|Prompt|Source|原文|原始提示词)\s*[:：][\s\S]*$/i, '').trim();
+  var lines = cleaned.split(/\r?\n/);
+  var kept = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    if (!_hasChinese(line) && /[A-Za-z][A-Za-z'’.-]*(?:\s+[A-Za-z][A-Za-z'’.-]*){5,}/.test(line)) continue;
+    if (_hasChinese(line)) {
+      line = line.replace(/(^|[\s。！？；;，,、])[A-Za-z][A-Za-z'’.-]*(?:\s+[A-Za-z][A-Za-z'’.-]*){5,}[\s\S]*$/, '$1').replace(/[ ，,；;。]+$/, '。').trim();
+      line = _dropEnglishPromptFragments(line);
+    }
+    if (line) kept.push(line);
+  }
+  return kept.join('\n').trim();
+}
+
+function _dropEnglishPromptFragments(line) {
+  var text = String(line || '').trim();
+  if (!text || !_hasChinese(text)) return text;
+  text = text.replace(/([。！？!?])\s*[A-Za-z0-9][A-Za-z0-9'’._+/-]*(?:[\s,，、；;]+[A-Za-z0-9][A-Za-z0-9'’._+/-]*)+\s*$/g, '$1').trim();
+  var pieces = text.split(/[，,、；;]/);
+  var kept = [];
+  for (var i = 0; i < pieces.length; i++) {
+    var piece = pieces[i].trim().replace(/^[，,、；;\s]+|[，,、；;\s]+$/g, '');
+    if (!piece) continue;
+    if (!_hasChinese(piece)) {
+      if (/[A-Za-z][A-Za-z0-9'’._+/-]*/.test(piece)) continue;
+      kept.push(piece);
+      continue;
+    }
+    piece = piece.replace(/\s+[A-Za-z0-9][A-Za-z0-9'’._+/-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’._+/-]*){0,4}\s*$/g, '').trim();
+    if (piece) kept.push(piece);
+  }
+  return kept.join('，').trim();
+}
+
+function _removePromptInterrogateToast() {
+  var container = _ensureToastContainer();
+  var existing = container.querySelectorAll('.toast');
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getAttribute && existing[i].getAttribute('data-toast-scope') === 'prompt-interrogate') {
+      existing[i].parentNode.removeChild(existing[i]);
+      if (container.classList) container.classList.remove('has-prompt-result-expanded');
+    }
+  }
+  if (container.classList) container.classList.remove('has-prompt-result-active');
+  return container;
+}
+
+function clearPromptInterrogateToast() {
+  _removePromptInterrogateToast();
+}
+
+function showPromptInterrogatePendingToast() {
+  var container = _removePromptInterrogateToast();
+  if (container.classList) container.classList.add('has-prompt-result-active');
+  var t = document.createElement('div');
+  t.className = 'toast toast-info toast-prompt-result prompt-result-toast prompt-result-pending is-persistent';
+  if (t.setAttribute) t.setAttribute('data-toast-scope', 'prompt-interrogate');
+  t.innerHTML = ''
+    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon('loader', 16) : '') + '</span>'
+    + '<span class="toast-content">'
+    +   '<span class="toast-title">图片反推中</span>'
+    + '</span>'
+    + '<button class="toast-close" type="button" title="关闭">×</button>';
+  var closeBtn = t.querySelector('.toast-close');
+  if (closeBtn) closeBtn.addEventListener('click', function () {
+    clearPromptInterrogateToast();
+  });
+  container.appendChild(t);
+}
+
+function showPromptResultToast(prompt, meta) {
+  var text = String(prompt || '').trim();
+  if (!text) return;
+  var container = _removePromptInterrogateToast();
+  if (container.classList) container.classList.add('has-prompt-result-active');
+  var t = document.createElement('div');
+  t.className = 'toast toast-done toast-prompt-result prompt-result-toast is-persistent is-collapsed';
+  if (t.setAttribute) t.setAttribute('data-toast-scope', 'prompt-interrogate');
+  var provider = meta && meta.provider ? String(meta.provider) : '';
+  var promptEn = String((meta && (meta.prompt_en || meta.english_prompt)) || (_hasChinese(text) ? '' : text) || '').trim();
+  var promptZh = _cleanPromptResultChinese(String((meta && (meta.prompt_zh || meta.zh_prompt || meta.chinese_prompt || meta.translated_prompt)) || (_hasChinese(text) ? text : '') || '').trim());
+  var currentLang = promptZh ? 'zh' : 'en';
+  function stringifyStructured(value) {
+    if (!value) return '';
+    if (typeof value === 'string') return value.trim();
+    try { return JSON.stringify(value, null, 2); } catch (err) { return ''; }
+  }
+  var structuredJson = '';
+  var structuredSource = meta && (meta.structured_prompt_json || meta.prompt_json || meta.json_prompt || meta.structured_prompt);
+  structuredJson = stringifyStructured(structuredSource);
+  var structuredJsonEn = stringifyStructured(meta && (meta.structured_prompt_json_en || meta.english_prompt_json || meta.json_prompt_en || meta.structured_prompt_en));
+  var hasStructuredJson = !!structuredJson;
+  var currentFormat = 'text';
+  function getPromptText() {
+    return currentLang === 'zh' ? promptZh : (promptEn || text);
+  }
+  function getStructuredText() {
+    if (currentLang === 'en' && structuredJsonEn) return structuredJsonEn;
+    return structuredJson;
+  }
+  function canShowLanguage() {
+    if (currentFormat === 'json') return !!(structuredJson && structuredJsonEn);
+    return !!(promptZh && promptEn);
+  }
+  var currentText = getPromptText();
+  function langLabel(lang) { return lang === 'zh' ? '中文' : 'English'; }
+  t.innerHTML = ''
+    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon('check-circle', 16) : '') + '</span>'
+    + '<span class="toast-content">'
+    +   '<span class="toast-title">反推完成</span>'
+    +   '<span class="prompt-result-panel">'
+    +     '<span class="prompt-result-meta">' + escH(provider || '图片反推提示词') + '</span>'
+    +     '<span class="prompt-result-body" data-lang="' + escA(currentLang) + '" data-format="text">' + escH(currentText) + '</span>'
+    +     '<span class="prompt-result-controls">'
+    +       '<span class="prompt-result-control-left">'
+    +         '<span class="prompt-result-format' + (hasStructuredJson ? '' : ' hidden') + '">'
+    +           '<button class="prompt-result-format-btn active" type="button" data-format="text">纯词汇</button>'
+    +           '<button class="prompt-result-format-btn" type="button" data-format="json">JSON格式</button>'
+    +         '</span>'
+    +         '<span class="prompt-result-language' + (promptZh && promptEn ? '' : ' hidden') + '">'
+    +         '<button class="prompt-result-lang-btn' + (currentLang === 'zh' ? ' active' : '') + '" type="button" data-lang="zh">中文</button>'
+    +         '<button class="prompt-result-lang-btn' + (currentLang === 'en' ? ' active' : '') + '" type="button" data-lang="en">English</button>'
+    +         '</span>'
+    +       '</span>'
+    +       '<span class="prompt-result-copy-row">'
+    +         '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="copy">复制到输入框</button>'
+    +       '</span>'
+    +     '</span>'
+    +   '</span>'
+    + '</span>'
+    + '<span class="prompt-result-actions">'
+    +   '<button class="prompt-result-action" type="button" data-action="view">点击查看</button>'
+    + '</span>'
+    + '<button class="toast-close" type="button" title="关闭">×</button>';
+  function setContainerExpanded(expanded) {
+    if (container && container.classList) {
+      container.classList.toggle('has-prompt-result-expanded', !!expanded);
+    }
+  }
+  function closePromptResultToast() {
+    setContainerExpanded(false);
+    if (container && container.classList) container.classList.remove('has-prompt-result-active');
+    if (t.parentNode) t.parentNode.removeChild(t);
+  }
+  function setLanguage(lang) {
+    currentLang = (lang === 'zh' && promptZh) ? 'zh' : 'en';
+    currentText = currentFormat === 'json' ? getStructuredText() : getPromptText();
+    var body = t.querySelector('.prompt-result-body');
+    if (body) {
+      body.textContent = currentText;
+      body.setAttribute('data-lang', currentFormat === 'json' ? currentLang : currentLang);
+    }
+    var langBtns = t.querySelectorAll('.prompt-result-lang-btn');
+    for (var li = 0; li < langBtns.length; li++) {
+      langBtns[li].classList.toggle('active', langBtns[li].getAttribute('data-lang') === currentLang);
+    }
+  }
+  function setFormat(format) {
+    currentFormat = (format === 'json' && hasStructuredJson) ? 'json' : 'text';
+    currentText = currentFormat === 'json' ? getStructuredText() : getPromptText();
+    var body = t.querySelector('.prompt-result-body');
+    if (body) {
+      body.textContent = currentText;
+      body.setAttribute('data-format', currentFormat);
+      body.setAttribute('data-lang', currentLang);
+    }
+    var formatBtns = t.querySelectorAll('.prompt-result-format-btn');
+    for (var fi = 0; fi < formatBtns.length; fi++) {
+      formatBtns[fi].classList.toggle('active', formatBtns[fi].getAttribute('data-format') === currentFormat);
+    }
+    var langBox = t.querySelector('.prompt-result-language');
+    if (langBox) {
+      langBox.classList.toggle('hidden', !canShowLanguage());
+    }
+  }
+  var closeBtn = t.querySelector('.toast-close');
+  if (closeBtn) closeBtn.addEventListener('click', function () {
+    closePromptResultToast();
+  });
+  var viewBtn = t.querySelector('[data-action="view"]');
+  var copyBtn = t.querySelector('[data-action="copy"]');
+  var formatButtons = t.querySelectorAll('.prompt-result-format-btn');
+  for (var fbi = 0; fbi < formatButtons.length; fbi++) {
+    formatButtons[fbi].addEventListener('click', function () {
+      setFormat(this.getAttribute('data-format'));
+    });
+  }
+  var langButtons = t.querySelectorAll('.prompt-result-lang-btn');
+  for (var bi = 0; bi < langButtons.length; bi++) {
+    langButtons[bi].addEventListener('click', function () {
+      setLanguage(this.getAttribute('data-lang'));
+    });
+  }
+  if (viewBtn) viewBtn.addEventListener('click', function () {
+    t.classList.add('is-expanded');
+    t.classList.remove('is-collapsed');
+    setContainerExpanded(true);
+    if (copyBtn) copyBtn.classList.remove('hidden');
+    viewBtn.classList.add('hidden');
+  });
+	  if (copyBtn) copyBtn.addEventListener('click', function () {
+	    var input = $('#promptInput');
+	    if (window.CW && typeof CW.registerPromptTranslationPair === 'function') {
+	      CW.registerPromptTranslationPair(promptZh, promptEn);
+	    }
+	    if (input) {
+	      input.value = currentText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    }
+    if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+    t.classList.add('is-copied');
+    closePromptResultToast();
+  });
+  container.appendChild(t);
 }
 
 function showToast(message, type) {
-  var container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
-  }
+  var container = _ensureToastContainer();
   type = type || 'info';
   var aliases = {
     success: 'done',
@@ -64,39 +344,38 @@ function showToast(message, type) {
     danger: 'error',
     loading: 'generating'
   };
-  var resolvedType = aliases[type] || type;
-  var iconMap = {
-    info: 'info',
-    queued: 'clock-3',
-    generating: 'loader-circle',
-    done: 'check-circle-2',
-    warn: 'triangle-alert',
-    error: 'octagon-x'
-  };
-  var titleMap = {
-    info: '提示',
-    queued: '队列通知',
-    generating: '任务进度',
-    done: '操作完成',
-    warn: '注意',
-    error: '操作失败'
-  };
+		  var resolvedType = aliases[type] || type;
+  if (_isGenerationStatusToast(message, resolvedType) && !_isGenerationStatusToastAllowed(message, resolvedType)) {
+    return;
+  }
+  var generationSlot = _isGenerationStatusToast(message, resolvedType);
+				  var iconMap = {
+		    info: 'info',
+		    queued: 'clock',
+		    generating: 'loader',
+		    done: 'check-circle',
+		    favorite: 'heart',
+		    unfavorite: 'heart',
+		    warn: 'alert-triangle',
+		    error: 'x-circle'
+		  };
   // Dedup: remove existing toast with same message
   var existing = container.querySelectorAll('.toast');
   for (var ei = 0; ei < existing.length; ei++) {
-    if (existing[ei].textContent.indexOf(message) >= 0) {
+    if ((generationSlot && existing[ei].getAttribute && existing[ei].getAttribute('data-toast-scope') === 'generation') ||
+        existing[ei].textContent.indexOf(message) >= 0) {
       existing[ei].parentNode.removeChild(existing[ei]);
-      break;
+      if (!generationSlot) break;
     }
   }
   var t = document.createElement('div');
-  t.className = 'toast toast-' + resolvedType;
-  t.innerHTML = ''
-    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon(iconMap[resolvedType] || 'bell', 16) : '') + '</span>'
-    + '<span class="toast-content">'
-    +   '<span class="toast-title">' + escH(titleMap[resolvedType] || titleMap.info) + '</span>'
-    +   '<span class="toast-message">' + escH(message) + '</span>'
-    + '</span>'
+	  t.className = 'toast toast-' + resolvedType;
+  if (generationSlot && t.setAttribute) t.setAttribute('data-toast-scope', 'generation');
+	  t.innerHTML = ''
+	    + '<span class="toast-icon">' + (window.CW && CW.icon ? CW.icon(iconMap[resolvedType] || 'bell', 16) : '') + '</span>'
+	    + '<span class="toast-content">'
+	    +   '<span class="toast-message">' + escH(message) + '</span>'
+	    + '</span>'
     + '<button class="toast-close" type="button" title="关闭">×</button>';
   var closeBtn = t.querySelector('.toast-close');
   if (closeBtn) closeBtn.addEventListener('click', function () {
@@ -139,7 +418,7 @@ function initDragScroll(selector) {
   }
 
 function rndSeed(btnEl) {
-    const input = btnEl ? btnEl.parentElement.querySelector('input') : null;
+    const input = btnEl ? btnEl.parentElement.querySelector('input[type="number"]') : null;
     if (input) input.value = Math.floor(Math.random() * 2 ** 53);
   }
 
@@ -212,4 +491,8 @@ function initAdvToggle() {
   window.CW.initResizeHandle = initResizeHandle;
   window.CW.initDragScroll = initDragScroll;
   window.CW.toast = showToast;
+  window.CW.showPromptInterrogatePendingToast = showPromptInterrogatePendingToast;
+  window.CW.showPromptResultToast = showPromptResultToast;
+  window.CW.clearPromptInterrogateToast = clearPromptInterrogateToast;
+  window.CW.syncClearPromptButton = syncClearPromptButton;
 })();

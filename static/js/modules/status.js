@@ -6,11 +6,13 @@
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var jobs = A.jobs, API = A.API;
+  var _lastRunningSummaries = [];
 
-  function _setCurrentTarget(inst) {
+  function _setCurrentTarget(inst, manual) {
     if (!inst) return;
     A.currentTargetInstance = inst.name || '';
     A.currentTargetNodeId = inst.node_id || '';
+    A.manualTargetInstance = !!manual;
   }
 
   function _getCurrentTarget(instances) {
@@ -24,14 +26,197 @@
     }
     if (!selected && instances.length) {
       selected = instances[0];
-      _setCurrentTarget(selected);
+      _setCurrentTarget(selected, false);
     }
     return selected;
   }
 
+  function _isTerminalJobStatus(status) {
+    return status === 'done' || status === 'error' || status === 'history';
+  }
+
+  function _jobProgressPct(job) {
+    var status = (job && job.status) || '';
+    var pct = job && job.progress ? Number(job.progress.pct) : 0;
+    if (!isFinite(pct)) pct = 0;
+    if (status === 'downloading') pct = Math.max(pct, 98);
+    return _clampPct(pct);
+  }
+
+  function _activeJobState() {
+    var vals = Object.values(jobs || {});
+    var best = null;
+    for (var i = 0; i < vals.length; i++) {
+      var job = vals[i] || {};
+      var status = job.status || '';
+      if (_isTerminalJobStatus(status)) continue;
+      var pct = _jobProgressPct(job);
+      if (!best || pct >= best.pct) {
+        best = {
+          pct: pct,
+          instance: job.instance || '',
+          node_id: job.target_node_id || job.node_id || '',
+          status: status,
+        };
+      }
+    }
+    if (!best) return null;
+    best.pct = Math.max(0, Math.min(100, Math.round(best.pct)));
+    return best;
+  }
+
+  function _activeJobStatesByInstance() {
+    var vals = Object.values(jobs || {});
+    var byKey = {};
+    for (var i = 0; i < vals.length; i++) {
+      var job = vals[i] || {};
+      var status = job.status || '';
+      if (_isTerminalJobStatus(status)) continue;
+      var instance = job.instance || '';
+      if (!instance) continue;
+      var nodeId = job.target_node_id || job.node_id || '';
+      var key = instance + '|' + nodeId;
+      var pct = _jobProgressPct(job);
+      if (!byKey[key] || pct >= byKey[key].pct) {
+        byKey[key] = {
+          label: instance,
+          instance: instance,
+          node_id: nodeId,
+          pct: pct,
+        };
+      }
+    }
+    return Object.keys(byKey).map(function(key) { return byKey[key]; });
+  }
+
+  function _activeJobProgress() {
+    var state = _activeJobState();
+    return state ? state.pct : null;
+  }
+
+  function _findInstanceForJob(instances, jobState) {
+    if (!jobState || !jobState.instance) return null;
+    return (instances || []).find(function(inst) {
+      return inst.name === jobState.instance &&
+        (!jobState.node_id || inst.node_id === jobState.node_id);
+    }) || (instances || []).find(function(inst) {
+      return inst.name === jobState.instance;
+    }) || null;
+  }
+
+  function _clampPct(value) {
+    var pct = Number(value || 0);
+    if (!isFinite(pct)) pct = 0;
+    return Math.max(0, Math.min(100, Math.round(pct)));
+  }
+
+  function _runningInstanceSummaries(instances, activeJob) {
+    var out = [];
+    for (var i = 0; i < (instances || []).length; i++) {
+      var inst = instances[i] || {};
+      if ((inst.queue_running || 0) <= 0) continue;
+      var pct = _clampPct(inst.progress || 0);
+      if (activeJob && activeJob.instance === inst.name) {
+        pct = Math.max(pct, _clampPct(activeJob.pct));
+      }
+      var unknownRemote = !!inst.remote_untracked_running && inst.progress_known === false;
+      out.push({
+        label: inst.name || inst.node_name || '实例',
+        instance: inst.name || '',
+        node_id: inst.node_id || '',
+        pct: pct,
+        text: unknownRemote ? '未追踪任务中' : '',
+      });
+    }
+    return out;
+  }
+
+  function _copyRunningSummary(item) {
+    item = item || {};
+    return {
+      label: item.label || item.instance || '实例',
+      instance: item.instance || item.label || '',
+      node_id: item.node_id || '',
+      pct: _clampPct(item.pct),
+      text: item.text || '',
+    };
+  }
+
+  function _findRunningSummaryIndex(out, item) {
+    var instance = item && item.instance;
+    var nodeId = item && item.node_id;
+    for (var i = 0; i < out.length; i++) {
+      if (out[i].instance === instance && (!nodeId || !out[i].node_id || out[i].node_id === nodeId)) return i;
+    }
+    return -1;
+  }
+
+  function _mergeRunningSummaries(baseSummaries, jobStates) {
+    var out = (baseSummaries || []).map(_copyRunningSummary);
+    for (var i = 0; i < (jobStates || []).length; i++) {
+      var state = _copyRunningSummary(jobStates[i]);
+      var idx = _findRunningSummaryIndex(out, state);
+      if (idx >= 0) out[idx] = Object.assign({}, out[idx], state);
+      else out.push(state);
+    }
+    return out;
+  }
+
+  function _rememberRunningSummaries(summaries, keep) {
+    if ((summaries || []).length || keep) {
+      _lastRunningSummaries = (summaries || []).map(_copyRunningSummary);
+    } else {
+      _lastRunningSummaries = [];
+    }
+  }
+
+  function _runningStateText(summaries, fallbackPct) {
+    if ((summaries || []).length > 1) {
+      return summaries.map(function(item) {
+        return item.label + ': ' + (item.text || (item.pct + '%'));
+      }).join(' | ');
+    }
+    if ((summaries || []).length === 1 && summaries[0].text) return summaries[0].text;
+    return '出图中 ' + _clampPct(fallbackPct) + '%';
+  }
+
+  function _safeVramMessage(gpu) {
+    var msg = String((gpu && gpu.message) || '').trim();
+    if (!msg) return 'VRAM 未上报';
+    var rawError = /(connection\s+closed|permission\s+denied|connection\s+refused|timed?\s*out|no\s+route|host\s+key|known_hosts|port\s+\d+|ssh:|sshpass|stderr)/i;
+    if (rawError.test(msg)) return 'VRAM 暂不可用';
+    return msg.length > 24 ? 'VRAM 暂不可用' : msg;
+  }
+
+  function syncComfyServiceButton() {
+    var activeJob = _activeJobState();
+    var activePct = activeJob ? activeJob.pct : null;
+    var runningSummaries = _mergeRunningSummaries(_lastRunningSummaries, _activeJobStatesByInstance());
+    var comfyBtn = $('#svcComfyUI');
+    var comfyState = $('#comfyState');
+    var bar = $('#statusbar');
+    if (activePct == null && !runningSummaries.length) {
+      if (comfyBtn) comfyBtn.classList.remove('running');
+      if (bar && bar.dataset.instanceState === 'running') bar.dataset.instanceState = 'idle';
+      return;
+    }
+    if (bar) bar.dataset.instanceState = 'running';
+    if (comfyBtn) {
+      comfyBtn.classList.remove('pending', 'off');
+      comfyBtn.classList.add('on', 'running');
+    }
+    if (comfyState) comfyState.textContent = _runningStateText(runningSummaries, activePct);
+  }
+
 async function pollStatus() {
     try {
-      const r = await fetch(`${API}/api/status`);
+      var qs = new URLSearchParams();
+      var activeJob = _activeJobState();
+      if (activeJob && activeJob.node_id) qs.set('target_node_id', activeJob.node_id);
+      else if (A.currentTargetNodeId) qs.set('target_node_id', A.currentTargetNodeId);
+      if (activeJob && activeJob.instance) qs.set('target_instance', activeJob.instance);
+      else if (A.currentTargetInstance) qs.set('target_instance', A.currentTargetInstance);
+      const r = await fetch(`${API}/api/status${qs.toString() ? '?' + qs.toString() : ''}`);
       const d = await r.json();
       updateServices(d);
       updateGPU(d.gpu, d.instances || []);
@@ -43,28 +228,53 @@ function updateServices(d) {
     const target = _getCurrentTarget(insts);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');
-    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (target && target.up ? 'on' : 'off');
+    const bar = $('#statusbar');
+    const anyRunning = insts.some(function(inst) { return (inst.queue_running || 0) > 0; });
+    const anyPending = insts.some(function(inst) { return (inst.queue_pending || 0) > 0; });
+    var activeJob = _activeJobState();
+    const runningInst = (target && (target.queue_running || 0) > 0)
+      ? target
+      : insts.find(function(inst) { return inst.up && (inst.queue_running || 0) > 0; });
+    const pendingInst = (target && (target.queue_pending || 0) > 0)
+      ? target
+      : insts.find(function(inst) { return inst.up && (inst.queue_pending || 0) > 0; });
+    var activeInst = _findInstanceForJob(insts, activeJob) || runningInst || pendingInst;
+    var displayTarget = activeInst || target;
+    var jobPct = activeJob ? activeJob.pct : null;
+    var activeJobsByInstance = _activeJobStatesByInstance();
+    var runningSummaries = _mergeRunningSummaries(_runningInstanceSummaries(insts, activeJob), activeJobsByInstance);
+    var instPct = runningInst ? _clampPct(runningInst.progress || 0) : 0;
+    var runningPct = jobPct == null ? instPct : Math.max(instPct, jobPct);
+    var localRunning = jobPct != null;
+    _rememberRunningSummaries(runningSummaries, anyRunning || localRunning);
+    if (bar) bar.dataset.instanceState = (anyRunning || localRunning) ? 'running' : anyPending ? 'pending' : 'idle';
+    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (displayTarget && (displayTarget.up || localRunning || anyRunning) ? 'on' : 'off') + ((anyRunning || localRunning) ? ' running' : anyPending ? ' pending' : '');
+    if (comfyBtn) comfyBtn.title = displayTarget ? ((displayTarget.node_name || '') + (displayTarget.name ? ' ' + displayTarget.name : '')).trim() : 'ComfyUI';
     if (comfyState) {
-      if (!target) comfyState.textContent = '无可用实例';
-      else if (!target.up) comfyState.textContent = (target.node_name || target.name || '目标实例') + ' 已关闭';
-      else if ((target.queue_running || 0) > 0) comfyState.textContent = (target.node_name || target.name) + ' 出图中';
-      else if ((target.queue_pending || 0) > 0) comfyState.textContent = (target.node_name || target.name) + ' 排队中';
-      else comfyState.textContent = (target.node_name || target.name) + ' 待机';
+      var stateText = '';
+      if (anyRunning || localRunning) stateText = _runningStateText(runningSummaries, runningPct);
+      else if (!displayTarget) stateText = '无可用实例';
+      else if (!displayTarget.up) stateText = '已关闭';
+      else if ((displayTarget.queue_pending || 0) > 0) stateText = '排队中';
+      else stateText = '待机';
+      comfyState.textContent = stateText;
     }
   }
 
 function updateGPU(g, instances) {
-    const target = _getCurrentTarget(instances || []);
+    const active = _findInstanceForJob(instances || [], _activeJobState());
+    const target = active || _getCurrentTarget(instances || []);
     const gpu = target && target.gpu ? target.gpu : g;
     const fill = $('#vramFill');
     if (!fill) return;
     const pct = gpu && target ? (gpu.vram_pct || 0) : 0;
     const temp = gpu && target ? (gpu.temp_c || 0) : 0;
+    const util = gpu && target ? Math.max(0, Math.min(100, Number(gpu.util_pct || 0))) : 0;
     fill.style.width = pct + '%';
     // State: green=idle, yellow=busy, red=overloaded.
     // Keep "red" for clearly high pressure so low VRAM usage does not look alarming.
-    const isOverload = pct >= 80 || temp >= 85;
-    const isBusy = !isOverload && (pct >= 50 || temp >= 70);
+    const isOverload = pct >= 80 || temp >= 85 || util >= 95;
+    const isBusy = !isOverload && (pct >= 50 || temp >= 70 || util >= 70);
     fill.className = 'sb-vram-fill' + (isOverload ? ' overload' : isBusy ? ' busy' : '');
     // Also tint the entire statusbar
     const bar = $('#statusbar');
@@ -73,12 +283,13 @@ function updateGPU(g, instances) {
     var total = Number(gpu && target ? (gpu.vram_total_mb || 0) : 0);
     var vramText = $('#vramText');
     if (vramText) {
+      var compactVram = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
       vramText.textContent = total > 0
-        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%) · ${temp} °C`
-        : (target ? `${target.node_name || target.name} ${gpu && gpu.message ? gpu.message : '未上报 VRAM'}` : '无可用设备');
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB${compactVram ? '' : ` (${pct}%)`} · GPU ${util}% · ${temp} °C`
+        : (target ? `${target.node_name || target.name} ${_safeVramMessage(gpu)}` : '无可用设备');
     }
-    if ($('#gpuTemp')) $('#gpuTemp').textContent = total > 0 ? `${temp} °C` : '— °C';
-    if ($('#gpuUtil')) $('#gpuUtil').textContent = total > 0 ? `GPU ${gpu.util_pct}%` : (target ? ((target.node_name || target.name) + ' · ' + (target.up ? '在线' : '离线')) : 'GPU —%');
+    if ($('#gpuTemp')) $('#gpuTemp').textContent = '';
+    if ($('#gpuUtil')) $('#gpuUtil').textContent = '';
     if ($('#vramSegments') && !$('#vramSegments').dataset.done) {
       [25, 50, 75].forEach((pct) => {
         const seg = document.createElement('div');
@@ -148,20 +359,26 @@ async function _refreshInstCards() {
         html += '<div class="popup-section-title">' + escH(group.name) + ' \u5b9e\u4f8b\u5217\u8868</div>';
         for (var idx = 0; idx < group.items.length; idx++) {
         var inst = group.items[idx];
-        var isSelected = A.currentTargetInstance === inst.name && (!A.currentTargetNodeId || A.currentTargetNodeId === inst.node_id);
+        var isAux = !!inst.prompt_aux || inst.role === 'prompt_aux';
         var statusCls = inst.up ? 'on' : 'off';
         var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
         var btnCls = inst.up ? 'stop' : 'start';
         var groupLabel = groupMap[inst.loaded_group] || inst.loaded_group || '';
+        var instBusy = (inst.queue_running || 0) > 0 || (inst.queue_pending || 0) > 0;
+        var unknownRemote = !!inst.remote_untracked_running && inst.progress_known === false;
         var stateText = !inst.up
           ? '\u5173\u95ed'
+          : unknownRemote
+            ? '\u672a\u8ffd\u8e2a\u4efb\u52a1\u4e2d'
+          : isAux && instBusy
+            ? '\u8f85\u52a9\u4efb\u52a1\u4e2d'
           : inst.queue_running > 0
             ? '\u51fa\u56fe\u4e2d'
             : inst.queue_pending > 0
               ? '\u6392\u961f\u4e2d'
               : '\u5f85\u673a';
         html +=
-          '<div class="inst-card ' + statusCls + (isSelected ? ' active-target' : '') + '">' +
+          '<div class="inst-card ' + statusCls + '">' +
           '<div class="inst-card-header">' +
           '<div class="inst-card-name"><span class="inst-led ' +
           statusCls +
@@ -169,8 +386,12 @@ async function _refreshInstCards() {
           inst.name +
           ' <span class="dim-tag">:' +
           inst.port +
-          '</span></div>' +
-          '<button class="inst-card-btn" onclick="CW.setTargetInstance(\'' + escA(inst.name) + '\',\'' + escA(inst.node_id || '') + '\')">' + (isSelected ? '当前目标' : '设为目标') + '</button>' +
+          '</span>' +
+          (isAux ? ' <span class="dim-tag">\u63d0\u793a\u8bcd\u8f85\u52a9</span>' : '') +
+          '</div>' +
+          (isAux
+            ? '<button class="inst-card-btn" disabled>\u8f85\u52a9\u5b9e\u4f8b</button>'
+            : '') +
           '<button class="inst-card-btn ' +
           btnCls +
           '" onclick="CW.toggleInst(\'' +
@@ -193,7 +414,11 @@ async function _refreshInstCards() {
           `">` +
           inst.queue_running +
           ` \u4efb\u52a1` +
-          (inst.queue_running > 0 && inst.current_workflow ? `(\u2009${inst.current_workflow} - ${inst.progress}%)` : ``) +
+          (inst.queue_running > 0 && inst.current_workflow
+            ? `(\u2009${inst.current_workflow} - ${inst.progress}%)`
+            : inst.queue_running > 0 && unknownRemote
+              ? `(\u2009\u672a\u8ffd\u8e2a\u4efb\u52a1)`
+              : ``) +
           `</span></div>` +
           `<div class="inst-card-row"><span>\u6392\u961f</span><span class="val ` +
           (inst.queue_pending ? `pending` : ``) +
@@ -310,11 +535,6 @@ function initServiceToggles() {
   window.CW.closeInstPopup = closeInstPopup;
   window.CW.toggleInst = toggleInst;
   window.CW.killGpuProc = killGpuProc;
-  window.CW.setTargetInstance = function(name, nodeId) {
-    A.currentTargetInstance = name || '';
-    A.currentTargetNodeId = nodeId || '';
-    pollStatus();
-    _refreshInstCards();
-  };
   window.CW.pollStatus = pollStatus;
+  window.CW.syncComfyServiceButton = syncComfyServiceButton;
 })();

@@ -8,6 +8,7 @@ import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, sock
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
 import websockets.client
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -27,12 +28,34 @@ import bcrypt
 
 # ── V4 refactored module imports (keep inline implementations for backward compat) ──
 from modules.config import NodeCategory, ModelGroup, NODE_STATUS_MAP
+from modules.comfyui_upload import ensure_workflow_images_available
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner
+from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
+from modules.prompt_labels import infer_generation_label
+from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
+from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult
+
+APP_ROOT = Path(__file__).resolve().parent
+VERSION_FILE = APP_ROOT / "VERSION"
+
+
+def _read_app_version() -> str:
+    override = os.environ.get("EZ_COMFYUI_VERSION", "").strip()
+    if override:
+        return override
+    try:
+        version = VERSION_FILE.read_text("utf-8").strip()
+    except Exception:
+        version = ""
+    return version or "v0.0.0"
+
+
+APP_VERSION = _read_app_version()
 
 # ── Auth config
 AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "auth.db")
@@ -44,14 +67,160 @@ ACCESS_TOKEN_EXPIRE_DAYS = 7
 
 # ── Logging ──
 _log_buffer: list[dict] = []
-_MAX_LOG = 500
+_MAX_LOG = 2000
+_LOG_RETENTION_SEC = 3600
+_LOG_FILE = os.environ.get(
+    "EZ_COMFYUI_LOG_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "logs", "recent.jsonl"),
+)
+
+def _log_job_for_id(job_id: str) -> dict | None:
+    if not job_id:
+        return None
+    job_id = str(job_id)
+    job_map = globals().get("jobs") or {}
+    if job_id in job_map:
+        return job_map[job_id]
+    suffix = job_id[-12:]
+    for jid, job in job_map.items():
+        if str(jid).endswith(suffix):
+            return job
+    return None
+
+
+def _log_workflow_type(workflow: str) -> str:
+    if not workflow:
+        return ""
+    classifier = globals().get("_workflow_primary_type")
+    if callable(classifier):
+        try:
+            return classifier(workflow) or ""
+        except Exception:
+            pass
+    return ""
+
+
+def _trim_log_buffer(now: float | None = None) -> None:
+    now = now or time.time()
+    cutoff = now - _LOG_RETENTION_SEC
+    _log_buffer[:] = [entry for entry in _log_buffer if float(entry.get("ts") or 0) >= cutoff]
+    if len(_log_buffer) > _MAX_LOG:
+        del _log_buffer[:len(_log_buffer) - _MAX_LOG]
+
+
+def _persist_log_buffer() -> None:
+    try:
+        os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
+        with open(_LOG_FILE, "w", encoding="utf-8") as fh:
+            for entry in _log_buffer:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _append_persistent_log(entry: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
+        with open(_LOG_FILE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _load_recent_logs() -> None:
+    if not os.path.isfile(_LOG_FILE):
+        return
+    now = time.time()
+    cutoff = now - _LOG_RETENTION_SEC
+    loaded: list[dict] = []
+    try:
+        with open(_LOG_FILE, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if float(entry.get("ts") or 0) >= cutoff:
+                    loaded.append(entry)
+        _log_buffer[:] = loaded[-_MAX_LOG:]
+        _persist_log_buffer()
+    except Exception:
+        pass
+
 
 def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = ""):
+    phase = str(phase or "")
+    raw_msg = str(msg or "")
+    raw_details = str(details or "")
+    if phase == "stop" or raw_msg.strip().lower() == "stop":
+        return
+    msg_map = {
+        "Starting generation": "开始生成",
+        "Workflow finished": "工作流完成",
+        "Workflow execution started": "工作流开始执行",
+    }
+    phase_map = {
+        "generate": "生成",
+        "complete": "完成",
+        "node": "节点",
+        "sampler": "采样",
+        "step": "步进",
+        "start": "开始",
+        "done": "完成",
+        "error": "错误",
+        "wstrack": "进度追踪",
+        "coldstart": "冷启动",
+        "instance": "实例",
+        "queue": "队列",
+        "wf_meta": "工作流元数据",
+        "wf_config": "工作流配置",
+        "db": "数据库",
+        "idle": "空闲回收",
+        "dead": "实例恢复",
+        "stuck": "任务卡住",
+        "ws": "通信",
+    }
+    msg = msg_map.get(raw_msg, raw_msg)
+    if msg.startswith("Sampling "):
+        msg = "采样 " + msg[len("Sampling "):]
+    elif msg.startswith("WS error:"):
+        msg = "进度追踪错误:" + msg[len("WS error:"):]
+    elif msg.startswith("ComfyUI execution error:"):
+        msg = "ComfyUI 执行错误:" + msg[len("ComfyUI execution error:"):]
+    elif msg.startswith("Prompt 已提交:"):
+        msg = "任务已提交:" + msg[len("Prompt 已提交:"):]
+    elif msg.endswith(" started"):
+        msg = msg[:-len(" started")] + " 已启动"
+    elif msg.endswith(" stopped"):
+        msg = msg[:-len(" stopped")] + " 已停止"
+    elif msg.endswith(" restarted"):
+        msg = msg[:-len(" restarted")] + " 已重启"
+    elif msg.endswith(" start FAILED"):
+        msg = msg[:-len(" start FAILED")] + " 启动失败"
+    elif msg.endswith(" stop FAILED"):
+        msg = msg[:-len(" stop FAILED")] + " 停止失败"
+    elif msg.endswith(" restart FAILED"):
+        msg = msg[:-len(" restart FAILED")] + " 重启失败"
+    phase = phase_map.get(phase, phase)
+    details = msg_map.get(raw_details, raw_details)
+    job = _log_job_for_id(job_id)
+    workflow = str((job or {}).get("workflow") or "")
+    workflow_type = str((job or {}).get("workflow_type") or _log_workflow_type(workflow))
     entry = {"ts": time.time(), "level": level, "phase": phase,
              "msg": str(msg)[:200], "job_id": job_id[-12:], "details": str(details)[:500]}
+    user_id = str((job or {}).get("user_id") or "")
+    if user_id:
+        entry["user_id"] = user_id
+    if workflow:
+        entry["workflow"] = workflow
+    if workflow_type:
+        entry["workflow_type"] = workflow_type
     _log_buffer.append(entry)
-    if len(_log_buffer) > _MAX_LOG:
-        _log_buffer[:50] = []
+    _trim_log_buffer()
+    _append_persistent_log(entry)
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(broadcast({"type": "log", "entry": entry}))
@@ -60,11 +229,122 @@ def add_log(level: str, phase: str, msg: str, job_id: str = "", details: str = "
 
 NODES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "nodes.json")
 
+
+def _friendly_generation_error(err: Exception) -> str:
+    text = str(err)
+    if "Connection refused" in text or "Errno 61" in text or "Errno 111" in text:
+        return "ComfyUI 连接被拒绝，请检查出图实例是否仍在运行"
+    if "timed out" in text or "TimeoutError" in text:
+        return "ComfyUI 响应超时，请稍后重试"
+    return text[:200]
+
 # ── Runtime connection state ──
 _connected_nodes: dict[str, bool] = {}  # node_id -> connected (default True if missing)
+ACTIVE_JOB_STATUSES = {
+    "dispatching",
+    "queued",
+    "starting_comfyui",
+    "preparing",
+    "submitting",
+    "generating",
+    "downloading",
+}
+JOB_STAGE_TIMEOUTS = {
+    "dispatching": 120,
+    "queued": 600,
+    "starting_comfyui": 360,
+    "preparing": 180,
+    "submitting": 90,
+    "generating": 1200,
+    "downloading": 240,
+}
+JOB_STAGE_TIMEOUT_MESSAGES = {
+    "dispatching": "任务调度超时",
+    "queued": "排队超时",
+    "starting_comfyui": "实例启动超时",
+    "preparing": "准备阶段超时",
+    "submitting": "提交阶段超时",
+    "generating": "生成阶段超时（长时间无进度）",
+    "downloading": "拉取图片超时",
+}
 
 def _is_node_connected(nid: str) -> bool:
     return _connected_nodes.get(nid, True)
+
+def _job_is_active_for_instance(job: dict, instance_name: str) -> bool:
+    return job.get("instance") == instance_name and job.get("status") in ACTIVE_JOB_STATUSES
+
+
+def _current_job_for_instance(instance_name: str) -> dict | None:
+    active_jobs = [
+        job
+        for job in jobs.values()
+        if _job_is_active_for_instance(job, instance_name)
+    ]
+    if not active_jobs:
+        return None
+    status_rank = {
+        "downloading": 6,
+        "generating": 5,
+        "submitting": 4,
+        "preparing": 3,
+        "starting_comfyui": 2,
+        "queued": 1,
+        "dispatching": 0,
+    }
+    return max(
+        active_jobs,
+        key=lambda job: (
+            status_rank.get(job.get("status"), 0),
+            _job_last_activity_ts(job),
+        ),
+    )
+
+
+def _job_progress_pct(job: dict | None) -> int:
+    if not job:
+        return 0
+    prog = job.get("progress", {}) or {}
+    pct = prog.get("pct", 0) if isinstance(prog, dict) else 0
+    try:
+        return max(0, min(100, int(pct)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _job_last_activity_ts(job: dict) -> float:
+    for key in ("last_update", "submitted_at", "generating_at", "created_at_ts"):
+        try:
+            ts = float(job.get(key) or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if ts > 0:
+            return ts
+    return 0
+
+
+def _job_stuck_state(job: dict, now: float | None = None) -> tuple[bool, float, int]:
+    status = str(job.get("status") or "")
+    timeout = JOB_STAGE_TIMEOUTS.get(status, 600)
+    last = _job_last_activity_ts(job)
+    if not last or status in ("done", "error", "cancelled"):
+        return False, 0.0, timeout
+    now = now or time.time()
+    age = max(0.0, now - last)
+    return age > timeout, age, timeout
+
+
+def _finalize_stuck_job(job_id: str, job: dict, now: float | None = None) -> None:
+    now = now or time.time()
+    status = str(job.get("status") or "")
+    _stuck, age, timeout = _job_stuck_state(job, now=now)
+    message = JOB_STAGE_TIMEOUT_MESSAGES.get(status, "任务超时")
+    job["status"] = "error"
+    job["message"] = f"{message}（{int(age)}秒无状态变化，阈值{int(timeout)}秒）"
+    job["last_update"] = now
+    task = _job_tasks.pop(job_id, None)
+    if task and not task.done():
+        task.cancel()
 
 def _resolve_secret_value(value: str) -> str:
     """Resolve config secrets. Use env:NAME in JSON to avoid storing cleartext."""
@@ -137,6 +417,79 @@ def _get_enabled_instances() -> list[dict]:
             instances.append(full)
     return instances
 
+
+_AUX_INSTANCE_ROLE_TOKENS = {
+    "aux",
+    "assistant",
+    "caption",
+    "interrogate",
+    "llm",
+    "prompt",
+    "prompt-aux",
+    "prompt_aux",
+    "prompt_optimize",
+    "prompt_interrogate",
+    "text",
+    "反推",
+    "提示词",
+    "辅助",
+}
+
+
+def _instance_role_tokens(inst: dict) -> set[str]:
+    """Return normalized role/label tokens that describe how an instance may be used."""
+    values: list[str] = []
+    for key in ("role", "roles", "purpose", "usage", "task_role", "labels", "tags"):
+        raw = inst.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple, set)):
+            values.extend(str(item) for item in raw)
+        else:
+            values.extend(part.strip() for part in str(raw).replace("，", ",").split(","))
+
+    name = str(inst.get("name") or inst.get("id") or "").strip()
+    service = str(inst.get("service") or "").strip()
+    env_aux_names = {
+        item.strip().lower()
+        for item in os.environ.get("EZ_COMFYUI_AUX_INSTANCES", "").replace("，", ",").split(",")
+        if item.strip()
+    }
+    if name and name.lower() in env_aux_names:
+        values.append("prompt_aux")
+    if service and service.lower() in env_aux_names:
+        values.append("prompt_aux")
+
+    tokens = {item.strip().lower() for item in values if item and item.strip()}
+    return tokens
+
+
+def _is_prompt_aux_instance(inst: dict) -> bool:
+    """Whether this instance is reserved for prompt optimization/image interrogation."""
+    if bool(inst.get("prompt_aux") or inst.get("auxiliary") or inst.get("aux_instance")):
+        return True
+    tokens = _instance_role_tokens(inst)
+    return bool(tokens & _AUX_INSTANCE_ROLE_TOKENS)
+
+
+def _get_prompt_aux_instances(instances: list[dict] | None = None) -> list[dict]:
+    """Return instances reserved for prompt optimization and image interrogation."""
+    pool = _get_enabled_instances() if instances is None else list(instances or [])
+    return [inst for inst in pool if _is_prompt_aux_instance(inst)]
+
+
+def _get_generation_instances(instances: list[dict] | None = None) -> list[dict]:
+    """Return instances that may accept image-generation jobs."""
+    pool = _get_enabled_instances() if instances is None else list(instances or [])
+    return [inst for inst in pool if not _is_prompt_aux_instance(inst)]
+
+
+def _can_view_instance(inst: dict, current_user: dict | None = None) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    return not _is_prompt_aux_instance(inst)
+
+
 def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[dict]:
     """Return enabled instances visible to the current user."""
     instances = []
@@ -153,6 +506,8 @@ def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[di
             continue
         for inst in normalized.get("instances", []):
             if not inst.get("enabled", True):
+                continue
+            if not _can_view_instance(inst, current_user):
                 continue
             full = dict(inst)
             full["_node_id"] = normalized["id"]
@@ -222,9 +577,14 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
         ok = _run_cmd(["systemctl", "--user", action, svc])
 
     if ok:
-        add_log("info", "instance", f"[{node_name}] {inst_name} {action}ed", details=action)
+        action_text = {"stop": "stopped"}.get(action, f"{action}ed")
+        add_log("info", "instance", f"[{node_name}] {inst_name} {action_text}", details=action)
         if action in ("start", "restart", "force-restart"):
             _instance_start_grace[inst_name] = time.time()
+        elif action == "stop":
+            _instance_last_active[inst_name] = 0
+            _instance_group[inst_name] = ""
+            _instance_start_grace.pop(inst_name, None)
     else:
         add_log("warn", "instance", f"[{node_name}] {inst_name} {action} FAILED", details=action)
     return ok
@@ -275,7 +635,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
         # Phase 1: find the best instance
-        candidate_instances = _get_enabled_instances()
+        candidate_instances = _get_generation_instances()
         if preferred_node_id:
             candidate_instances = [item for item in candidate_instances if item.get("_node_id") == preferred_node_id]
         if not candidate_instances:
@@ -284,8 +644,24 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         if preferred_instance:
             inst = next((item for item in candidate_instances if item.get("name") == preferred_instance), None)
         if not inst:
-            inst = await pick_best_instance(workflow_name)
+            inst = await mod_picker.pick_best_instance(
+                instances=candidate_instances,
+                workflow_name=workflow_name,
+                affinity_getter=lambda wf: (pick_affinity_instance(wf) or {}).get("name", ""),
+                health_check=lambda _inst: True,
+                queue_size_getter=lambda item: _get_instance_queue_size(item["url"]) + sum(
+                    1
+                    for jid, job in jobs.items()
+                    if jid != job_id
+                    and job.get("instance") == item.get("name")
+                    and job.get("status") in ACTIVE_JOB_STATUSES
+                ),
+                group_getter=lambda name: _instance_group.get(name, ""),
+            )
         sem = _instance_semas.get(inst["name"]) or _instance_semas.get(inst["id"]) or asyncio.Semaphore(1)
+        jobs[job_id]["instance"] = inst["name"]
+        jobs[job_id]["target_node_id"] = inst.get("_node_id", "")
+        jobs[job_id]["target_url"] = inst.get("url", "")
         jobs[job_id]["message"] = f"匹配实例 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -310,8 +686,6 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         jobs[job_id]["message"] = f"实例 {inst['name']} 就绪，开始出图"
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
-        jobs[job_id]["instance"] = inst["name"]
-        await broadcast({"type": "job_update", "job": jobs[job_id]})
         _instance_group[inst["name"]] = extract_model_group(workflow_name)
 
         await generate_task(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, instance=inst)
@@ -527,11 +901,56 @@ JOBS_FILE    = os.environ.get("JOBS_FILE", os.path.join(_BASE, "data", "jobs.jso
 PORT = int(os.environ.get("EZ_COMFYUI_PORT", "9091"))
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
 
+
+def _safe_rel_path(base_dir: str, rel_path: str) -> str:
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    root = os.path.abspath(base_dir)
+    path = os.path.abspath(os.path.join(root, safe))
+    if os.path.commonpath([root, path]) != root:
+        raise HTTPException(400, "Invalid path")
+    return path
+
+
+def _workflow_thumbnail_rel(path: str) -> str:
+    root = os.path.abspath(WORKFLOW_DIR)
+    full = os.path.abspath(path)
+    if os.path.commonpath([root, full]) != root:
+        raise HTTPException(400, "Workflow thumbnail must live under workflow directory")
+    return os.path.relpath(full, root).replace("\\", "/")
+
+
+def _workflow_thumbnail_path(filename: str, entry: dict | None, ext: str) -> tuple[str, str]:
+    workflow_path = _resolve_workflow(filename, entry)
+    if not workflow_path:
+        workflow_path = os.path.join(WORKFLOW_DIR, filename)
+    workflow_dir = os.path.dirname(os.path.abspath(workflow_path))
+    thumb_name = os.path.splitext(os.path.basename(filename))[0] + ext
+    thumb_path = os.path.join(workflow_dir, thumb_name)
+    return thumb_path, _workflow_thumbnail_rel(thumb_path)
+
+
+def _candidate_generated_media_paths(rel_path: str) -> list[str]:
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    if not safe:
+        return []
+    return [_safe_rel_path(OUTPUT_DIR, safe)]
+
+
+def _image_media_type(path: str, default: str = "application/octet-stream") -> str:
+    ext = os.path.splitext(path)[1].lower()
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }.get(ext, default)
+
 # ── Generation SQLite Database ──
 GEN_DB = os.path.join(_BASE, "data", "generation.db")
 
-def _db_connect(path: str = GEN_DB) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+def _db_connect(path: str | None = None) -> sqlite3.Connection:
+    conn = sqlite3.connect(path or GEN_DB)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -608,6 +1027,23 @@ def _init_gen_db():
         conn.execute("ALTER TABLE generations ADD COLUMN is_public INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    try:
+        conn.execute("ALTER TABLE generations ADD COLUMN deleted_at TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE generations ADD COLUMN deleted_by TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    for ddl in (
+        "ALTER TABLE generations ADD COLUMN batch_id TEXT DEFAULT ''",
+        "ALTER TABLE generations ADD COLUMN batch_index INTEGER DEFAULT 0",
+        "ALTER TABLE generations ADD COLUMN batch_count INTEGER DEFAULT 1",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_meta (
             filename TEXT PRIMARY KEY,
@@ -636,10 +1072,11 @@ def _init_gen_db():
     """)
     conn.commit()
     conn.close()
-    _migrate_wf_meta_json_to_db()
-    _migrate_wf_configs_to_db()
     # Initialize auth DB
     _init_auth_db()
+    _migrate_wf_meta_json_to_db()
+    _migrate_legacy_wf_thumbnails()
+    _migrate_wf_configs_to_db()
 
 
 def _init_auth_db():
@@ -684,7 +1121,10 @@ def _init_auth_db():
 
 def _gen_db_to_record(row: dict) -> dict:
     """Transform a SQLite generations row to the JSON record format used by the frontend."""
+    if not isinstance(row, dict):
+        row = dict(row)
     seed_val = str(row["seed"]) if row.get("seed") else ""
+    deleted_at = row.get("deleted_at", "") or ""
     params = {}
     if row.get("params"):
         try:
@@ -709,7 +1149,34 @@ def _gen_db_to_record(row: dict) -> dict:
         "user_id": row.get("user_id", ""),
         "username": row.get("username", ""),
         "is_public": bool(row.get("is_public", 0)),
+        "is_deleted": bool(deleted_at),
+        "deleted_at": deleted_at,
+        "deleted_by": row.get("deleted_by", "") or "",
+        "sort_index": row.get("history_rowid", 0),
+        "batch_id": row.get("batch_id", "") or "",
+        "batch_index": row.get("batch_index", 0) or 0,
+        "batch_count": row.get("batch_count", 1) or 1,
     }
+
+
+def _history_username_map(user_ids: list[str]) -> dict[str, str]:
+    """Look up usernames from the auth database for generation history rows."""
+    ids = sorted({str(uid) for uid in user_ids if uid})
+    if not ids:
+        return {}
+    try:
+        conn = sqlite3.connect(AUTH_DB)
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT id, username FROM users WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        conn.close()
+        return {row["id"]: row["username"] for row in rows}
+    except Exception as e:
+        add_log("warn", "history", f"用户名查询失败：{e}", "")
+        return {}
 
 
 def _workflow_primary_type(filename: str) -> str:
@@ -736,11 +1203,13 @@ def _workflow_primary_type(filename: str) -> str:
 def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
     """Insert a generation record into SQLite."""
     try:
+        if not record.get("thumb") and record.get("filename"):
+            record["thumb"] = make_thumbnail(record.get("filename", "")) or ""
         conn = sqlite3.connect(GEN_DB)
         conn.execute(
             """INSERT OR REPLACE INTO generations
-               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public, batch_id, batch_index, batch_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record["id"],
                 record.get("workflow", ""),
@@ -755,6 +1224,9 @@ def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
                 json.dumps(record.get("field_values", {}), ensure_ascii=False),
                 user_id,
                 1 if record.get("is_public") else 0,
+                record.get("batch_id", "") or "",
+                int(record.get("batch_index", 0) or 0),
+                int(record.get("batch_count", 1) or 1),
             ),
         )
         conn.commit()
@@ -818,6 +1290,23 @@ def get_current_user_optional(request: Request) -> dict | None:
         return None
     try:
         payload = jwt.decode(auth.split(" ")[1], SECRET_KEY, algorithms=[ALGORITHM])
+        conn = sqlite3.connect(AUTH_DB)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT role, disabled FROM users WHERE id=?", (payload.get("sub", ""),)).fetchone()
+        conn.close()
+        if not row or row["disabled"]:
+            return None
+        payload["role"] = row["role"] or "user"
+        return payload
+    except Exception:
+        return None
+
+
+def _get_user_from_token(token: str | None) -> dict | None:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         conn = sqlite3.connect(AUTH_DB)
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT role, disabled FROM users WHERE id=?", (payload.get("sub", ""),)).fetchone()
@@ -969,6 +1458,39 @@ def _migrate_wf_meta_json_to_db():
         conn.close()
 
 
+def _migrate_legacy_wf_thumbnails():
+    """Move old flat workflow thumbnails next to their workflow JSON files."""
+    if not os.path.isdir(WF_THUMB_DIR):
+        return
+    meta = _load_wf_meta()
+    changed = False
+    for fname, entry in list(meta.items()):
+        thumb = str((entry or {}).get("thumbnail") or "")
+        if not thumb or "/" in thumb.replace("\\", "/"):
+            continue
+        src = os.path.join(WF_THUMB_DIR, thumb)
+        if not os.path.isfile(src):
+            continue
+        ext = os.path.splitext(thumb)[1].lower() or ".jpg"
+        entry = _normalize_wf_meta_entry(fname, entry)
+        try:
+            dest, rel = _workflow_thumbnail_path(fname, entry, ext)
+        except HTTPException as e:
+            add_log("warn", "wf_thumb", f"Failed to migrate {thumb}: {e.detail}")
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if os.path.abspath(dest) != os.path.abspath(src):
+            if os.path.isfile(dest):
+                os.remove(src)
+            else:
+                shutil.move(src, dest)
+        entry["thumbnail"] = rel
+        _write_wf_meta_entry_to_db(fname, entry)
+        changed = True
+    if changed:
+        _export_wf_meta_json_from_db()
+
+
 def _delete_wf_meta_entry(filename: str):
     conn = _db_connect()
     try:
@@ -1003,6 +1525,8 @@ def _can_manage_workflow(filename: str, entry: dict, current_user: dict) -> bool
 
 
 def _can_access_job(job: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
     owner = job.get("user_id", "")
     uid = _user_id(current_user or {})
     return bool(uid and owner == uid)
@@ -1032,17 +1556,18 @@ jobs: dict[str, dict] = {}
 _job_tasks: dict[str, asyncio.Task] = {}
 history: list[dict] = []
 ws_clients: list[WebSocket] = []
+ws_client_users: dict[WebSocket, dict] = {}
 gpu_cache: dict = {"ts": 0, "data": None}
 node_gpu_cache: dict = {}
 
 # ── Model Affinity Routing ──────────────────────────────────────────────
 # Per-instance semaphores: one concurrent job per ComfyUI instance
 def _build_instance_semas():
-    return {inst["name"]: asyncio.Semaphore(1) for inst in _get_enabled_instances()}
+    return {inst["name"]: asyncio.Semaphore(1) for inst in _get_generation_instances()}
 def _build_instance_last_active():
     return {inst["name"]: 0 for inst in _get_enabled_instances()}
 def _build_instance_group():
-    return {inst["name"]: "" for inst in _get_enabled_instances()}
+    return {inst["name"]: "" for inst in _get_generation_instances()}
 
 _instance_semas: dict[str, asyncio.Semaphore] = {}
 _instance_last_active: dict[str, float] = {}
@@ -1053,15 +1578,18 @@ START_GRACE_PERIOD = 90  # seconds to skip dead watcher check after intentional 
 def _refresh_instance_state():
     """Refresh per-instance semaphores and state dicts from current nodes."""
     global _instance_semas, _instance_last_active, _instance_group
-    current = {inst["name"] for inst in _get_enabled_instances()}
+    current = {inst["name"] for inst in _get_generation_instances()}
     # Add new
-    for inst in _get_enabled_instances():
+    for inst in _get_generation_instances():
         if inst["name"] not in _instance_semas:
             _instance_semas[inst["name"]] = asyncio.Semaphore(1)
         if inst["name"] not in _instance_last_active:
             _instance_last_active[inst["name"]] = 0
         if inst["name"] not in _instance_group:
             _instance_group[inst["name"]] = ""
+    for inst in _get_prompt_aux_instances():
+        if inst["name"] not in _instance_last_active:
+            _instance_last_active[inst["name"]] = 0
 
 # Model group definitions — workflows sharing a base model get the same group.
 # Affinity matching is done at the GROUP level, not filename level.
@@ -1088,7 +1616,7 @@ def pick_affinity_instance(workflow_name: str) -> dict | None:
     if not workflow_name:
         return None
     wf_group = extract_model_group(workflow_name)
-    for inst in _get_enabled_instances():
+    for inst in _get_generation_instances():
         if _instance_group.get(inst["name"]) == wf_group:
             return inst
     return None
@@ -1105,16 +1633,22 @@ async def _idle_instance_watcher():
         await asyncio.sleep(60)
         now = time.time()
         for inst in _get_enabled_instances():
+            if _is_prompt_aux_instance(inst):
+                continue
             name = inst["name"]
             last = _instance_last_active.get(name, 0)
             if last == 0:
                 continue
-            active_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("generating", "dispatching", "preparing", "queued")]
+            active_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
             if active_jobs:
                 continue
             if now - last > IDLE_TIMEOUT:
                 node = _get_node_by_id(inst.get("_node_id", ""))
                 if node:
+                    if not _check_service_active(node, inst):
+                        _instance_last_active[name] = 0
+                        _instance_group[name] = ""
+                        continue
                     add_log("warn", "idle", f"Stopping idle {name} ({now - last:.0f}s idle)")
                     _run_instance_action(node, inst, "stop")
 
@@ -1170,34 +1704,34 @@ def _check_service_active(node: dict, instance: dict) -> bool:
     return False
 
 async def _stuck_job_watcher():
-    """Kill jobs stuck >10min without status change. Stop its instance."""
+    """Fail jobs that exceed their current stage timeout and release their instance."""
     while True:
         await asyncio.sleep(60)
         now = time.time()
         for jid, j in list(jobs.items()):
-            if j.get("status") in ("done", "error"):
+            stuck, age, _timeout = _job_stuck_state(j, now=now)
+            if not stuck:
                 continue
-            last_up = j.get("last_update", j.get("generating_at", 0))
-            if last_up and now - last_up > 600:  # 10 minutes
-                j["status"] = "error"
-                j["message"] = "任务超时（10分钟无状态变化）"
-                print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {now-last_up:.0f}s)")
-                add_log("warn", "stuck", f"Killed job idle {now-last_up:.0f}s", jid)
-                inst_name = j.get("instance", "")
-                if inst_name:
-                    for inst in _get_enabled_instances():
-                        if inst["name"] == inst_name:
-                            node = _get_node_by_id(inst.get("_node_id", ""))
-                            if node:
-                                _run_instance_action(node, inst, "stop")
-                            break
-                asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
+            _finalize_stuck_job(jid, j, now=now)
+            print(f"[stuck-watcher] Killed stuck job {jid[-12:]} (idle {age:.0f}s)")
+            add_log("warn", "stuck", f"Killed job idle {age:.0f}s", jid)
+            inst_name = j.get("instance", "")
+            if inst_name:
+                for inst in _get_enabled_instances():
+                    if inst["name"] == inst_name:
+                        node = _get_node_by_id(inst.get("_node_id", ""))
+                        if node:
+                            _run_instance_action(node, inst, "stop")
+                        break
+            save_jobs()
+            asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
 
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _inst_mgr, _job_runner
+    _load_recent_logs()
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
@@ -1230,8 +1764,9 @@ async def lifespan(app: FastAPI):
         instance_last_active=_instance_last_active,
         output_dir=OUTPUT_DIR,
         history_dir=HISTORY_DIR,
-        get_enabled_instances_fn=_get_enabled_instances,
+        get_enabled_instances_fn=_get_generation_instances,
         insert_gen_fn=_insert_generation,
+        input_dir=COMFYUI_INPUT,
     )
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
@@ -1240,7 +1775,7 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
     yield
 
-app = FastAPI(title="Ez ComfyUI Showcase", lifespan=lifespan)
+app = FastAPI(title="Ez ComfyUI Showcase", version=APP_VERSION, lifespan=lifespan)
 
 @app.post("/api/nodes/{nid}/connect")
 def _api_node_connect(nid: str, current_user: dict = Depends(require_admin)):
@@ -1252,9 +1787,28 @@ def _api_node_disconnect(nid: str, current_user: dict = Depends(require_admin)):
     _connected_nodes[nid] = False
     return {"ok": True}
 
+def _can_view_log_entry(entry: dict, current_user: dict) -> bool:
+    if _is_admin_user(current_user):
+        return True
+    entry_user_id = str(entry.get("user_id") or "")
+    if entry_user_id and entry_user_id == str(current_user.get("id") or ""):
+        return True
+    log_job_suffix = str(entry.get("job_id") or "")
+    if not log_job_suffix:
+        return False
+    for jid, job in jobs.items():
+        if str(jid).endswith(log_job_suffix) and _can_access_job(job, current_user):
+            return True
+    return False
+
+
 @app.get("/api/logs")
-def api_logs(limit: int = 200, current_user: dict = Depends(require_admin)):
-    return list(_log_buffer[-limit:])
+def api_logs(limit: int = _MAX_LOG, current_user: dict = Depends(get_current_user)):
+    _trim_log_buffer()
+    _persist_log_buffer()
+    safe_limit = max(1, min(int(limit or _MAX_LOG), _MAX_LOG))
+    visible = [entry for entry in _log_buffer if _can_view_log_entry(entry, current_user)]
+    return list(visible[-safe_limit:])
 static_dir = Path(__file__).parent / "static"
 if static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -1342,7 +1896,7 @@ def get_gpu_stats() -> dict:
     return data
 
 
-def _empty_gpu_stats(message: str = "") -> dict:
+def _empty_gpu_stats(message: str = "", detail: str = "") -> dict:
     return {
         "vram_used_mb": 0,
         "vram_total_mb": 0,
@@ -1350,6 +1904,7 @@ def _empty_gpu_stats(message: str = "") -> dict:
         "temp_c": 0,
         "util_pct": 0,
         "message": message,
+        "detail": detail,
     }
 
 
@@ -1373,6 +1928,7 @@ def _parse_nvidia_smi_stats(out: str) -> dict:
         "temp_c": temp,
         "util_pct": util,
         "message": "",
+        "detail": "",
     }
 
 
@@ -1417,7 +1973,7 @@ def _run_remote_gpu_query(node: dict) -> dict:
     ])
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
     if r.returncode != 0:
-        return _empty_gpu_stats((r.stderr or "VRAM 未获取到").strip()[:120])
+        return _empty_gpu_stats("VRAM 暂不可用", (r.stderr or "VRAM 未获取到").strip()[:240])
     data = _parse_nvidia_smi_stats(r.stdout)
     if data.get("vram_total_mb", 0) > 0:
         return data
@@ -1425,7 +1981,8 @@ def _run_remote_gpu_query(node: dict) -> dict:
     mem = subprocess.run(mem_cmd, capture_output=True, text=True, timeout=8)
     if mem.returncode == 0:
         return _parse_meminfo_stats(mem.stdout, data)
-    data["message"] = (mem.stderr or data.get("message") or "VRAM 未获取到").strip()[:120]
+    data["message"] = data.get("message") or "VRAM 暂不可用"
+    data["detail"] = (mem.stderr or data.get("detail") or "VRAM 未获取到").strip()[:240]
     return data
 
 
@@ -1448,9 +2005,27 @@ def get_node_gpu_stats(node: dict | None) -> dict:
     try:
         data = _run_remote_gpu_query(node)
     except Exception as e:
-        data = _empty_gpu_stats(str(e)[:120])
+        data = _empty_gpu_stats("VRAM 暂不可用", str(e)[:240])
     node_gpu_cache[key] = {"ts": now, "data": data}
     return data
+
+
+def _select_status_node_id(instances: list[dict], target_node_id: str = "", target_instance: str = "") -> str:
+    visible_node_ids = {inst.get("_node_id", "") for inst in instances}
+    if target_node_id and target_node_id in visible_node_ids:
+        return target_node_id
+    if target_instance:
+        for inst in instances:
+            if inst.get("name") == target_instance:
+                return inst.get("_node_id", "")
+    return instances[0].get("_node_id", "") if instances else ""
+
+
+def _gpu_stats_for_status_node(instances: list[dict], target_node_id: str = "", target_instance: str = "") -> dict[str, dict]:
+    node_id = _select_status_node_id(instances, target_node_id, target_instance)
+    if not node_id:
+        return {}
+    return {node_id: get_node_gpu_stats(_get_node_by_id(node_id))}
 
 
 def comfyui_up(base_url: str = None) -> bool:
@@ -1459,6 +2034,64 @@ def comfyui_up(base_url: str = None) -> bool:
             return r.status == 200
     except Exception:
         return False
+
+
+def _mark_aux_instance_active(instance: dict) -> None:
+    name = str((instance or {}).get("name") or "")
+    if name:
+        _instance_last_active[name] = time.time()
+
+
+def _ensure_aux_instance_ready(
+    instance: dict,
+    phase: str,
+    timeout: float = 180.0,
+    poll_interval: float = 2.0,
+) -> dict:
+    """Ensure a non-generation ComfyUI task has a live instance before submit."""
+    inst = dict(instance or {})
+    url = inst.get("url", "")
+    name = inst.get("name", "unknown")
+    if url and comfyui_up(url):
+        _mark_aux_instance_active(inst)
+        return inst
+
+    node = _get_node_by_id(inst.get("_node_id", ""))
+    conn = (node or {}).get("connection") or inst.get("_node_connection", "local")
+    if conn == "remote-http":
+        raise RuntimeError(f"实例 {name} 当前不可用，HTTP 远程实例不能自动启动")
+    if not node:
+        raise RuntimeError(f"实例 {name} 缺少设备信息，无法自动启动")
+
+    add_log("info", phase, f"启动 ComfyUI 实例 {name}...", details="coldstart")
+    if not _run_instance_action(node, inst, "start"):
+        raise RuntimeError(f"实例 {name} 启动命令失败")
+
+    deadline = time.time() + float(timeout or 180.0)
+    interval = max(0.2, float(poll_interval or 2.0))
+    while time.time() < deadline:
+        if url and comfyui_up(url):
+            _mark_aux_instance_active(inst)
+            add_log("info", phase, f"ComfyUI 实例 {name} 已就绪", details="coldstart")
+            return inst
+        time.sleep(interval)
+    raise TimeoutError(f"实例 {name} 启动后未就绪")
+
+
+def _pick_ready_aux_instance(instances: list[dict], phase: str, timeout: float = 180.0) -> dict:
+    """Pick a reserved auxiliary instance and cold-start it when needed."""
+    aux_instances = _get_prompt_aux_instances(instances)
+    if not aux_instances:
+        raise RuntimeError("未配置提示词独立实例，请新增独立 ComfyUI 入口并为实例设置 roles: ['prompt_aux']")
+    errors = []
+    for inst in sorted(aux_instances, key=lambda item: _get_instance_queue_size(item.get("url", ""))):
+        try:
+            return _ensure_aux_instance_ready(inst, phase=phase, timeout=timeout)
+        except Exception as e:
+            errors.append(f"{inst.get('name', '?')}: {e}")
+            add_log("warn", phase, f"实例 {inst.get('name', '?')} 不可用: {e}")
+    detail = "；".join(errors) if errors else "无候选实例"
+    raise RuntimeError(f"没有可用的提示词独立实例: {detail}")
 
 
 def comfyui_pid() -> int | None:
@@ -1522,8 +2155,19 @@ def comfyui_post(path: str, data: dict, base_url: str = None) -> dict:
         url, data=payload,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            body = ""
+        detail = f"HTTP Error {e.code}: {e.reason}"
+        if body:
+            detail = f"{detail}; {body[:500]}"
+        raise RuntimeError(f"HTTP POST {url} 失败: {detail}") from e
 
 
 def comfyui_get(path: str, base_url: str = None) -> dict:
@@ -1579,15 +2223,81 @@ def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, out
 
 
 # ── Multi-instance routing ──────────────────────────────────────────────
-def _get_instance_queue_size(base_url: str) -> int:
-    """Return number of pending + running jobs on a ComfyUI instance."""
+def _queue_prompt_id(item) -> str:
+    if isinstance(item, list) and len(item) > 1:
+        return str(item[1] or "")
+    if isinstance(item, dict):
+        return str(item.get("prompt_id") or item.get("id") or "")
+    return ""
+
+
+def _get_instance_queue_counts(base_url: str) -> dict:
+    """Return remote ComfyUI queue counts for one instance."""
     try:
         q = comfyui_get("/queue", base_url=base_url)
-        running = len(q.get("queue_running", []))
-        pending = len(q.get("queue_pending", []))
-        return running + pending
+        running_items = q.get("queue_running", []) or []
+        pending_items = q.get("queue_pending", []) or []
+        running = len(running_items)
+        pending = len(pending_items)
+        return {
+            "running": running,
+            "pending": pending,
+            "total": running + pending,
+            "running_prompt_ids": [pid for pid in (_queue_prompt_id(item) for item in running_items) if pid],
+            "pending_prompt_ids": [pid for pid in (_queue_prompt_id(item) for item in pending_items) if pid],
+        }
     except Exception:
-        return 999  # unreachable → lowest priority
+        return {"running": 0, "pending": 0, "total": 999, "running_prompt_ids": [], "pending_prompt_ids": []}
+
+
+def _get_instance_queue_size(base_url: str) -> int:
+    """Return number of pending + running jobs on a ComfyUI instance."""
+    return _get_instance_queue_counts(base_url)["total"]
+
+
+_untracked_remote_cleanup_at: dict[str, float] = {}
+
+
+def _active_prompt_ids_for_instance(instance_name: str) -> set[str]:
+    return {
+        str(job.get("prompt_id") or "")
+        for job in jobs.values()
+        if _job_is_active_for_instance(job, instance_name) and job.get("prompt_id")
+    }
+
+
+def _untracked_remote_prompt_ids(instance_name: str, remote_queue: dict) -> list[str]:
+    known = _active_prompt_ids_for_instance(instance_name)
+    remote_ids = list(remote_queue.get("running_prompt_ids") or []) + list(remote_queue.get("pending_prompt_ids") or [])
+    return [pid for pid in remote_ids if pid and pid not in known]
+
+
+def _cleanup_untracked_remote_prompts(inst: dict, remote_queue: dict) -> list[str]:
+    """Reject remote ComfyUI prompts that are not tracked by this frontend/backend job system."""
+    prompt_ids = _untracked_remote_prompt_ids(inst.get("name", ""), remote_queue)
+    if not prompt_ids:
+        return []
+    key = f"{inst.get('name', '')}:{','.join(prompt_ids)}"
+    now = time.time()
+    if now - _untracked_remote_cleanup_at.get(key, 0) < 15:
+        return prompt_ids
+    _untracked_remote_cleanup_at[key] = now
+    base_url = inst.get("url", "")
+    try:
+        comfyui_post("/queue", {"delete": prompt_ids}, base_url=base_url)
+    except Exception:
+        pass
+    try:
+        comfyui_post("/interrupt", {}, base_url=base_url)
+    except Exception:
+        pass
+    add_log(
+        "warn",
+        "queue",
+        f"已拒绝未追踪远端任务: {inst.get('name', '')}",
+        details=",".join(prompt_ids),
+    )
+    return prompt_ids
 
 
 async def pick_best_instance(workflow_name: str = "") -> dict:
@@ -1595,53 +2305,14 @@ async def pick_best_instance(workflow_name: str = "") -> dict:
     instances = _get_enabled_instances()
     if not instances:
         raise RuntimeError("No enabled instances available")
-
-    # Phase 0: T2I → A, I2I → B. The selected instance is cold-started later.
-    if workflow_name:
-        lower = workflow_name.lower()
-        inst_a = next((i for i in instances if i["name"] == "A"), None)
-        inst_b = next((i for i in instances if i["name"] == "B"), None)
-        if lower.startswith("t2i") or "_t2i" in lower or "-t2i" in lower:
-            if inst_a:
-                return inst_a
-        if lower.startswith("i2i") or "_i2i" in lower or "-i2i" in lower:
-            if inst_b:
-                return inst_b
-
-    # Phase 1: try workflow affinity
-    if workflow_name:
-        affinity = pick_affinity_instance(workflow_name)
-        if affinity:
-            return affinity
-
-    # Phase 2: prefer idle instance with same or no model group
-    wf_group = extract_model_group(workflow_name) if workflow_name else ""
-    sizes = await asyncio.gather(*[asyncio.to_thread(_get_instance_queue_size, inst["url"]) for inst in instances])
-
-    # Best: idle instance with matching group
-    for inst, sz in zip(instances, sizes):
-        if sz == 0 and _instance_group.get(inst["name"]) == wf_group:
-            return inst
-    # Good: idle instance with no loaded group
-    for inst, sz in zip(instances, sizes):
-        if sz == 0 and not _instance_group.get(inst["name"]):
-            return inst
-
-    # Phase 3: shortest queue
-    best, best_load = None, 999
-    for inst, load in zip(instances, sizes):
-        if load >= best_load:
-            continue
-        ig = _instance_group.get(inst["name"], "")
-        if ig in (wf_group, ""):
-            best, best_load = inst, load
-    if not best:
-        for inst, load in zip(instances, sizes):
-            if load < best_load:
-                best, best_load = inst, load
-    chosen = best or instances[0]
-
-    return chosen
+    return await mod_picker.pick_best_instance(
+        instances=instances,
+        workflow_name=workflow_name,
+        affinity_getter=lambda wf: (pick_affinity_instance(wf) or {}).get("name", ""),
+        health_check=lambda _inst: True,
+        queue_size_getter=lambda inst: _get_instance_queue_size(inst["url"]),
+        group_getter=lambda name: _instance_group.get(name, ""),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1684,10 +2355,61 @@ EDITABLE_FIELDS = {
         "image": {"type": "image", "label": "参考图片"},
     },
     "SeedVR2VideoUpscaler": {
-        "seed":       {"type": "seed",   "label": "超分种子"},
+        "seed":       {"type": "seed",   "label": "超分种子", "min": 0, "max": 4294967295},
         "resolution": {"type": "number", "label": "超分分辨率", "min": 512, "max": 8192, "step": 64},
     },
 }
+
+
+def _looks_like_seed_field(ct: str, title: str, field: str) -> bool:
+    field_l = str(field or "").lower()
+    title_l = str(title or "").lower().replace("_", " ")
+    ct_l = str(ct or "").lower()
+    if field_l in ("seed", "noise_seed"):
+        return True
+    if field_l != "value":
+        return False
+    return "seed" in title_l or "seed" in ct_l
+
+
+def _seed_limits_for_field(class_type: str, field: str) -> tuple[int, int] | None:
+    if class_type == "SeedVR2VideoUpscaler" and field == "seed":
+        return (0, 4294967295)
+    return None
+
+
+def _normalize_seed_value_for_field(class_type: str, field: str, value):
+    limits = _seed_limits_for_field(class_type, field)
+    if not limits:
+        return value
+    try:
+        seed = int(value)
+    except (TypeError, ValueError):
+        return value
+    mn, mx = limits
+    if seed < mn:
+        return mn
+    if seed > mx:
+        span = mx - mn + 1
+        return mn + ((seed - mn) % span)
+    return seed
+
+
+def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
+    normalized = dict(field_values or {})
+    for key, value in list(normalized.items()):
+        if "::" not in key:
+            continue
+        nid, field = key.split("::", 1)
+        node = wf.get(nid, {})
+        if not isinstance(node, dict):
+            continue
+        normalized[key] = _normalize_seed_value_for_field(
+            str(node.get("class_type") or ""),
+            field,
+            value,
+        )
+    return normalized
 
 
 def _resolve_link(wf: dict, value, depth: int = 0):
@@ -1760,18 +2482,23 @@ def analyze_workflow(path: str) -> dict:
             elif isinstance(fv, int):
                 ui_type = "number"
             ef_extra = {}
+            seed_like = _looks_like_seed_field(ct, title, fk)
             if ct in EDITABLE_FIELDS and fk in EDITABLE_FIELDS[ct]:
                 ef = EDITABLE_FIELDS[ct][fk]
                 ui_type = ef.get("type", ui_type)
                 for k in ("options", "step", "min", "max"):
                     if k in ef:
                         ef_extra[k] = ef[k]
+            elif seed_like:
+                ui_type = "seed"
             zone, visible = _auto_classify(ct, fk, fv)
+            if seed_like:
+                zone, visible = "advanced", True
             field_entry = {
                 "key": f"{nid}::{fk}",
                 "field": fk,
                 "type": ui_type,
-                "label": fk,
+                "label": title if seed_like and fk == "value" else fk,
                 "value": fv,
                 "zone": zone,
                 "visible": visible,
@@ -1961,6 +2688,20 @@ def _parse_legacy(path: str) -> dict:
                         "class_type": ct, "field": fk,
                         "value": val, **fm,
                     })
+        for fk, val in inputs.items():
+            if ct in EDITABLE_FIELDS and fk in EDITABLE_FIELDS[ct]:
+                continue
+            if not _looks_like_seed_field(ct, title, fk):
+                continue
+            if isinstance(val, list):
+                val = _resolve_link(wf, val)
+            fields.append({
+                "node_id": nid, "node_title": title,
+                "class_type": ct, "field": fk,
+                "value": val,
+                "type": "seed",
+                "label": title if fk == "value" else "种子",
+            })
     summary = model_name or Path(path).stem.replace("-", " ").replace("_", " ")
     return {"fields": fields, "summary": summary, "model": model_name}
 
@@ -1994,6 +2735,7 @@ def _parse_with_config(path: str, config: dict) -> dict:
             val = _resolve_link(wf, val)
         ftype = field_cfg.get("type", "")
         fextra = {}
+        seed_like = _looks_like_seed_field(ct, title, fname)
         if ct in EDITABLE_FIELDS and fname in EDITABLE_FIELDS[ct]:
             ef = EDITABLE_FIELDS[ct][fname]
             if not ftype:
@@ -2001,6 +2743,8 @@ def _parse_with_config(path: str, config: dict) -> dict:
             for k in ("options", "step", "min", "max"):
                 if k in ef:
                     fextra[k] = ef[k]
+        if seed_like:
+            ftype = "seed"
         if not ftype:
             ftype = "text"
         for k in ("options", "step", "min", "max"):
@@ -2011,8 +2755,8 @@ def _parse_with_config(path: str, config: dict) -> dict:
             "class_type": ct, "field": fname,
             "value": val,
             "type": ftype,
-            "label": field_cfg.get("label", fname),
-            "zone": field_cfg.get("zone", "user_input"),
+            "label": title if seed_like and fname == "value" else field_cfg.get("label", fname),
+            "zone": "advanced" if seed_like else field_cfg.get("zone", "user_input"),
             "visible": field_cfg.get("visible", True),
             "order": field_cfg.get("order", 0),
             **fextra,
@@ -2025,15 +2769,42 @@ def _parse_with_config(path: str, config: dict) -> dict:
 #  Broadcast
 # ══════════════════════════════════════════════════════════════════════════
 
+def _ws_payload_owner(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    msg_type = data.get("type")
+    if msg_type == "job_update":
+        job = data.get("job") or {}
+        return str(job.get("user_id") or "")
+    if msg_type == "job_cancelled":
+        job_id = str(data.get("job_id") or "")
+        job = jobs.get(job_id) or {}
+        return str(job.get("user_id") or "")
+    return ""
+
+
+def _ws_client_can_receive(client_user: dict | None, data: dict) -> bool:
+    owner = _ws_payload_owner(data)
+    if not owner:
+        return True
+    if _is_admin_user(client_user):
+        return True
+    client_user_id = _user_id(client_user or {})
+    return bool(client_user_id and client_user_id == owner)
+
+
 async def broadcast(data: dict):
     dead = []
     for ws in ws_clients:
+        if not _ws_client_can_receive(ws_client_users.get(ws), data):
+            continue
         try:
             await ws.send_json(data)
         except Exception:
             dead.append(ws)
     for ws in dead:
         ws_clients.remove(ws)
+        ws_client_users.pop(ws, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2284,6 +3055,10 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 if "seed" in v.get("inputs", {}):
                     v["inputs"]["seed"] = seed
 
+        issues = validate_api_prompt(wf)
+        if issues:
+            raise RuntimeError(describe_api_prompt_issues(issues))
+
         if vllm_was_running:
             jobs[job_id]["message"] = "停止 vLLM 释放显存..."
             await broadcast({"type": "job_update", "job": jobs[job_id]})
@@ -2306,6 +3081,8 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                     break
             else:
                 raise TimeoutError(f"ComfyUI #{inst['name']} 启动超时 (180s)")
+
+        ensure_workflow_images_available(wf, COMFYUI_INPUT, inst_url)
 
         add_log("info", "generate", "Starting generation", job_id)
         jobs[job_id]["status"] = "generating"
@@ -2349,6 +3126,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         elapsed = time.time() - elapsed_start
 
         # ── Remote image pullback: download output images from remote instance ──
+        downloaded = []
         if ws_ok and pid:
             jobs[job_id]["status"] = "downloading"
             jobs[job_id]["message"] = "正在拉取图片..."
@@ -2367,26 +3145,42 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             _extra = jobs[job_id].get("ws_error", "") if job_id in jobs else ""
             raise TimeoutError(f"出图失败{' ('+_extra[:100]+')' if _extra else ''}")
 
-        hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
-        filename = None
-        if pid in hist:
-            for node_out in hist[pid].get("outputs", {}).values():
-                for img in node_out.get("images", []):
-                    filename = img["filename"]
-                    break
-                if filename:
-                    break
+        sources = []
+        if downloaded:
+            for path in downloaded:
+                if path and os.path.isfile(path):
+                    sources.append((path, os.path.basename(path)))
+        if not sources:
+            try:
+                hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
+                if pid in hist:
+                    for node_out in hist[pid].get("outputs", {}).values():
+                        for img in node_out.get("images", []):
+                            filename = img.get("filename", "")
+                            if not filename:
+                                continue
+                            src = os.path.join(OUTPUT_DIR, filename)
+                            if not os.path.isfile(src):
+                                matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
+                                if matches:
+                                    src = matches[0]
+                            if os.path.isfile(src):
+                                sources.append((src, filename))
+            except Exception as e:
+                raise RuntimeError(_friendly_generation_error(e))
         if job_id not in jobs or jobs[job_id].get("status") == "error":
             return False, pid or ""
-        if not filename:
+        deduped = []
+        seen_paths = set()
+        for src, filename in sources:
+            real_path = os.path.abspath(src)
+            if real_path in seen_paths or not os.path.isfile(src):
+                continue
+            seen_paths.add(real_path)
+            deduped.append((src, filename or os.path.basename(src)))
+        sources = deduped
+        if not sources:
             raise RuntimeError("未找到输出图片")
-
-        # Prefer local OUTPUT_DIR (files were downloaded there via _download_remote_images_sync)
-        src = os.path.join(OUTPUT_DIR, filename)
-        if not os.path.isfile(src):
-            matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
-            if matches:
-                src = matches[0]
 
         gen_user_id = jobs[job_id].get("user_id", "anonymous") if job_id in jobs else "anonymous"
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -2401,45 +3195,61 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             if m:
                 n = int(m.group(1))
                 if n >= seq: seq = n + 1
-        hist_name = f"{wf_basename}_{seq:04d}.png"
-        # Save to OUTPUT_DIR/{user_id}/{YYYY-MM-DD}/
         output_subdir = os.path.join(OUTPUT_DIR, subdir)
         os.makedirs(output_subdir, exist_ok=True)
-        shutil.copy2(src, os.path.join(output_subdir, hist_name))
 
-        rel_path = f"{subdir}/{hist_name}"
-        actual_w, actual_h = get_image_size(rel_path)
+        prompt_text = infer_generation_label(
+            os.path.basename(workflow_path),
+            field_values,
+            _workflow_primary_type(os.path.basename(workflow_path)),
+        )
 
-        prompt_text = ""
-        for k, v in field_values.items():
-            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_text = str(v)
-                break
-
-        thumb_rel = make_thumbnail(rel_path) or ""
-        record = {
-            "id": job_id, "filename": rel_path,
-            "original": filename,
-            "workflow": os.path.basename(workflow_path),
-            "prompt": prompt_text, "seed": str(seed),
-            "width": actual_w or img_width, "height": actual_h or img_height,
-            "elapsed": round(elapsed, 1),
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "thumb": thumb_rel,
-            "field_values": field_values,
-            "user_id": gen_user_id,
-        }
-        history.insert(0, record)
+        batch_count = len(sources)
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        records = []
+        for idx, (src, filename) in enumerate(sources):
+            hist_name = f"{wf_basename}_{seq + idx:04d}.png"
+            shutil.copy2(src, os.path.join(output_subdir, hist_name))
+            rel_path = f"{subdir}/{hist_name}"
+            actual_w, actual_h = get_image_size(rel_path)
+            thumb_rel = make_thumbnail(rel_path) or ""
+            records.append({
+                "id": job_id if idx == 0 else f"{job_id}_{idx + 1:02d}",
+                "filename": rel_path,
+                "original": filename,
+                "workflow": os.path.basename(workflow_path),
+                "prompt": prompt_text, "seed": str(seed),
+                "width": actual_w or img_width, "height": actual_h or img_height,
+                "elapsed": round(elapsed, 1),
+                "time": created_at,
+                "thumb": thumb_rel,
+                "field_values": field_values,
+                "user_id": gen_user_id,
+                "batch_id": job_id if batch_count > 1 else "",
+                "batch_index": idx,
+                "batch_count": batch_count,
+            })
+        for record in reversed(records):
+            history.insert(0, record)
         save_history()
         # Also write to SQLite with user_id
         gen_user_id = ""
         if job_id in jobs:
             gen_user_id = jobs[job_id].get("user_id", "")
-        _insert_generation(record, elapsed, user_id=gen_user_id)
+        for record in reversed(records):
+            _insert_generation(record, elapsed, user_id=gen_user_id)
 
+        cover = records[0]
         jobs[job_id].update(
             status="done", message=f"完成 ({elapsed:.1f}s)",
-            image=rel_path, elapsed=round(elapsed, 1),
+            image=cover.get("filename", ""),
+            thumb=cover.get("thumb", ""),
+            images=[record.get("filename", "") for record in records],
+            thumbs=[record.get("thumb", "") for record in records],
+            batch_id=job_id if batch_count > 1 else "",
+            batch_count=batch_count,
+            batch_items=records,
+            elapsed=round(elapsed, 1),
         )
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -2450,7 +3260,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         if isinstance(e, TimeoutError):
             jobs[job_id]["message"] = "出图失败"
         else:
-            jobs[job_id]["message"] = str(e)
+            jobs[job_id]["message"] = _friendly_generation_error(e)
         await broadcast({"type": "job_update", "job": jobs[job_id]})
     finally:
         save_jobs()
@@ -2484,8 +3294,45 @@ def load_jobs():
 # ══════════════════════════════════════════════════════════════════════════
 
 HISTORY_FILE = os.path.join(HISTORY_DIR, "history.json")
-THUMB_DIR = os.path.join(HISTORY_DIR, "thumbs")
 THUMB_SIZE = 400
+
+
+def _project_ffmpeg_bin() -> str | None:
+    """Return an explicitly configured or project-local ffmpeg binary."""
+    configured = os.environ.get("EZ_COMFYUI_FFMPEG", "")
+    candidates = [
+        configured,
+        os.path.join(_BASE, ".venv", "bin", "ffmpeg"),
+        os.path.join(_BASE, "bin", "ffmpeg"),
+        os.path.join(_BASE, "tools", "ffmpeg", "ffmpeg"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _make_thumbnail_with_pillow(src: str, thumb_path: str) -> bool:
+    """Create a thumbnail using the project Python environment."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(src) as img:
+            img = ImageOps.exif_transpose(img)
+            img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
+            if img.mode not in ("RGB", "L"):
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                if "A" in img.getbands():
+                    background.paste(img, mask=img.getchannel("A"))
+                else:
+                    background.paste(img)
+                img = background
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(thumb_path, "JPEG", quality=82, optimize=True)
+        return os.path.isfile(thumb_path)
+    except Exception as e:
+        add_log("warn", "thumbnail", f"pillow thumbnail failed: {e}", os.path.basename(src))
+        return False
 
 
 def make_thumbnail(rel_path: str) -> str | None:
@@ -2502,16 +3349,25 @@ def make_thumbnail(rel_path: str) -> str | None:
     if os.path.isfile(thumb_path):
         return thumb_rel
     os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    if _make_thumbnail_with_pillow(src, thumb_path):
+        return thumb_rel
+    ffmpeg = _project_ffmpeg_bin()
+    if not ffmpeg:
+        add_log("warn", "thumbnail", "project ffmpeg not configured; thumbnail skipped", rel_path)
+        return None
     try:
-        subprocess.run([
-            "ffmpeg", "-y", "-i", src,
+        result = subprocess.run([
+            ffmpeg, "-y", "-i", src,
             "-vf", f"scale=w={THUMB_SIZE}:h={THUMB_SIZE}:force_original_aspect_ratio=decrease",
+            "-frames:v", "1",
             "-q:v", "3", thumb_path
         ], capture_output=True, timeout=10)
         if os.path.isfile(thumb_path):
             return thumb_rel
-    except Exception:
-        pass
+        stderr = (result.stderr or b"").decode("utf-8", "ignore").strip()
+        add_log("warn", "thumbnail", f"thumbnail failed ({result.returncode}): {stderr[-300:]}", rel_path)
+    except Exception as e:
+        add_log("warn", "thumbnail", f"thumbnail failed: {e}", rel_path)
     return None
 
 def get_image_size(rel_path: str) -> tuple[int, int]:
@@ -2577,6 +3433,79 @@ class GenerateRequest(BaseModel):
     preferred_node_id: str = ""
 
 
+class PromptOptimizeRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 384
+
+
+class PromptTranslateRequest(BaseModel):
+    prompt: str
+    target_language: str = ""
+    max_new_tokens: int | None = None
+
+
+_PROMPT_TRANSLATE_CACHE: OrderedDict[tuple[str, str], dict] = OrderedDict()
+_PROMPT_TRANSLATE_CACHE_MAX = 160
+_PROMPT_TRANSLATE_CACHE_TTL = 6 * 3600
+
+
+def _prompt_translate_cache_key(prompt: str, target: str) -> tuple[str, str]:
+    normalized = re.sub(r"\s+", " ", str(prompt or "").strip())
+    return (target, normalized)
+
+
+def _prompt_translate_cache_get(prompt: str, target: str) -> dict | None:
+    key = _prompt_translate_cache_key(prompt, target)
+    entry = _PROMPT_TRANSLATE_CACHE.get(key)
+    if not entry:
+        return None
+    if time.time() - float(entry.get("ts", 0)) > _PROMPT_TRANSLATE_CACHE_TTL:
+        _PROMPT_TRANSLATE_CACHE.pop(key, None)
+        return None
+    _PROMPT_TRANSLATE_CACHE.move_to_end(key)
+    cached = dict(entry.get("data") or {})
+    cached["cached"] = True
+    cached["instance"] = cached.get("instance") or "cache"
+    return cached
+
+
+def _prompt_translate_cache_put(prompt: str, target: str, result: dict) -> None:
+    translated = str((result or {}).get("translated_prompt") or "").strip()
+    if not prompt or not target or not translated:
+        return
+    data = dict(result or {})
+    data["cached"] = True
+    _PROMPT_TRANSLATE_CACHE[_prompt_translate_cache_key(prompt, target)] = {"ts": time.time(), "data": data}
+    _PROMPT_TRANSLATE_CACHE.move_to_end(_prompt_translate_cache_key(prompt, target))
+    reverse_target = "zh" if target == "en" else "en"
+    reverse = {
+        "ok": True,
+        "provider": "prompt-translate-cache",
+        "original_prompt": translated,
+        "target_language": reverse_target,
+        "translated_prompt": str(prompt or "").strip(),
+        "prompt_en": str(prompt or "").strip() if reverse_target == "en" else "",
+        "prompt_zh": str(prompt or "").strip() if reverse_target == "zh" else "",
+        "cached": True,
+        "instance": "cache",
+    }
+    _PROMPT_TRANSLATE_CACHE[_prompt_translate_cache_key(translated, reverse_target)] = {"ts": time.time(), "data": reverse}
+    _PROMPT_TRANSLATE_CACHE.move_to_end(_prompt_translate_cache_key(translated, reverse_target))
+    while len(_PROMPT_TRANSLATE_CACHE) > _PROMPT_TRANSLATE_CACHE_MAX:
+        _PROMPT_TRANSLATE_CACHE.popitem(last=False)
+
+
+def _is_json_object_text(text: str) -> bool:
+    try:
+        return isinstance(json.loads(str(text or "").strip()), dict)
+    except Exception:
+        return False
+
+
+class PromptInterrogateRequest(BaseModel):
+    image: str
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  API: Page
 # ══════════════════════════════════════════════════════════════════════════
@@ -2587,38 +3516,69 @@ async def index():
     return HTMLResponse(html_path.read_text("utf-8")) if html_path.is_file() else HTMLResponse("<h1>index.html missing</h1>", 500)
 
 
+@app.get("/api/version")
+def api_version():
+    return {"version": APP_VERSION}
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  API: Status & GPU
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/status")
-def api_status(current_user: dict | None = Depends(get_current_user_optional)):
+def api_status(
+    target_node_id: str = "",
+    target_instance: str = "",
+    current_user: dict | None = Depends(get_current_user_optional),
+):
     instances = []
-    node_gpu = {}
-    for inst in _get_enabled_instances_for_user(current_user):
+    visible_instances = _get_enabled_instances_for_user(current_user)
+    node_gpu = _gpu_stats_for_status_node(visible_instances, target_node_id, target_instance)
+    for inst in visible_instances:
         node_id = inst.get("_node_id", "")
-        if node_id not in node_gpu:
-            node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
-        q_size = _get_instance_queue_size(inst["url"])
+        remote_queue = _get_instance_queue_counts(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
-        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
-        q_run = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching")])
-        q_pend = len([j for j in inst_jobs if j["status"] == "preparing"])
+        is_prompt_aux = _is_prompt_aux_instance(inst)
+        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
+        local_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
+        local_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
+        untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
+        q_run = max(local_run, remote_queue["running"])
+        q_pend = max(local_pend, remote_queue["pending"])
+        q_size = max(remote_queue["total"], q_run + q_pend)
+        current_job = _current_job_for_instance(name)
+        remote_untracked_running = bool(untracked_remote_ids) and not current_job
+        current_workflow = ""
+        current_label = ""
+        if current_job:
+            current_workflow = (current_job.get("workflow") or "").replace(".json", "")
+            prompt_preview = current_job.get("prompt_preview", "")
+            current_label = prompt_preview[:60] if prompt_preview else current_workflow
         instances.append({
             "name": name,
+            "port": inst.get("port"),
             "url": inst["url"],
             "node_id": inst.get("_node_id", ""),
             "node_name": inst.get("_node_name", ""),
             "node_connection": inst.get("_node_connection", "local"),
+            "role": "prompt_aux" if is_prompt_aux else "generation",
+            "prompt_aux": is_prompt_aux,
             "up": comfyui_up(base_url=inst["url"]),
             "queue": q_size,
             "queue_running": q_run,
             "queue_pending": q_pend,
+            "progress": _job_progress_pct(current_job),
+            "progress_known": bool(current_job),
+            "remote_untracked_running": remote_untracked_running,
+            "remote_running_prompt_ids": untracked_remote_ids or remote_queue.get("running_prompt_ids", []),
+            "current_workflow": current_workflow,
+            "current_prompt": current_label,
             "loaded_group": grp,
             "gpu": node_gpu.get(node_id, _empty_gpu_stats("VRAM 未获取到")),
         })
     return {
+        "version": APP_VERSION,
         "comfyui": any(i["up"] for i in instances),
         "instances": instances,
         "comfyui_pid": comfyui_pid(),
@@ -2662,7 +3622,7 @@ def api_comfyui(action: str, current_user: dict = Depends(require_admin)):
             _instance_group[inst["name"]] = ""
             results.append(f"{inst['name']} 已停止")
             for jid, jb in list(jobs.items()):
-                if jb.get("instance") == inst["name"] and jb.get("status") in ("generating", "dispatching", "preparing"):
+                if jb.get("instance") == inst["name"] and jb.get("status") in ACTIVE_JOB_STATUSES:
                     jb["status"] = "error"
                     jb["message"] = "实例已停止"
         return {"ok": True, "msg": "; ".join(results)}
@@ -2724,32 +3684,35 @@ def api_gpu_kill(req: dict, current_user: dict = Depends(require_admin)):
 @app.get("/api/comfyui/status")
 def api_comfyui_status(current_user: dict | None = Depends(get_current_user_optional)):
     result = []
-    node_gpu = {}
-    for inst in _get_enabled_instances_for_user(current_user):
+    visible_instances = _get_enabled_instances_for_user(current_user)
+    node_gpu = _gpu_stats_for_status_node(visible_instances)
+    for inst in visible_instances:
         name = inst["name"]
         node_id = inst.get("_node_id", "")
-        if node_id not in node_gpu:
-            node_gpu[node_id] = get_node_gpu_stats(_get_node_by_id(node_id))
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
-        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("dispatching", "generating", "preparing")]
-        queue_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching")])
-        queue_pending = len([j for j in inst_jobs if j["status"] == "preparing"])
+        remote_queue = _get_instance_queue_counts(inst["url"])
+        inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
+        local_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
+        local_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
+        queue_running = max(local_running, remote_queue["running"])
+        queue_pending = max(local_pending, remote_queue["pending"])
+        queue_total = max(remote_queue["total"], queue_running + queue_pending)
         grp = _instance_group.get(name, "")
-        current_job = next((j for j in jobs.values() if j.get("instance") == name and j.get("status") in ("generating", "dispatching", "preparing")), None)
+        is_prompt_aux = _is_prompt_aux_instance(inst)
+        current_job = _current_job_for_instance(name)
+        untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
+        remote_untracked_running = bool(untracked_remote_ids) and not current_job
         current_label = ""
         current_workflow = ""
-        current_progress = 0
         pending_workflows = []
         if current_job:
             workflow_name = (current_job.get("workflow") or "").replace(".json", "")
             current_workflow = workflow_name
             prompt_preview = current_job.get("prompt_preview", "")
             current_label = prompt_preview[:60] if prompt_preview else workflow_name
-            prog = current_job.get("progress", {}) or {}
-            current_progress = prog.get("pct", 0) if isinstance(prog, dict) else 0
         for j in jobs.values():
-            if j.get("instance") == name and j.get("status") in ("queued", "preparing"):
+            if j.get("instance") == name and j.get("status") in ("queued", "preparing", "starting_comfyui"):
                 wf = (j.get("workflow") or "").replace(".json", "")
                 if wf:
                     pending_workflows.append(wf)
@@ -2758,8 +3721,14 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             "node_id": inst.get("_node_id", ""),
             "node_name": inst.get("_node_name", ""),
             "node_connection": inst.get("_node_connection", "local"),
+            "role": "prompt_aux" if is_prompt_aux else "generation",
+            "prompt_aux": is_prompt_aux,
+            "queue": queue_total,
             "queue_running": queue_running, "queue_pending": queue_pending,
-            "progress": current_progress,
+            "progress": _job_progress_pct(current_job),
+            "progress_known": bool(current_job),
+            "remote_untracked_running": remote_untracked_running,
+            "remote_running_prompt_ids": untracked_remote_ids or remote_queue.get("running_prompt_ids", []),
             "current_workflow": current_workflow,
             "pending_workflows": pending_workflows,
             "current_prompt": current_label, "loaded_group": grp,
@@ -3064,34 +4033,114 @@ def api_workflow_dir_remove(path: str, current_user: dict = Depends(require_admi
 
 # ── Image Upload ────────────────────────────────────────────────────
 
+_UPLOAD_PASSTHROUGH_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+_UPLOAD_NORMALIZE_IMAGE_EXTS = {".tif", ".tiff", ".gif", ".jfif", ".jpe", ".avif", ".heic", ".heif", ""}
+_UPLOAD_ALLOWED_IMAGE_EXTS = _UPLOAD_PASSTHROUGH_IMAGE_EXTS | _UPLOAD_NORMALIZE_IMAGE_EXTS
+_UPLOAD_FORMAT_EXTS = {
+    "PNG": {".png"},
+    "JPEG": {".jpg", ".jpeg"},
+    "WEBP": {".webp"},
+    "BMP": {".bmp"},
+}
+_UPLOAD_SAFE_PASSTHROUGH_MODES = {"RGB", "RGBA", "L", "LA", "P"}
+
+
+def _register_optional_image_openers() -> None:
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except Exception:
+        pass
+
+
+def _decode_uploaded_image(content: bytes):
+    try:
+        from PIL import Image, ImageOps
+    except Exception as e:
+        raise HTTPException(400, f"Image validation unavailable: {e}") from e
+    _register_optional_image_openers()
+    try:
+        with Image.open(BytesIO(content)) as img:
+            source_format = str(img.format or "").upper()
+            try:
+                img.seek(0)
+            except Exception:
+                pass
+            img.load()
+            img = ImageOps.exif_transpose(img)
+            return img.copy(), source_format
+    except Exception as e:
+        raise HTTPException(400, f"Invalid image file: {e}") from e
+
+
+def _png_bytes_from_image(img) -> bytes:
+    if img.mode == "P":
+        img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+    elif img.mode == "LA":
+        img = img.convert("RGBA")
+    elif img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGB")
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
+def _normalize_uploaded_image_content(filename: str, content: bytes) -> tuple[str, bytes]:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _UPLOAD_ALLOWED_IMAGE_EXTS:
+        raise HTTPException(400, f"Unsupported image format: {ext}")
+    img, source_format = _decode_uploaded_image(content)
+    expected_exts = _UPLOAD_FORMAT_EXTS.get(source_format, set())
+    can_passthrough = (
+        ext in _UPLOAD_PASSTHROUGH_IMAGE_EXTS
+        and ext in expected_exts
+        and img.mode in _UPLOAD_SAFE_PASSTHROUGH_MODES
+    )
+    if can_passthrough:
+        return ext, content
+    return ".png", _png_bytes_from_image(img)
+
+
 @app.post("/api/upload-image")
 async def api_upload_image(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file")
-    ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
-    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-        raise HTTPException(400, f"Unsupported image format: {ext}")
+    ext, content = _normalize_uploaded_image_content(file.filename or "", content)
     unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}{ext}"
-    dest = os.path.join(COMFYUI_INPUT, unique_name)
+    user_dir = _user_id(current_user) or "anonymous"
+    date_dir = datetime.now().strftime("%Y-%m-%d")
+    rel_name = f"{user_dir}/{date_dir}/{unique_name}"
+    dest = os.path.join(COMFYUI_INPUT, user_dir, date_dir, unique_name)
     try:
-        os.makedirs(COMFYUI_INPUT, exist_ok=True)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:
             f.write(content)
     except Exception as e:
         raise HTTPException(500, f"Image upload failed: {e}")
-    return {"ok": True, "filename": unique_name, "path": dest}
+    return {"ok": True, "filename": rel_name, "path": dest}
 
 
-@app.get("/api/input-image/{filename}")
+@app.get("/api/input-image/{filename:path}")
 def api_input_image(filename: str):
-    safe = os.path.basename(filename)
-    path = os.path.join(COMFYUI_INPUT, safe)
-    if not os.path.isfile(path):
+    safe = filename.replace("\\", "/").lstrip("/")
+    path = _resolve_input_image_path(safe)
+    if not path:
         raise HTTPException(404)
-    ext = os.path.splitext(safe)[1].lower()
+    ext = os.path.splitext(path)[1].lower()
     media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+def _resolve_input_image_path(filename: str) -> str:
+    safe = filename.replace("\\", "/").lstrip("/")
+    input_root = os.path.abspath(COMFYUI_INPUT)
+    path = os.path.abspath(os.path.join(input_root, safe))
+    if os.path.commonpath([input_root, path]) != input_root:
+        raise HTTPException(400, "Invalid image path")
+    if os.path.isfile(path):
+        return path
+    return ""
 
 
 # ── Workflow Metadata ─────────────────────────────────────────────────
@@ -3252,6 +4301,36 @@ def api_workflows_meta(current_user: dict | None = Depends(get_current_user_opti
     return result
 
 
+@app.post("/api/workflows/meta/sort")
+def api_sort_wf_meta(body: dict, current_user: dict = Depends(get_current_user)):
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Sort payload must be an object")
+    meta = _load_wf_meta()
+    seen = set()
+    for d in _get_workflow_dirs():
+        for f in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
+            seen.add(os.path.basename(f))
+    updates: list[tuple[str, int]] = []
+    for filename, order in body.items():
+        filename = os.path.basename(str(filename or ""))
+        if not filename or filename not in seen:
+            raise HTTPException(404, f"Workflow not found: {filename}")
+        entry = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+        if not _can_manage_workflow(filename, entry, current_user):
+            raise HTTPException(403, f"No permission for workflow: {filename}")
+        try:
+            updates.append((filename, int(order)))
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"Invalid sort order for workflow: {filename}")
+    for filename, order in updates:
+        entry = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
+        entry["sort_order"] = order
+        meta[filename] = entry
+        _write_wf_meta_entry_to_db(filename, entry)
+    _export_wf_meta_json_from_db()
+    return {"ok": True, "meta": api_workflows_meta(current_user)}
+
+
 @app.put("/api/workflows/meta/{filename}")
 def api_update_wf_meta(filename: str, body: dict, current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
@@ -3291,29 +4370,34 @@ def api_delete_wf_meta(filename: str, current_user: dict = Depends(get_current_u
 
 @app.post("/api/workflows/meta/thumbnail")
 async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    os.makedirs(WF_THUMB_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename)[1] or ".jpg"
-    thumb_name = f"{os.path.splitext(filename)[0]}{ext}"
-    thumb_path = os.path.join(WF_THUMB_DIR, thumb_name)
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+        raise HTTPException(400, f"Unsupported image format: {ext}")
     content = await file.read()
-    with open(thumb_path, "wb") as f:
-        f.write(content)
+    if not content:
+        raise HTTPException(400, "Empty file")
     meta = _load_wf_meta()
     meta[filename] = _normalize_wf_meta_entry(filename, meta.get(filename, {}))
     if not _can_manage_workflow(filename, meta[filename], current_user):
         raise HTTPException(403, "No permission for this workflow")
-    meta[filename]["thumbnail"] = thumb_name
+    thumb_path, rel_thumb = _workflow_thumbnail_path(filename, meta[filename], ext)
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    with open(thumb_path, "wb") as f:
+        f.write(content)
+    meta[filename]["thumbnail"] = rel_thumb
     _write_wf_meta_entry_to_db(filename, meta[filename])
     _export_wf_meta_json_from_db()
-    return {"ok": True, "thumbnail": thumb_name}
+    return {"ok": True, "thumbnail": rel_thumb}
 
 
-@app.get("/api/workflows/thumbnail/{name}")
+@app.get("/api/workflows/thumbnail/{name:path}")
 def api_get_wf_thumbnail(name: str):
-    path = os.path.join(WF_THUMB_DIR, name)
+    path = _safe_rel_path(WORKFLOW_DIR, name)
     if not os.path.isfile(path):
         raise HTTPException(404)
-    return FileResponse(path, media_type="image/jpeg")
+    ext = os.path.splitext(path)[1].lower()
+    media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
 
 
 @app.put("/api/workflows/{filename}/rename")
@@ -3350,6 +4434,172 @@ def api_workflow_delete(name: str, current_user: dict = Depends(get_current_user
 #  API: Generation
 # ══════════════════════════════════════════════════════════════════════════
 
+@app.post("/api/prompt/optimize")
+def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends(get_current_user)):
+    prompt = str(req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt is required")
+    instances = _get_enabled_instances()
+    if not instances:
+        raise HTTPException(503, "No enabled ComfyUI instances available")
+    try:
+        inst = _pick_ready_aux_instance(instances, "prompt_optimize", timeout=180)
+        result = run_prompt_optimizer(
+            prompt,
+            inst.get("url", COMFYUI_URL),
+            comfyui_post,
+            comfyui_get,
+            timeout=300,
+            poll_interval=1,
+            max_new_tokens=req.max_new_tokens,
+        )
+        _mark_aux_instance_active(inst)
+    except TimeoutError as e:
+        add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(504, f"提示词优化超时: {e}") from e
+    except RuntimeError as e:
+        add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
+        status_code = 503 if "提示词独立实例" in str(e) else 500
+        raise HTTPException(status_code, f"提示词优化失败: {e}") from e
+    except Exception as e:
+        add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"提示词优化失败: {e}") from e
+    result["instance"] = inst.get("name", "")
+    add_log("info", "prompt_optimize", f"Prompt optimized by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+    return result
+
+
+@app.post("/api/prompt/translate")
+def api_prompt_translate(req: PromptTranslateRequest, current_user: dict = Depends(get_current_user)):
+    prompt = str(req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt is required")
+    target = str(req.target_language or "").strip().lower()
+    if target not in ("zh", "en"):
+        target = "en" if re.search(r"[\u4e00-\u9fff]", prompt) else "zh"
+    cached = _prompt_translate_cache_get(prompt, target)
+    if cached:
+        add_log("info", "prompt_translate", f"Prompt translation cache hit to {target}", details=f"user={_user_id(current_user)}")
+        return cached
+    instances = _get_enabled_instances()
+    if not instances:
+        raise HTTPException(503, "No enabled ComfyUI instances available")
+    try:
+        inst = _pick_ready_aux_instance(instances, "prompt_translate", timeout=180)
+        result = run_prompt_language_switcher(
+            prompt,
+            target,
+            inst.get("url", COMFYUI_URL),
+            comfyui_post,
+            comfyui_get,
+            timeout=180,
+            poll_interval=1,
+            max_new_tokens=req.max_new_tokens,
+        )
+        _mark_aux_instance_active(inst)
+    except TimeoutError as e:
+        add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(504, f"提示词翻译超时: {e}") from e
+    except RuntimeError as e:
+        add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
+        status_code = 503 if "提示词独立实例" in str(e) else 500
+        raise HTTPException(status_code, f"提示词翻译失败: {e}") from e
+    except Exception as e:
+        add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"提示词翻译失败: {e}") from e
+    result["instance"] = inst.get("name", "")
+    result["cached"] = False
+    if _is_json_object_text(result.get("translated_prompt", "")):
+        result["format"] = "json"
+    _prompt_translate_cache_put(prompt, target, result)
+    add_log("info", "prompt_translate", f"Prompt translated to {result.get('target_language', target)}", details=f"user={_user_id(current_user)}")
+    return result
+
+
+@app.post("/api/prompt/interrogate")
+def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = Depends(get_current_user)):
+    image = str(req.image or "").replace("\\", "/").lstrip("/")
+    if not image:
+        raise HTTPException(400, "Image is required")
+    if not _resolve_input_image_path(image):
+        raise HTTPException(404, "Image not found")
+    instances = _get_enabled_instances()
+    if not instances:
+        raise HTTPException(503, "No enabled ComfyUI instances available")
+    try:
+        inst = _pick_ready_aux_instance(instances, "prompt_interrogate", timeout=180)
+        inst_url = inst.get("url", COMFYUI_URL)
+        prepared_image = prepare_interrogate_image(image, COMFYUI_INPUT)
+        image_for_interrogate = prepared_image.get("filename") or image
+        workflow = build_image_interrogate_workflow(image_for_interrogate)
+        ensure_workflow_images_available(workflow, COMFYUI_INPUT, inst_url)
+        result = run_image_interrogator(
+            image_for_interrogate,
+            inst_url,
+            comfyui_post,
+            comfyui_get,
+            timeout=180,
+            poll_interval=1,
+        )
+        _mark_aux_instance_active(inst)
+        result["image_preprocess"] = prepared_image
+        prompt_text = str(result.get("prompt") or "").strip()
+        if prompt_text and not result.get("prompt_zh"):
+            try:
+                translated = run_prompt_translator(
+                    prompt_text,
+                    inst_url,
+                    comfyui_post,
+                    comfyui_get,
+                    timeout=90,
+                    poll_interval=1,
+                    max_new_tokens=192,
+                )
+                prompt_zh = normalize_interrogated_chinese_prompt(translated.get("prompt_zh", ""))
+                if prompt_zh:
+                    result["prompt_zh"] = prompt_zh
+                    result["prompt_en"] = prompt_text
+                    result["translator_provider"] = translated.get("provider", "")
+            except Exception as translate_error:
+                add_log("warn", "prompt_interrogate", f"Prompt Chinese translation skipped: {translate_error}", details=f"user={_user_id(current_user)}")
+        if prompt_text and not result.get("structured_prompt_json"):
+            source_prompt = str(result.get("prompt_zh") or prompt_text).strip()
+            if source_prompt:
+                try:
+                    structured = run_prompt_optimizer(
+                        source_prompt,
+                        inst_url,
+                        comfyui_post,
+                        comfyui_get,
+                        timeout=180,
+                        poll_interval=1,
+                        max_new_tokens=384,
+                    )
+                    if structured.get("structured_prompt_json"):
+                        result["structured_prompt_json"] = structured.get("structured_prompt_json")
+                    if structured.get("structured_prompt"):
+                        result["structured_prompt"] = structured.get("structured_prompt")
+                    if structured.get("optimized_prompt"):
+                        result["structured_optimized_prompt"] = structured.get("optimized_prompt")
+                    if structured.get("provider"):
+                        result["structured_provider"] = structured.get("provider")
+                except Exception as structure_error:
+                    add_log("warn", "prompt_interrogate", f"Prompt JSON structure skipped: {structure_error}", details=f"user={_user_id(current_user)}")
+    except TimeoutError as e:
+        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(504, f"图片反推超时: {e}") from e
+    except RuntimeError as e:
+        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+        status_code = 503 if "提示词独立实例" in str(e) else 500
+        raise HTTPException(status_code, f"图片反推失败: {e}") from e
+    except Exception as e:
+        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"图片反推失败: {e}") from e
+    result["instance"] = inst.get("name", "")
+    add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+    return result
+
+
 @app.post("/api/generate")
 def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     meta = _load_wf_meta()
@@ -3365,27 +4615,51 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     seed = req.seed if req.seed is not None else random.randint(0, 2**63)
     vllm_was = vllm_running()
 
-    prompt_preview = ""
-    for k, v in req.fields.items():
-        if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-            prompt_preview = str(v)[:200]
-            break
+    try:
+        with open(path) as f:
+            wf_check = json.load(f)
+        normalized_fields = _normalize_workflow_field_values(wf_check, req.fields)
+        for key, val in normalized_fields.items():
+            if "::" not in key:
+                continue
+            nid, field = key.split("::", 1)
+            if nid in wf_check and "inputs" in wf_check[nid]:
+                wf_check[nid]["inputs"][field] = val
+        for nid, v in wf_check.items():
+            if isinstance(v, dict) and v.get("class_type") == "KSampler":
+                if "seed" in v.get("inputs", {}):
+                    v["inputs"]["seed"] = seed
+        issues = validate_api_prompt(wf_check)
+        if issues:
+            detail = describe_api_prompt_issues(issues)
+            add_log("error", "workflow", detail)
+            raise HTTPException(400, detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"工作流校验失败: {e}") from e
 
-    add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
+    workflow_type = _workflow_primary_type(req.workflow)
+    prompt_preview = infer_generation_label(req.workflow, normalized_fields, workflow_type)[:200]
+    now_ts = time.time()
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
         "workflow": req.workflow, "seed": str(seed),
+        "workflow_type": workflow_type,
         "prompt_preview": prompt_preview,
         "width": req.width, "height": req.height,
-        "fields": req.fields,
+        "fields": normalized_fields,
         "preferred_instance": req.preferred_instance or "",
         "preferred_node_id": req.preferred_node_id or "",
         "queued_at": datetime.now().strftime("%H:%M:%S"),
+        "created_at_ts": now_ts,
+        "last_update": now_ts,
         "user_id": user_id,
     }
+    add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
 
     _job_queue.put_nowait((
-        job_id, path, req.fields, seed, vllm_was, req.width, req.height, user_id,
+        job_id, path, normalized_fields, seed, vllm_was, req.width, req.height, user_id,
         req.preferred_instance or "", req.preferred_node_id or ""
     ))
     return {"job_id": job_id, "seed": seed}
@@ -3393,8 +4667,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
 @app.get("/api/jobs")
 def api_all_jobs(current_user: dict = Depends(get_current_user)):
-    uid = _user_id(current_user or {})
-    return [j for j in jobs.values() if j.get("user_id") == uid]
+    return [j for j in jobs.values() if _can_access_job(j, current_user)]
 
 
 @app.get("/api/jobs/{job_id}")
@@ -3461,21 +4734,24 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     path = _resolve_workflow(wf, entry)
     if not path:
         raise HTTPException(404, "Workflow not found")
+    try:
+        with open(path) as f:
+            wf_check = json.load(f)
+        fields = _normalize_workflow_field_values(wf_check, fields)
+    except Exception:
+        pass
 
     del jobs[job_id]
 
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     vllm_was = vllm_running()
 
-    prompt_preview = ""
-    for k, v in fields.items():
-        if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-            prompt_preview = str(v)[:200]
-            break
+    prompt_preview = infer_generation_label(wf, fields, _workflow_primary_type(wf))[:200]
 
     jobs[new_id] = {
         "id": new_id, "status": "queued", "message": "排队中...",
         "workflow": wf, "seed": str(seed),
+        "workflow_type": _workflow_primary_type(wf),
         "prompt_preview": prompt_preview,
         "user_id": user_id,
         "width": width, "height": height,
@@ -3502,7 +4778,17 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     uid = _user_id(current_user or {})
-    if current_user and scope == "mine":
+    trash_mode = scope == "trash"
+    if trash_mode and not current_user:
+        conn.close()
+        raise HTTPException(401, "Not authenticated")
+    if current_user and trash_mode and current_user.get("role") == "admin":
+        conditions = []
+        params = []
+    elif current_user and trash_mode:
+        conditions = ["user_id = ?"]
+        params = [uid]
+    elif current_user and scope == "mine":
         conditions = ["user_id = ?"]
         params = [uid]
     elif current_user and current_user.get("role") == "admin":
@@ -3521,21 +4807,39 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     if status:
         conditions.append("status = ?")
         params.append(status)
+    if trash_mode:
+        conditions.append("COALESCE(deleted_at, '') != ''")
+    else:
+        conditions.append("COALESCE(deleted_at, '') = ''")
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-    rows = conn.execute(
-        "SELECT generations.*, users.username AS username "
-        "FROM generations "
-        "LEFT JOIN users ON users.id = generations.user_id" +
-        where_clause +
-        " ORDER BY generations.created_at DESC LIMIT ? OFFSET ?",
-        params + [limit, offset],
-    ).fetchall()
+    rows = [
+        dict(r) for r in conn.execute(
+            "SELECT generations.*, generations.rowid AS history_rowid FROM generations" +
+            where_clause +
+            " ORDER BY datetime(created_at) DESC, history_rowid DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+    ]
+    thumb_updates = []
+    for row in rows:
+        if row.get("thumb_path") or not row.get("image_path"):
+            continue
+        thumb = make_thumbnail(row.get("image_path", "")) or ""
+        if thumb:
+            row["thumb_path"] = thumb
+            thumb_updates.append((thumb, row.get("id", "")))
+    if thumb_updates:
+        conn.executemany("UPDATE generations SET thumb_path=? WHERE id=?", thumb_updates)
+        conn.commit()
     total = conn.execute(
         "SELECT COUNT(*) FROM generations" + where_clause,
         params,
     ).fetchone()[0]
     conn.close()
-    return {"ok": True, "data": [_gen_db_to_record(dict(r)) for r in rows], "total": total}
+    usernames = _history_username_map([r.get("user_id", "") for r in rows])
+    for row in rows:
+        row["username"] = usernames.get(row.get("user_id", ""), "")
+    return {"ok": True, "data": [_gen_db_to_record(r) for r in rows], "total": total}
 
 
 @app.post("/api/history")
@@ -3548,49 +4852,231 @@ def api_history_create(req: dict, current_user: dict = Depends(get_current_user)
 
 @app.delete("/api/history/{item_id}")
 def api_history_delete(item_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a generation record from SQLite and remove its image file."""
-    user_id = current_user.get("sub", "")
+    """Soft-delete a generation record while keeping image files untouched."""
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT image_path, user_id FROM generations WHERE id=?", (item_id,)).fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(404, "Record not found")
-    owner_id = row["user_id"] or ""
-    current_uid = user_id or ""
-    can_delete = _is_admin_user(current_user) or bool(owner_id and current_uid and owner_id == current_uid)
-    if not can_delete:
-        conn.close()
-        raise HTTPException(403, "无权删除他人的记录")
-    if row["image_path"]:
-        # Try HISTORY_DIR first, then OUTPUT_DIR
-        for img_dir in [HISTORY_DIR, OUTPUT_DIR]:
-            img_path = os.path.join(img_dir, row["image_path"])
-            if os.path.isfile(img_path):
-                os.remove(img_path)
-            thumb_path = os.path.join(img_dir, row["image_path"].rsplit(".", 1)[0] + "_thumb.jpg")
-            if os.path.isfile(thumb_path):
-                os.remove(thumb_path)
-    conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
+    _history_owner_check(conn, item_id, current_user, allow_deleted=True)
+    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "UPDATE generations SET deleted_at=?, deleted_by=? WHERE id=?",
+        (deleted_at, current_user.get("sub", ""), item_id),
+    )
     conn.commit()
     conn.close()
-    # Also clean up from in-memory JSON history
     global history
     item = next((h for h in history if h["id"] == item_id), None)
     if item:
-        history = [h for h in history if h["id"] != item_id]
+        item["is_deleted"] = True
+        item["deleted_at"] = deleted_at
+        item["deleted_by"] = current_user.get("sub", "")
         save_history()
-    return {"ok": True}
+    return {"ok": True, "deleted": True, "deleted_at": deleted_at}
 
 
-def _history_owner_check(conn, item_id: str, current_user: dict):
+def _history_owner_check(conn, item_id: str, current_user: dict, allow_deleted: bool = False):
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT id, image_path, thumb_path, user_id FROM generations WHERE id=?", (item_id,)).fetchone()
+    row = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE id=?", (item_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Record not found")
     if current_user.get("role") != "admin" and row["user_id"] != current_user.get("sub"):
         raise HTTPException(403, "无权操作他人的记录")
+    if not allow_deleted and row["deleted_at"]:
+        raise HTTPException(404, "Record deleted")
     return row
+
+
+def _history_row_value(row, key: str, default=""):
+    if not row:
+        return default
+    try:
+        if key in row.keys():
+            return row[key]
+    except AttributeError:
+        if isinstance(row, dict):
+            return row.get(key, default)
+    return default
+
+
+def _history_input_image_refs(row) -> set[str]:
+    params = _history_row_value(row, "params", "")
+    if isinstance(params, str):
+        params = _json_loads_safe(params, {})
+    if not isinstance(params, dict):
+        return set()
+    refs: set[str] = set()
+    image_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+    for key, value in params.items():
+        if not isinstance(value, str):
+            continue
+        field = str(key).split("::", 1)[-1].lower()
+        if not (field.startswith("image") or field == "upload"):
+            continue
+        rel = value.replace("\\", "/").lstrip("/")
+        if rel.lower().endswith(image_exts):
+            refs.add(rel)
+    return refs
+
+
+def _history_input_ref_path(rel_path: str, user_id: str) -> str:
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    if not safe:
+        return ""
+    parts = safe.split("/")
+    owner = user_id or "anonymous"
+    if len(parts) < 3 or parts[0] != owner or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1]):
+        return ""
+    root = os.path.abspath(COMFYUI_INPUT)
+    path = os.path.abspath(os.path.join(root, safe))
+    if os.path.commonpath([root, path]) != root:
+        raise HTTPException(400, "Invalid image path")
+    return path
+
+
+def _history_input_ref_in_use(conn, rel_path: str, item_id: str, excluding_ids: set[str] | None = None) -> bool:
+    if not conn or not rel_path:
+        return False
+    target = rel_path.replace("\\", "/").lstrip("/")
+    excluded = {str(item_id)}
+    if excluding_ids:
+        excluded.update(str(x) for x in excluding_ids)
+    rows = conn.execute("SELECT id, params FROM generations").fetchall()
+    for other in rows:
+        if str(_history_row_value(other, "id", "")) in excluded:
+            continue
+        if target in _history_input_image_refs(other):
+            return True
+    return False
+
+
+def _delete_history_files(row, conn=None, excluding_ids: set[str] | None = None) -> None:
+    image_path = _history_row_value(row, "image_path", "")
+    thumb_path = _history_row_value(row, "thumb_path", "")
+    item_id = _history_row_value(row, "id", "")
+    user_id = _history_row_value(row, "user_id", "")
+    candidates = []
+    if image_path:
+        candidates.append(_safe_rel_path(OUTPUT_DIR, image_path))
+        thumb_guess = image_path.rsplit(".", 1)[0] + "_thumb.jpg"
+        candidates.append(_safe_rel_path(OUTPUT_DIR, thumb_guess))
+    if thumb_path:
+        candidates.append(_safe_rel_path(OUTPUT_DIR, thumb_path))
+    for rel in _history_input_image_refs(row):
+        if _history_input_ref_in_use(conn, rel, item_id, excluding_ids):
+            continue
+        candidates.append(_history_input_ref_path(rel, user_id))
+    seen = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path):
+            os.remove(path)
+
+
+def _purge_history_record(conn, item_id: str, current_user: dict) -> bool:
+    row = _history_owner_check(conn, item_id, current_user, allow_deleted=True)
+    _delete_history_files(row, conn)
+    conn.execute("DELETE FROM generations WHERE id=?", (item_id,))
+    global history
+    history = [h for h in history if h.get("id") != item_id]
+    return True
+
+
+@app.post("/api/history/{item_id}/restore")
+def api_history_restore(item_id: str, current_user: dict = Depends(get_current_user)):
+    """Restore a soft-deleted generation record."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    _history_owner_check(conn, item_id, current_user, allow_deleted=True)
+    conn.execute("UPDATE generations SET deleted_at='', deleted_by='' WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+    item = next((h for h in history if h.get("id") == item_id), None)
+    if item:
+        item["is_deleted"] = False
+        item["deleted_at"] = ""
+        item["deleted_by"] = ""
+        save_history()
+    return {"ok": True, "restored": True}
+
+
+@app.post("/api/history/{item_id}/permanent-delete")
+def api_history_permanent_delete(item_id: str, current_user: dict = Depends(get_current_user)):
+    """Permanently delete a generation record and its files."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    _purge_history_record(conn, item_id, current_user)
+    conn.commit()
+    conn.close()
+    save_history()
+    return {"ok": True, "deleted": True}
+
+
+@app.post("/api/history/batch-restore")
+def api_history_batch_restore(body: dict, current_user: dict = Depends(get_current_user)):
+    ids = [str(x) for x in body.get("ids", []) if str(x)]
+    if not ids:
+        raise HTTPException(400, "ids required")
+    restored = 0
+    for item_id in ids:
+        try:
+            api_history_restore(item_id, current_user)
+            restored += 1
+        except HTTPException as e:
+            if e.status_code in (403, 404):
+                continue
+            raise
+    return {"ok": True, "restored": restored}
+
+
+@app.post("/api/history/batch-permanent-delete")
+def api_history_batch_permanent_delete(body: dict, current_user: dict = Depends(get_current_user)):
+    ids = [str(x) for x in body.get("ids", []) if str(x)]
+    if not ids:
+        raise HTTPException(400, "ids required")
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    deleted = 0
+    for item_id in ids:
+        try:
+            _purge_history_record(conn, item_id, current_user)
+            deleted += 1
+        except HTTPException as e:
+            if e.status_code in (403, 404):
+                continue
+            raise
+    conn.commit()
+    conn.close()
+    save_history()
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/history/trash/clear")
+def api_history_clear_trash(current_user: dict = Depends(get_current_user)):
+    """Permanently delete every deleted record the current user can manage."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    if current_user.get("role") == "admin":
+        rows = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE COALESCE(deleted_at, '') != ''").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE user_id=? AND COALESCE(deleted_at, '') != ''",
+            (current_user.get("sub", ""),),
+        ).fetchall()
+    deleted_ids = [row["id"] for row in rows]
+    for row in rows:
+        _delete_history_files(row, conn, set(deleted_ids))
+    if deleted_ids:
+        placeholders = ",".join("?" for _ in deleted_ids)
+        conn.execute(f"DELETE FROM generations WHERE id IN ({placeholders})", deleted_ids)
+    conn.commit()
+    conn.close()
+    if deleted_ids:
+        global history
+        deleted_set = set(deleted_ids)
+        history = [h for h in history if h.get("id") not in deleted_set]
+        save_history()
+    return {"ok": True, "deleted": len(deleted_ids)}
 
 
 @app.post("/api/history/{item_id}/share")
@@ -3642,53 +5128,51 @@ def api_history_batch_download(body: dict, current_user: dict = Depends(get_curr
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for row in rows:
             rel = row["image_path"]
-            for base in (OUTPUT_DIR, HISTORY_DIR):
-                p = os.path.join(base, rel)
-                if os.path.isfile(p):
-                    zf.write(p, arcname=os.path.basename(rel))
-                    break
+            p = _safe_rel_path(OUTPUT_DIR, rel)
+            if os.path.isfile(p):
+                zf.write(p, arcname=os.path.basename(rel))
     return FileResponse(zip_path, media_type="application/zip", filename=zip_name)
 
 
 @app.delete("/api/history")
 def api_history_clear(current_user: dict = Depends(get_current_user)):
-    """Clear all generation records for the current user."""
+    """Move all generation records for the current user to trash."""
     user_id = current_user.get("sub", "")
+    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(GEN_DB)
-    conn.execute("DELETE FROM generations WHERE user_id=?", (user_id,))
+    conn.execute(
+        "UPDATE generations SET deleted_at=?, deleted_by=? WHERE user_id=? AND COALESCE(deleted_at, '') = ''",
+        (deleted_at, user_id, user_id),
+    )
     conn.commit()
     conn.close()
-    # Also clean in-memory JSON history
-    global history
-    history = [h for h in history if h.get("user_id") != user_id]
-    save_history()
-    return {"ok": True}
+    changed = False
+    for item in history:
+        if item.get("user_id") == user_id and not item.get("deleted_at"):
+            item["is_deleted"] = True
+            item["deleted_at"] = deleted_at
+            item["deleted_by"] = user_id
+            changed = True
+    if changed:
+        save_history()
+    return {"ok": True, "deleted": True, "deleted_at": deleted_at}
 
 
 @app.get("/api/images/{filename:path}")
 def api_image(filename: str):
     """Serve generated images."""
-    path = os.path.join(OUTPUT_DIR, filename)
+    path = _safe_rel_path(OUTPUT_DIR, filename)
     if os.path.isfile(path):
-        return FileResponse(path, media_type="image/png")
-    old = os.path.join(HISTORY_DIR, filename)
-    if os.path.isfile(old):
-        return FileResponse(old, media_type="image/png")
+        return FileResponse(path, media_type=_image_media_type(path, "image/png"))
     raise HTTPException(404)
 
 
 @app.get("/api/thumbs/{filename:path}")
 def api_thumb(filename: str):
     """Serve thumbnail images."""
-    path = os.path.join(OUTPUT_DIR, filename)
+    path = _safe_rel_path(OUTPUT_DIR, filename)
     if os.path.isfile(path):
-        return FileResponse(path, media_type="image/jpeg")
-    old_t = os.path.join(HISTORY_DIR, "thumbs", filename)
-    if os.path.isfile(old_t):
-        return FileResponse(old_t, media_type="image/jpeg")
-    old_o = os.path.join(HISTORY_DIR, "thumbs", filename.replace("_thumb.jpg", ".png"))
-    if os.path.isfile(old_o):
-        return FileResponse(old_o, media_type="image/png")
+        return FileResponse(path, media_type=_image_media_type(path, "image/jpeg"))
     raise HTTPException(404)
 
 
@@ -3900,8 +5384,10 @@ def api_user_delete(user_id: str, current_user: dict = Depends(require_admin)):
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    ws_user = _get_user_from_token(ws.query_params.get("token"))
     await ws.accept()
     ws_clients.append(ws)
+    ws_client_users[ws] = ws_user or {}
     try:
         while True:
             data = await ws.receive_text()
@@ -3912,6 +5398,7 @@ async def ws_endpoint(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+        ws_client_users.pop(ws, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3998,7 +5485,11 @@ def api_nodes_list(current_user: dict = Depends(get_current_user)):
     for node in nodes:
         if not _can_view_node(node, current_user):
             continue
-        inst_statuses = [_get_instance_status(node, inst) for inst in node.get("instances", [])]
+        visible_node_instances = [
+            inst for inst in node.get("instances", [])
+            if _can_view_instance(inst, current_user)
+        ]
+        inst_statuses = [_get_instance_status(node, inst) for inst in visible_node_instances]
         http_up = any(s["http_up"] for s in inst_statuses)
         ssh_ok = _check_node_ssh(node)
 

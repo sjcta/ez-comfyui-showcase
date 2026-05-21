@@ -14,6 +14,7 @@ import glob
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import time
@@ -23,9 +24,33 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 from modules.instance_manager import InstanceManager
-from modules.instance_picker import pick_best_instance
+from modules.instance_picker import pick_best_instance, strict_preferred_instance_name
+from modules.prompt_labels import infer_generation_label
 from modules.step_calculator import StepCalculator
-from modules.ws_tracker import WSTracker, TrackResult
+from modules.comfyui_upload import ensure_workflow_images_available
+from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
+from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
+
+
+def _friendly_generation_error(err: Exception) -> str:
+    text = str(err)
+    if "Connection refused" in text or "Errno 61" in text or "Errno 111" in text:
+        return "ComfyUI 连接被拒绝，请检查出图实例是否仍在运行"
+    if "timed out" in text or "TimeoutError" in text:
+        return "ComfyUI 响应超时，请稍后重试"
+    return text[:200]
+
+
+def _filter_retry_instances(instances: list[dict], workflow_name: str, failed_instances: set[str]) -> list[dict]:
+    if not failed_instances or len(failed_instances) >= len(instances):
+        return instances
+    strict_preferred = strict_preferred_instance_name(workflow_name)
+    if strict_preferred:
+        return [
+            inst for inst in instances
+            if inst.get("name") == strict_preferred or inst.get("name") not in failed_instances
+        ]
+    return [inst for inst in instances if inst.get("name") not in failed_instances]
 
 
 class JobRunner:
@@ -68,6 +93,7 @@ class JobRunner:
         # ── 路径常量 ─────────────────────────────────────────────────
         output_dir: str = "",
         history_dir: str = "",
+        input_dir: str = "",
         # ── 实例列表 ─────────────────────────────────────────────────
         get_enabled_instances_fn: Callable[[], list[dict]] | None = None,
         insert_gen_fn: Callable | None = None,
@@ -97,6 +123,7 @@ class JobRunner:
             instance_last_active: 实例最后活跃时间字典。
             output_dir: ComfyUI 输出目录。
             history_dir: 历史图片目录。
+            input_dir: 本地上传参考图目录。
             get_enabled_instances_fn: 获取已启用实例列表的函数。
         """
         self._inst_mgr = inst_mgr
@@ -122,11 +149,13 @@ class JobRunner:
         self._instance_last_active = instance_last_active
         self._output_dir = output_dir
         self._history_dir = history_dir
+        self._input_dir = input_dir
         self._get_enabled_instances = get_enabled_instances_fn
 
         # ── 运行态 ──────────────────────────────────────────────────
         self._running_jobs: dict[str, asyncio.Task] = {}
         self._step_calculator = StepCalculator()
+        self._submit_retry_limit = 3
 
     # ── 主入口 ─────────────────────────────────────────────────────────
 
@@ -185,10 +214,19 @@ class JobRunner:
             if not instances:
                 # 降级：从 inst_mgr 获取
                 pass
+            failed_instances = set(self._jobs[job_id].get("failed_instances", []))
+            instances = _filter_retry_instances(instances, workflow_name, failed_instances)
+            strict_preferred = strict_preferred_instance_name(workflow_name)
             if preferred_node_id:
                 instances = [inst for inst in instances if inst.get("_node_id") == preferred_node_id]
             if preferred_instance:
                 preferred_match = next((inst for inst in instances if inst.get("name") == preferred_instance), None)
+                if preferred_match:
+                    instance = preferred_match
+                else:
+                    instance = None
+            elif strict_preferred:
+                preferred_match = next((inst for inst in instances if inst.get("name") == strict_preferred), None)
                 if preferred_match:
                     instance = preferred_match
                 else:
@@ -201,10 +239,10 @@ class JobRunner:
                 return ""
 
             def _health_check(inst: dict) -> bool:
-                try:
-                    return self._comfyui_up(inst.get("url", ""))
-                except Exception:
-                    return True  # 乐观假设
+                # A stopped instance is still a valid candidate: the next phase
+                # is responsible for cold-starting it and reporting real startup
+                # failures. Filtering here would skip cold start entirely.
+                return True
 
             def _queue_size(inst: dict) -> int:
                 try:
@@ -217,6 +255,25 @@ class JobRunner:
                 except Exception:
                     return 999
 
+            def _local_queue_size(inst: dict) -> int:
+                name = inst.get("name", "")
+                if not name:
+                    return 0
+                active_status = {"dispatching", "queued", "starting_comfyui", "preparing", "submitting", "generating", "downloading"}
+                return sum(
+                    1
+                    for jid, job in self._jobs.items()
+                    if jid != job_id
+                    and job.get("instance") == name
+                    and job.get("status") in active_status
+                )
+
+            def _combined_queue_size(inst: dict) -> int:
+                remote = _queue_size(inst)
+                if remote >= 999:
+                    return remote
+                return remote + _local_queue_size(inst)
+
             def _group_getter(inst_name: str) -> str:
                 return self._instance_group.get(inst_name, "")
 
@@ -226,12 +283,16 @@ class JobRunner:
                     workflow_name=workflow_name,
                     affinity_getter=_affinity_getter,
                     health_check=_health_check,
-                    queue_size_getter=_queue_size,
+                    queue_size_getter=_combined_queue_size,
                     group_getter=_group_getter,
                 )
 
             if not instance:
                 raise RuntimeError("没有可用实例")
+
+            self._jobs[job_id]["instance"] = instance["name"]
+            self._jobs[job_id]["target_node_id"] = instance.get("_node_id", "")
+            self._jobs[job_id]["target_url"] = instance.get("url", "")
 
             # ── 获取实例信号量 ─────────────────────────────────────
             inst_sem_key = instance.get("name") or instance.get("id", "")
@@ -241,11 +302,13 @@ class JobRunner:
             )
 
             self._jobs[job_id]["message"] = f"匹配实例 {instance['name']}..."
+            self._jobs[job_id]["progress"] = {"pct": 5}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             # ── Phase 2: 停止 vLLM（如需） ─────────────────────────
             if vllm_was_running:
                 self._jobs[job_id]["message"] = "停止 vLLM 释放显存..."
+                self._jobs[job_id]["progress"] = {"pct": 7}
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 self._stop_vllm()
                 await asyncio.sleep(2)
@@ -253,19 +316,23 @@ class JobRunner:
             # ── Phase 3: 实例冷启动 ────────────────────────────────
             self._jobs[job_id]["status"] = "starting_comfyui"
             self._jobs[job_id]["message"] = f"启动 ComfyUI #{instance['name']}..."
+            self._jobs[job_id]["progress"] = {"pct": 9}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             try:
                 await self._inst_mgr.ensure_running(instance, timeout=300)
             except (TimeoutError, Exception) as e:
                 self._add_log("warn", "coldstart", f"冷启动失败: {e}", job_id)
+                self._jobs[job_id]["message"] = f"实例 {instance['name']} 首次启动未就绪，正在重试..."
+                self._jobs[job_id]["progress"] = {"pct": 10}
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 # 兜底：直接使用 app 级别的启动方法
                 node = self._get_node_by_id(instance.get("_node_id", ""))
                 if node:
-                    self._run_instance_action(node, instance, "start")
+                    started = self._run_instance_action(node, instance, "start")
                 else:
                     svc_name = f"comfyui-{instance['name'].lower()}"
-                    subprocess.run(
+                    result = subprocess.run(
                         ["systemctl", "--user", "start", svc_name],
                         capture_output=True, timeout=5,
                         env={
@@ -274,6 +341,9 @@ class JobRunner:
                             "XDG_RUNTIME_DIR": "/run/user/1000",
                         },
                     )
+                    started = result.returncode == 0
+                if not started:
+                    raise RuntimeError(f"实例 {instance['name']} 启动命令失败")
                 for _ in range(90):
                     await asyncio.sleep(2)
                     if self._comfyui_up(instance["url"]):
@@ -285,6 +355,7 @@ class JobRunner:
             self._jobs[job_id]["status"] = "queued"
             self._jobs[job_id]["last_update"] = time.time()
             self._jobs[job_id]["message"] = f"排队等待 {instance['name']}..."
+            self._jobs[job_id]["progress"] = {"pct": 12}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             try:
@@ -302,11 +373,13 @@ class JobRunner:
             self._jobs[job_id]["status"] = "preparing"
             self._jobs[job_id]["message"] = f"实例 {instance['name']} 就绪，开始出图"
             self._jobs[job_id]["instance"] = instance["name"]
+            self._jobs[job_id]["progress"] = {"pct": 15}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             # ── Phase 5: 加载并准备 workflow ───────────────────────
             self._jobs[job_id]["status"] = "preparing"
             self._jobs[job_id]["message"] = "准备 workflow..."
+            self._jobs[job_id]["progress"] = {"pct": 16}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             with open(workflow_path, "r") as f:
@@ -326,6 +399,12 @@ class JobRunner:
                     if "seed" in v.get("inputs", {}):
                         v["inputs"]["seed"] = seed
 
+            issues = validate_api_prompt(wf)
+            if issues:
+                raise RuntimeError(describe_api_prompt_issues(issues))
+
+            ensure_workflow_images_available(wf, self._input_dir, instance["url"])
+
             # ── 记录实例模型组 ─────────────────────────────────────
             from modules.config import ModelGroup
             self._instance_group[instance["name"]] = ModelGroup.extract_model_group(workflow_name)
@@ -341,9 +420,11 @@ class JobRunner:
 
             # ── Phase 6: WS 追踪出图 ───────────────────────────────
             self._add_log("info", "generate", "Starting generation", job_id)
-            self._jobs[job_id]["status"] = "generating"
-            self._jobs[job_id]["message"] = "出图中..."
-            self._jobs[job_id]["generating_at"] = time.time()
+            self._jobs[job_id]["status"] = "submitting"
+            self._jobs[job_id]["message"] = "提交工作流..."
+            self._jobs[job_id]["progress"] = {"pct": 12}
+            self._jobs[job_id]["submitted_at"] = time.time()
+            self._jobs[job_id]["last_update"] = time.time()
             self._save_jobs()
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
@@ -360,6 +441,12 @@ class JobRunner:
                 self._jobs[job_id]["message"] = msg
                 self._jobs[job_id]["progress"] = {"pct": int(pct)}
                 self._jobs[job_id]["last_update"] = time.time()
+                if self._jobs[job_id].get("status") == "submitting" and msg not in (
+                    "提交工作流...",
+                    "等待实例开始执行...",
+                ):
+                    self._jobs[job_id]["status"] = "generating"
+                    self._jobs[job_id]["generating_at"] = time.time()
                 if pid:
                     self._jobs[job_id]["prompt_id"] = pid
                 self._save_jobs()
@@ -381,6 +468,39 @@ class JobRunner:
                 prompt_id = result.prompt_id
                 if prompt_id:
                     self._jobs[job_id]["prompt_id"] = prompt_id
+            except PromptStartTimeout as stalled:
+                prompt_id = stalled.prompt_id
+                attempt_count = int(self._jobs[job_id].get("submit_retry_count", 0)) + 1
+                self._jobs[job_id]["submit_retry_count"] = attempt_count
+                failed = list(dict.fromkeys(
+                    list(self._jobs[job_id].get("failed_instances", [])) +
+                    [instance["name"]]
+                ))
+                self._jobs[job_id]["failed_instances"] = failed
+                self._jobs[job_id]["ws_error"] = str(stalled)[:300]
+                self._jobs[job_id]["message"] = (
+                    f"实例 {instance['name']} 提交后无响应，自动纠错 {attempt_count}/{self._submit_retry_limit}..."
+                )
+                self._jobs[job_id]["progress"] = {"pct": 12}
+                self._save_jobs()
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+                await self._recover_submit_stall(job_id, instance, prompt_id)
+                if inst_held and sem:
+                    self._jobs[job_id]["sem_acquired"] = False
+                    sem.release()
+                    inst_held = False
+                if attempt_count < self._submit_retry_limit:
+                    await self.run(
+                        job_id, workflow_path, field_values, seed, vllm_was_running,
+                        img_width, img_height, user_id=user_id,
+                        preferred_instance="", preferred_node_id=preferred_node_id,
+                    )
+                    return
+                raise TimeoutError("提交工作流多次无响应，实例容器或设备可能异常")
+            except PromptSubmitError as submit_err:
+                self._add_log("error", "wstrack", f"Prompt submit rejected: {submit_err}", job_id)
+                self._jobs[job_id]["ws_error"] = str(submit_err)[:500]
+                raise RuntimeError(_friendly_generation_error(submit_err))
             except Exception as _ws_err:
                 self._add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
                 self._jobs[job_id]["ws_error"] = str(_ws_err)[:300]
@@ -423,6 +543,7 @@ class JobRunner:
             if prompt_id:
                 self._jobs[job_id]["status"] = "downloading"
                 self._jobs[job_id]["message"] = "正在拉取图片..."
+                self._jobs[job_id]["progress"] = {"pct": 96}
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             if job_id not in self._jobs:
@@ -462,7 +583,7 @@ class JobRunner:
                 if isinstance(e, TimeoutError):
                     self._jobs[job_id]["message"] = "出图失败"
                 else:
-                    self._jobs[job_id]["message"] = str(e)[:200]
+                    self._jobs[job_id]["message"] = _friendly_generation_error(e)
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 self._save_jobs()
 
@@ -476,6 +597,59 @@ class JobRunner:
             self._save_jobs()
             if vllm_was_running:
                 self._start_vllm()
+
+    async def _recover_submit_stall(self, job_id: str, instance: dict, prompt_id: str) -> None:
+        """Try to clean up a prompt that was accepted but never began execution."""
+        inst_name = instance.get("name", "")
+        inst_url = instance.get("url", "").rstrip("/")
+        self._add_log(
+            "warn", "stuck",
+            f"实例 {inst_name} 提交后无执行事件，正在自动纠错",
+            job_id,
+        )
+
+        def _post(path: str, payload: dict) -> None:
+            if not inst_url:
+                return
+            req = urllib.request.Request(
+                f"{inst_url}{path}",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+
+        if prompt_id:
+            try:
+                await asyncio.to_thread(_post, "/queue", {"delete": [prompt_id]})
+            except Exception as e:
+                self._add_log("warn", "stuck", f"清理队列失败: {e}", job_id)
+
+        try:
+            await asyncio.to_thread(_post, "/interrupt", {})
+        except Exception:
+            pass
+
+        node = self._get_node_by_id(instance.get("_node_id", ""))
+        if node:
+            try:
+                restarted = await asyncio.to_thread(
+                    self._run_instance_action, node, instance, "restart"
+                )
+                if restarted:
+                    self._add_log("warn", "stuck", f"已重启实例 {inst_name}", job_id)
+                    for _ in range(60):
+                        await asyncio.sleep(2)
+                        try:
+                            if self._comfyui_up(instance["url"]):
+                                return
+                        except Exception:
+                            pass
+                else:
+                    self._add_log("warn", "stuck", f"实例 {inst_name} 重启命令失败", job_id)
+            except Exception as e:
+                self._add_log("warn", "stuck", f"实例 {inst_name} 重启异常: {e}", job_id)
 
     # ── 取消 ────────────────────────────────────────────────────────────
 
@@ -558,11 +732,7 @@ class JobRunner:
 
         new_id = f"job_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
 
-        prompt_preview = ""
-        for k, v in fields.items():
-            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_preview = str(v)[:200]
-                break
+        prompt_preview = infer_generation_label(wf, fields)[:200]
 
         new_vllm_was = self._vllm_running()
 
@@ -615,36 +785,63 @@ class JobRunner:
         if not prompt_id and job_id in self._jobs:
             prompt_id = self._jobs[job_id].get("prompt_id", "") or ""
 
-        hist = None
-        filename = None
-        for _wait in range(30):
-            hist = self._comfyui_get(f"/history/{prompt_id}", inst_url)
-            if isinstance(hist, dict) and prompt_id in hist:
-                for node_out in hist[prompt_id].get("outputs", {}).values():
-                    for img in node_out.get("images", []):
-                        filename = img["filename"]
-                        break
-                    if filename:
-                        break
-                if filename:
-                    break
-            import time as _t
-            _t.sleep(1)
+        sources: list[tuple[str, str]] = []
 
-        if not filename:
+        downloaded = await asyncio.to_thread(
+            self._download_images,
+            job_id,
+            prompt_id,
+            inst_url,
+            self._output_dir,
+        )
+        if downloaded:
+            for path in downloaded:
+                if path and os.path.isfile(path):
+                    sources.append((path, os.path.basename(path)))
+
+        if not sources:
+            last_history_error = None
+            for _wait in range(30):
+                try:
+                    hist = self._comfyui_get(f"/history/{prompt_id}", inst_url)
+                    if isinstance(hist, dict) and prompt_id in hist:
+                        found: list[tuple[str, str]] = []
+                        for node_out in hist[prompt_id].get("outputs", {}).values():
+                            for img in node_out.get("images", []):
+                                filename = img.get("filename", "")
+                                if not filename:
+                                    continue
+                                src_path = os.path.join(self._output_dir, filename)
+                                if not os.path.isfile(src_path):
+                                    for root, _dirs, files in os.walk(self._output_dir):
+                                        if filename in files:
+                                            src_path = os.path.join(root, filename)
+                                            break
+                                if os.path.isfile(src_path):
+                                    found.append((src_path, filename))
+                        if found:
+                            sources = found
+                            break
+                except Exception as e:
+                    last_history_error = e
+                import time as _t
+                _t.sleep(1)
+
+            if not sources and last_history_error:
+                raise RuntimeError(_friendly_generation_error(last_history_error))
+
+        deduped: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+        for src_path, original_name in sources:
+            real_path = os.path.abspath(src_path)
+            if real_path in seen_paths or not os.path.isfile(src_path):
+                continue
+            seen_paths.add(real_path)
+            deduped.append((src_path, original_name or os.path.basename(src_path)))
+        sources = deduped
+
+        if not sources:
             raise RuntimeError(f"未找到输出图片 (prompt={prompt_id[:12]})")
-
-        await asyncio.to_thread(self._download_images, job_id, prompt_id, inst_url, self._output_dir)
-
-        src = os.path.join(self._output_dir, filename)
-        if not os.path.isfile(src):
-            for root, _dirs, files in os.walk(self._output_dir):
-                if filename in files:
-                    src = os.path.join(root, filename)
-                    break
-
-        if not os.path.isfile(src):
-            raise RuntimeError(f"输出图片未找到: {filename}")
 
         date_str = datetime.now().strftime("%Y-%m-%d")
         owner = user_id or "anonymous"
@@ -653,53 +850,70 @@ class JobRunner:
         existing = glob.glob(os.path.join(self._output_dir, subdir, f"{wf_basename}_*.png"))
         seq = 1
         for p in existing:
-            import re
             m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.png$", os.path.basename(p))
             if m:
                 seq = max(seq, int(m.group(1)) + 1)
-        hist_name = f"{wf_basename}_{seq:04d}.png"
-        rel_path = f"{subdir}/{hist_name}"
-        dst = os.path.join(self._output_dir, rel_path)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(src, dst)
 
-        actual_w, actual_h = self._get_image_size(rel_path)
+        prompt_text = infer_generation_label(
+            os.path.basename(workflow_path),
+            field_values,
+        )
 
-        prompt_text = ""
-        for k, v in field_values.items():
-            if "text" in k.split("::")[-1] or "prompt" in k.split("::")[-1]:
-                prompt_text = str(v)
-                break
+        batch_count = len(sources)
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        records: list[dict] = []
+        for idx, (src, original_name) in enumerate(sources):
+            hist_name = f"{wf_basename}_{seq + idx:04d}.png"
+            rel_path = f"{subdir}/{hist_name}"
+            dst = os.path.join(self._output_dir, rel_path)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
 
-        record = {
-            "id": job_id,
-            "filename": rel_path,
-            "original": filename,
-            "workflow": os.path.basename(workflow_path),
-            "prompt": prompt_text,
-            "seed": str(seed),
-            "width": actual_w or img_width,
-            "height": actual_h or img_height,
-            "elapsed": round(elapsed, 1),
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "thumb": self._make_thumbnail(rel_path) or "",
-            "field_values": field_values,
-            "user_id": user_id or "",
-            "is_public": False,
-        }
-        self._history.insert(0, record)
+            actual_w, actual_h = self._get_image_size(rel_path)
+            record_id = job_id if idx == 0 else f"{job_id}_{idx + 1:02d}"
+            records.append({
+                "id": record_id,
+                "filename": rel_path,
+                "original": original_name,
+                "workflow": os.path.basename(workflow_path),
+                "prompt": prompt_text,
+                "seed": str(seed),
+                "width": actual_w or img_width,
+                "height": actual_h or img_height,
+                "elapsed": round(elapsed, 1),
+                "time": created_at,
+                "thumb": self._make_thumbnail(rel_path) or "",
+                "field_values": field_values,
+                "user_id": user_id or "",
+                "is_public": False,
+                "batch_id": job_id if batch_count > 1 else "",
+                "batch_index": idx,
+                "batch_count": batch_count,
+            })
+
+        for record in reversed(records):
+            self._history.insert(0, record)
         self._save_history()
         # 同步写入 SQLite
-        try:
-            self._insert_gen(record, round(elapsed, 1), user_id=user_id or "")
-        except Exception:
-            pass
+        for record in reversed(records):
+            try:
+                self._insert_gen(record, round(elapsed, 1), user_id=user_id or "")
+            except Exception:
+                pass
 
         if job_id in self._jobs:
+            cover = records[0]
             self._jobs[job_id].update(
                 status="done",
                 message=f"完成 ({elapsed:.1f}s)",
-                image=rel_path,
+                image=cover.get("filename", ""),
+                thumb=cover.get("thumb", ""),
+                images=[record.get("filename", "") for record in records],
+                thumbs=[record.get("thumb", "") for record in records],
+                batch_id=job_id if batch_count > 1 else "",
+                batch_count=batch_count,
+                batch_items=records,
                 elapsed=round(elapsed, 1),
+                progress={"pct": 100},
             )
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})

@@ -99,6 +99,7 @@
     get: () => currentTargetNodeId,
     set: (v) => { currentTargetNodeId = v || ''; }
   });
+  window.__APP__.manualTargetInstance = false;
   console.log('[BOOT] defineProperties done');
 
   function shortSeed(s) {
@@ -161,7 +162,9 @@
     const totalPend = insts.reduce((s, i) => s + (i.queue_pending || 0), 0);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');
-    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off');
+    const runningInst = insts.find(function(i) { return i.up && (i.queue_running || 0) > 0; });
+    var runningPct = runningInst ? Math.max(0, Math.min(100, Math.round(Number(runningInst.progress || 0) || 0))) : 0;
+    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off') + (totalRun > 0 ? ' running' : totalPend > 0 ? ' pending' : '');
     if (comfyState) {
       var upCount = insts.filter(function (i) {
         return i.up;
@@ -173,7 +176,7 @@
         return i.up && i.queue_pending > 0;
       }).length;
       if (!anyUp) comfyState.textContent = '全部关闭';
-      else if (busyCount > 0) comfyState.textContent = '出图中(' + busyCount + '/' + upCount + ')';
+      else if (busyCount > 0) comfyState.textContent = '出图中 ' + runningPct + '%';
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
       else comfyState.textContent = '待机(' + upCount + ')';
     }
@@ -197,8 +200,9 @@
     var used = Number(g.vram_used_mb || 0);
     var total = Number(g.vram_total_mb || 0);
     if ($('#vramText')) {
+      var compactVram = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
       $('#vramText').textContent = total > 0
-        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB (${pct}%) · ${temp} °C`
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB${compactVram ? '' : ` (${pct}%)`} · ${temp} °C`
         : '未获取到 VRAM';
     }
     if ($('#gpuTemp')) $('#gpuTemp').textContent = `${temp} °C`;
@@ -522,15 +526,18 @@
       var shortId = job.id.slice(-6);
       var wfTag = getWFType(job.workflow);
       var typeLabel = wfTag ? wfTag.text : '';
+      var toastByStatus = {
+        queued: ['排队中', 'queued'],
+        generating: ['出图中', 'generating'],
+        done: ['结束出图', 'done'],
+        error: ['失败', 'error']
+      };
       try {
-        if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + ' 排队中', 'queued');
-        else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + ' 出图中', 'generating');
-        else if (job.status === 'downloading') showToast(shortId + ' ' + typeLabel + ' 拉取图片', 'queued');
-        else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 完成', 'done');
-        else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + ' 失败', 'error');
+        if (toastByStatus[job.status]) showToast(shortId + ' ' + typeLabel + ' ' + toastByStatus[job.status][0], toastByStatus[job.status][1]);
       } catch(e) {}
     }
     jobs[job.id] = job;
+    if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
     // ── Done: immediate image swap + background history refresh ──
     if (job.status === 'done' && job.image) {
       if (!prev || prev.status !== 'done' || !prev.image) {
@@ -775,31 +782,34 @@
 
 function init() {
   console.log("[BOOT] init function");
+    var unifiedPoller = window.CW && window.CW.pollManager;
     var statusPoller = (window.CW && window.CW.pollStatus && window.CW.pollStatus !== pollStatus)
       ? window.CW.pollStatus
       : pollStatus;
     statusPoller();
     setInterval(statusPoller, 5000);
-    setInterval(() => {
-      if (ws && ws.readyState === 1) ws.send('ping');
-    }, 30000);
-    if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
-      window.CW.authReady.finally(function() {
+    if (!unifiedPoller) {
+      setInterval(() => {
+        if (ws && ws.readyState === 1) ws.send('ping');
+      }, 30000);
+      if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
+        window.CW.authReady.finally(function() {
+          pollJobs();
+        });
+      } else {
         pollJobs();
-      });
-    } else {
-      pollJobs();
+      }
+      setInterval(function() {
+        pollJobs();
+      }, 5000);
+      connectWS();
     }
-    setInterval(function() {
-      pollJobs();
-    }, 5000);
-    connectWS();
     initServiceToggles();
     window.CW.initAdvToggle && window.CW.initAdvToggle();
     window.CW.initRatioGrid && window.CW.initRatioGrid();
     window.CW.initOverlayUpload && window.CW.initOverlayUpload();
     window.CW.initResizeHandle && window.CW.initResizeHandle();
-    setInterval(tickTimers, 1000);
+    if (!unifiedPoller) setInterval(tickTimers, 1000);
     if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
   // Clear button clears prompt and focuses input
   // (always visible — toggled in HTML)
@@ -936,7 +946,7 @@ function init() {
   }
 
   function rndSeed(btnEl) {
-    var input = btnEl ? btnEl.parentElement.querySelector('input') : null;
+    var input = btnEl ? btnEl.parentElement.querySelector('input[type="number"]') : null;
     if (input) input.value = Math.floor(Math.random() * Math.pow(2, 53));
   }
 
@@ -949,13 +959,27 @@ function init() {
   console.log('[DEBUG] getWFType exists:', typeof getWFType !== 'undefined');
   console.log('[DEBUG] cancelJob exists:', typeof cancelJob !== 'undefined');
   console.log('[DEBUG] window.CW keys:', Object.keys(window.CW).length);
+  function logWorkflowClass(workflowType, jobId) {
+    if (!jobId) return 'log-system';
+    if (workflowType === '文生图') return 'log-flow log-flow-t2i';
+    if (workflowType === '图生图') return 'log-flow log-flow-i2i';
+    if (workflowType === '文生视频') return 'log-flow log-flow-t2v';
+    if (workflowType === '图生视频') return 'log-flow log-flow-i2v';
+    if (workflowType === '放大') return 'log-flow log-flow-cat';
+    if (workflowType) return 'log-flow log-flow-other';
+    return 'log-task';
+  }
   window.CW._logEntries = [];
   window.CW._onLog = function(entry) {
     window.CW._logEntries.push(entry);
     var body = document.getElementById('logBody');
     if (!body) return;
+    var filter = document.getElementById('logLevelFilter');
+    var activeLevel = filter ? filter.value : '';
+    if (activeLevel && entry.level !== activeLevel) return;
     var el = document.createElement('div');
-    el.className = 'log-entry';
+    el.className = 'log-entry ' + logWorkflowClass(entry.workflow_type || '', entry.job_id || '');
+    if (entry.workflow) el.title = entry.workflow;
     var ts = new Date(entry.ts * 1000).toLocaleTimeString();
     el.innerHTML = '<span class="log-time">' + ts + '</span>'
       + '<span class="log-level ' + entry.level + '">' + entry.level.toUpperCase() + '</span>'
@@ -964,6 +988,8 @@ function init() {
       + (entry.details ? '<div class="log-details">' + entry.details + '</div>' : '');
     body.appendChild(el);
     body.scrollTop = body.scrollHeight;
+    var countEl = document.getElementById('logCount');
+    if (countEl) countEl.textContent = String((window.CW._logEntries || []).length);
   };
   window.CW.toggleLog = function() {
     var panel = document.getElementById('logPanel');
@@ -1006,10 +1032,12 @@ function init() {
   window.CW.refreshForAuthChange = function() {
     window.__APP__.currentTargetInstance = '';
     window.__APP__.currentTargetNodeId = '';
+    window.__APP__.manualTargetInstance = false;
     if (window.CW.loadWfMeta) window.CW.loadWfMeta();
     if (window.CW.loadWorkflows) window.CW.loadWorkflows();
     if (window.CW.loadHistory) window.CW.loadHistory();
     if (window.CW.pollStatus) window.CW.pollStatus();
+    if (window.CW.pollManager && window.CW.pollManager.reconnect) window.CW.pollManager.reconnect();
   };
   window.CW._bootApp = function() {
     if (window.CW.__appBooted) return;

@@ -37,6 +37,19 @@ class TrackResult:
     elapsed: float
 
 
+class PromptStartTimeout(TimeoutError):
+    """Raised when ComfyUI accepts a prompt but does not begin executing it soon."""
+
+    def __init__(self, prompt_id: str, timeout: float) -> None:
+        super().__init__(f"Prompt {prompt_id[-12:]} 启动超时 ({timeout:.0f}s)")
+        self.prompt_id = prompt_id
+        self.timeout = timeout
+
+
+class PromptSubmitError(RuntimeError):
+    """Raised when ComfyUI rejects the prompt before it enters the queue."""
+
+
 # ── HTTP 辅助函数（纯同步，通过 asyncio.to_thread 调用） ────────────────
 
 import urllib.request
@@ -64,6 +77,16 @@ def _http_post(url: str, data: dict) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            body = ""
+        detail = f"HTTP Error {e.code}: {e.reason}"
+        if body:
+            detail = f"{detail}; {body[:500]}"
+        raise RuntimeError(f"HTTP POST {url} 失败: {detail}") from e
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         raise RuntimeError(f"HTTP POST {url} 失败: {e}") from e
 
@@ -128,6 +151,8 @@ class WSTracker:
     """重试间隔（秒）"""
     WS_SILENT_TIMEOUT: float = 300.0
     """WS 无消息超时（秒），退化 HTTP"""
+    PROMPT_START_TIMEOUT: float = 45.0
+    """POST /prompt 后等待 ComfyUI 开始执行的最长时间（秒）"""
     HTTP_POLL_INTERVAL: float = 3.0
     """HTTP polling 间隔（秒）"""
     PROGRESS_REFRESH_INTERVAL: float = 5.0
@@ -176,13 +201,18 @@ class WSTracker:
         self._prompt_id: str = ""
         self._completed_units: float = 0.0
         self._last_prog: int = 0
+        self._current_node_id: str = ""
         self._current_node_cls: str = ""
         self._sampler_cur: int = 0
         self._sampler_total: int = 0
-        self._node_entered_at: dict[str, float] = {}  # weight=0 node → entry time
+        self._completed_node_ids: set[str] = set()
+        self._node_entered_at: dict[str, float] = {}  # time-estimated node → entry time
+        self._time_node_units: dict[str, float] = {}  # time-estimated node → contributed units
         self._start_time: float = 0.0
         self._cancelled: bool = False
         self._workflow_done: bool = False
+        self._last_pct: float = 0.0
+        self._prompt_started: bool = False
 
     # ── 注入 ────────────────────────────────────────────────────────────
 
@@ -224,12 +254,17 @@ class WSTracker:
         self._prompt_id = ""
         self._completed_units = 0.0
         self._last_prog = 0
+        self._current_node_id = ""
         self._current_node_cls = ""
         self._sampler_cur = 0
         self._sampler_total = 0
+        self._completed_node_ids = set()
         self._node_entered_at = {}
+        self._time_node_units = {}
         self._cancelled = False
         self._workflow_done = False
+        self._last_pct = 0.0
+        self._prompt_started = False
 
         total_units = self._step_info.total_units
         node_weights = self._step_info.node_weights
@@ -259,7 +294,7 @@ class WSTracker:
 
         # ── Phase 2: 提交 prompt ──────────────────────────────────────
         await self._report_progress({
-            "pct": 0, "message": "提交工作流...", "current_node": ""
+            "pct": 12, "message": "提交工作流...", "current_node": ""
         })
         try:
             resp = await asyncio.to_thread(
@@ -272,11 +307,14 @@ class WSTracker:
                 raise RuntimeError(
                     f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}"
                 )
+            await self._report_progress({
+                "pct": 14, "message": "等待实例开始执行...", "current_node": ""
+            })
         except Exception as e:
             if ws:
                 await ws.close()
             self._log("error", "ws", f"提交 prompt 失败: {e}", self._job_id)
-            return TrackResult(ok=False, prompt_id="", elapsed=time.time() - self._start_time)
+            raise PromptSubmitError(str(e)) from e
 
         self._log("info", "ws", f"Prompt 已提交: {self._prompt_id[-12:]}", self._job_id)
 
@@ -288,6 +326,8 @@ class WSTracker:
             return result
         except Exception as e:
             await ws.close()
+            if isinstance(e, PromptStartTimeout):
+                raise
             # 退化 HTTP polling
             self._log("warn", "ws", f"WS 异常: {e}，退化 HTTP", self._job_id)
             return await self._http_fallback_track(timeout)
@@ -333,6 +373,7 @@ class WSTracker:
         total_units = self._step_info.total_units
         node_weights = self._step_info.node_weights
         last_ws_msg = time.time()
+        prompt_wait_started = time.time()
 
         # 启动定时进度刷新（处理 weight=0 的时长推算节点）
         refresh_task = asyncio.create_task(self._refresh_delayed_node_loop())
@@ -351,11 +392,38 @@ class WSTracker:
                               self._job_id)
                     break
 
+                now = time.time()
+                if (
+                    self._prompt_id
+                    and not self._prompt_started
+                    and now - prompt_wait_started > self.PROMPT_START_TIMEOUT
+                ):
+                    self._log(
+                        "warn", "ws",
+                        f"Prompt {self._prompt_id[-12:]} {self.PROMPT_START_TIMEOUT:.0f}s 未开始执行",
+                        self._job_id,
+                    )
+                    raise PromptStartTimeout(self._prompt_id, self.PROMPT_START_TIMEOUT)
+
+                recv_timeout = min(300.0, max(0.1, self.WS_SILENT_TIMEOUT - (now - last_ws_msg)))
+                if self._prompt_id and not self._prompt_started:
+                    recv_timeout = min(
+                        recv_timeout,
+                        max(0.1, self.PROMPT_START_TIMEOUT - (now - prompt_wait_started)),
+                    )
+
                 try:
-                    async with asyncio.timeout(300):
+                    async with asyncio.timeout(recv_timeout):
                         raw = await ws.recv()
                     last_ws_msg = time.time()
                 except asyncio.TimeoutError:
+                    if self._prompt_id and not self._prompt_started:
+                        self._log(
+                            "warn", "ws",
+                            f"Prompt {self._prompt_id[-12:]} {self.PROMPT_START_TIMEOUT:.0f}s 未开始执行",
+                            self._job_id,
+                        )
+                        raise PromptStartTimeout(self._prompt_id, self.PROMPT_START_TIMEOUT)
                     self._log("warn", "ws", "WS recv 超时，退化 HTTP", self._job_id)
                     break
                 except websockets.exceptions.ConnectionClosed:
@@ -376,12 +444,15 @@ class WSTracker:
                     continue
 
                 if msg_type == "executing":
+                    self._prompt_started = True
                     await self._handle_executing(data, total_units, node_weights)
 
                 elif msg_type == "progress":
+                    self._prompt_started = True
                     await self._handle_progress(data, total_units, node_weights)
 
                 elif msg_type == "executed":
+                    self._prompt_started = True
                     await self._handle_executed(data)
 
                 elif msg_type == "execution_error":
@@ -389,6 +460,7 @@ class WSTracker:
                     break
 
                 elif msg_type == "execution_start":
+                    self._prompt_started = True
                     self._log("info", "start", "Workflow execution started", self._job_id)
 
             # ── WS 循环结束 → 检查是否已完成 ──────────────────────────
@@ -427,7 +499,7 @@ class WSTracker:
                 self._prompt_id = resp.get("prompt_id", "")
             except Exception as e:
                 self._log("error", "http", f"HTTP fallback prompt 提交失败: {e}", self._job_id)
-                return TrackResult(ok=False, prompt_id="", elapsed=time.time() - self._start_time)
+                raise PromptSubmitError(str(e)) from e
 
         return await self._http_poll_track(timeout)
 
@@ -499,21 +571,27 @@ class WSTracker:
             return
 
         nid = str(node_id)
+        if self._current_node_id and self._current_node_id != nid:
+            self._mark_node_completed(self._current_node_id)
         cls = self._node_types.get(nid, "")
+        self._current_node_id = nid
         self._current_node_cls = cls
         title = self._node_titles.get(nid, cls or nid)
         weight = node_weights.get(nid, 1.0)
         cum_pct = self._calc_pct()
         self._log("info", "node", f"[{cls}] {title} ({cum_pct:.0f}%)", self._job_id)
 
-        # 采样器/超分器：不在此加 weight（由 progress 事件逐 step 累加）
+        # 采样器/超分器：不在此加 weight（由 progress 事件逐 step 累加）。
+        # 普通节点也必须等 executed 事件才计入完成；否则 VAEDecode/SaveImage
+        # 一开始执行就会把整体进度推到 100%。
         if cls in NodeCategoryDict.SAMPLER or cls in NodeCategoryDict.UPSCALE:
             self._last_prog = 0
             self._sampler_cur = 0
             self._sampler_total = 0
-        elif weight > 0:
-            self._completed_units += weight
-        else:
+            if nid in self._step_info.time_estimates:
+                self._node_entered_at[nid] = time.time()
+                self._time_node_units.setdefault(nid, 0.0)
+        elif weight <= 0:
             # weight=0 节点 → 记录进入时间，供时长推算
             self._node_entered_at[nid] = time.time()
 
@@ -539,10 +617,16 @@ class WSTracker:
         self._sampler_cur = cur
         self._sampler_total = total
 
+        node_id = str(data.get("node", "")) if data.get("node") is not None else self._current_node_id
         if cur > self._last_prog:
-            node_id = str(data.get("node", "")) if data.get("node") is not None else ""
             weight = node_weights.get(node_id, 1.0)
-            if weight > 0:
+            if node_id in self._step_info.time_estimates and weight > 0:
+                contribution = min(max(cur / max(total, 1), 0.0), 0.98) * weight
+                previous = self._time_node_units.get(node_id, 0.0)
+                if contribution > previous:
+                    self._completed_units += contribution - previous
+                    self._time_node_units[node_id] = contribution
+            elif weight > 0:
                 delta = (cur - self._last_prog) / total * weight
                 self._completed_units += delta
             else:
@@ -553,6 +637,7 @@ class WSTracker:
         # 更新 current_node_cls
         prog_node = data.get("node")
         if prog_node is not None:
+            self._current_node_id = str(prog_node)
             cls = self._node_types.get(str(prog_node), "")
             if cls:
                 self._current_node_cls = cls
@@ -574,10 +659,13 @@ class WSTracker:
         """
         enode = data.get("node")
         if enode is not None:
-            cls = self._node_types.get(str(enode), "")
+            node_id = str(enode)
+            cls = self._node_types.get(node_id, "")
             if cls:
+                self._current_node_id = node_id
                 self._current_node_cls = cls
-                self._log("info", "done", f"[{cls}] Completed", self._job_id)
+                self._mark_node_completed(node_id)
+                self._log("info", "done", f"[{cls}] Completed ({self._calc_pct():.0f}%)", self._job_id)
 
         pct = self._calc_pct()
         await self._report_progress({
@@ -585,6 +673,28 @@ class WSTracker:
             "message": self._build_status_message(pct),
             "current_node": self._current_node_cls,
         })
+
+    def _mark_node_completed(self, node_id: str) -> None:
+        """Mark a non-progress-reporting node done once ComfyUI moves past it."""
+        node_id = str(node_id or "")
+        if not node_id or node_id in self._completed_node_ids:
+            return
+        cls = self._node_types.get(node_id, "")
+        if (
+            not cls
+            or cls in NodeCategoryDict.SAMPLER
+            or (cls in NodeCategoryDict.UPSCALE and node_id not in self._step_info.time_estimates)
+        ):
+            return
+        weight = self._step_info.node_weights.get(node_id, 1.0)
+        if weight > 0:
+            previous = self._time_node_units.get(node_id, 0.0)
+            self._completed_units += max(0.0, weight - previous)
+            self._time_node_units[node_id] = weight
+        self._completed_node_ids.add(node_id)
+        entered = self._node_entered_at.pop(node_id, None)
+        if entered and node_id in self._step_info.time_estimates:
+            TimeEstimator.record(cls, max(0.0, time.time() - entered))
 
     def _handle_error(self, data: dict) -> None:
         """处理 execution_error 消息。
@@ -610,28 +720,33 @@ class WSTracker:
         """
         while True:
             await asyncio.sleep(self.PROGRESS_REFRESH_INTERVAL)
-            if not self._node_entered_at:
-                continue
+            await self._refresh_delayed_node_loop_once_for_test()
 
-            now = time.time()
-            for node_id, entered in self._node_entered_at.items():
-                cls = self._node_types.get(node_id, "")
-                if not cls:
-                    continue
-                elapsed = now - entered
-                pct, _ = TimeEstimator.progress(cls, elapsed, 0)
-                # 更新 completed_units 中的推算部分
-                weight = self._step_info.node_weights.get(node_id, 0.0)
-                if weight == 0.0 and cls:
-                    # 找到这个节点在 total_units 中的对应位置
-                    weight_est = self._step_info.time_estimates.get(node_id, 30.0)
-                    expected = TimeEstimator.estimate(cls, 0)
-                    if expected > 0:
-                        # 用已完成百分比 × 预期的 weight 来推算
-                        # 在 total_units 中，这个节点贡献 1 unit 的"值"
-                        pct_of_unit = min(elapsed / expected, 1.0)
-                        # 通过 record 方式：直接用最小占比
-                        pass
+    async def _refresh_delayed_node_loop_once_for_test(self) -> None:
+        """Refresh time-estimated nodes once. Used by the loop and unit tests."""
+        if not self._node_entered_at:
+            return
+
+        now = time.time()
+        for node_id, entered in list(self._node_entered_at.items()):
+            cls = self._node_types.get(node_id, "")
+            if not cls:
+                continue
+            elapsed = now - entered
+            weight = self._step_info.node_weights.get(node_id, 0.0)
+            expected = self._step_info.time_estimates.get(node_id, 0.0)
+            if weight > 0.0 and expected > 0:
+                contribution = min(elapsed / expected, 0.95) * weight
+                previous = self._time_node_units.get(node_id, 0.0)
+                if contribution > previous:
+                    self._completed_units += contribution - previous
+                    self._time_node_units[node_id] = contribution
+                    pct = self._calc_pct()
+                    await self._report_progress({
+                        "pct": pct,
+                        "message": self._build_status_message(pct),
+                        "current_node": cls,
+                    })
 
     # ── 工具方法 ────────────────────────────────────────────────────────
 
@@ -643,8 +758,19 @@ class WSTracker:
         """
         total = self._step_info.total_units
         if total <= 0:
-            return 0.0
-        return min(100.0, self._completed_units / total * 100.0)
+            raw = 0.0
+        else:
+            raw = min(1.0, max(0.0, self._completed_units / total))
+        if self._workflow_done or raw >= 1.0:
+            pct = 100.0
+        else:
+            # Human-facing progress bands:
+            # 0-12% is queue/startup/prompt submission, 18-96% is actual ComfyUI work,
+            # and the remaining 4% is reserved for image download/storage.
+            pct = 18.0 + raw * 78.0
+            pct = min(96.0, pct)
+        self._last_pct = max(self._last_pct, pct)
+        return self._last_pct
 
     def _build_status_message(self, pct: float) -> str:
         """构造可读的状态消息。

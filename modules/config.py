@@ -26,6 +26,10 @@ class NodeCategory:
     FREE: ClassVar[set[str]] = {
         "SaveImage",
         "PreviewImage",
+        "PrimitiveBoolean",
+        "PrimitiveFloat",
+        "PrimitiveInt",
+        "PrimitiveString",
     }
 
     WEIGHT_1: ClassVar[set[str]] = {

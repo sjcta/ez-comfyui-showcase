@@ -32,7 +32,7 @@ class StepInfo:
         node_order: 节点拓扑排序（processing order）。
         time_estimates: {node_id: expected_seconds} — 仅 weight=0 的节点。
     """
-    total_units: int = 0
+    total_units: float = 0.0
     node_weights: dict[str, float] = field(default_factory=dict)
     node_labels: dict[str, str] = field(default_factory=dict)
     sampler_steps: dict[str, int] = field(default_factory=dict)
@@ -95,7 +95,10 @@ class StepCalculator:
             # 分类处理
             cat = self.get_category(cls)
 
-            if cat == "free":
+            if cls in ("SaveImage", "PreviewImage"):
+                result.node_weights[nid] = 1.0
+
+            elif cat == "free":
                 # FREE 节点不计入进度
                 result.node_weights[nid] = 0.0
                 continue
@@ -109,7 +112,7 @@ class StepCalculator:
                 weight, steps = self._calc_upscale_weight(nid, workflow)
                 result.node_weights[nid] = weight
                 result.sampler_steps[nid] = steps
-                if weight == 0.0:
+                if steps == 0:
                     # 无 steps 参数节点 → 时长推算
                     resolution = self._resolve_resolution_hint(workflow)
                     expected = TimeEstimator.estimate(cls, resolution)
@@ -120,7 +123,7 @@ class StepCalculator:
                 result.node_weights[nid] = 1.0
 
         # 第三步：累加 total_units
-        result.total_units = int(sum(result.node_weights.values()))
+        result.total_units = float(sum(result.node_weights.values()))
 
         return result
 
@@ -235,7 +238,12 @@ class StepCalculator:
 
         if raw_steps is None:
             # 无 steps 参数 → 时长推算
-            return (0.0, 0)
+            resolution = self._resolve_resolution_hint(workflow)
+            expected = TimeEstimator.estimate(
+                workflow.get(nid, {}).get("class_type", ""),
+                resolution,
+            )
+            return (float(max(1.0, expected)), 0)
 
         if isinstance(raw_steps, (int, float)):
             effective = max(1, int(raw_steps))
@@ -326,6 +334,13 @@ class StepCalculator:
                 w = inputs.get("width", 0)
                 h = inputs.get("height", 0)
                 max_dim = max(max_dim, int(w), int(h))
+            if ct in ("SeedVR2VideoUpscaler",):
+                inputs = node.get("inputs", {})
+                resolution = inputs.get("resolution", 0)
+                try:
+                    max_dim = max(max_dim, int(resolution or 0))
+                except (TypeError, ValueError):
+                    pass
         return max_dim
 
     @staticmethod
