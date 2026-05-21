@@ -1,3 +1,4 @@
+import json
 import unittest
 
 import app
@@ -109,11 +110,79 @@ class PromptOptimizerTests(unittest.TestCase):
         ```"""
 
         parsed = parse_prompt_optimizer_output(text, "切成片的西瓜")
+        structured_json = json.loads(parsed["structured_prompt_json"])
 
         self.assertEqual(parsed["optimized_prompt"], "切成片的西瓜，白色瓷盘，夏日自然光")
         self.assertEqual(parsed["structured_prompt"]["version"], "ez-prompt-json-v1")
         self.assertEqual(parsed["structured_prompt"]["subject"], "西瓜")
         self.assertIn('"subject": "西瓜"', parsed["structured_prompt_json"])
+        self.assertNotIn("version", structured_json)
+        self.assertNotIn("language", structured_json)
+        self.assertNotIn("intent", structured_json)
+        self.assertNotIn("prompt", structured_json)
+        self.assertNotIn("materials_textures", structured_json)
+        self.assertNotIn("visible_text", structured_json)
+        self.assertNotIn("negative_prompt", structured_json)
+        self.assertEqual(structured_json["important_details"], ["白色瓷盘"])
+
+    def test_structured_prompt_json_removes_prompt_duplicate_from_details(self):
+        text = """{
+          "keyword_prompt": "极简抽象海报，几何形状构成的人脸，黄灰粉渐变色调",
+          "structured_prompt": {
+            "version": "ez-prompt-json-v1",
+            "language": "zh",
+            "intent": "生成抽象几何人脸海报",
+            "prompt": "极简抽象海报，几何形状构成的人脸，黄灰粉渐变色调",
+            "subject": "抽象几何人脸",
+            "important_details": [
+              "极简抽象海报，几何形状构成的人脸，黄灰粉渐变色调。",
+              "双眼硕大细长，直视观者",
+              "面部两侧各一条垂直条纹"
+            ],
+            "constraints": [],
+            "visible_text": []
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "抽象几何人脸海报")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertEqual(
+            structured_json["important_details"],
+            ["双眼硕大细长，直视观者", "面部两侧各一条垂直条纹"],
+        )
+        self.assertNotIn("version", structured_json)
+        self.assertNotIn("language", structured_json)
+        self.assertNotIn("intent", structured_json)
+        self.assertNotIn("prompt", structured_json)
+        self.assertNotIn("constraints", structured_json)
+
+    def test_structured_prompt_json_uses_fields_instead_of_full_prompt_when_decomposed(self):
+        text = """{
+          "keyword_prompt": "年轻女子十七八岁，棕色长发，白色露肩连衣裙，坐在床前面对大窗户",
+          "structured_prompt": {
+            "intent": "写实肖像摄影，强调人物与环境的和谐与宁静氛围",
+            "prompt": "年轻女子十七八岁，棕色长发，白皙肤色，佩戴精致项链，身穿白色露肩连衣裙，坐在床前面对大窗户，窗外绿意盎然，画面中央直视镜头，神情宁静，柔和梦幻棕褐色调，写实摄影，肖像角度",
+            "subject": "年轻女子，十七八岁，棕色长发，白皙肤色，佩戴精致项链，身穿白色露肩连衣裙",
+            "action": "坐在床前，面对大窗户，直视镜头，神情宁静",
+            "scene": "室内，床前，大窗户透入自然光，窗外绿意盎然",
+            "composition": "画面中央构图，人物居中，床与窗户形成对角线引导，突出人物面部与表情",
+            "lighting": "柔和自然光，从窗户斜射，营造温暖朦胧感，阴影柔和",
+            "style": "写实摄影，肖像风格，细腻真实质感，带梦幻氛围",
+            "color_palette": "棕褐色主调，搭配白色连衣裙与绿色窗外景致，整体柔和"
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "写实肖像摄影")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertNotIn("intent", structured_json)
+        self.assertNotIn("prompt", structured_json)
+        self.assertEqual(
+            structured_json["subject"],
+            "年轻女子，十七八岁，棕色长发，白皙肤色，佩戴精致项链，身穿白色露肩连衣裙",
+        )
+        self.assertEqual(structured_json["action"], "坐在床前，面对大窗户，直视镜头，神情宁静")
 
     def test_parse_prompt_optimizer_output_falls_back_for_plain_text(self):
         parsed = parse_prompt_optimizer_output("黑猫警长，经典中国动画风格，正义警察猫角色", "黑猫警长")
@@ -162,8 +231,10 @@ class PromptOptimizerTests(unittest.TestCase):
         calls = []
         old_runner = app.run_prompt_optimizer
         old_instances = app._get_enabled_instances
+        old_picker = app._pick_ready_aux_instance
         try:
             app._get_enabled_instances = lambda: [{"name": "A", "url": "http://comfy-a"}]
+            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
 
             def fake_runner(prompt, base_url, post, get, **kwargs):
                 calls.append((prompt, base_url))
@@ -186,12 +257,95 @@ class PromptOptimizerTests(unittest.TestCase):
         finally:
             app.run_prompt_optimizer = old_runner
             app._get_enabled_instances = old_instances
+            app._pick_ready_aux_instance = old_picker
 
         self.assertEqual(calls, [("请帮我生成一张切成片的西瓜", "http://comfy-a")])
         self.assertEqual(result["cleaned_prompt"], "切成片的西瓜")
         self.assertEqual(result["optimized_prompt"], "fresh sliced watermelon, natural lighting")
         self.assertEqual(result["structured_prompt"]["subject"], "watermelon")
         self.assertIn("subject", result["structured_prompt_json"])
+
+    def test_prompt_aux_instances_are_split_from_generation_pool(self):
+        instances = [
+            {"name": "A", "url": "http://comfy-a", "roles": ["generation"]},
+            {"name": "Prompt", "url": "http://comfy-prompt", "roles": ["prompt_aux"]},
+            {"name": "Caption", "url": "http://comfy-caption", "prompt_aux": True},
+        ]
+
+        self.assertEqual(
+            [inst["name"] for inst in app._get_generation_instances(instances)],
+            ["A"],
+        )
+        self.assertEqual(
+            [inst["name"] for inst in app._get_prompt_aux_instances(instances)],
+            ["Prompt", "Caption"],
+        )
+
+    def test_pick_ready_aux_instance_only_uses_reserved_prompt_pool(self):
+        old_ready = app._ensure_aux_instance_ready
+        old_queue = app._get_instance_queue_size
+        old_log = app.add_log
+        try:
+            app._ensure_aux_instance_ready = lambda inst, phase, timeout=180: inst
+            app._get_instance_queue_size = lambda url: 8 if url.endswith("gen") else 0
+            app.add_log = lambda *args, **kwargs: None
+
+            picked = app._pick_ready_aux_instance(
+                [
+                    {"name": "Gen", "url": "http://comfy-gen", "roles": ["generation"]},
+                    {"name": "Prompt", "url": "http://comfy-prompt", "roles": ["prompt_aux"]},
+                ],
+                phase="prompt_optimize",
+            )
+        finally:
+            app._ensure_aux_instance_ready = old_ready
+            app._get_instance_queue_size = old_queue
+            app.add_log = old_log
+
+        self.assertEqual(picked["name"], "Prompt")
+
+    def test_pick_ready_aux_instance_requires_reserved_prompt_pool(self):
+        with self.assertRaisesRegex(RuntimeError, "未配置提示词独立实例"):
+            app._pick_ready_aux_instance(
+                [{"name": "A", "url": "http://comfy-a", "roles": ["generation"]}],
+                phase="prompt_optimize",
+            )
+
+    def test_aux_instance_ready_starts_stopped_instance_before_prompt_task(self):
+        calls = []
+        old_up = app.comfyui_up
+        old_get_node = app._get_node_by_id
+        old_action = app._run_instance_action
+        old_log = app.add_log
+        old_last_active = dict(app._instance_last_active)
+        try:
+            states = iter([False, True])
+            app.comfyui_up = lambda url=None: next(states)
+            app._get_node_by_id = lambda nid: {"id": nid, "name": "Node", "connection": "local"}
+
+            def fake_action(node, inst, action):
+                calls.append((node["id"], inst["name"], action))
+                return True
+
+            app._run_instance_action = fake_action
+            app.add_log = lambda *args, **kwargs: None
+
+            inst = app._ensure_aux_instance_ready(
+                {"name": "A", "url": "http://comfy-a", "_node_id": "node-a"},
+                phase="prompt_optimize",
+                timeout=2,
+                poll_interval=0.2,
+            )
+        finally:
+            app.comfyui_up = old_up
+            app._get_node_by_id = old_get_node
+            app._run_instance_action = old_action
+            app.add_log = old_log
+            app._instance_last_active.clear()
+            app._instance_last_active.update(old_last_active)
+
+        self.assertEqual(inst["name"], "A")
+        self.assertEqual(calls, [("node-a", "A", "start")])
 
 
 if __name__ == "__main__":

@@ -1,14 +1,14 @@
 # Ez ComfyUI Showcase 🎨
 
-Dual-instance ComfyUI Web Management & Generation Platform.
+Multi-instance ComfyUI Web Management & Generation Platform.
 
-Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel ComfyUI instances (A:8190 / B:8189) behind an intelligent scheduler.
+Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel generation ComfyUI instances (A:8190 / B:8189) plus an isolated prompt auxiliary instance (Prompt:8191) behind an intelligent scheduler.
 
 ---
 
 ## Features
 
-- **双实例并行调度** — 自动负载均衡，多 workflow 不互相阻塞
+- **多实例分池调度** — 出图走 A/B 生成池，提示词优化和图片反推走独立 Prompt 辅助池
 - **三段式 UI** — 工作流管理、生成面板、历史画廊一站式操作
 - **GPU 监控** — 实时显存/功耗/温度仪表盘
 - **服务管理** — 浏览器内一键启动/停止 ComfyUI 实例
@@ -31,7 +31,7 @@ Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel C
 |-------|-----------|
 | Backend | Python 3 + asyncio + FastAPI |
 | Frontend | Vanilla JS ES6 Modules, CSS3 |
-| ComfyUI | 2× instances (A/B), --highvram |
+| ComfyUI | 2× generation instances (A/B) + 1× prompt auxiliary instance, --highvram |
 | Nginx | SSL reverse proxy (`imdjj.cn:1213`) |
 | Hardware | NVIDIA GB10, 128GB unified, CUDA 13 |
 

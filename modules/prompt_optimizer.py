@@ -33,14 +33,15 @@ IMAGE_PROMPT_OPTIMIZATION_GUIDE = (
 STRUCTURED_PROMPT_JSON_SCHEMA = (
     "Return only a valid JSON object with this exact top-level shape: "
     '{"keyword_prompt":"...",'
-    '"structured_prompt":{"version":"ez-prompt-json-v1","language":"zh or en",'
-    '"intent":"...","prompt":"...","subject":"...","action":"...","scene":"...",'
+    '"structured_prompt":{"subject":"...","action":"...","scene":"...",'
     '"composition":"...","lighting":"...","style":"...","color_palette":"...",'
     '"materials_textures":[],"important_details":[],"visible_text":[],"constraints":[],'
     '"negative_prompt":[]}}. '
     "The keyword_prompt is the compact plain prompt. The structured_prompt is the JSON prompt "
-    "that can be copied directly to an image model. Use empty strings or empty arrays for "
-    "unknown fields. Keep the user's language unless the user explicitly asks otherwise."
+    "that can be copied directly to an image model. Do not include metadata keys such as "
+    "version, language, or intent. Do not repeat the full keyword_prompt inside structured_prompt "
+    "when subject/action/scene/composition fields already describe the image. Omit fields that are "
+    "unknown, empty strings, or empty arrays. Keep the user's language unless the user explicitly asks otherwise."
 )
 
 DEFAULT_OPTIMIZER_INSTRUCTION = (
@@ -328,6 +329,68 @@ def _normalize_structured_prompt(value: Any, cleaned_prompt: str, optimized_prom
     return structured
 
 
+def _prune_empty_prompt_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            if key in {"version", "language", "intent"}:
+                continue
+            pruned = _prune_empty_prompt_value(item)
+            if pruned in ("", None, [], {}):
+                continue
+            cleaned[key] = pruned
+        return cleaned
+    if isinstance(value, list):
+        cleaned_items = []
+        for item in value:
+            pruned = _prune_empty_prompt_value(item)
+            if pruned in ("", None, [], {}):
+                continue
+            cleaned_items.append(pruned)
+        return cleaned_items
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _structured_prompt_for_image_model(structured: dict[str, Any]) -> dict[str, Any]:
+    """Return the compact JSON variant shown to users and copied into prompt fields."""
+    output = copy.deepcopy(structured or {})
+    prompt = str(output.get("prompt") or "").strip()
+    if prompt:
+        prompt_key = re.sub(r"[\s，,。.;；:：]+", "", prompt).lower()
+        details = _coerce_text_list(output.get("important_details"))
+        output["important_details"] = [
+            item
+            for item in details
+            if re.sub(r"[\s，,。.;；:：]+", "", item).lower() != prompt_key
+        ]
+    visual_keys = (
+        "subject",
+        "action",
+        "scene",
+        "composition",
+        "lighting",
+        "style",
+        "color_palette",
+        "materials_textures",
+        "important_details",
+        "visible_text",
+        "constraints",
+        "negative_prompt",
+    )
+    visual_field_count = 0
+    for key in visual_keys:
+        value = output.get(key)
+        if isinstance(value, str) and value.strip():
+            visual_field_count += 1
+        elif isinstance(value, list) and any(str(item).strip() for item in value):
+            visual_field_count += 1
+    if visual_field_count >= 2:
+        output.pop("prompt", None)
+    return _prune_empty_prompt_value(output)
+
+
 def parse_prompt_optimizer_output(text: str, cleaned_prompt: str) -> dict[str, Any]:
     """Parse the optimizer result into compatible plain text plus a JSON prompt."""
     normalized = _normalize_optimized_text(text)
@@ -351,7 +414,7 @@ def parse_prompt_optimizer_output(text: str, cleaned_prompt: str) -> dict[str, A
     return {
         "optimized_prompt": optimized,
         "structured_prompt": structured,
-        "structured_prompt_json": json.dumps(structured, ensure_ascii=False, indent=2),
+        "structured_prompt_json": json.dumps(_structured_prompt_for_image_model(structured), ensure_ascii=False, indent=2),
     }
 
 

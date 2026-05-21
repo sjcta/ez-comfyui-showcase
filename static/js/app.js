@@ -946,7 +946,7 @@ function init() {
   }
 
   function rndSeed(btnEl) {
-    var input = btnEl ? btnEl.parentElement.querySelector('input') : null;
+    var input = btnEl ? btnEl.parentElement.querySelector('input[type="number"]') : null;
     if (input) input.value = Math.floor(Math.random() * Math.pow(2, 53));
   }
 

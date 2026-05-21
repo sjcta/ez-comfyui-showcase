@@ -1377,6 +1377,12 @@ select { cursor: pointer; }
   font-size: 14px; transition: all .12s; display: flex; align-items: center;
 }
 .seed-group .btn-dice:hover { background: var(--border); }
+.seed-group .btn-dice.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-deep));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
 
 .adv-toggle {
   display: flex; align-items: center; gap: 6px;
@@ -4664,6 +4670,9 @@ select { cursor: pointer; }
   flex: 1 1 auto;
   min-width: 0;
   margin-bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .prompt-input-wrap {
   min-width: 0;
@@ -4679,40 +4688,41 @@ select { cursor: pointer; }
 }
 .prompt-variant-panel {
   display: inline-flex;
-  flex: 1 0 100%;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  margin-top: 2px;
-  padding: 6px;
-  border: 1px solid rgba(56,189,248,.22);
+  justify-content: flex-end;
+  gap: 0;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid rgba(56,189,248,.34);
   border-radius: 999px;
-  background: rgba(2,6,23,.56);
+  background: rgba(2,6,23,.70);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
   animation: promptVariantIn .18s ease-out both;
 }
 .prompt-variant-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 5px 12px;
-  border: 1px solid rgba(148,163,184,.24);
+  min-height: 24px;
+  padding: 4px 10px;
+  border: 0;
   border-radius: 999px;
-  background: rgba(15,23,42,.72);
+  background: transparent;
   color: rgba(203,213,225,.84);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 750;
   cursor: pointer;
-  transition: border-color .16s ease, background-color .16s ease, color .16s ease;
+  transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
 }
 .prompt-variant-btn:hover {
-  border-color: rgba(56,189,248,.48);
+  background: rgba(56,189,248,.10);
   color: #e0f2fe;
 }
 .prompt-variant-btn.active {
-  border-color: rgba(245,158,11,.68);
-  background: rgba(245,158,11,.16);
+  background: rgba(245,158,11,.18);
   color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(245,158,11,.42);
 }
 @keyframes promptVariantIn {
   from { opacity: 0; transform: translateY(-4px); }

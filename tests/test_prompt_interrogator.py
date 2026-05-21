@@ -18,7 +18,7 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertEqual(workflow["2"]["class_type"], "WD14Tagger|pysssss")
         self.assertEqual(workflow["6"]["class_type"], "Florence2Run")
 
-    def test_extract_interrogate_result_prefers_promptgen_with_wd14_fallback(self):
+    def test_extract_interrogate_result_prefers_promptgen_and_keeps_wd14_metadata(self):
         entry = {
             "outputs": {
                 "3": {"text": ["tag one, tag two"]},
@@ -31,6 +31,44 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertEqual(result["prompt"], "a detailed prompt generated from image")
         self.assertEqual(result["wd14_tags"], "tag one, tag two")
         self.assertEqual(result["promptgen"], "a detailed prompt generated from image")
+
+    def test_extract_interrogate_result_removes_duplicate_caption_and_wrong_tag_tail(self):
+        caption = (
+            "A photograph of a futuristic sports car driving on a winding mountain road during sunrise or sunset. "
+            "The car is positioned in the center of the image, with its sleek aerodynamic design highlighted by warm golden light."
+        )
+        duplicate = (
+            "In this image, the car is positioned at the center of the frame, with its sleek and aerodynamic design "
+            "highlighted by the warm, golden light of the sunrise or sunset."
+        )
+        wrong_tags = "1girl, solo, wings, outdoors, sky, wheel, no people, driving, mountain, road, fog"
+        entry = {
+            "outputs": {
+                "3": {"text": [wrong_tags]},
+                "7": {"text": [caption + "\n\n" + duplicate + "\n\n" + wrong_tags]},
+            }
+        }
+
+        result = extract_interrogate_result(entry)
+
+        self.assertEqual(result["prompt"], caption)
+        self.assertNotIn("1girl", result["prompt"])
+        self.assertNotIn("wings", result["prompt"])
+        self.assertEqual(result["wd14_tags"], wrong_tags)
+
+    def test_extract_interrogate_result_does_not_use_wd14_tag_line_as_prompt(self):
+        entry = {
+            "outputs": {
+                "3": {"text": ["1girl, solo, wings, outdoors, sky, wheel, no people, driving, mountain, road, fog"]},
+                "7": {"text": [""]},
+            }
+        }
+
+        result = extract_interrogate_result(entry)
+
+        self.assertEqual(result["prompt"], "")
+        self.assertEqual(result["promptgen"], "")
+        self.assertIn("1girl", result["wd14_tags"])
 
     def test_prepare_interrogate_image_downscales_large_upload(self):
         try:

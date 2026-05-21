@@ -63,6 +63,37 @@ function _setPromptInputValue(value) {
     return pi;
   }
 
+function _getSeedInput() {
+    return document.querySelector('.seed-group input[type="number"]');
+  }
+
+function _setSeedRandomEnabled(enabled) {
+    $$('.btn-dice[data-seed-random]').forEach(function(btn) {
+      btn.classList.toggle('is-active', !!enabled);
+      btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    });
+  }
+
+function _isSeedRandomEnabled() {
+    var btn = document.querySelector('.btn-dice[data-seed-random]');
+    return !!(btn && btn.classList.contains('is-active'));
+  }
+
+function _getManualSeedValue() {
+    var input = _getSeedInput();
+    if (!input) return null;
+    var value = String(input.value || '').trim();
+    if (!value) return null;
+    var seed = parseInt(value, 10);
+    return Number.isFinite(seed) ? seed : null;
+  }
+
+function toggleSeedRandom(btnEl) {
+    var btn = btnEl || document.querySelector('.btn-dice[data-seed-random]');
+    if (!btn) return;
+    _setSeedRandomEnabled(!btn.classList.contains('is-active'));
+  }
+
 function _clearPromptOptimizationVariants() {
     var old = $('#promptOptimizeVariants');
     if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -75,9 +106,10 @@ function _showPromptOptimizationVariants(data) {
       _clearPromptOptimizationVariants();
       return;
     }
-    var btn = $('#optimizePromptBtn');
-    var actions = btn && btn.closest ? btn.closest('.prompt-actions') : null;
-    if (!actions) return;
+    var promptField = $('#promptInput');
+    var promptGroup = promptField && promptField.closest ? promptField.closest('.prompt-fg') : null;
+    var labelRow = promptGroup ? promptGroup.querySelector('.prompt-label-row') : null;
+    if (!labelRow) return;
     _clearPromptOptimizationVariants();
     var panel = document.createElement('div');
     panel.id = 'promptOptimizeVariants';
@@ -97,7 +129,7 @@ function _showPromptOptimizationVariants(data) {
         activate(this.getAttribute('data-kind') || 'text');
       });
     }
-    actions.appendChild(panel);
+    labelRow.appendChild(panel);
   }
 
 function _quickGenerationLabel() {
@@ -221,8 +253,9 @@ async function fillFormFromHistory(idx, key) {
     }
     // Restore seed (covers old items without field_values, and ensures actual seed is used)
     if (h.seed) {
-      const seedInput = document.querySelector('.seed-group input');
+      const seedInput = _getSeedInput();
       if (seedInput) seedInput.value = h.seed;
+      _setSeedRandomEnabled(true);
     }
     document.querySelector('.col-left').scrollTop = 0;
   }
@@ -238,6 +271,7 @@ async function restoreJob(jobId) {
         const el = $(`#advFields [data-key="${k}"]`);
         if (el) el.value = v;
       }
+      if (Object.keys(snap.adv || {}).some(function(k) { return k.endsWith('::seed'); })) _setSeedRandomEnabled(true);
       return;
     }
     // Fallback: restore from server job data
@@ -287,8 +321,9 @@ async function restoreJob(jobId) {
     }
     // Restore seed
     if (j.seed) {
-      const seedEl = document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
+      const seedEl = _getSeedInput() || document.querySelector('[data-field="seed"]') || document.querySelector('input[placeholder*="seed"]');
       if (seedEl) seedEl.value = j.seed;
+      _setSeedRandomEnabled(true);
     }
     // Restore advanced fields from server fields data
     if (j.fields && typeof j.fields === 'object') {
@@ -362,18 +397,22 @@ async function doGenerate() {
     });
 
     try {
+      const manualSeed = _getManualSeedValue();
+      const requestBody = {
+        workflow: A.currentWF,
+        fields,
+        width: parseInt(($('#widthInput') || {}).value) || 0,
+        height: parseInt(($('#heightInput') || {}).value) || 0,
+        preferred_instance: A.manualTargetInstance ? (A.currentTargetInstance || '') : '',
+        preferred_node_id: A.manualTargetInstance ? (A.currentTargetNodeId || '') : '',
+      };
+      if (!_isSeedRandomEnabled() && manualSeed === null) throw new Error('请输入种子数字，或开启随机种子');
+      if (!_isSeedRandomEnabled()) requestBody.seed = manualSeed;
       const authHeaders = window.CW.auth.getAuthHeaders();
       const r = await fetch(`${API}/api/generate`, {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
-        body: JSON.stringify({
-          workflow: A.currentWF,
-          fields,
-          width: parseInt(($('#widthInput') || {}).value) || 0,
-          height: parseInt(($('#heightInput') || {}).value) || 0,
-          preferred_instance: A.manualTargetInstance ? (A.currentTargetInstance || '') : '',
-          preferred_node_id: A.manualTargetInstance ? (A.currentTargetNodeId || '') : '',
-        }),
+        body: JSON.stringify(requestBody),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || '提交失败');
@@ -781,7 +820,7 @@ function renderAdvFields(fields) {
           html += `<label class="toggle-label bool-toggle"><input type="checkbox" data-key="${key}" ${val === true || val === 'True' || val === 'true' ? 'checked' : ''} onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label>`;
           break;
         case 'seed':
-          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}"><button type="button" class="btn-dice" onclick="CW.rndSeed(this)">${CW.icon('dice-1')}</button></div>`;
+          html += `<div class="seed-group"><input type="number" data-key="${key}" data-type="number" value="${val}" oninput="CW.setSeedRandomEnabled(false)"><button type="button" class="btn-dice seed-random-toggle is-active" data-seed-random="1" aria-pressed="true" title="随机种子" aria-label="随机种子" onclick="CW.toggleSeedRandom(this)">${CW.icon('shuffle')}</button></div>`;
           break;
         case 'number': {
           const step = f.step || 1,
@@ -930,6 +969,8 @@ function renderQuickGen() {
   window.CW.renderAdvFields = renderAdvFields;
   window.CW.renderQuickGen = renderQuickGen;
   window.CW.renderQuickForm = renderQuickForm;
+  window.CW.toggleSeedRandom = toggleSeedRandom;
+  window.CW.setSeedRandomEnabled = _setSeedRandomEnabled;
   window.CW.initRatioGrid = initRatioGrid;
   window.CW.highlightRatio = highlightRatio;
 })();

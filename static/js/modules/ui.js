@@ -353,7 +353,7 @@ function initDragScroll(selector) {
   }
 
 function rndSeed(btnEl) {
-    const input = btnEl ? btnEl.parentElement.querySelector('input') : null;
+    const input = btnEl ? btnEl.parentElement.querySelector('input[type="number"]') : null;
     if (input) input.value = Math.floor(Math.random() * 2 ** 53);
   }
 

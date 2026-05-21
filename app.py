@@ -362,6 +362,73 @@ def _get_enabled_instances() -> list[dict]:
             instances.append(full)
     return instances
 
+
+_AUX_INSTANCE_ROLE_TOKENS = {
+    "aux",
+    "assistant",
+    "caption",
+    "interrogate",
+    "llm",
+    "prompt",
+    "prompt-aux",
+    "prompt_aux",
+    "prompt_optimize",
+    "prompt_interrogate",
+    "text",
+    "反推",
+    "提示词",
+    "辅助",
+}
+
+
+def _instance_role_tokens(inst: dict) -> set[str]:
+    """Return normalized role/label tokens that describe how an instance may be used."""
+    values: list[str] = []
+    for key in ("role", "roles", "purpose", "usage", "task_role", "labels", "tags"):
+        raw = inst.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple, set)):
+            values.extend(str(item) for item in raw)
+        else:
+            values.extend(part.strip() for part in str(raw).replace("，", ",").split(","))
+
+    name = str(inst.get("name") or inst.get("id") or "").strip()
+    service = str(inst.get("service") or "").strip()
+    env_aux_names = {
+        item.strip().lower()
+        for item in os.environ.get("EZ_COMFYUI_AUX_INSTANCES", "").replace("，", ",").split(",")
+        if item.strip()
+    }
+    if name and name.lower() in env_aux_names:
+        values.append("prompt_aux")
+    if service and service.lower() in env_aux_names:
+        values.append("prompt_aux")
+
+    tokens = {item.strip().lower() for item in values if item and item.strip()}
+    return tokens
+
+
+def _is_prompt_aux_instance(inst: dict) -> bool:
+    """Whether this instance is reserved for prompt optimization/image interrogation."""
+    if bool(inst.get("prompt_aux") or inst.get("auxiliary") or inst.get("aux_instance")):
+        return True
+    tokens = _instance_role_tokens(inst)
+    return bool(tokens & _AUX_INSTANCE_ROLE_TOKENS)
+
+
+def _get_prompt_aux_instances(instances: list[dict] | None = None) -> list[dict]:
+    """Return instances reserved for prompt optimization and image interrogation."""
+    pool = _get_enabled_instances() if instances is None else list(instances or [])
+    return [inst for inst in pool if _is_prompt_aux_instance(inst)]
+
+
+def _get_generation_instances(instances: list[dict] | None = None) -> list[dict]:
+    """Return instances that may accept image-generation jobs."""
+    pool = _get_enabled_instances() if instances is None else list(instances or [])
+    return [inst for inst in pool if not _is_prompt_aux_instance(inst)]
+
+
 def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[dict]:
     """Return enabled instances visible to the current user."""
     instances = []
@@ -505,7 +572,7 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
         # Phase 1: find the best instance
-        candidate_instances = _get_enabled_instances()
+        candidate_instances = _get_generation_instances()
         if preferred_node_id:
             candidate_instances = [item for item in candidate_instances if item.get("_node_id") == preferred_node_id]
         if not candidate_instances:
@@ -1433,11 +1500,11 @@ node_gpu_cache: dict = {}
 # ── Model Affinity Routing ──────────────────────────────────────────────
 # Per-instance semaphores: one concurrent job per ComfyUI instance
 def _build_instance_semas():
-    return {inst["name"]: asyncio.Semaphore(1) for inst in _get_enabled_instances()}
+    return {inst["name"]: asyncio.Semaphore(1) for inst in _get_generation_instances()}
 def _build_instance_last_active():
     return {inst["name"]: 0 for inst in _get_enabled_instances()}
 def _build_instance_group():
-    return {inst["name"]: "" for inst in _get_enabled_instances()}
+    return {inst["name"]: "" for inst in _get_generation_instances()}
 
 _instance_semas: dict[str, asyncio.Semaphore] = {}
 _instance_last_active: dict[str, float] = {}
@@ -1448,15 +1515,18 @@ START_GRACE_PERIOD = 90  # seconds to skip dead watcher check after intentional 
 def _refresh_instance_state():
     """Refresh per-instance semaphores and state dicts from current nodes."""
     global _instance_semas, _instance_last_active, _instance_group
-    current = {inst["name"] for inst in _get_enabled_instances()}
+    current = {inst["name"] for inst in _get_generation_instances()}
     # Add new
-    for inst in _get_enabled_instances():
+    for inst in _get_generation_instances():
         if inst["name"] not in _instance_semas:
             _instance_semas[inst["name"]] = asyncio.Semaphore(1)
         if inst["name"] not in _instance_last_active:
             _instance_last_active[inst["name"]] = 0
         if inst["name"] not in _instance_group:
             _instance_group[inst["name"]] = ""
+    for inst in _get_prompt_aux_instances():
+        if inst["name"] not in _instance_last_active:
+            _instance_last_active[inst["name"]] = 0
 
 # Model group definitions — workflows sharing a base model get the same group.
 # Affinity matching is done at the GROUP level, not filename level.
@@ -1483,7 +1553,7 @@ def pick_affinity_instance(workflow_name: str) -> dict | None:
     if not workflow_name:
         return None
     wf_group = extract_model_group(workflow_name)
-    for inst in _get_enabled_instances():
+    for inst in _get_generation_instances():
         if _instance_group.get(inst["name"]) == wf_group:
             return inst
     return None
@@ -1500,6 +1570,8 @@ async def _idle_instance_watcher():
         await asyncio.sleep(60)
         now = time.time()
         for inst in _get_enabled_instances():
+            if _is_prompt_aux_instance(inst):
+                continue
             name = inst["name"]
             last = _instance_last_active.get(name, 0)
             if last == 0:
@@ -1629,7 +1701,7 @@ async def lifespan(app: FastAPI):
         instance_last_active=_instance_last_active,
         output_dir=OUTPUT_DIR,
         history_dir=HISTORY_DIR,
-        get_enabled_instances_fn=_get_enabled_instances,
+        get_enabled_instances_fn=_get_generation_instances,
         insert_gen_fn=_insert_generation,
         input_dir=COMFYUI_INPUT,
     )
@@ -1899,6 +1971,64 @@ def comfyui_up(base_url: str = None) -> bool:
             return r.status == 200
     except Exception:
         return False
+
+
+def _mark_aux_instance_active(instance: dict) -> None:
+    name = str((instance or {}).get("name") or "")
+    if name:
+        _instance_last_active[name] = time.time()
+
+
+def _ensure_aux_instance_ready(
+    instance: dict,
+    phase: str,
+    timeout: float = 180.0,
+    poll_interval: float = 2.0,
+) -> dict:
+    """Ensure a non-generation ComfyUI task has a live instance before submit."""
+    inst = dict(instance or {})
+    url = inst.get("url", "")
+    name = inst.get("name", "unknown")
+    if url and comfyui_up(url):
+        _mark_aux_instance_active(inst)
+        return inst
+
+    node = _get_node_by_id(inst.get("_node_id", ""))
+    conn = (node or {}).get("connection") or inst.get("_node_connection", "local")
+    if conn == "remote-http":
+        raise RuntimeError(f"实例 {name} 当前不可用，HTTP 远程实例不能自动启动")
+    if not node:
+        raise RuntimeError(f"实例 {name} 缺少设备信息，无法自动启动")
+
+    add_log("info", phase, f"启动 ComfyUI 实例 {name}...", details="coldstart")
+    if not _run_instance_action(node, inst, "start"):
+        raise RuntimeError(f"实例 {name} 启动命令失败")
+
+    deadline = time.time() + float(timeout or 180.0)
+    interval = max(0.2, float(poll_interval or 2.0))
+    while time.time() < deadline:
+        if url and comfyui_up(url):
+            _mark_aux_instance_active(inst)
+            add_log("info", phase, f"ComfyUI 实例 {name} 已就绪", details="coldstart")
+            return inst
+        time.sleep(interval)
+    raise TimeoutError(f"实例 {name} 启动后未就绪")
+
+
+def _pick_ready_aux_instance(instances: list[dict], phase: str, timeout: float = 180.0) -> dict:
+    """Pick a reserved auxiliary instance and cold-start it when needed."""
+    aux_instances = _get_prompt_aux_instances(instances)
+    if not aux_instances:
+        raise RuntimeError("未配置提示词独立实例，请新增独立 ComfyUI 入口并为实例设置 roles: ['prompt_aux']")
+    errors = []
+    for inst in sorted(aux_instances, key=lambda item: _get_instance_queue_size(item.get("url", ""))):
+        try:
+            return _ensure_aux_instance_ready(inst, phase=phase, timeout=timeout)
+        except Exception as e:
+            errors.append(f"{inst.get('name', '?')}: {e}")
+            add_log("warn", phase, f"实例 {inst.get('name', '?')} 不可用: {e}")
+    detail = "；".join(errors) if errors else "无候选实例"
+    raise RuntimeError(f"没有可用的提示词独立实例: {detail}")
 
 
 def comfyui_pid() -> int | None:
@@ -3138,15 +3268,19 @@ def api_status(
         q_size = _get_instance_queue_size(inst["url"])
         grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
+        is_prompt_aux = _is_prompt_aux_instance(inst)
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
         q_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
         q_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
         instances.append({
             "name": name,
+            "port": inst.get("port"),
             "url": inst["url"],
             "node_id": inst.get("_node_id", ""),
             "node_name": inst.get("_node_name", ""),
             "node_connection": inst.get("_node_connection", "local"),
+            "role": "prompt_aux" if is_prompt_aux else "generation",
+            "prompt_aux": is_prompt_aux,
             "up": comfyui_up(base_url=inst["url"]),
             "queue": q_size,
             "queue_running": q_run,
@@ -3942,8 +4076,8 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
     instances = _get_enabled_instances()
     if not instances:
         raise HTTPException(503, "No enabled ComfyUI instances available")
-    inst = min(instances, key=lambda item: _get_instance_queue_size(item.get("url", "")))
     try:
+        inst = _pick_ready_aux_instance(instances, "prompt_optimize", timeout=180)
         result = run_prompt_optimizer(
             prompt,
             inst.get("url", COMFYUI_URL),
@@ -3953,9 +4087,14 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
             poll_interval=1,
             max_new_tokens=req.max_new_tokens,
         )
+        _mark_aux_instance_active(inst)
     except TimeoutError as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(504, f"提示词优化超时: {e}") from e
+    except RuntimeError as e:
+        add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
+        status_code = 503 if "提示词独立实例" in str(e) else 500
+        raise HTTPException(status_code, f"提示词优化失败: {e}") from e
     except Exception as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"提示词优化失败: {e}") from e
@@ -3974,9 +4113,9 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     instances = _get_enabled_instances()
     if not instances:
         raise HTTPException(503, "No enabled ComfyUI instances available")
-    inst = min(instances, key=lambda item: _get_instance_queue_size(item.get("url", "")))
-    inst_url = inst.get("url", COMFYUI_URL)
     try:
+        inst = _pick_ready_aux_instance(instances, "prompt_interrogate", timeout=180)
+        inst_url = inst.get("url", COMFYUI_URL)
         prepared_image = prepare_interrogate_image(image, COMFYUI_INPUT)
         image_for_interrogate = prepared_image.get("filename") or image
         workflow = build_image_interrogate_workflow(image_for_interrogate)
@@ -3989,6 +4128,7 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
             timeout=180,
             poll_interval=1,
         )
+        _mark_aux_instance_active(inst)
         result["image_preprocess"] = prepared_image
         prompt_text = str(result.get("prompt") or "").strip()
         if prompt_text:
@@ -4012,6 +4152,10 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     except TimeoutError as e:
         add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(504, f"图片反推超时: {e}") from e
+    except RuntimeError as e:
+        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+        status_code = 503 if "提示词独立实例" in str(e) else 500
+        raise HTTPException(status_code, f"图片反推失败: {e}") from e
     except Exception as e:
         add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"图片反推失败: {e}") from e

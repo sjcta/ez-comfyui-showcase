@@ -242,13 +242,16 @@ async function _refreshInstCards() {
         html += '<div class="popup-section-title">' + escH(group.name) + ' \u5b9e\u4f8b\u5217\u8868</div>';
         for (var idx = 0; idx < group.items.length; idx++) {
         var inst = group.items[idx];
-        var isSelected = A.currentTargetInstance === inst.name && (!A.currentTargetNodeId || A.currentTargetNodeId === inst.node_id);
+        var isAux = !!inst.prompt_aux || inst.role === 'prompt_aux';
+        var isSelected = !isAux && A.currentTargetInstance === inst.name && (!A.currentTargetNodeId || A.currentTargetNodeId === inst.node_id);
         var statusCls = inst.up ? 'on' : 'off';
         var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
         var btnCls = inst.up ? 'stop' : 'start';
         var groupLabel = groupMap[inst.loaded_group] || inst.loaded_group || '';
         var stateText = !inst.up
           ? '\u5173\u95ed'
+          : isAux && inst.queue > 0
+            ? '\u8f85\u52a9\u4efb\u52a1\u4e2d'
           : inst.queue_running > 0
             ? '\u51fa\u56fe\u4e2d'
             : inst.queue_pending > 0
@@ -263,8 +266,12 @@ async function _refreshInstCards() {
           inst.name +
           ' <span class="dim-tag">:' +
           inst.port +
-          '</span></div>' +
-          '<button class="inst-card-btn" onclick="CW.setTargetInstance(\'' + escA(inst.name) + '\',\'' + escA(inst.node_id || '') + '\')">' + (isSelected ? '当前目标' : '设为目标') + '</button>' +
+          '</span>' +
+          (isAux ? ' <span class="dim-tag">\u63d0\u793a\u8bcd\u8f85\u52a9</span>' : '') +
+          '</div>' +
+          (isAux
+            ? '<button class="inst-card-btn" disabled>\u8f85\u52a9\u5b9e\u4f8b</button>'
+            : '<button class="inst-card-btn" onclick="CW.setTargetInstance(\'' + escA(inst.name) + '\',\'' + escA(inst.node_id || '') + '\')">' + (isSelected ? '当前目标' : '设为目标') + '</button>') +
           '<button class="inst-card-btn ' +
           btnCls +
           '" onclick="CW.toggleInst(\'' +

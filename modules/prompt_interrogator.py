@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import difflib
 import os
+import re
 import time
 import uuid
 from typing import Any, Callable
@@ -179,12 +181,83 @@ def _tag_output(outputs: dict[str, Any], node_id: str) -> str:
     return ""
 
 
+def _is_tag_like_prompt_line(text: str) -> bool:
+    """Detect WD14/booru-style comma tag lines that should not become final prompts."""
+    line = str(text or "").strip().strip(".。")
+    if not line:
+        return False
+    parts = [part.strip() for part in re.split(r"[,，]", line) if part.strip()]
+    if len(parts) < 4:
+        return False
+    if re.search(r"[.。!?！？]", line):
+        return False
+    short_parts = 0
+    for part in parts:
+        words = [word for word in re.split(r"\s+", part) if word]
+        if len(words) <= 3 and len(part) <= 36:
+            short_parts += 1
+    return short_parts / max(1, len(parts)) >= 0.75
+
+
+def _paragraph_similarity(a: str, b: str) -> float:
+    a_norm = re.sub(r"\s+", " ", str(a or "").strip().lower())
+    b_norm = re.sub(r"\s+", " ", str(b or "").strip().lower())
+    if not a_norm or not b_norm:
+        return 0.0
+    return max(
+        difflib.SequenceMatcher(None, a_norm, b_norm).ratio(),
+        difflib.SequenceMatcher(None, b_norm, a_norm).ratio(),
+    )
+
+
+def _paragraph_token_overlap(a: str, b: str) -> float:
+    words_a = {
+        word
+        for word in re.findall(r"[a-zA-Z][a-zA-Z'-]{2,}", str(a or "").lower())
+        if word not in {"the", "and", "with", "this", "that", "image", "itself", "even", "more"}
+    }
+    words_b = {
+        word
+        for word in re.findall(r"[a-zA-Z][a-zA-Z'-]{2,}", str(b or "").lower())
+        if word not in {"the", "and", "with", "this", "that", "image", "itself", "even", "more"}
+    }
+    if not words_a or not words_b:
+        return 0.0
+    return len(words_a & words_b) / max(1, min(len(words_a), len(words_b)))
+
+
+def _clean_promptgen_text(text: str) -> str:
+    """Keep Florence's natural caption and remove duplicate/tagger fragments."""
+    normalized = str(text or "").replace("\r\n", "\n").strip()
+    if not normalized:
+        return ""
+    blocks = [block.strip() for block in re.split(r"\n\s*\n+", normalized) if block.strip()]
+    if not blocks:
+        blocks = [normalized]
+    cleaned_blocks: list[str] = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        prose_lines = [line for line in lines if not _is_tag_like_prompt_line(line)]
+        prose = " ".join(prose_lines).strip()
+        if not prose:
+            continue
+        if any(
+            _paragraph_similarity(prose, previous) >= 0.58
+            or _paragraph_token_overlap(prose, previous) >= 0.55
+            for previous in cleaned_blocks
+        ):
+            continue
+        cleaned_blocks.append(prose)
+    return "\n\n".join(cleaned_blocks).strip()
+
+
 def extract_interrogate_result(history_entry: dict[str, Any]) -> dict[str, str]:
     """Extract prompt candidates from a ComfyUI interrogation history entry."""
     outputs = history_entry.get("outputs", {}) if isinstance(history_entry, dict) else {}
     wd14 = _text_output(outputs, "3") or _tag_output(outputs, "2")
-    promptgen = _text_output(outputs, "7")
-    prompt = promptgen or wd14
+    promptgen = _clean_promptgen_text(_text_output(outputs, "7"))
+    wd14_as_prompt = "" if _is_tag_like_prompt_line(wd14) else wd14
+    prompt = promptgen or wd14_as_prompt
     return {"prompt": prompt, "promptgen": promptgen, "wd14_tags": wd14}
 
 
