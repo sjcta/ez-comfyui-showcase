@@ -78,6 +78,22 @@ class PollManagerResumeTest(unittest.TestCase):
         self.assertIn("onJobUpdate(sj);", app_source)
         self.assertNotIn("jobs[id] = sj;\n          onJobUpdate(sj);", app_source)
 
+    def test_unseen_terminal_admin_jobs_refresh_history_without_gallery_rerender(self):
+        source = (ROOT / "static/js/modules/poll_manager.js").read_text("utf-8")
+
+        self.assertIn("function _isTerminalJob(job)", source)
+        self.assertIn("this._seenTerminalJobs = {};", source)
+        self.assertIn("if (!prev && _isTerminalJob(job))", source)
+        self.assertIn("if (_isTerminalJob(sj))", source)
+        self.assertIn("historyLoader = historyRefreshNeedsRender ? window.CW.loadHistory : (window.CW.loadHistoryNoRender || window.CW.loadHistory)", source)
+
+    def test_history_no_render_refresh_uses_signature_diff(self):
+        source = (ROOT / "static/js/modules/history.js").read_text("utf-8")
+
+        self.assertIn("var _historyDataSignature = '';", source)
+        self.assertIn("if (nextSignature === _historyDataSignature) return false;", source)
+        self.assertIn("_historyDataSignature = nextSignature;", source)
+
 
 if __name__ == "__main__":
     unittest.main()

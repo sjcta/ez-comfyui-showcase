@@ -31,6 +31,7 @@
     this._httpPollInFlight = false;
     this._resumeHandler = null;
     this._stopped = false;
+    this._seenTerminalJobs = {};
   }
 
   /**
@@ -111,6 +112,11 @@
     if (!job) return false;
     var status = job.status || '';
     return status !== 'done' && status !== 'error' && status !== 'history';
+  }
+
+  function _isTerminalJob(job) {
+    var status = job && job.status || '';
+    return status === 'done' || status === 'error' || status === 'history';
   }
 
   function _currentUserId() {
@@ -229,6 +235,14 @@
     }
     var prev = jobs[job.id];
 
+    if (!prev && _isTerminalJob(job)) {
+      this._seenTerminalJobs[job.id] = true;
+      if (window.CW.loadHistoryNoRender) {
+        Promise.resolve(window.CW.loadHistoryNoRender()).catch(function() {});
+      }
+      return;
+    }
+
     // ── Toast on status change ──
     if (prev && prev.status !== job.status) {
       var shortId = job.id ? job.id.slice(-6) : '';
@@ -321,6 +335,7 @@
         var needRerender = false;
         var doneOrErrorProcessed = false;
         var historyRefresh = false;
+        var historyRefreshNeedsRender = false;
 
         for (var id in serverMap) {
           if (!serverMap.hasOwnProperty(id)) continue;
@@ -328,6 +343,13 @@
           var prev = jobs[id];
 
           if (!prev) {
+            if (_isTerminalJob(sj)) {
+              if (!self._seenTerminalJobs[id]) {
+                self._seenTerminalJobs[id] = true;
+                historyRefresh = true;
+              }
+              continue;
+            }
             // New job appeared
             self.onJobUpdate(sj);
             needRerender = true;
@@ -365,6 +387,7 @@
         for (var cleanId in jobs) {
           if (jobs.hasOwnProperty(cleanId) && !serverMap[cleanId]) {
             if (_jobNeedsHistoryRefresh(jobs[cleanId])) historyRefresh = true;
+            if (_jobNeedsHistoryRefresh(jobs[cleanId])) historyRefreshNeedsRender = true;
             delete jobs[cleanId];
             needRerender = true;
           }
@@ -373,9 +396,10 @@
         if (doneOrErrorProcessed) {
           if (needRerender && window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
         } else if (historyRefresh) {
-          if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
-          if (window.CW.loadHistory) {
-            Promise.resolve(window.CW.loadHistory()).catch(function(e) {
+          if (historyRefreshNeedsRender && window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+          var historyLoader = historyRefreshNeedsRender ? window.CW.loadHistory : (window.CW.loadHistoryNoRender || window.CW.loadHistory);
+          if (historyLoader) {
+            Promise.resolve(historyLoader()).catch(function(e) {
               console.warn('[PollManager] loadHistory after stale job failed:', e && e.message ? e.message : e);
             });
           }

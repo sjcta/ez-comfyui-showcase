@@ -2,7 +2,7 @@
 
 Multi-instance ComfyUI Web Management & Generation Platform.
 
-Current version: **v4.2.3**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
+Current version: **v4.3.0**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
 
 Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel generation ComfyUI instances (A:8190 / B:8189) plus an isolated prompt auxiliary instance (Prompt:8191) behind an intelligent scheduler.
 
@@ -95,8 +95,11 @@ python3 app.py --port 9091
 
 ## Version History
 
+See [`CHANGELOG.md`](CHANGELOG.md) for the full user-facing update notes.
+
 | Version | Highlights |
 |---------|-----------|
+| v4.3.0 | 正式升级 — 登录保持一个月、管理员网站通知、登录前首页、更多工作流、设备管理布局优化、历史画廊载入和 admin 轮询闪烁修复 |
 | v4.2.3 | 图片保护校验 — 出图后先进入“图片校验中”，由本地轻量 worker 写回保护状态后再显示 |
 | v4.2.2 | Safari 修复 — 登录/注册等弹窗遮罩拆分为独立合成层，避免黑色遮罩抖动或失效 |
 | v4.2.1 | 小版本修正 — JSON 提示词中英切换稳定化、启动脚本 restart 修复、提示词助手与历史/状态 UI 累积修正 |

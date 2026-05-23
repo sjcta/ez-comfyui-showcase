@@ -15,6 +15,7 @@
   var _optimisticHistoryById = {};
   var _galleryBatchItems = {};
   var _loadHistoryPromise = null;
+  var _historyDataSignature = '';
   var lbIdx = -1;
   var lbItems = [];
   var _galleryFilters = { owner: 'all', type: '', style: '' };
@@ -1968,6 +1969,15 @@ async function loadHistory() {
       const r = await fetch(`${API}/api/history?scope=${scope}&limit=${HISTORY_FETCH_LIMIT}`, { headers: Object.assign({}, authHeaders) });
       const d = await _historyJsonOrThrow(r, '加载历史');
       var nextItems = _sortHistoryItems(d.data || []);
+      _historyDataSignature = nextItems.map(function(item) {
+        return [
+          item && item.id || '',
+          item && item.filename || '',
+          item && item.thumb || '',
+          item && item.is_public ? '1' : '0',
+          item && item.deleted_at || '',
+        ].join(':');
+      }).join('|');
       var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
       _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) {
         if (serverIds.has(String(id))) return false;
@@ -2065,11 +2075,24 @@ function renderGallery() {
       const r = await fetch(`${API}/api/history?scope=${scope}&limit=${HISTORY_FETCH_LIMIT}`, { headers: Object.assign({}, authHeaders) });
       const d = await _historyJsonOrThrow(r, '加载历史');
       var nextItems = _sortHistoryItems(d.data || []);
+      var nextSignature = nextItems.map(function(item) {
+        return [
+          item && item.id || '',
+          item && item.filename || '',
+          item && item.thumb || '',
+          item && item.is_public ? '1' : '0',
+          item && item.deleted_at || '',
+        ].join(':');
+      }).join('|');
+      if (nextSignature === _historyDataSignature) return false;
+      _historyDataSignature = nextSignature;
       var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
       _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) { return !serverIds.has(String(id)); });
       historyItems.length = 0;
       Array.prototype.push.apply(historyItems, _applyPinnedHistoryOrder(nextItems));
+      return true;
     } catch (e) { console.error("loadHistoryNoRender:", e); }
+    return false;
   }
 	  window.CW.loadHistoryNoRender = loadHistoryNoRender;
 	  window.CW.renderGallery = renderGallery;
