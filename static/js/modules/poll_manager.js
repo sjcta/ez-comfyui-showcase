@@ -232,11 +232,13 @@
     // ── Toast on status change ──
     if (prev && prev.status !== job.status) {
       var shortId = job.id ? job.id.slice(-6) : '';
-      var wfTag = window.CW.getWFType ? window.CW.getWFType(job.workflow) : '';
+      var wfMeta = (A._wfMeta || {})[job.workflow] || {};
+      var wfTag = window.CW.wfTag ? window.CW.wfTag(job.workflow, wfMeta.tags) : '';
       var typeLabel = wfTag ? wfTag.text : '';
       var toastByStatus = {
         queued: ['排队中', 'queued'],
         generating: ['出图中', 'generating'],
+        checking: ['图片校验中', 'generating'],
         done: ['结束出图', 'done'],
         error: ['失败', 'error']
       };
@@ -327,12 +329,10 @@
 
           if (!prev) {
             // New job appeared
-            jobs[id] = sj;
             self.onJobUpdate(sj);
             needRerender = true;
           } else if (prev.status !== sj.status) {
             // Status changed
-            jobs[id] = sj;
             self.onJobUpdate(sj);
             // onJobUpdate handles loadHistory for done/error itself
             if (sj.status === 'done' && sj.image) {
@@ -415,12 +415,18 @@
     var els = document.querySelectorAll('.gi-timer');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
+      if (el.closest && el.closest('.job-card.queued')) continue;
       var ts = parseFloat(el.dataset.ts);
       if (ts > 0) {
-        var sec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-        var m = Math.floor(sec / 60);
-        var s = sec % 60;
-        el.textContent = m > 0 ? m + 'm' + String(s).padStart(2, '0') + 's' : s + 's';
+        var estimateLabel = el.dataset.estimateLabel || '';
+        if (window.CW.formatJobElapsedWithEstimate) {
+          el.textContent = window.CW.formatJobElapsedWithEstimate(ts, estimateLabel);
+        } else {
+          var sec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+          var m = Math.floor(sec / 60);
+          var s = sec % 60;
+          el.textContent = m > 0 ? m + 'm' + String(s).padStart(2, '0') + 's' : s + 's';
+        }
       }
     }
   };

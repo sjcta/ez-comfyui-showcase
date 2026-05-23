@@ -134,8 +134,7 @@ class StatusGpuMessageTests(unittest.TestCase):
         self.assertFalse(inst_a["progress_known"])
         self.assertTrue(inst_a["remote_untracked_running"])
         self.assertEqual(inst_a["remote_running_prompt_ids"], ["remote-prompt-id"])
-        comfyui_post.assert_any_call("/queue", {"delete": ["remote-prompt-id"]}, base_url="http://a")
-        comfyui_post.assert_any_call("/interrupt", {}, base_url="http://a")
+        comfyui_post.assert_not_called()
 
     def test_comfyui_status_uses_remote_queue_counts_for_prompt_aux_instance(self):
         instances = [

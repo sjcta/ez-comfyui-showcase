@@ -104,6 +104,15 @@ async def pick_best_instance(
     strict_preferred = profile.get("strict_preferred")
     preferred = str(profile.get("preferred") or "")
     if strict_preferred and preferred:
+        group_match = next(
+            (
+                inst for inst in available
+                if wf_group and _get_instance_group(inst.get("name", ""), group_getter) == wf_group
+            ),
+            None,
+        )
+        if group_match:
+            return group_match
         match = _find_instance(available, preferred)
         if match:
             return match

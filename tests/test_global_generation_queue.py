@@ -1,0 +1,102 @@
+import asyncio
+import unittest
+
+import app
+
+
+def _queue_item(job_id, workflow):
+    return (job_id, workflow, {}, 1, False, 1024, 1024, "u1", "", "")
+
+
+class _BlockingRunner:
+    def __init__(self):
+        self.started = []
+        self.first_started = asyncio.Event()
+        self.first_release = asyncio.Event()
+        self.second_started = asyncio.Event()
+
+    async def run(self, job_id, *_args, **_kwargs):
+        self.started.append(job_id)
+        if job_id == "job-one":
+            self.first_started.set()
+            await self.first_release.wait()
+        if job_id == "job-two":
+            self.second_started.set()
+
+
+class GlobalGenerationQueueTest(unittest.TestCase):
+    def test_queue_worker_waits_for_current_job_before_starting_next(self):
+        async def run_case():
+            old_queue = app._job_queue
+            old_runner = app._job_runner
+            old_tasks = dict(app._job_tasks)
+            app._job_queue = asyncio.Queue()
+            app._job_tasks.clear()
+            app.jobs["job-one"] = {"id": "job-one", "status": "queued"}
+            app.jobs["job-two"] = {"id": "job-two", "status": "queued"}
+            runner = _BlockingRunner()
+            app._job_runner = runner
+            worker = asyncio.create_task(app._queue_worker())
+            try:
+                app._job_queue.put_nowait(_queue_item("job-one", "t2i_flux2_klein.json"))
+                app._job_queue.put_nowait(_queue_item("job-two", "i2i_flux2_klein.json"))
+
+                await asyncio.wait_for(runner.first_started.wait(), timeout=1)
+                await asyncio.sleep(0.05)
+
+                self.assertEqual(runner.started, ["job-one"])
+                self.assertFalse(runner.second_started.is_set())
+
+                runner.first_release.set()
+                await asyncio.wait_for(runner.second_started.wait(), timeout=1)
+                self.assertEqual(runner.started, ["job-one", "job-two"])
+            finally:
+                worker.cancel()
+                try:
+                    await worker
+                except asyncio.CancelledError:
+                    pass
+                for task in list(app._job_tasks.values()):
+                    if not task.done():
+                        task.cancel()
+                app._job_queue = old_queue
+                app._job_runner = old_runner
+                app.jobs.pop("job-one", None)
+                app.jobs.pop("job-two", None)
+                app._job_tasks.clear()
+                app._job_tasks.update(old_tasks)
+
+        asyncio.run(run_case())
+
+    def test_queue_worker_skips_job_cancelled_before_dispatch(self):
+        async def run_case():
+            old_queue = app._job_queue
+            old_runner = app._job_runner
+            old_tasks = dict(app._job_tasks)
+            app._job_queue = asyncio.Queue()
+            app._job_tasks.clear()
+            runner = _BlockingRunner()
+            app._job_runner = runner
+            worker = asyncio.create_task(app._queue_worker())
+            try:
+                app._job_queue.put_nowait(_queue_item("job-cancelled", "t2i_flux2_klein.json"))
+                await asyncio.wait_for(app._job_queue.join(), timeout=1)
+
+                self.assertEqual(runner.started, [])
+                self.assertNotIn("job-cancelled", app._job_tasks)
+            finally:
+                worker.cancel()
+                try:
+                    await worker
+                except asyncio.CancelledError:
+                    pass
+                app._job_queue = old_queue
+                app._job_runner = old_runner
+                app._job_tasks.clear()
+                app._job_tasks.update(old_tasks)
+
+        asyncio.run(run_case())
+
+
+if __name__ == "__main__":
+    unittest.main()

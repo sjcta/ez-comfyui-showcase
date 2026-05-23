@@ -52,8 +52,9 @@ class StepCalculator:
         print(step_info.total_units)
     """
 
-    # ── 权重乘数（从耗时角度看，采样/超分应比普通节点大 2~3 倍） ──
-    SAMPLER_WEIGHT: float = 2.5
+    # ── 进度预算：采样/真超分是主要等待时间，其它节点只占准备/收尾 ──
+    LONG_RUNNING_BUDGET: float = 90.0
+    OTHER_NODE_BUDGET: float = 10.0
 
     # ── 主入口 ───────────────────────────────────────────────────────────
 
@@ -80,7 +81,10 @@ class StepCalculator:
                 if title:
                     node_titles[str(nid)] = title
 
-        # 第二步：按节点类型分配权重
+        active_nodes: list[str] = []
+        normal_node_units: dict[str, float] = {}
+
+        # 第二步：按节点类型收集权重意图
         for nid in self._topological_sort(workflow):
             cls = node_types.get(nid, "")
             if not cls:
@@ -96,7 +100,7 @@ class StepCalculator:
             cat = self.get_category(cls)
 
             if cls in ("SaveImage", "PreviewImage"):
-                result.node_weights[nid] = 1.0
+                normal_node_units[nid] = 1.0
 
             elif cat == "free":
                 # FREE 节点不计入进度
@@ -104,25 +108,38 @@ class StepCalculator:
                 continue
 
             elif cat == "sampler":
-                weight, steps = self._calc_sampler_weight(nid, workflow)
-                result.node_weights[nid] = weight
+                steps = self._calc_sampler_steps(nid, workflow)
                 result.sampler_steps[nid] = steps
+                active_nodes.append(nid)
 
             elif cat == "upscale":
-                weight, steps = self._calc_upscale_weight(nid, workflow)
-                result.node_weights[nid] = weight
+                steps = self._calc_upscale_steps(nid, workflow)
                 result.sampler_steps[nid] = steps
                 if steps == 0:
                     # 无 steps 参数节点 → 时长推算
                     resolution = self._resolve_resolution_hint(workflow)
                     expected = TimeEstimator.estimate(cls, resolution)
                     result.time_estimates[nid] = expected
+                active_nodes.append(nid)
 
             else:
                 # LOADER / WEIGHT_1 / 未归类 → weight=1
-                result.node_weights[nid] = 1.0
+                normal_node_units[nid] = 1.0
 
-        # 第三步：累加 total_units
+        # 第三步：把采样/超分固定在 90% 预算里，其它节点共享 10%。
+        if active_nodes:
+            active_weight = self.LONG_RUNNING_BUDGET / len(active_nodes)
+            for nid in active_nodes:
+                result.node_weights[nid] = active_weight
+
+            normal_total = sum(normal_node_units.values())
+            if normal_total > 0:
+                for nid, units in normal_node_units.items():
+                    result.node_weights[nid] = self.OTHER_NODE_BUDGET * (units / normal_total)
+        else:
+            result.node_weights.update(normal_node_units)
+
+        # 第四步：累加 total_units
         result.total_units = float(sum(result.node_weights.values()))
 
         return result
@@ -193,7 +210,7 @@ class StepCalculator:
             return "sampler"
         if class_type in NodeCategory.UPSCALE:
             return "upscale"
-        if class_type in NodeCategory.FREE:
+        if class_type in NodeCategory.FREE or class_type in NodeCategory.FREE_RUNTIME:
             return "free"
         if class_type in NodeCategory.LOADER or class_type in NodeCategory.WEIGHT_1:
             return "normal"
@@ -201,60 +218,67 @@ class StepCalculator:
 
     # ── 内部辅助 ─────────────────────────────────────────────────────────
 
-    def _calc_sampler_weight(self, nid: str, workflow: dict) -> tuple[float, int]:
-        """计算采样器节点的权重和有效步数。
-
-        Weight = steps × denoise + 1（+1 给初始化执行事件）。
+    def _calc_sampler_steps(self, nid: str, workflow: dict) -> int:
+        """计算采样器节点的有效步数。
 
         Args:
             nid: 节点 ID。
             workflow: 工作流字典。
 
         Returns:
-            (weight, effective_steps)
+            effective_steps
         """
-        raw_steps = self._resolve_steps_or_default(nid, "steps", 8, workflow)
+        raw_steps = self._resolve_sampler_steps(nid, workflow)
         denoise = self._resolve_float_or_default(nid, "denoise", 1.0, workflow)
         effective = max(1, int(raw_steps * denoise))
-        weight = float(effective + 1) * self.SAMPLER_WEIGHT  # +1 给初始化事件
-        return weight, effective
+        return effective
 
-    def _calc_upscale_weight(self, nid: str, workflow: dict) -> tuple[float, int]:
-        """计算超分器节点的权重和有效步数。
+    def _resolve_sampler_steps(self, nid: str, workflow: dict) -> int:
+        """Resolve sampler steps, including custom samplers fed by scheduler nodes."""
+        direct_steps = self._resolve_steps_or_default(nid, "steps", 0, workflow)
+        if direct_steps > 0:
+            return direct_steps
 
-        有 steps 参数 → steps + 1（初始化 unit）。
-        无 steps 参数 → weight=0（退化为时长推算）。
+        node = workflow.get(nid, {})
+        inputs = node.get("inputs", {}) if isinstance(node, dict) else {}
+        for key in ("sigmas", "scheduler"):
+            linked = inputs.get(key)
+            if isinstance(linked, list) and linked:
+                linked_id = str(linked[0])
+                linked_steps = self._resolve_steps_or_default(linked_id, "steps", 0, workflow)
+                if linked_steps > 0:
+                    return linked_steps
+
+        return 8
+
+    def _calc_upscale_steps(self, nid: str, workflow: dict) -> int:
+        """计算超分器节点的有效步数。
+
+        有 steps 参数 → 用 steps 拆分内部进度。
+        无 steps 参数 → 返回 0，运行时优先使用 Comfy progress，缺失时用时长推算。
 
         Args:
             nid: 节点 ID。
             workflow: 工作流字典。
 
         Returns:
-            (weight, effective_steps)
+            effective_steps
         """
         node = workflow.get(nid, {})
         inputs = node.get("inputs", {}) if isinstance(node, dict) else {}
         raw_steps = inputs.get("steps", None)
 
         if raw_steps is None:
-            # 无 steps 参数 → 时长推算
-            resolution = self._resolve_resolution_hint(workflow)
-            expected = TimeEstimator.estimate(
-                workflow.get(nid, {}).get("class_type", ""),
-                resolution,
-            )
-            return (float(max(1.0, expected)), 0)
+            return 0
 
         if isinstance(raw_steps, (int, float)):
-            effective = max(1, int(raw_steps))
-            return (float(effective + 1) * self.SAMPLER_WEIGHT, effective)
+            return max(1, int(raw_steps))
 
         if isinstance(raw_steps, list) and len(raw_steps) >= 1:
             linked_steps = self.resolve_steps(str(raw_steps[0]), workflow)
-            effective = max(1, linked_steps)
-            return (float(effective + 1) * self.SAMPLER_WEIGHT, effective)
+            return max(1, linked_steps)
 
-        return (self.SAMPLER_WEIGHT, 0)
+        return 0
 
     def _resolve_steps_or_default(
         self, nid: str, key: str, default: int, workflow: dict
@@ -329,7 +353,7 @@ class StepCalculator:
             if not isinstance(node, dict):
                 continue
             ct = node.get("class_type", "")
-            if ct in ("EmptyLatentImage", "EmptySD3LatentImage"):
+            if ct in ("EmptyLatentImage", "EmptySD3LatentImage", "EmptyFlux2LatentImage"):
                 inputs = node.get("inputs", {})
                 w = inputs.get("width", 0)
                 h = inputs.get("height", 0)

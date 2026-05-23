@@ -30,6 +30,28 @@ IMAGE_PROMPT_OPTIMIZATION_GUIDE = (
     "bullets, or explanation."
 )
 
+VIDEO_SCRIPT_OPTIMIZATION_GUIDE = (
+    "Use a video-generation script prompt checklist internally, blending LTX-style concise visual "
+    "direction with Seedance 2.0-style Chinese script structure. Preserve the user's core concept, "
+    "subject identity, visual style, and intended action, but default to the app's single uploaded image "
+    "as the only visual reference. Rewrite the request as a production-ready Chinese video script prompt, not an image prompt. Include only "
+    "details that improve video adherence, separated clearly by 人物、场景、氛围、动作、表情、镜头、光影 when relevant: "
+    "shot scale, scene and atmosphere, subject action as a clear beginning-to-end motion sequence, "
+    "camera movement relative to the subject, lighting and color, and visual continuity. For LTX/Sulphur, "
+    "keep the motion instructions concrete and avoid overloading one shot with conflicting actions; "
+    "state motion intensity when relevant. Do not invent @图片, @视频, or @音频 reference placeholders; "
+    "if the user mentions the current reference, describe it naturally as the single uploaded image "
+    "or first-frame reference. Do not add audio, music, ambient sound, or sound-reference instructions "
+    "unless the workflow explicitly supports audio and the user asks for it. Do not include duration "
+    "or aspect-ratio settings such as 时长10秒 or 16:9; those are controlled by the user interface. "
+    "Preserve user-provided second or frame timeline labels such as 0-3秒, 3-6秒, or 第24帧 as action-content structure, "
+    "because timeline descriptions are not the same as duration settings. "
+    "Avoid negative prompt phrasing such as 禁止文字、字幕、LOGO、水印、风格漂移、角色变脸 in the positive script; "
+    "instead use positive visual continuity wording only when useful. Prefer compact Chinese clauses such as "
+    "人物：...；场景：...；氛围：...；动作：...；表情：...；镜头：...；光影：..., or keep a user-provided timeline. "
+    "Avoid markdown, JSON, checklist labels, tag soup, and generic praise such as masterpiece."
+)
+
 STRUCTURED_PROMPT_JSON_SCHEMA = (
     "Return only a valid JSON object with this exact top-level shape: "
     '{"keyword_prompt":"...",'
@@ -63,6 +85,19 @@ QWEN_OPTIMIZER_TEMPLATE = (
     "{reference_context}\n\nUser request: {prompt}"
 )
 
+QWEN_VIDEO_SCRIPT_OPTIMIZER_TEMPLATE = (
+    "You are a professional video script prompt optimizer for LTX / Sulphur and Seedance 2.0 video "
+    "generation workflows. Convert the user request into one Chinese video-generation script prompt. "
+    "Remove request wording such as help me, generate, please, video, prompt, and optimize, but preserve "
+    "the real scene, subject, action, and style. Assume the current workflow has a single uploaded image "
+    "reference by default. Do not invent @图片, @视频, or @音频 reference placeholders. Do not include duration "
+    "or aspect-ratio settings; the user interface controls those values. Preserve user-provided second or frame timeline labels. "
+    "Separate the script into compact Chinese clauses for 人物、场景、氛围、动作、表情、镜头、光影 when useful. "
+    "{timing_context}"
+    "Apply this model-aware video script guide: {optimization_guide} Do not output markdown, JSON, "
+    "checklist labels, or explanation. Output only the final video script prompt.\n\nUser request: {prompt}"
+)
+
 QWEN_TRANSLATE_TEMPLATE = (
     "Translate the following image-generation prompt into concise, natural Chinese. "
     "Keep artist names, brand names, character names, model names, and technical camera/style terms "
@@ -86,6 +121,52 @@ QWEN_LANGUAGE_SWITCH_TEMPLATE = (
 KNOWN_REFERENCE_CONTEXT = {
     "黑猫警长": "黑猫警长 is a classic Chinese animated police cat character, heroic, upright, smart, nostalgic Chinese animation style.",
 }
+
+
+def _context_number(context: dict[str, Any] | None, *keys: str) -> float:
+    data = context or {}
+    for key in keys:
+        try:
+            value = data.get(key)
+        except AttributeError:
+            return 0.0
+        if value in (None, ""):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return 0.0
+
+
+def _format_context_number(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _video_script_timing_context_text(context: dict[str, Any] | None) -> str:
+    duration = _context_number(context, "duration_seconds", "duration_sec", "seconds", "duration")
+    fps = _context_number(context, "fps", "frame_rate", "frameRate")
+    frames = _context_number(context, "frame_count", "frames", "length", "frames_number")
+    if duration <= 0 and frames > 0 and fps > 0:
+        duration = frames / fps
+    fragments: list[str] = []
+    if duration > 0:
+        fragments.append(f"{_format_context_number(duration)} seconds")
+    if fps > 0:
+        fragments.append(f"{_format_context_number(fps)} fps")
+    if frames > 0:
+        fragments.append(f"{_format_context_number(frames)} frames")
+    if not fragments:
+        return ""
+    return (
+        "Current workflow timing: "
+        + ", ".join(fragments)
+        + ". Keep timeline segments within this duration or frame range, and do not output it as a standalone duration parameter. "
+    )
 
 
 REQUEST_PREFIX_RE = re.compile(
@@ -170,20 +251,31 @@ def build_qwen_prompt_optimizer_workflow(
     prompt: str,
     max_new_tokens: int = 384,
     keep_model_loaded: bool = True,
+    prompt_mode: str = "image",
+    prompt_context: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build a Qwen3-VL text-only workflow for Chinese-aware prompt cleanup."""
     cleaned = clean_user_prompt(prompt)
     tokens = max(128, min(int(max_new_tokens or 128), 4096))
     reference_context = _known_reference_context(cleaned)
+    mode = "video_script" if str(prompt_mode or "").lower() in {"video", "video_script", "script"} else "image"
+    if mode == "video_script":
+        optimizer_text = QWEN_VIDEO_SCRIPT_OPTIMIZER_TEMPLATE.format(
+            prompt=cleaned,
+            optimization_guide=VIDEO_SCRIPT_OPTIMIZATION_GUIDE,
+            timing_context=_video_script_timing_context_text(prompt_context),
+        )
+    else:
+        optimizer_text = QWEN_OPTIMIZER_TEMPLATE.format(
+            prompt=cleaned,
+            reference_context=reference_context,
+            optimization_guide=IMAGE_PROMPT_OPTIMIZATION_GUIDE,
+            json_schema=STRUCTURED_PROMPT_JSON_SCHEMA,
+        )
     return {
         "1": {
             "inputs": {
-                "text": QWEN_OPTIMIZER_TEMPLATE.format(
-                    prompt=cleaned,
-                    reference_context=reference_context,
-                    optimization_guide=IMAGE_PROMPT_OPTIMIZATION_GUIDE,
-                    json_schema=STRUCTURED_PROMPT_JSON_SCHEMA,
-                ),
+                "text": optimizer_text,
                 "model": "Qwen3-VL-4B-Instruct",
                 "quantization": "4bit",
                 "keep_model_loaded": bool(keep_model_loaded),
@@ -195,12 +287,12 @@ def build_qwen_prompt_optimizer_workflow(
                 "attention": "sdpa",
             },
             "class_type": "Qwen3_VQA",
-            "_meta": {"title": "Qwen Prompt Optimizer"},
+            "_meta": {"title": "Qwen Video Script Optimizer" if mode == "video_script" else "Qwen Prompt Optimizer"},
         },
         "2": {
             "inputs": {"text": ["1", 0]},
             "class_type": "ShowText|pysssss",
-            "_meta": {"title": "Optimized Prompt"},
+            "_meta": {"title": "Optimized Video Script" if mode == "video_script" else "Optimized Prompt"},
         },
     }
 
@@ -540,6 +632,66 @@ def parse_prompt_optimizer_output(text: str, cleaned_prompt: str) -> dict[str, A
     }
 
 
+VIDEO_REFERENCE_CLAUSE_RE = re.compile(r"@[图片图像视频音频素材][\w\d０-９一二三四五六七八九十\-—~～至到、,，]*")
+VIDEO_DURATION_PARAM_RE = re.compile(r"(?:^|[，,；;\s])(?:时长\s*)?\d+(?:\.\d+)?\s*(?:秒|s)\s*$", re.IGNORECASE)
+VIDEO_ASPECT_PARAM_RE = re.compile(r"^(?:画幅|比例|宽高比|aspect\s*ratio)?\s*\d+\s*[:：]\s*\d+\s*$", re.IGNORECASE)
+VIDEO_NEGATIVE_TERMS_RE = re.compile(
+    r"(?:文字|字幕|logo|LOGO|水印|风格漂移|角色变脸|变脸|畸变|崩坏)",
+    re.IGNORECASE,
+)
+VIDEO_AUDIO_TERMS_RE = re.compile(r"(?:@音频|音频|环境音|声音|音效|配乐|音乐|钢琴音|爵士|旁白)")
+
+
+def _sanitize_video_script_prompt(prompt: str) -> str:
+    """Remove UI-controlled or unsupported clauses from video script optimizer output."""
+    text = str(prompt or "").strip()
+    if not text:
+        return ""
+    parts = [part.strip() for part in re.split(r"[，,；;\n]+", text) if part.strip()]
+    kept: list[str] = []
+    for part in parts:
+        clause = part.strip()
+        bare_clause = clause.strip(" 。.，,；;")
+        if not clause:
+            continue
+        if VIDEO_REFERENCE_CLAUSE_RE.search(bare_clause):
+            continue
+        if VIDEO_AUDIO_TERMS_RE.search(bare_clause):
+            continue
+        if VIDEO_ASPECT_PARAM_RE.match(bare_clause):
+            continue
+        if VIDEO_DURATION_PARAM_RE.search("，" + bare_clause):
+            continue
+        if re.match(r"^(?:禁止|不要|避免|无|不能|不得)", bare_clause) and VIDEO_NEGATIVE_TERMS_RE.search(bare_clause):
+            continue
+        if "硬性动作冲突" in bare_clause:
+            continue
+        kept.append(bare_clause)
+    if not kept:
+        return text
+    return "，".join(kept).strip(" ，,；;。.") + "。"
+
+
+def parse_video_script_optimizer_output(text: str, cleaned_prompt: str) -> dict[str, Any]:
+    """Parse the video-script optimizer result without creating image JSON variants."""
+    optimized = _normalize_optimized_text(text)
+    parsed = _extract_json_object(optimized)
+    if isinstance(parsed, dict):
+        optimized = str(
+            parsed.get("video_script")
+            or parsed.get("script")
+            or parsed.get("optimized_prompt")
+            or parsed.get("prompt")
+            or optimized
+        ).strip()
+    optimized = _sanitize_video_script_prompt(optimized)
+    return {
+        "optimized_prompt": optimized,
+        "cleaned_prompt": cleaned_prompt,
+        "prompt_mode": "video_script",
+    }
+
+
 def _remove_inline_english_prompt(text: str) -> str:
     """Drop an accidental full English prompt while preserving short technical terms."""
     cleaned = str(text or "").strip()
@@ -809,10 +961,18 @@ def run_qwen_prompt_optimizer(
     timeout: float = 120.0,
     poll_interval: float = 1.0,
     max_new_tokens: int = 384,
+    prompt_mode: str = "image",
+    prompt_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit the Qwen3 4B text optimizer workflow to ComfyUI."""
     cleaned = clean_user_prompt(prompt)
-    workflow = build_qwen_prompt_optimizer_workflow(cleaned, max_new_tokens=max_new_tokens)
+    mode = "video_script" if str(prompt_mode or "").lower() in {"video", "video_script", "script"} else "image"
+    workflow = build_qwen_prompt_optimizer_workflow(
+        cleaned,
+        max_new_tokens=max_new_tokens,
+        prompt_mode=mode,
+        prompt_context=prompt_context,
+    )
     response = comfyui_post(
         "/prompt",
         {"prompt": copy.deepcopy(workflow), "client_id": f"ez-prompt-qwen-{uuid.uuid4().hex}"},
@@ -829,7 +989,12 @@ def run_qwen_prompt_optimizer(
             entry = history[prompt_id]
             status = entry.get("status", {}) if isinstance(entry, dict) else {}
             if status.get("completed", False):
-                parsed = parse_prompt_optimizer_output(extract_show_text(entry, "2"), cleaned)
+                raw_text = extract_show_text(entry, "2")
+                parsed = (
+                    parse_video_script_optimizer_output(raw_text, cleaned)
+                    if mode == "video_script"
+                    else parse_prompt_optimizer_output(raw_text, cleaned)
+                )
                 if parsed["optimized_prompt"]:
                     return {
                         "ok": True,
@@ -837,6 +1002,7 @@ def run_qwen_prompt_optimizer(
                         "prompt_id": prompt_id,
                         "original_prompt": str(prompt or ""),
                         "cleaned_prompt": cleaned,
+                        "prompt_mode": mode,
                         **parsed,
                     }
                 raise RuntimeError("ComfyUI Qwen prompt optimization completed without text output")
@@ -956,6 +1122,8 @@ def run_prompt_optimizer(
     timeout: float = 120.0,
     poll_interval: float = 1.0,
     max_new_tokens: int = 384,
+    prompt_mode: str = "image",
+    prompt_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Default optimizer: Chinese-aware Qwen3 4B workflow."""
     return run_qwen_prompt_optimizer(
@@ -966,6 +1134,8 @@ def run_prompt_optimizer(
         timeout=timeout,
         poll_interval=poll_interval,
         max_new_tokens=max_new_tokens,
+        prompt_mode=prompt_mode,
+        prompt_context=prompt_context,
     )
 
 

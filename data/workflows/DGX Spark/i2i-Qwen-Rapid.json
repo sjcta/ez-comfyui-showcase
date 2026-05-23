@@ -1,0 +1,188 @@
+{
+  "78": {
+    "inputs": {
+      "image": "t2i-z-xxx_00001_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "88": {
+    "inputs": {
+      "upscale_method": "area",
+      "largest_size": 1024,
+      "image": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToMaxDimension",
+    "_meta": {
+      "title": "图像缩放到最大尺寸"
+    }
+  },
+  "89": {
+    "inputs": {
+      "unet_name": "gguf/qwen-rapid-nsfw-v9.0-Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "96": {
+    "inputs": {
+      "filename_prefix": "i2i-Qwen-Rapid-no-seedvr2",
+      "images": [
+        "115:8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像（无SeedVR2）"
+    }
+  },
+  "97": {
+    "inputs": {
+      "conditioning": [
+        "115:111",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "115:38": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "115:39": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "115:66": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "115:111": {
+    "inputs": {
+      "prompt": "正向提示词",
+      "clip": [
+        "115:38",
+        0
+      ],
+      "vae": [
+        "115:39",
+        0
+      ],
+      "image1": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "文本编码（QwenImageEditPlus）"
+    }
+  },
+  "115:88": {
+    "inputs": {
+      "pixels": [
+        "88",
+        0
+      ],
+      "vae": [
+        "115:39",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "115:75": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "115:66",
+        0
+      ]
+    },
+    "class_type": "CFGNorm",
+    "_meta": {
+      "title": "CFG归一化"
+    }
+  },
+  "115:3": {
+    "inputs": {
+      "seed": 21948240408338,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "115:75",
+        0
+      ],
+      "positive": [
+        "115:111",
+        0
+      ],
+      "negative": [
+        "97",
+        0
+      ],
+      "latent_image": [
+        "115:88",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "115:8": {
+    "inputs": {
+      "samples": [
+        "115:3",
+        0
+      ],
+      "vae": [
+        "115:39",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  }
+}

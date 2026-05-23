@@ -20,7 +20,34 @@ class StatusUiContractTests(unittest.TestCase):
         css = (ROOT / "static/css/style.css").read_text()
 
         self.assertIn(".sb-vram { display: flex; align-items: center; gap: 5px;", css)
-        self.assertIn(".sb-vram { max-width: none; min-width: 0; flex: 1 1 auto; gap: 5px; }", css)
+        self.assertIn(".sb-vram-track { flex: 0 1 250px; width: 250px;", css)
+
+    def test_statusbar_has_no_vram_meteor_effect(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertNotIn(".statusbar::after", css)
+        self.assertNotIn("statusbarFlow", css)
+        self.assertNotIn("--status-flow", css)
+
+    def test_mobile_statusbar_keeps_service_button_beside_vram(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn(".statusbar { display: grid; grid-template-columns: 50vw minmax(0, 1fr); align-items: center;", css)
+        self.assertIn(".sb-vram { display: grid; width: 50vw;", css)
+        self.assertIn("grid-template-columns: 31px minmax(72px, 1fr);", css)
+        self.assertIn("grid-template-areas: \"label track\" \"text text\";", css)
+        self.assertIn(".sb-vram-label { grid-area: label; width: 31px;", css)
+        self.assertIn(".sb-vram-text { grid-area: text; white-space: nowrap; overflow: visible;", css)
+        self.assertIn(".sb-services { grid-column: 2; justify-self: end; align-self: center;", css)
+
+    def test_mobile_toast_starts_below_statusbar(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn(".toast-container {\n    top: 96px;", css)
+        self.assertIn(".toast-container.has-prompt-result-active {\n    top: 96px;", css)
+        self.assertIn("@keyframes toastInMobile", css)
+        self.assertIn("animation: toastInMobile .25s ease, toastOut .4s ease 3.6s forwards;", css)
+        self.assertNotIn("top: 83px", css)
 
     def test_status_poll_sends_current_device_target(self):
         status_js = (ROOT / "static/js/modules/status.js").read_text()

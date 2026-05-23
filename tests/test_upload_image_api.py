@@ -15,6 +15,12 @@ class UploadImageApiTests(unittest.TestCase):
             app.api_upload_image(upload, current_user={"sub": "u1", "role": "user"})
         )
 
+    def _upload_video(self, filename: str, content: bytes):
+        upload = UploadFile(io.BytesIO(content), filename=filename)
+        return app.asyncio.run(
+            app.api_upload_video(upload, current_user={"sub": "u1", "role": "user"})
+        )
+
     def test_tiff_upload_is_converted_to_png_for_browser_and_comfyui(self):
         from PIL import Image
 
@@ -106,6 +112,30 @@ class UploadImageApiTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("Unsupported image format", str(ctx.exception.detail))
+
+    def test_mp4_upload_is_stored_for_load_video(self):
+        old_input = app.COMFYUI_INPUT
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                app.COMFYUI_INPUT = tmp
+                result = self._upload_video("clip.mp4", b"\x00\x00\x00\x18ftypmp42")
+                self.assertTrue(result["filename"].endswith(".mp4"))
+                self.assertTrue(os.path.isfile(result["path"]))
+        finally:
+            app.COMFYUI_INPUT = old_input
+
+    def test_unknown_video_extension_is_rejected(self):
+        old_input = app.COMFYUI_INPUT
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                app.COMFYUI_INPUT = tmp
+                with self.assertRaises(HTTPException) as ctx:
+                    self._upload_video("clip.txt", b"not a video")
+        finally:
+            app.COMFYUI_INPUT = old_input
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Unsupported video format", str(ctx.exception.detail))
 
 
 if __name__ == "__main__":

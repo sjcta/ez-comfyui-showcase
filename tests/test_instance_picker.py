@@ -62,6 +62,24 @@ class InstancePickerTest(unittest.TestCase):
         )
         self.assertEqual(picked["name"], "B")
 
+    def test_flux2_klein_t2i_and_i2i_share_model_group(self):
+        picked = self._pick(
+            "i2i_flux2_klein.json",
+            {"A": 0, "B": 0},
+            {"A": "flux2-klein"},
+        )
+
+        self.assertEqual(picked["name"], "A")
+
+    def test_flux2_dev_variants_share_model_group(self):
+        picked = self._pick(
+            "t2i_flux2_dev_q6k.json",
+            {"A": 0, "B": 0},
+            {"B": "flux2-dev"},
+        )
+
+        self.assertEqual(picked["name"], "B")
+
 
 if __name__ == "__main__":
     unittest.main()

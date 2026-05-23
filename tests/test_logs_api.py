@@ -44,6 +44,14 @@ class LogsApiTest(unittest.TestCase):
         self.assertEqual(entries[0]["workflow"], "i2i-Qwen-Edit-v2511.json")
         self.assertEqual(entries[0]["workflow_type"], "图生图")
 
+    def test_workflow_primary_type_prefers_custom_metadata_tag(self):
+        old_loader = app._load_wf_meta
+        try:
+            app._load_wf_meta = lambda: {"i2v-custom.json": {"tags": ["视频制作", "图生视频"]}}
+            self.assertEqual(app._workflow_primary_type("i2v-custom.json"), "视频制作")
+        finally:
+            app._load_wf_meta = old_loader
+
     def test_stop_log_is_ignored_and_messages_are_localized(self):
         app.add_log("info", "stop", "stop", "")
         app.add_log("info", "generate", "Starting generation", "job-1")
@@ -74,6 +82,42 @@ class LogsApiTest(unittest.TestCase):
         entries = app.api_logs(current_user={"id": "u1", "sub": "u1", "role": "user"})
 
         self.assertEqual([entry["msg"] for entry in entries], ["recent"])
+
+    def test_recent_log_reload_drops_non_actionable_thumbnail_noise(self):
+        now = time.time()
+        thumbnail_noise = {
+            "ts": now - 120,
+            "level": "warn",
+            "phase": "thumbnail",
+            "msg": "pillow thumbnail failed: cannot identify image file '/var/folders/x/tmpabc/outputs/hist-1.png'",
+            "job_id": "hist-1.png",
+            "details": "",
+        }
+        ffmpeg_noise = dict(
+            thumbnail_noise,
+            msg="project ffmpeg not configured; thumbnail skipped",
+        )
+        real_log = dict(
+            thumbnail_noise,
+            level="info",
+            phase="生成",
+            msg="recent",
+            job_id="recent-job",
+            user_id="u1",
+        )
+        with open(app._LOG_FILE, "w", encoding="utf-8") as fh:
+            fh.write(app.json.dumps(thumbnail_noise, ensure_ascii=False) + "\n")
+            fh.write(app.json.dumps(ffmpeg_noise, ensure_ascii=False) + "\n")
+            fh.write(app.json.dumps(real_log, ensure_ascii=False) + "\n")
+
+        app._load_recent_logs()
+        entries = app.api_logs(current_user={"id": "u1", "sub": "u1", "role": "user"})
+
+        self.assertEqual([entry["msg"] for entry in entries], ["recent"])
+        with open(app._LOG_FILE, encoding="utf-8") as fh:
+            persisted = fh.read()
+        self.assertNotIn("pillow thumbnail failed", persisted)
+        self.assertNotIn("project ffmpeg not configured", persisted)
 
 
 if __name__ == "__main__":

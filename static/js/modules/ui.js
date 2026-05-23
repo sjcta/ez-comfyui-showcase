@@ -388,31 +388,36 @@ function showToast(message, type) {
 function initDragScroll(selector) {
     var el = document.querySelector(selector);
     if (!el) return;
-    var isDown = false, startX, scrollLeft;
+    var isDown = false, hasDragged = false, startX, scrollLeft;
+    var threshold = 6;
     el.addEventListener("mousedown", function(e) {
       isDown = true;
+      hasDragged = false;
       startX = e.pageX - el.offsetLeft;
       scrollLeft = el.scrollLeft;
-      el.style.scrollSnapType = "none";
-      el.classList.add("dragging");
     });
     el.addEventListener("mouseleave", function() {
       if (!isDown) return;
       isDown = false;
-      el.style.scrollSnapType = "";
+      hasDragged = false;
       el.classList.remove("dragging");
     });
     el.addEventListener("mouseup", function() {
       if (!isDown) return;
       isDown = false;
-      el.style.scrollSnapType = "";
+      hasDragged = false;
       el.classList.remove("dragging");
     });
     el.addEventListener("mousemove", function(e) {
       if (!isDown) return;
-      e.preventDefault();
       var x = e.pageX - el.offsetLeft;
       var walk = (x - startX);
+      if (!hasDragged) {
+        if (Math.abs(walk) < threshold) return;
+        hasDragged = true;
+        el.classList.add("dragging");
+      }
+      e.preventDefault();
       el.scrollLeft = scrollLeft - walk;
     });
   }

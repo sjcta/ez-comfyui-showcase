@@ -89,6 +89,61 @@ class SeedFieldDetectionTests(unittest.TestCase):
         self.assertLessEqual(fields["92::seed"], 4294967295)
         self.assertNotEqual(fields["92::seed"], 8103845055849200000)
 
+    def test_flux2_scheduler_dimensions_follow_latent_size_before_submit(self):
+        workflow = {
+            "47": {
+                "class_type": "EmptyFlux2LatentImage",
+                "inputs": {"width": 1024, "height": 1024},
+            },
+            "48": {
+                "class_type": "Flux2Scheduler",
+                "inputs": {"steps": 8, "width": 1024, "height": 1024},
+            },
+        }
+
+        fields = app._normalize_workflow_field_values(
+            workflow,
+            {"47::width": 1072, "47::height": 1920},
+        )
+
+        self.assertEqual(fields["48::width"], 1072)
+        self.assertEqual(fields["48::height"], 1920)
+
+    def test_ltx_audio_fps_follows_visible_primitive_fps(self):
+        workflow = {
+            "4978": {
+                "class_type": "PrimitiveFloat",
+                "_meta": {"title": "fps"},
+                "inputs": {"value": 24},
+            },
+            "4986": {
+                "class_type": "PrimitiveInt",
+                "_meta": {"title": "audio fps"},
+                "inputs": {"value": 24},
+            },
+            "3980": {
+                "class_type": "LTXVEmptyLatentAudio",
+                "inputs": {"frame_rate": ["4986", 0], "frames_number": 121},
+            },
+            "1241": {
+                "class_type": "LTXVConditioning",
+                "inputs": {"frame_rate": ["4978", 0]},
+            },
+            "4819": {
+                "class_type": "CreateVideo",
+                "inputs": {"fps": ["4978", 0]},
+            },
+        }
+
+        fields = app._normalize_workflow_field_values(
+            workflow,
+            {"4978::value": 12},
+        )
+
+        self.assertEqual(fields["4986::value"], 12)
+        self.assertEqual(fields["3980::frame_rate"], ["4986", 0])
+        self.assertEqual(fields["4819::fps"], 12)
+
 
 if __name__ == "__main__":
     unittest.main()

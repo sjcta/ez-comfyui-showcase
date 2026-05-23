@@ -2,7 +2,7 @@ import unittest
 from unittest import mock
 
 import app
-from modules.job_runner import _filter_retry_instances
+from modules.job_runner import _filter_retry_instances, _workflow_track_timeout
 
 
 class InstanceIdleGuardTest(unittest.TestCase):
@@ -34,6 +34,28 @@ class InstanceIdleGuardTest(unittest.TestCase):
 
         self.assertFalse(app._job_is_active_for_instance(job, "A"))
 
+    def test_active_instance_job_blocks_lifecycle_restart(self):
+        app.jobs["job-active-instance"] = {"instance": "A", "status": "generating"}
+        try:
+            self.assertTrue(app._has_active_instance_job("A"))
+        finally:
+            app.jobs.pop("job-active-instance", None)
+
+    def test_done_instance_job_does_not_block_lifecycle_restart(self):
+        app.jobs["job-done-instance"] = {"instance": "A", "status": "done"}
+        try:
+            self.assertFalse(app._has_active_instance_job("A"))
+        finally:
+            app.jobs.pop("job-done-instance", None)
+
+    def test_firered_instance_stays_warm_longer(self):
+        app._instance_group["B"] = "i2i-firered"
+        try:
+            self.assertEqual(app._idle_timeout_for_instance("B"), app.FIRERED_INSTANCE_IDLE_TIMEOUT)
+            self.assertGreater(app._idle_timeout_for_instance("B"), app.DEFAULT_INSTANCE_IDLE_TIMEOUT)
+        finally:
+            app._instance_group.pop("B", None)
+
     def test_successful_stop_clears_idle_timestamp(self):
         app._instance_last_active["A"] = 123.0
         app._instance_group["A"] = "seedvr"
@@ -49,6 +71,34 @@ class InstanceIdleGuardTest(unittest.TestCase):
 
         self.assertEqual(app._instance_last_active.get("A"), 0)
         self.assertEqual(app._instance_group.get("A"), "")
+
+    def test_remote_instance_action_places_ssh_port_before_destination(self):
+        calls = []
+
+        class Result:
+            returncode = 0
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            return Result()
+
+        node = {
+            "id": "n1",
+            "name": "DGX Spark",
+            "host": "10.10.10.75",
+            "connection": "remote-ssh",
+            "ssh_config": {"user": "sjcta", "port": 2222},
+        }
+        inst = {"id": "i1", "name": "B", "service": "comfyui-b"}
+
+        with mock.patch("app.subprocess.run", side_effect=fake_run):
+            self.assertTrue(app._run_instance_action(node, inst, "start"))
+
+        self.assertTrue(calls)
+        cmd = calls[0]
+        self.assertEqual(cmd[:4], ["ssh", "-p", "2222", "sjcta@10.10.10.75"])
+        self.assertIn("systemctl", cmd)
+        self.assertLess(cmd.index("2222"), cmd.index("sjcta@10.10.10.75"))
 
     def test_submitting_jobs_use_short_stuck_timeout(self):
         job = {"status": "submitting", "last_update": 100.0}
@@ -67,6 +117,21 @@ class InstanceIdleGuardTest(unittest.TestCase):
         self.assertFalse(stuck)
         self.assertEqual(age, 400.0)
         self.assertEqual(timeout, app.JOB_STAGE_TIMEOUTS["generating"])
+
+    def test_video_generating_jobs_allow_long_decode_quiet_period(self):
+        job = {"status": "generating", "last_update": 100.0, "workflow_type": "图生视频"}
+
+        stuck, age, timeout = app._job_stuck_state(job, now=1401.0)
+
+        self.assertFalse(stuck)
+        self.assertEqual(age, 1301.0)
+        self.assertGreater(timeout, app.JOB_STAGE_TIMEOUTS["generating"])
+
+    def test_video_workflows_use_longer_ws_track_timeout(self):
+        self.assertGreater(
+            _workflow_track_timeout({"workflow_type": "图生视频"}, "i2v_ltx23_sulphur.json"),
+            900,
+        )
 
     def test_stuck_job_finalizer_marks_error_and_cancels_task(self):
         async def never_finishes():

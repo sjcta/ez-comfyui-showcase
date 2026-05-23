@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "workflow": "t2v_sulphur2_q4.json",
+  "fields": [
+    {
+      "key": "2483::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "4977::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "生成模式",
+      "order": 1,
+      "type": "video_mode"
+    },
+    {
+      "key": "2004::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图（图生视频必选）",
+      "order": 2,
+      "type": "image",
+      "required_when": {
+        "4977::value": false
+      }
+    },
+    {
+      "key": "3059::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 3,
+      "type": "number",
+      "step": 32,
+      "min": 256,
+      "max": 1280
+    },
+    {
+      "key": "3059::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 4,
+      "type": "number",
+      "step": 32,
+      "min": 192,
+      "max": 768
+    },
+    {
+      "key": "4979::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "帧数",
+      "order": 5,
+      "type": "number",
+      "step": 8,
+      "min": 9,
+      "max": 161
+    },
+    {
+      "key": "4978::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "FPS",
+      "order": 6,
+      "type": "number",
+      "step": 1,
+      "min": 8,
+      "max": 30
+    },
+    {
+      "key": "4814::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "主采样种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "4966::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "主采样步数",
+      "order": 2,
+      "type": "number",
+      "min": 1,
+      "max": 32
+    },
+    {
+      "key": "4964::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "视频 CFG",
+      "order": 3,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 12
+    },
+    {
+      "key": "4831::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样器",
+      "order": 5,
+      "type": "select",
+      "options": [
+        "euler_ancestral_cfg_pp",
+        "euler_cfg_pp",
+        "euler_ancestral",
+        "euler",
+        "res_multistep_cfg_pp",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "4823::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "视频前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "4986::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "音频 FPS",
+      "order": 0,
+      "type": "number"
+    }
+  ]
+}

@@ -45,6 +45,36 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
 
         self.assertLess(job_loop, history_loop)
 
+    def test_live_job_patch_reorders_active_cards(self):
+        history = (ROOT / "static/js/modules/history.js").read_text()
+        card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()
+        generate = (ROOT / "static/js/modules/generate.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
+
+        for source in (history, card_manager):
+            self.assertIn("function _ensureJobCardOrder", source)
+            self.assertIn("_ensureJobCardOrder();", source)
+            self.assertIn("if (cards.length < 1) return", source)
+            self.assertNotIn("if (cards.length < 2) return", source)
+            self.assertIn("_sortJobCards([ja, jb])", source)
+            self.assertIn("compareDocumentPosition(firstNonJob)", source)
+            self.assertIn("gallery.insertBefore(card, firstNonJob)", source)
+        self.assertIn(".masonry .gi.job-card", css)
+        self.assertIn("order: -1;", css)
+        self.assertIn("window.CW.forceGalleryRerender", generate)
+
+    def test_gallery_patch_keeps_unchanged_cards_in_place(self):
+        history = (ROOT / "static/js/modules/history.js").read_text()
+        card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()
+
+        for source in (history, card_manager):
+            self.assertIn("function _placeGalleryChild", source)
+            self.assertIn("if (child === cursor)", source)
+            self.assertIn("gallery.insertBefore(child, cursor)", source)
+            self.assertNotIn("gallery.appendChild(oldChild);", source)
+            self.assertIn("data-video-mask-bound", source)
+            self.assertIn("--gi-info-height", source)
+
 
 if __name__ == "__main__":
     unittest.main()

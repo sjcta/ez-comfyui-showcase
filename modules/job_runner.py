@@ -26,10 +26,15 @@ from typing import Any, Awaitable, Callable
 from modules.instance_manager import InstanceManager
 from modules.instance_picker import pick_best_instance, strict_preferred_instance_name
 from modules.prompt_labels import infer_generation_label
+from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.step_calculator import StepCalculator
 from modules.comfyui_upload import ensure_workflow_images_available
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
+
+
+def _is_image_output(filename: str) -> bool:
+    return is_image_output(filename)
 
 
 def _friendly_generation_error(err: Exception) -> str:
@@ -51,6 +56,19 @@ def _filter_retry_instances(instances: list[dict], workflow_name: str, failed_in
             if inst.get("name") == strict_preferred or inst.get("name") not in failed_instances
         ]
     return [inst for inst in instances if inst.get("name") not in failed_instances]
+
+
+DEFAULT_TRACK_TIMEOUT = 900
+VIDEO_TRACK_TIMEOUT = 3600
+
+
+def _workflow_track_timeout(job: dict | None, workflow_path: str) -> int:
+    job = job or {}
+    workflow_type = str(job.get("workflow_type") or "")
+    workflow_name = os.path.basename(str(workflow_path or "")).lower()
+    if "视频" in workflow_type or any(token in workflow_name for token in ("i2v", "t2v", "video", "ltx", "sulphur")):
+        return VIDEO_TRACK_TIMEOUT
+    return DEFAULT_TRACK_TIMEOUT
 
 
 class JobRunner:
@@ -97,6 +115,7 @@ class JobRunner:
         # ── 实例列表 ─────────────────────────────────────────────────
         get_enabled_instances_fn: Callable[[], list[dict]] | None = None,
         insert_gen_fn: Callable | None = None,
+        protection_check_fn: Callable[[str, list[dict], float], None] | None = None,
     ) -> None:
         """初始化 JobRunner。
 
@@ -134,6 +153,7 @@ class JobRunner:
         self._save_jobs = save_jobs_fn
         self._save_history = save_history_fn
         self._insert_gen = insert_gen_fn or (lambda r, e: None)
+        self._protection_check = protection_check_fn
         self._make_thumbnail = make_thumbnail_fn
         self._get_image_size = get_image_size_fn
         self._comfyui_up = comfyui_up_fn
@@ -302,13 +322,13 @@ class JobRunner:
             )
 
             self._jobs[job_id]["message"] = f"匹配实例 {instance['name']}..."
-            self._jobs[job_id]["progress"] = {"pct": 5}
+            self._jobs[job_id]["progress"] = {"pct": 0}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             # ── Phase 2: 停止 vLLM（如需） ─────────────────────────
             if vllm_was_running:
                 self._jobs[job_id]["message"] = "停止 vLLM 释放显存..."
-                self._jobs[job_id]["progress"] = {"pct": 7}
+                self._jobs[job_id]["progress"] = {"pct": 0}
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 self._stop_vllm()
                 await asyncio.sleep(2)
@@ -316,7 +336,7 @@ class JobRunner:
             # ── Phase 3: 实例冷启动 ────────────────────────────────
             self._jobs[job_id]["status"] = "starting_comfyui"
             self._jobs[job_id]["message"] = f"启动 ComfyUI #{instance['name']}..."
-            self._jobs[job_id]["progress"] = {"pct": 9}
+            self._jobs[job_id]["progress"] = {"pct": 0}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             try:
@@ -324,7 +344,7 @@ class JobRunner:
             except (TimeoutError, Exception) as e:
                 self._add_log("warn", "coldstart", f"冷启动失败: {e}", job_id)
                 self._jobs[job_id]["message"] = f"实例 {instance['name']} 首次启动未就绪，正在重试..."
-                self._jobs[job_id]["progress"] = {"pct": 10}
+                self._jobs[job_id]["progress"] = {"pct": 0}
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 # 兜底：直接使用 app 级别的启动方法
                 node = self._get_node_by_id(instance.get("_node_id", ""))
@@ -355,7 +375,7 @@ class JobRunner:
             self._jobs[job_id]["status"] = "queued"
             self._jobs[job_id]["last_update"] = time.time()
             self._jobs[job_id]["message"] = f"排队等待 {instance['name']}..."
-            self._jobs[job_id]["progress"] = {"pct": 12}
+            self._jobs[job_id]["progress"] = {"pct": 0}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             try:
@@ -373,13 +393,13 @@ class JobRunner:
             self._jobs[job_id]["status"] = "preparing"
             self._jobs[job_id]["message"] = f"实例 {instance['name']} 就绪，开始出图"
             self._jobs[job_id]["instance"] = instance["name"]
-            self._jobs[job_id]["progress"] = {"pct": 15}
+            self._jobs[job_id]["progress"] = {"pct": 0}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             # ── Phase 5: 加载并准备 workflow ───────────────────────
             self._jobs[job_id]["status"] = "preparing"
             self._jobs[job_id]["message"] = "准备 workflow..."
-            self._jobs[job_id]["progress"] = {"pct": 16}
+            self._jobs[job_id]["progress"] = {"pct": 0}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             with open(workflow_path, "r") as f:
@@ -422,9 +442,11 @@ class JobRunner:
             self._add_log("info", "generate", "Starting generation", job_id)
             self._jobs[job_id]["status"] = "submitting"
             self._jobs[job_id]["message"] = "提交工作流..."
-            self._jobs[job_id]["progress"] = {"pct": 12}
+            self._jobs[job_id]["progress"] = {"pct": 0}
             self._jobs[job_id]["submitted_at"] = time.time()
             self._jobs[job_id]["last_update"] = time.time()
+            client_id = str(self._jobs[job_id].get("client_id") or f"ez-{uuid.uuid4().hex[:12]}")
+            self._jobs[job_id]["client_id"] = client_id
             self._save_jobs()
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
@@ -438,8 +460,12 @@ class JobRunner:
                 pct = progress.get("pct", 0)
                 msg = progress.get("message", "")
                 pid = progress.get("prompt_id", "")
+                progress_state = {"pct": int(pct)}
+                for key in ("current_node", "sampler_cur", "sampler_total"):
+                    if key in progress:
+                        progress_state[key] = progress.get(key)
                 self._jobs[job_id]["message"] = msg
-                self._jobs[job_id]["progress"] = {"pct": int(pct)}
+                self._jobs[job_id]["progress"] = progress_state
                 self._jobs[job_id]["last_update"] = time.time()
                 if self._jobs[job_id].get("status") == "submitting" and msg not in (
                     "提交工作流...",
@@ -460,10 +486,13 @@ class JobRunner:
                 node_types=node_types,
                 progress_callback=_progress_callback,
                 log_callback=self._add_log,
+                client_id=client_id,
             )
 
             try:
-                result: TrackResult = await tracker.track(timeout=900)
+                result: TrackResult = await tracker.track(
+                    timeout=_workflow_track_timeout(self._jobs.get(job_id), workflow_path)
+                )
                 ws_ok = result.ok
                 prompt_id = result.prompt_id
                 if prompt_id:
@@ -481,7 +510,7 @@ class JobRunner:
                 self._jobs[job_id]["message"] = (
                     f"实例 {instance['name']} 提交后无响应，自动纠错 {attempt_count}/{self._submit_retry_limit}..."
                 )
-                self._jobs[job_id]["progress"] = {"pct": 12}
+                self._jobs[job_id]["progress"] = {"pct": 0}
                 self._save_jobs()
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 await self._recover_submit_stall(job_id, instance, prompt_id)
@@ -543,7 +572,7 @@ class JobRunner:
             if prompt_id:
                 self._jobs[job_id]["status"] = "downloading"
                 self._jobs[job_id]["message"] = "正在拉取图片..."
-                self._jobs[job_id]["progress"] = {"pct": 96}
+                self._jobs[job_id]["progress"] = {"pct": 100}
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             if job_id not in self._jobs:
@@ -747,7 +776,11 @@ class JobRunner:
             "height": height,
             "fields": fields,
             "queued_at": datetime.now().strftime("%H:%M:%S"),
+            "created_at_ts": time.time(),
         }
+        for key in ("estimated_duration_sec", "estimated_duration_label"):
+            if key in old:
+                self._jobs[new_id][key] = old[key]
         return new_id
 
     # ── 输出保存 ────────────────────────────────────────────────────────
@@ -785,7 +818,7 @@ class JobRunner:
         if not prompt_id and job_id in self._jobs:
             prompt_id = self._jobs[job_id].get("prompt_id", "") or ""
 
-        sources: list[tuple[str, str]] = []
+        sources: list[tuple[str, str, str]] = []
 
         downloaded = await asyncio.to_thread(
             self._download_images,
@@ -797,7 +830,7 @@ class JobRunner:
         if downloaded:
             for path in downloaded:
                 if path and os.path.isfile(path):
-                    sources.append((path, os.path.basename(path)))
+                    sources.append((path, os.path.basename(path), output_media_type(path)))
 
         if not sources:
             last_history_error = None
@@ -805,20 +838,20 @@ class JobRunner:
                 try:
                     hist = self._comfyui_get(f"/history/{prompt_id}", inst_url)
                     if isinstance(hist, dict) and prompt_id in hist:
-                        found: list[tuple[str, str]] = []
-                        for node_out in hist[prompt_id].get("outputs", {}).values():
-                            for img in node_out.get("images", []):
-                                filename = img.get("filename", "")
-                                if not filename:
-                                    continue
-                                src_path = os.path.join(self._output_dir, filename)
-                                if not os.path.isfile(src_path):
-                                    for root, _dirs, files in os.walk(self._output_dir):
-                                        if filename in files:
-                                            src_path = os.path.join(root, filename)
-                                            break
-                                if os.path.isfile(src_path):
-                                    found.append((src_path, filename))
+                        found: list[tuple[str, str, str]] = []
+                        for ref in collect_preferred_outputs(hist[prompt_id].get("outputs", {})):
+                            filename = ref.get("filename", "")
+                            rel_path = output_ref_rel_path(ref)
+                            if not filename or not rel_path:
+                                continue
+                            src_path = os.path.join(self._output_dir, rel_path)
+                            if not os.path.isfile(src_path):
+                                for root, _dirs, files in os.walk(self._output_dir):
+                                    if filename in files:
+                                        src_path = os.path.join(root, filename)
+                                        break
+                            if os.path.isfile(src_path):
+                                found.append((src_path, filename, output_media_type(filename)))
                         if found:
                             sources = found
                             break
@@ -830,27 +863,27 @@ class JobRunner:
             if not sources and last_history_error:
                 raise RuntimeError(_friendly_generation_error(last_history_error))
 
-        deduped: list[tuple[str, str]] = []
+        deduped: list[tuple[str, str, str]] = []
         seen_paths: set[str] = set()
-        for src_path, original_name in sources:
+        for src_path, original_name, media_type in sources:
             real_path = os.path.abspath(src_path)
             if real_path in seen_paths or not os.path.isfile(src_path):
                 continue
             seen_paths.add(real_path)
-            deduped.append((src_path, original_name or os.path.basename(src_path)))
+            deduped.append((src_path, original_name or os.path.basename(src_path), media_type or output_media_type(src_path)))
         sources = deduped
 
         if not sources:
-            raise RuntimeError(f"未找到输出图片 (prompt={prompt_id[:12]})")
+            raise RuntimeError(f"未找到输出媒体 (prompt={prompt_id[:12]})")
 
         date_str = datetime.now().strftime("%Y-%m-%d")
         owner = user_id or "anonymous"
         subdir = f"{owner}/{date_str}"
         wf_basename = os.path.basename(workflow_path).replace(".json", "")
-        existing = glob.glob(os.path.join(self._output_dir, subdir, f"{wf_basename}_*.png"))
+        existing = glob.glob(os.path.join(self._output_dir, subdir, f"{wf_basename}_*.*"))
         seq = 1
         for p in existing:
-            m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.png$", os.path.basename(p))
+            m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.[^.]+$", os.path.basename(p))
             if m:
                 seq = max(seq, int(m.group(1)) + 1)
 
@@ -862,18 +895,23 @@ class JobRunner:
         batch_count = len(sources)
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         records: list[dict] = []
-        for idx, (src, original_name) in enumerate(sources):
-            hist_name = f"{wf_basename}_{seq + idx:04d}.png"
+        for idx, (src, original_name, media_type) in enumerate(sources):
+            ext = os.path.splitext(original_name or src)[1].lower() or ".png"
+            hist_name = f"{wf_basename}_{seq + idx:04d}{ext}"
             rel_path = f"{subdir}/{hist_name}"
             dst = os.path.join(self._output_dir, rel_path)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(src, dst)
 
-            actual_w, actual_h = self._get_image_size(rel_path)
+            thumb_rel = self._make_thumbnail(rel_path) or ""
+            actual_w, actual_h = self._get_image_size(rel_path) if media_type == "image" else (0, 0)
+            if media_type == "video" and thumb_rel:
+                actual_w, actual_h = self._get_image_size(thumb_rel)
             record_id = job_id if idx == 0 else f"{job_id}_{idx + 1:02d}"
             records.append({
                 "id": record_id,
                 "filename": rel_path,
+                "media_type": media_type,
                 "original": original_name,
                 "workflow": os.path.basename(workflow_path),
                 "prompt": prompt_text,
@@ -882,10 +920,11 @@ class JobRunner:
                 "height": actual_h or img_height,
                 "elapsed": round(elapsed, 1),
                 "time": created_at,
-                "thumb": self._make_thumbnail(rel_path) or "",
+                "thumb": thumb_rel,
                 "field_values": field_values,
                 "user_id": user_id or "",
                 "is_public": False,
+                "protection_status": "pending",
                 "batch_id": job_id if batch_count > 1 else "",
                 "batch_index": idx,
                 "batch_count": batch_count,
@@ -903,17 +942,35 @@ class JobRunner:
 
         if job_id in self._jobs:
             cover = records[0]
-            self._jobs[job_id].update(
-                status="done",
-                message=f"完成 ({elapsed:.1f}s)",
-                image=cover.get("filename", ""),
-                thumb=cover.get("thumb", ""),
-                images=[record.get("filename", "") for record in records],
-                thumbs=[record.get("thumb", "") for record in records],
-                batch_id=job_id if batch_count > 1 else "",
-                batch_count=batch_count,
-                batch_items=records,
-                elapsed=round(elapsed, 1),
-                progress={"pct": 100},
-            )
+            done_payload = {
+                "image": cover.get("filename", ""),
+                "media_type": cover.get("media_type", "image") or "image",
+                "thumb": cover.get("thumb", ""),
+                "images": [record.get("filename", "") for record in records],
+                "media_types": [record.get("media_type", "image") or "image" for record in records],
+                "thumbs": [record.get("thumb", "") for record in records],
+                "batch_id": job_id if batch_count > 1 else "",
+                "batch_count": batch_count,
+                "batch_items": records,
+                "elapsed": round(elapsed, 1),
+                "progress": {"pct": 100},
+            }
+            if self._protection_check:
+                self._jobs[job_id].update(
+                    status="checking",
+                    message="图片校验中",
+                    protection_status="pending",
+                    pending_image=cover.get("filename", ""),
+                    pending_media_type=cover.get("media_type", "image") or "image",
+                    pending_thumb=cover.get("thumb", ""),
+                    **{k: v for k, v in done_payload.items() if k not in ("image", "thumb")},
+                )
+                self._save_jobs()
+                self._protection_check(job_id, records, round(elapsed, 1))
+            else:
+                self._jobs[job_id].update(
+                    status="done",
+                    message=f"完成 ({elapsed:.1f}s)",
+                    **done_payload,
+                )
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})

@@ -167,6 +167,7 @@ class WSTracker:
         node_types: dict[str, str],
         progress_callback: Callable[[dict], Awaitable[None]] | None = None,
         log_callback: Callable[[str, str, str, str], None] | None = None,
+        client_id: str | None = None,
     ) -> None:
         """初始化 WSTracker。
 
@@ -178,6 +179,7 @@ class WSTracker:
             node_types: {node_id: class_type} 映射。
             progress_callback: 进度更新的异步回调，参数为进度 dict。
             log_callback: 日志回调，参数为 (level, phase, msg, job_id)。
+            client_id: 可复用的 ComfyUI client_id，用于服务重启后重连同一 WS 客户端。
         """
         self._job_id: str = job_id
         self._workflow: dict = workflow
@@ -197,8 +199,13 @@ class WSTracker:
         self._log_callback: Callable[[str, str, str, str], None] | None = log_callback
 
         # 运行时状态
-        self._client_id: str = uuid.uuid4().hex[:12]
+        self._client_id: str = str(client_id or uuid.uuid4().hex[:12])
         self._prompt_id: str = ""
+        self._reset_runtime_state(clear_prompt_id=False)
+
+    def _reset_runtime_state(self, clear_prompt_id: bool) -> None:
+        if clear_prompt_id:
+            self._prompt_id = ""
         self._completed_units: float = 0.0
         self._last_prog: int = 0
         self._current_node_id: str = ""
@@ -213,6 +220,10 @@ class WSTracker:
         self._workflow_done: bool = False
         self._last_pct: float = 0.0
         self._prompt_started: bool = False
+
+    @property
+    def client_id(self) -> str:
+        return self._client_id
 
     # ── 注入 ────────────────────────────────────────────────────────────
 
@@ -251,20 +262,7 @@ class WSTracker:
             TrackResult 包含是否成功、prompt_id、耗时。
         """
         self._start_time = time.time()
-        self._prompt_id = ""
-        self._completed_units = 0.0
-        self._last_prog = 0
-        self._current_node_id = ""
-        self._current_node_cls = ""
-        self._sampler_cur = 0
-        self._sampler_total = 0
-        self._completed_node_ids = set()
-        self._node_entered_at = {}
-        self._time_node_units = {}
-        self._cancelled = False
-        self._workflow_done = False
-        self._last_pct = 0.0
-        self._prompt_started = False
+        self._reset_runtime_state(clear_prompt_id=True)
 
         total_units = self._step_info.total_units
         node_weights = self._step_info.node_weights
@@ -294,7 +292,7 @@ class WSTracker:
 
         # ── Phase 2: 提交 prompt ──────────────────────────────────────
         await self._report_progress({
-            "pct": 12, "message": "提交工作流...", "current_node": ""
+            "pct": 0, "message": "提交工作流...", "current_node": ""
         })
         try:
             resp = await asyncio.to_thread(
@@ -308,7 +306,7 @@ class WSTracker:
                     f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}"
                 )
             await self._report_progress({
-                "pct": 14, "message": "等待实例开始执行...", "current_node": ""
+                "pct": 0, "message": "等待实例开始执行...", "current_node": ""
             })
         except Exception as e:
             if ws:
@@ -332,6 +330,42 @@ class WSTracker:
             self._log("warn", "ws", f"WS 异常: {e}，退化 HTTP", self._job_id)
             return await self._http_fallback_track(timeout)
 
+    async def resume(self, prompt_id: str, timeout: int = 900) -> TrackResult:
+        """重连已有 ComfyUI prompt 的 WebSocket，仅恢复实时事件，不重新提交。
+
+        Args:
+            prompt_id: 已提交到 ComfyUI 的 prompt_id。
+            timeout: WS 重连追踪最长等待秒数。
+
+        Returns:
+            TrackResult。未收到完成事件时返回 ok=False，让上层继续 queue/history 兜底。
+        """
+        self._start_time = time.time()
+        self._reset_runtime_state(clear_prompt_id=True)
+        self._prompt_id = str(prompt_id or "")
+        if not self._prompt_id:
+            return TrackResult(ok=False, prompt_id="", elapsed=0.0)
+        self._prompt_started = True
+        ws_url = _build_ws_url(self._instance_url, self._client_id)
+        try:
+            ws = await websockets.client.connect(ws_url, open_timeout=10)
+        except (ConnectionRefusedError, OSError, asyncio.TimeoutError,
+                websockets.exceptions.WebSocketException) as e:
+            self._log("warn", "ws", f"恢复 WS 连接失败: {e}", self._job_id)
+            return TrackResult(ok=False, prompt_id=self._prompt_id, elapsed=time.time() - self._start_time)
+        try:
+            return await self._ws_track_loop(
+                ws,
+                timeout,
+                allow_http_fallback=False,
+                enforce_prompt_start_timeout=False,
+            )
+        finally:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
     def cancel(self) -> None:
         """取消追踪。设置取消标志，下次迭代将停止。"""
         self._cancelled = True
@@ -353,7 +387,13 @@ class WSTracker:
 
     # ── WS 追踪循环 ─────────────────────────────────────────────────────
 
-    async def _ws_track_loop(self, ws: Any, timeout: int) -> TrackResult:
+    async def _ws_track_loop(
+        self,
+        ws: Any,
+        timeout: int,
+        allow_http_fallback: bool = True,
+        enforce_prompt_start_timeout: bool = True,
+    ) -> TrackResult:
         """WS 消息接收循环。
 
         处理 executing/progress/executed/execution_error/execution_start 消息。
@@ -394,6 +434,8 @@ class WSTracker:
 
                 now = time.time()
                 if (
+                    enforce_prompt_start_timeout
+                    and
                     self._prompt_id
                     and not self._prompt_started
                     and now - prompt_wait_started > self.PROMPT_START_TIMEOUT
@@ -406,7 +448,7 @@ class WSTracker:
                     raise PromptStartTimeout(self._prompt_id, self.PROMPT_START_TIMEOUT)
 
                 recv_timeout = min(300.0, max(0.1, self.WS_SILENT_TIMEOUT - (now - last_ws_msg)))
-                if self._prompt_id and not self._prompt_started:
+                if enforce_prompt_start_timeout and self._prompt_id and not self._prompt_started:
                     recv_timeout = min(
                         recv_timeout,
                         max(0.1, self.PROMPT_START_TIMEOUT - (now - prompt_wait_started)),
@@ -417,7 +459,7 @@ class WSTracker:
                         raw = await ws.recv()
                     last_ws_msg = time.time()
                 except asyncio.TimeoutError:
-                    if self._prompt_id and not self._prompt_started:
+                    if enforce_prompt_start_timeout and self._prompt_id and not self._prompt_started:
                         self._log(
                             "warn", "ws",
                             f"Prompt {self._prompt_id[-12:]} {self.PROMPT_START_TIMEOUT:.0f}s 未开始执行",
@@ -478,6 +520,12 @@ class WSTracker:
                 pass
 
         # ── 退化 HTTP polling ─────────────────────────────────────────
+        if not allow_http_fallback:
+            return TrackResult(
+                ok=False,
+                prompt_id=self._prompt_id,
+                elapsed=time.time() - self._start_time,
+            )
         return await self._http_poll_track(timeout - (time.time() - start))
 
     async def _http_fallback_track(self, timeout: int) -> TrackResult:
@@ -764,11 +812,7 @@ class WSTracker:
         if self._workflow_done or raw >= 1.0:
             pct = 100.0
         else:
-            # Human-facing progress bands:
-            # 0-12% is queue/startup/prompt submission, 18-96% is actual ComfyUI work,
-            # and the remaining 4% is reserved for image download/storage.
-            pct = 18.0 + raw * 78.0
-            pct = min(96.0, pct)
+            pct = raw * 100.0
         self._last_pct = max(self._last_pct, pct)
         return self._last_pct
 
@@ -838,5 +882,11 @@ class WSTracker:
 
 class NodeCategoryDict:
     """运行时节点分类快速查找（避免循环依赖）。"""
-    SAMPLER = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "FluxSampler"}
+    SAMPLER = {
+        "KSampler",
+        "KSamplerAdvanced",
+        "SamplerCustom",
+        "SamplerCustomAdvanced",
+        "FluxSampler",
+    }
     UPSCALE = {"ImageUpscaleWithModel", "SeedVR2VideoUpscaler"}

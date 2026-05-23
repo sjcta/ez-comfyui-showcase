@@ -1,0 +1,250 @@
+{
+  "6": {
+    "inputs": {
+      "text": "Edit the reference image with high detail while preserving identity, composition, texture, and important visual details.",
+      "clip": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "13",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "i2i-flux2-dev-q5km",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "12": {
+    "inputs": {
+      "unet_name": "gguf/flux2-dev-Q5_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "noise": [
+        "25",
+        0
+      ],
+      "guider": [
+        "22",
+        0
+      ],
+      "sampler": [
+        "16",
+        0
+      ],
+      "sigmas": [
+        "48",
+        0
+      ],
+      "latent_image": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "16": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "20": {
+    "inputs": {
+      "model": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "FluxKVCache",
+    "_meta": {
+      "title": "Flux KV Cache"
+    }
+  },
+  "22": {
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "conditioning": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "BasicGuider"
+    }
+  },
+  "25": {
+    "inputs": {
+      "noise_seed": 2405220202
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "26": {
+    "inputs": {
+      "guidance": 4.0,
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "FluxGuidance"
+    }
+  },
+  "38": {
+    "inputs": {
+      "clip_name": "mistral_3_small_flux2_bf16.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "47": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "48": {
+    "inputs": {
+      "steps": 28,
+      "width": 1024,
+      "height": 1024
+    },
+    "class_type": "Flux2Scheduler",
+    "_meta": {
+      "title": "Flux2Scheduler"
+    }
+  },
+  "40": {
+    "inputs": {
+      "image": "t2i-z-xxx_00001_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "参考图片"
+    }
+  },
+  "41": {
+    "inputs": {
+      "image": [
+        "40",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 1.0
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Scale Reference Image To 1MP"
+    }
+  },
+  "42": {
+    "inputs": {
+      "pixels": [
+        "41",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode Reference"
+    }
+  },
+  "43": {
+    "inputs": {
+      "conditioning": [
+        "26",
+        0
+      ],
+      "reference_latents_method": "index"
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Edit Model Reference Method"
+    }
+  },
+  "44": {
+    "inputs": {
+      "conditioning": [
+        "43",
+        0
+      ],
+      "latent": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "Reference Latent"
+    }
+  }
+}

@@ -46,7 +46,7 @@
     return d.innerHTML;
   }
   function escA(s) {
-    return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
   const MODAL_TRANSITION_MS = 280;
   function setModalOpen(el, open, opts) {
@@ -74,6 +74,17 @@
       if (opts.removeAfterClose && el.parentNode) el.parentNode.removeChild(el);
       if (typeof opts.afterClose === 'function') opts.afterClose(el);
     }, delay);
+  }
+  function initSiteVersionBadge() {
+    const badge = $('#siteVersionBadge');
+    if (!badge) return;
+    fetch(API + '/api/version', { cache: 'no-store' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        const version = data && data.version ? String(data.version).trim() : '';
+        if (version) badge.textContent = version;
+      })
+      .catch(() => {});
   }
   // ── Expose shared state for modules ──
   console.log('[BOOT] before __APP__');
@@ -116,11 +127,22 @@
     if (n.startsWith('t2i') || n.includes('-t2i') || n.includes('_t2i')) return { text: '文生图', cls: 'wf-tag-t2i' };
     return '';
   }
+  function tagClassForText(text, fallback) {
+    const t = String(text || '');
+    if (t === '文生图') return 'wf-tag-t2i';
+    if (t === '图生图') return 'wf-tag-i2i';
+    if (t === '文生视频') return 'wf-tag-t2v';
+    if (t === '图生视频') return 'wf-tag-i2v';
+    if (/视频/.test(t)) return 'wf-tag-video';
+    if (t === '放大') return 'wf-tag-cat';
+    if (/^\d+K$/i.test(t)) return 'wf-tag-res';
+    return fallback && fallback.cls ? fallback.cls : 'wf-tag-res';
+  }
   /** Prefer metadata tags[0] over filename guess, keep CSS class from filename. */
   function wfTag(name, metaTags) {
     const fallback = getWFType(name);
     if (metaTags && metaTags.length > 0) {
-      return { text: metaTags[0], cls: fallback ? fallback.cls : 'wf-tag-res' };
+      return { text: metaTags[0], cls: tagClassForText(metaTags[0], fallback) };
     }
     return fallback;
   }
@@ -524,8 +546,9 @@
     // Toast on status change
     if (prev && prev.status !== job.status) {
       var shortId = job.id.slice(-6);
-      var wfTag = getWFType(job.workflow);
-      var typeLabel = wfTag ? wfTag.text : '';
+      var wfMeta = (window.__APP__ && window.__APP__._wfMeta && window.__APP__._wfMeta[job.workflow]) || {};
+      var jobWfTag = wfTag(job.workflow, wfMeta.tags);
+      var typeLabel = jobWfTag ? jobWfTag.text : '';
       var toastByStatus = {
         queued: ['排队中', 'queued'],
         generating: ['出图中', 'generating'],
@@ -565,7 +588,7 @@
     if (!hasGenerating) return;
     $$('.gi-timer').forEach((el) => {
       const ts = parseFloat(el.dataset.ts);
-      if (ts > 0) el.textContent = formatElapsed(ts);
+      if (ts > 0) el.textContent = formatJobElapsedWithEstimate(ts, el.dataset.estimateLabel || '');
     });
   }
 
@@ -574,6 +597,11 @@
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return m > 0 ? `${m}m${String(s).padStart(2, '0')}s` : `${s}s`;
+  }
+
+  function formatJobElapsedWithEstimate(startTime, estimateLabel) {
+    const elapsed = formatElapsed(startTime);
+    return estimateLabel ? `${elapsed} (${estimateLabel})` : elapsed;
   }
 
 
@@ -622,10 +650,9 @@
       for (const [id, sj] of Object.entries(serverJobs)) {
         const prev = jobs[id];
         if (!prev) {
-          jobs[id] = sj;
           needRerender = true;
+          onJobUpdate(sj);
         } else if (prev.status !== sj.status) {
-          jobs[id] = sj;
           onJobUpdate(sj);
           // onJobUpdate handles loadHistory for done/error itself
           if (sj.status === 'done' && sj.image) { alreadyRefreshed = true; }
@@ -782,6 +809,7 @@
 
 function init() {
   console.log("[BOOT] init function");
+    initSiteVersionBadge();
     var unifiedPoller = window.CW && window.CW.pollManager;
     var statusPoller = (window.CW && window.CW.pollStatus && window.CW.pollStatus !== pollStatus)
       ? window.CW.pollStatus
@@ -1020,8 +1048,9 @@ function init() {
     wfUploadOverlay,
     setModalOpen,
     MODAL_TRANSITION_MS,
-    getWFType, wfTag,
+    getWFType, wfTag, tagClassForText,
     formatElapsed,
+    formatJobElapsedWithEstimate,
     shortSeed,
     onJobUpdate,
   });

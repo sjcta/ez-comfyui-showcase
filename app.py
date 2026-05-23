@@ -21,17 +21,26 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-import uvicorn, urllib.request, urllib.error
+from pydantic import BaseModel, Field
+import uvicorn, urllib.request, urllib.error, urllib.parse
 from jose import jwt, JWTError
 import bcrypt
 
 # ── V4 refactored module imports (keep inline implementations for backward compat) ──
 from modules.config import NodeCategory, ModelGroup, NODE_STATUS_MAP
 from modules.comfyui_upload import ensure_workflow_images_available
+from modules.image_protection import (
+    ImageProtectionResult,
+    ImageProtectionWorker,
+    configure_image_protection,
+    get_image_protection_settings,
+    prompt_has_nsfw_risk,
+    prompt_needs_protection,
+)
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
-from modules.job_runner import JobRunner
+from modules.job_runner import JobRunner, _workflow_track_timeout
+from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
 from modules.prompt_labels import infer_generation_label
 from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
@@ -63,7 +72,7 @@ SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or "ez-comfyui-showcase-local-jwt-
 if not os.environ.get("JWT_SECRET_KEY"):
     print("[auth] JWT_SECRET_KEY is not set; using a stable local development secret.")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_DAYS = 7
+ACCESS_TOKEN_EXPIRE_DAYS = 31
 
 # ── Logging ──
 _log_buffer: list[dict] = []
@@ -127,6 +136,19 @@ def _append_persistent_log(entry: dict) -> None:
         pass
 
 
+def _is_non_actionable_thumbnail_log(entry: dict) -> bool:
+    """Return True for legacy thumbnail noise from invalid temp/test files."""
+    if str(entry.get("phase") or "") != "thumbnail":
+        return False
+    msg = str(entry.get("msg") or "")
+    if msg.startswith("pillow thumbnail failed: cannot identify image file"):
+        return True
+    if msg == "project ffmpeg not configured; thumbnail skipped":
+        rel = str(entry.get("job_id") or "").lower()
+        return os.path.splitext(rel)[1] in THUMB_IMAGE_EXTS
+    return False
+
+
 def _load_recent_logs() -> None:
     if not os.path.isfile(_LOG_FILE):
         return
@@ -142,6 +164,8 @@ def _load_recent_logs() -> None:
                 try:
                     entry = json.loads(line)
                 except Exception:
+                    continue
+                if _is_non_actionable_thumbnail_log(entry):
                     continue
                 if float(entry.get("ts") or 0) >= cutoff:
                     loaded.append(entry)
@@ -249,6 +273,10 @@ ACTIVE_JOB_STATUSES = {
     "generating",
     "downloading",
 }
+IMAGE_PROTECTION_PENDING = "pending"
+IMAGE_PROTECTION_SAFE = "safe"
+IMAGE_PROTECTION_PROTECTED = "protected"
+IMAGE_PROTECTION_ERROR = "error"
 JOB_STAGE_TIMEOUTS = {
     "dispatching": 120,
     "queued": 600,
@@ -267,12 +295,17 @@ JOB_STAGE_TIMEOUT_MESSAGES = {
     "generating": "生成阶段超时（长时间无进度）",
     "downloading": "拉取图片超时",
 }
+VIDEO_GENERATING_TIMEOUT = 3600
 
 def _is_node_connected(nid: str) -> bool:
     return _connected_nodes.get(nid, True)
 
 def _job_is_active_for_instance(job: dict, instance_name: str) -> bool:
     return job.get("instance") == instance_name and job.get("status") in ACTIVE_JOB_STATUSES
+
+
+def _has_active_instance_job(instance_name: str) -> bool:
+    return any(_job_is_active_for_instance(job, instance_name) for job in jobs.values())
 
 
 def _current_job_for_instance(instance_name: str) -> dict | None:
@@ -323,9 +356,22 @@ def _job_last_activity_ts(job: dict) -> float:
     return 0
 
 
+def _is_video_job(job: dict) -> bool:
+    workflow_type = str(job.get("workflow_type") or "")
+    workflow = os.path.basename(str(job.get("workflow") or "")).lower()
+    return "视频" in workflow_type or any(token in workflow for token in ("i2v", "t2v", "video", "ltx", "sulphur"))
+
+
+def _job_stage_timeout(job: dict, status: str) -> int:
+    timeout = JOB_STAGE_TIMEOUTS.get(status, 600)
+    if status == "generating" and _is_video_job(job):
+        return max(timeout, VIDEO_GENERATING_TIMEOUT)
+    return timeout
+
+
 def _job_stuck_state(job: dict, now: float | None = None) -> tuple[bool, float, int]:
     status = str(job.get("status") or "")
-    timeout = JOB_STAGE_TIMEOUTS.get(status, 600)
+    timeout = _job_stage_timeout(job, status)
     last = _job_last_activity_ts(job)
     if not last or status in ("done", "error", "cancelled"):
         return False, 0.0, timeout
@@ -553,11 +599,11 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
                 prefix = []
                 if ssh.get("auth") == "password" and ssh.get("password"):
                     prefix = ["sshpass", "-p", ssh["password"], "ssh",
-                              f"{ssh.get('user', 'root')}@{node['host']}",
-                              "-p", str(ssh.get("port", 22))]
+                              "-p", str(ssh.get("port", 22)),
+                              f"{ssh.get('user', 'root')}@{node['host']}"]
                 else:
-                    prefix = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}",
-                              "-p", str(ssh.get("port", 22))]
+                    prefix = ["ssh", "-p", str(ssh.get("port", 22)),
+                              f"{ssh.get('user', 'root')}@{node['host']}"]
                 # SSH needs D-Bus env for systemctl --user
                 dbus_cmd = ["DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
                             "XDG_RUNTIME_DIR=/run/user/1000"] + cmd_list
@@ -594,18 +640,35 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
 _job_queue: asyncio.Queue = asyncio.Queue()
 _inst_mgr: InstanceManager | None = None
 _job_runner: JobRunner | None = None
+_app_loop: asyncio.AbstractEventLoop | None = None
 
 async def _queue_worker():
-    """Non-blocking dispatcher — spawns a task per job so per-instance semaphore waits don't block the queue."""
+    """Global generation dispatcher.
+
+    Main A/B generation is intentionally serialized: queued jobs do not bind
+    to a ComfyUI instance until they reach this worker, then the usual affinity
+    picker chooses the best warm/cold instance for that workflow.
+    """
     while True:
         try:
             job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance, preferred_node_id = await _job_queue.get()
+            if job_id not in jobs:
+                _job_queue.task_done()
+                continue
             if _job_runner:
                 task = asyncio.create_task(_run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance, preferred_node_id))
             else:
                 task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, preferred_instance, preferred_node_id))
             _job_tasks[job_id] = task
-            task.add_done_callback(lambda _t, jid=job_id: _job_tasks.pop(jid, None))
+            try:
+                await task
+            except asyncio.CancelledError:
+                if asyncio.current_task() and asyncio.current_task().cancelling():
+                    raise
+            except Exception as e:
+                print(f"[queue_worker] Job {job_id} failed: {e}")
+            finally:
+                _job_tasks.pop(job_id, None)
         except Exception as e:
             print(f"[queue_worker] Error in dispatch loop: {e}")
             await asyncio.sleep(1)
@@ -898,6 +961,8 @@ WF_CONFIG_DIR = os.environ.get("WF_CONFIG_DIR", os.path.join(_BASE, "data", "wf_
 os.makedirs(WF_CONFIG_DIR, exist_ok=True)
 WF_THUMB_DIR = os.environ.get("WF_THUMB_DIR", os.path.join(_BASE, "data", "thumbs", "wf"))
 JOBS_FILE    = os.environ.get("JOBS_FILE", os.path.join(_BASE, "data", "jobs.json"))
+CANCELLED_PROMPTS_FILE = os.environ.get("CANCELLED_PROMPTS_FILE", os.path.join(_BASE, "data", "cancelled_prompts.json"))
+SYSTEM_SETTINGS_FILE = os.environ.get("SYSTEM_SETTINGS_FILE", os.path.join(_BASE, "data", "system_settings.json"))
 PORT = int(os.environ.get("EZ_COMFYUI_PORT", "9091"))
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
 
@@ -944,6 +1009,10 @@ def _image_media_type(path: str, default: str = "application/octet-stream") -> s
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
         ".bmp": "image/bmp",
+        ".mp4": "video/mp4",
+        ".m4v": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
     }.get(ext, default)
 
 # ── Generation SQLite Database ──
@@ -964,6 +1033,75 @@ def _json_loads_safe(value, default):
         return json.loads(value)
     except Exception:
         return default
+
+
+def _normalize_system_settings(raw: dict | None) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    image_settings = raw.get("image_protection") if isinstance(raw.get("image_protection"), dict) else {}
+    return {"image_protection": configure_image_protection(image_settings)}
+
+
+def _load_system_settings() -> dict:
+    try:
+        with open(SYSTEM_SETTINGS_FILE, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except Exception:
+        raw = {}
+    return _normalize_system_settings(raw)
+
+
+def _save_system_settings(settings: dict) -> None:
+    os.makedirs(os.path.dirname(SYSTEM_SETTINGS_FILE), exist_ok=True)
+    with open(SYSTEM_SETTINGS_FILE, "w", encoding="utf-8") as fh:
+        json.dump(settings, fh, ensure_ascii=False, indent=2)
+
+
+def _update_system_settings(patch: dict | None) -> dict:
+    current = _load_system_settings()
+    patch = patch if isinstance(patch, dict) else {}
+    if isinstance(patch.get("image_protection"), dict):
+        image_current = dict(current.get("image_protection") or {})
+        image_current.update(patch["image_protection"])
+        current["image_protection"] = image_current
+    updated = _normalize_system_settings(current)
+    _save_system_settings(updated)
+    return updated
+
+
+def _protection_candidate_paths(record: dict | sqlite3.Row) -> list[str]:
+    """Return thumbnail and original image candidates, preserving order."""
+    values: list[str] = []
+    for key in ("thumb", "thumb_path", "filename", "image_path"):
+        try:
+            rel = record.get(key, "") if hasattr(record, "get") else record[key]
+        except Exception:
+            rel = ""
+        rel = str(rel or "").strip()
+        if rel and rel not in values:
+            values.append(rel)
+    paths: list[str] = []
+    for rel in values:
+        path = rel if os.path.isabs(rel) else os.path.join(OUTPUT_DIR, rel)
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _check_image_protection_candidates(
+    worker: ImageProtectionWorker,
+    record: dict | sqlite3.Row,
+    prompt: str,
+) -> ImageProtectionResult:
+    fallback: ImageProtectionResult | None = None
+    for path in _protection_candidate_paths(record):
+        result = worker.check(path, prompt)
+        if result.status == IMAGE_PROTECTION_PROTECTED:
+            return result
+        if result.status == IMAGE_PROTECTION_SAFE:
+            fallback = result
+        elif fallback is None:
+            fallback = result
+    return fallback or ImageProtectionResult(IMAGE_PROTECTION_ERROR, 1.0, "missing image", "local-error")
 
 def _workflow_meta_row_to_entry(row: sqlite3.Row | None) -> dict | None:
     if not row:
@@ -1006,6 +1144,7 @@ def _init_gen_db():
             device TEXT DEFAULT '',
             instance TEXT DEFAULT '',
             status TEXT DEFAULT 'done',
+            media_type TEXT DEFAULT 'image',
             image_path TEXT DEFAULT '',
             thumb_path TEXT DEFAULT '',
             created_at DATETIME DEFAULT (datetime('now','localtime')),
@@ -1015,7 +1154,12 @@ def _init_gen_db():
             prompt TEXT DEFAULT '',
             width INTEGER DEFAULT 0,
             height INTEGER DEFAULT 0,
-            seed INTEGER DEFAULT 0
+            seed INTEGER DEFAULT 0,
+            protection_status TEXT DEFAULT 'pending',
+            protection_score REAL DEFAULT 0,
+            protection_reason TEXT DEFAULT '',
+            protection_source TEXT DEFAULT '',
+            protection_checked_at TEXT DEFAULT ''
         )
     """)
     # Add user_id column if not exists (migration for existing databases)
@@ -1039,11 +1183,20 @@ def _init_gen_db():
         "ALTER TABLE generations ADD COLUMN batch_id TEXT DEFAULT ''",
         "ALTER TABLE generations ADD COLUMN batch_index INTEGER DEFAULT 0",
         "ALTER TABLE generations ADD COLUMN batch_count INTEGER DEFAULT 1",
+        "ALTER TABLE generations ADD COLUMN media_type TEXT DEFAULT 'image'",
+        "ALTER TABLE generations ADD COLUMN protection_status TEXT DEFAULT 'safe'",
+        "ALTER TABLE generations ADD COLUMN protection_score REAL DEFAULT 0",
+        "ALTER TABLE generations ADD COLUMN protection_reason TEXT DEFAULT ''",
+        "ALTER TABLE generations ADD COLUMN protection_source TEXT DEFAULT ''",
+        "ALTER TABLE generations ADD COLUMN protection_checked_at TEXT DEFAULT ''",
     ):
         try:
             conn.execute(ddl)
         except sqlite3.OperationalError:
             pass
+    _backfill_legacy_prompt_protection(conn)
+    _recheck_safe_heuristic_nsfw_risk_rows(conn)
+    _recheck_safe_heuristic_video_rows(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_meta (
             filename TEXT PRIMARY KEY,
@@ -1115,6 +1268,22 @@ def _init_auth_db():
         first_user = conn.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
         if first_user:
             conn.execute("UPDATE users SET role='admin' WHERE id=?", (first_user[0],))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS site_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_by TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS site_notification_state (
+            user_id TEXT PRIMARY KEY,
+            suppressed_until_id INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT (datetime('now','localtime'))
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -1136,6 +1305,7 @@ def _gen_db_to_record(row: dict) -> dict:
     return {
         "id": row["id"],
         "filename": row.get("image_path", ""),
+        "media_type": row.get("media_type", "") or output_media_type(row.get("image_path", "")),
         "thumb": row.get("thumb_path", ""),
         "workflow": workflow,
         "workflow_type": workflow_type,
@@ -1156,7 +1326,399 @@ def _gen_db_to_record(row: dict) -> dict:
         "batch_id": row.get("batch_id", "") or "",
         "batch_index": row.get("batch_index", 0) or 0,
         "batch_count": row.get("batch_count", 1) or 1,
+        "protection_status": row.get("protection_status", IMAGE_PROTECTION_SAFE) or IMAGE_PROTECTION_SAFE,
+        "protection_score": float(row.get("protection_score", 0) or 0),
+        "protection_reason": row.get("protection_reason", "") or "",
+        "protection_source": row.get("protection_source", "") or "",
+        "protection_checked_at": row.get("protection_checked_at", "") or "",
     }
+
+
+def _backfill_legacy_prompt_protection(conn: sqlite3.Connection | None = None) -> int:
+    """Persist protection for legacy rows using the current fallback image check."""
+    own_conn = conn is None
+    if conn is None:
+        conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT id, prompt, image_path, thumb_path
+           FROM generations
+           WHERE COALESCE(protection_status, '') IN ('', ?)
+             AND COALESCE(protection_source, '') = ''
+             AND COALESCE(protection_checked_at, '') = ''""",
+        (IMAGE_PROTECTION_SAFE,),
+    ).fetchall()
+    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    updates = []
+    for row in rows:
+        prompt = row["prompt"] or ""
+        result = _check_image_protection_candidates(worker, row, prompt)
+        if result.status != IMAGE_PROTECTION_PROTECTED:
+            continue
+        updates.append((result.status, result.score, result.reason, result.source, checked_at, row["id"]))
+    if updates:
+        conn.executemany(
+            """UPDATE generations
+               SET protection_status=?, protection_score=?, protection_reason=?, protection_source=?, protection_checked_at=?
+               WHERE id=?""",
+            updates,
+        )
+        conn.commit()
+    if own_conn:
+        conn.close()
+    return len(updates)
+
+
+def _recheck_safe_heuristic_nsfw_risk_rows(conn: sqlite3.Connection | None = None) -> int:
+    """Re-check rows previously marked safe by the lightweight fallback after rule tuning."""
+    own_conn = conn is None
+    if conn is None:
+        conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT id, prompt, image_path, thumb_path
+           FROM generations
+           WHERE COALESCE(protection_status, '') = ?
+             AND COALESCE(protection_source, '') = 'heuristic'
+             AND COALESCE(deleted_at, '') = ''""",
+        (IMAGE_PROTECTION_SAFE,),
+    ).fetchall()
+    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    updates = []
+    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for row in rows:
+        prompt = row["prompt"] or ""
+        if not (prompt_needs_protection(prompt) or prompt_has_nsfw_risk(prompt)):
+            continue
+        result = _check_image_protection_candidates(worker, row, prompt)
+        if result.status != IMAGE_PROTECTION_PROTECTED:
+            continue
+        updates.append((
+            result.status,
+            result.score,
+            result.reason,
+            result.source,
+            checked_at,
+            row["id"],
+        ))
+    if updates:
+        conn.executemany(
+            """UPDATE generations
+               SET protection_status=?, protection_score=?, protection_reason=?, protection_source=?, protection_checked_at=?
+               WHERE id=?""",
+            updates,
+        )
+        conn.commit()
+    if own_conn:
+        conn.close()
+    return len(updates)
+
+
+def _recheck_safe_heuristic_video_rows(conn: sqlite3.Connection | None = None) -> int:
+    """Re-check video previews that were marked safe before visual fallback tuning."""
+    own_conn = conn is None
+    if conn is None:
+        conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT id, prompt, image_path, thumb_path
+           FROM generations
+           WHERE COALESCE(protection_status, '') = ?
+             AND COALESCE(protection_source, '') = 'heuristic'
+             AND COALESCE(deleted_at, '') = ''
+             AND (
+               COALESCE(media_type, '') = 'video'
+               OR lower(COALESCE(image_path, '')) LIKE '%.mp4'
+               OR lower(COALESCE(image_path, '')) LIKE '%.webm'
+               OR lower(COALESCE(image_path, '')) LIKE '%.mov'
+               OR lower(COALESCE(image_path, '')) LIKE '%.m4v'
+             )""",
+        (IMAGE_PROTECTION_SAFE,),
+    ).fetchall()
+    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    updates = []
+    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for row in rows:
+        result = _check_image_protection_candidates(worker, row, row["prompt"] or "")
+        if result.status != IMAGE_PROTECTION_PROTECTED:
+            continue
+        updates.append((
+            result.status,
+            result.score,
+            result.reason,
+            result.source,
+            checked_at,
+            row["id"],
+        ))
+    if updates:
+        conn.executemany(
+            """UPDATE generations
+               SET protection_status=?, protection_score=?, protection_reason=?, protection_source=?, protection_checked_at=?
+               WHERE id=?""",
+            updates,
+        )
+        conn.commit()
+    if own_conn:
+        conn.close()
+    return len(updates)
+
+
+def _duration_percentile(durations: list[float], percentile: float) -> float:
+    if not durations:
+        return 0.0
+    if len(durations) == 1:
+        return float(durations[0])
+    bounded = max(0.0, min(1.0, float(percentile)))
+    pos = (len(durations) - 1) * bounded
+    lower = int(pos)
+    upper = min(lower + 1, len(durations) - 1)
+    weight = pos - lower
+    return float(durations[lower] * (1 - weight) + durations[upper] * weight)
+
+
+def _workflow_cold_start_floor_sec(workflow: str) -> int:
+    lower = os.path.basename(str(workflow or "")).lower()
+    if "firered" in lower or "fire-red" in lower:
+        return 300
+    if "seedvr" in lower:
+        return 240
+    if "qwen" in lower:
+        return 180
+    if "flux2" in lower or "flux-2" in lower:
+        return 180
+    return 150
+
+
+def _read_recent_log_entries() -> list[dict]:
+    entries: list[dict] = []
+    try:
+        entries.extend(item for item in _log_buffer if isinstance(item, dict))
+    except Exception:
+        pass
+    try:
+        with open(_LOG_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(item, dict):
+                    entries.append(item)
+    except Exception:
+        pass
+    deduped: dict[tuple[str, str, float, str], dict] = {}
+    for item in entries:
+        try:
+            key = (
+                str(item.get("job_id") or ""),
+                str(item.get("workflow") or ""),
+                float(item.get("ts") or 0),
+                str(item.get("msg") or ""),
+            )
+        except (TypeError, ValueError):
+            continue
+        deduped[key] = item
+    return sorted(deduped.values(), key=lambda item: float(item.get("ts") or 0))
+
+
+def _extract_log_node_class(msg: str) -> str:
+    match = re.search(r"\[([^\]]+)\]", str(msg or ""))
+    return match.group(1).strip() if match else ""
+
+
+def _latest_logged_node_for_job(job: dict) -> str:
+    job_id = str((job or {}).get("id") or "")
+    if not job_id:
+        return ""
+    short_id = job_id[-12:]
+    latest_ts = 0.0
+    latest_node = ""
+    for entry in _read_recent_log_entries():
+        if str(entry.get("job_id") or "") != short_id:
+            continue
+        node = _extract_log_node_class(str(entry.get("msg") or ""))
+        if not node:
+            continue
+        try:
+            ts = float(entry.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts >= latest_ts:
+            latest_ts = ts
+            latest_node = node
+    return latest_node
+
+
+def _workflow_node_calibrated_estimate_sec(workflow: str, job: dict) -> int | None:
+    workflow = os.path.basename(str(workflow or ""))
+    progress = (job or {}).get("progress") or {}
+    current_node = str(progress.get("current_node") or "").strip() if isinstance(progress, dict) else ""
+    if not current_node:
+        current_node = _latest_logged_node_for_job(job or {})
+    if not workflow or not current_node:
+        return None
+
+    grouped: dict[str, dict] = {}
+    job_id = str((job or {}).get("id") or "")
+    current_short_id = job_id[-12:] if job_id else ""
+    for entry in _read_recent_log_entries():
+        if os.path.basename(str(entry.get("workflow") or "")) != workflow:
+            continue
+        log_job_id = str(entry.get("job_id") or "")
+        if not log_job_id or log_job_id == current_short_id:
+            continue
+        try:
+            ts = float(entry.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts <= 0:
+            continue
+        group = grouped.setdefault(log_job_id, {"start": 0.0, "end": 0.0, "nodes": {}})
+        phase = str(entry.get("phase") or "")
+        msg = str(entry.get("msg") or "")
+        if phase == "开始" or (not group["start"] and phase in {"生成", "队列"}):
+            group["start"] = ts
+        node = _extract_log_node_class(msg)
+        if node and node not in group["nodes"]:
+            group["nodes"][node] = ts
+        if phase == "完成" and "工作流完成" in msg:
+            group["end"] = ts
+
+    remaining_samples: list[float] = []
+    total_samples: list[float] = []
+    for group in grouped.values():
+        start = float(group.get("start") or 0)
+        end = float(group.get("end") or 0)
+        node_ts = float((group.get("nodes") or {}).get(current_node) or 0)
+        if not start or not end or end <= start:
+            continue
+        total_samples.append(end - start)
+        if node_ts and end > node_ts:
+            remaining_samples.append(end - node_ts)
+
+    if not remaining_samples:
+        return None
+
+    started_at = 0.0
+    for key in ("generating_at", "submitted_at", "created_at_ts"):
+        try:
+            started_at = float((job or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            started_at = 0.0
+        if started_at:
+            break
+    elapsed = max(0.0, time.time() - started_at) if started_at else 0.0
+    remaining = _duration_percentile(sorted(remaining_samples), 0.5)
+    total_floor = _duration_percentile(sorted(total_samples), 0.5) if total_samples else 0.0
+    return int(round(max(elapsed + remaining, total_floor)))
+
+
+def _is_cold_or_model_loading_job(job: dict, workflow: str) -> bool:
+    status = str((job or {}).get("status") or "").strip().lower()
+    if status in {"dispatching", "starting_comfyui"}:
+        return True
+    workflow = os.path.basename(str(workflow or ""))
+    if not workflow:
+        return False
+
+    try:
+        progress = (job or {}).get("progress") or {}
+        pct = float(progress.get("pct") or 0)
+    except (TypeError, ValueError):
+        pct = 0.0
+    lower = workflow.lower()
+    if status in {"preparing", "submitting", "generating"} and pct and pct <= 35:
+        if any(token in lower for token in ("firered", "fire-red", "qwen", "flux2", "flux-2")):
+            return True
+
+    inst_name = str((job or {}).get("instance") or "").strip()
+    if not inst_name:
+        return status in {"queued", "preparing", "submitting"}
+    expected_group = extract_model_group(workflow)
+    loaded_group = _instance_group.get(inst_name, "")
+    return bool(expected_group and loaded_group != expected_group)
+
+
+def _estimate_workflow_duration_sec(workflow: str, job: dict | None = None) -> int | None:
+    workflow = os.path.basename(str(workflow or ""))
+    if not workflow:
+        return None
+    try:
+        conn = sqlite3.connect(GEN_DB)
+        rows = conn.execute(
+            """
+            SELECT duration_sec
+            FROM generations
+            WHERE workflow = ?
+              AND duration_sec > 0
+              AND (status IS NULL OR status != 'deleted')
+            ORDER BY duration_sec ASC
+            """,
+            (workflow,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return None
+    durations = [float(row[0]) for row in rows if row and row[0]]
+    if not durations:
+        return None
+    median = _duration_percentile(durations, 0.5)
+    calibrated = _workflow_node_calibrated_estimate_sec(workflow, job or {})
+    if _is_cold_or_model_loading_job(job or {}, workflow):
+        p90 = _duration_percentile(durations, 0.9)
+        floor = _workflow_cold_start_floor_sec(workflow)
+        return int(round(max(p90, median + floor * 0.6, floor, calibrated or 0)))
+    lower = workflow.lower()
+    if "firered" in lower or "fire-red" in lower:
+        median = max(median, 120)
+    return int(round(max(median, calibrated or 0)))
+
+
+def _format_estimated_duration_label(seconds: int | float | None) -> str:
+    try:
+        raw_seconds = float(seconds or 0)
+    except (TypeError, ValueError):
+        return ""
+    if raw_seconds <= 0:
+        return ""
+    half_minutes = max(1.0, int((raw_seconds / 60.0) * 2 + 0.5) / 2.0)
+    if half_minutes.is_integer():
+        minute_text = str(int(half_minutes))
+    else:
+        minute_text = f"{half_minutes:.1f}".rstrip("0").rstrip(".")
+    return f"预计{minute_text}分钟"
+
+
+def _job_with_time_estimate(job: dict) -> dict:
+    enriched = dict(job or {})
+    estimate = _estimate_workflow_duration_sec(enriched.get("workflow", ""), enriched)
+    if estimate:
+        existing = 0
+        try:
+            existing = int(float(enriched.get("estimated_duration_sec") or 0))
+        except (TypeError, ValueError):
+            existing = 0
+        estimate = max(estimate, existing)
+        enriched["estimated_duration_sec"] = estimate
+        label = _format_estimated_duration_label(estimate)
+        if label:
+            enriched["estimated_duration_label"] = label
+    return enriched
+
+
+def _enrich_broadcast_payload(data: dict) -> dict:
+    if not isinstance(data, dict) or data.get("type") != "job_update":
+        return data
+    job = data.get("job")
+    if not isinstance(job, dict):
+        return data
+    enriched = dict(data)
+    enriched["job"] = _job_with_time_estimate(job)
+    return enriched
 
 
 def _history_username_map(user_ids: list[str]) -> dict[str, str]:
@@ -1182,6 +1744,14 @@ def _history_username_map(user_ids: list[str]) -> dict[str, str]:
 def _workflow_primary_type(filename: str) -> str:
     """Return the backend workflow category even when the workflow itself is not visible."""
     name = os.path.basename(filename or "")
+    try:
+        meta = _load_wf_meta()
+        entry = _normalize_wf_meta_entry(name, meta.get(name, {}))
+        tags = entry.get("tags") or []
+        if tags:
+            return str(tags[0])
+    except Exception:
+        pass
     lower = name.lower()
     if lower.startswith("i2v") or "-i2v" in lower or "_i2v" in lower:
         return "图生视频"
@@ -1191,13 +1761,7 @@ def _workflow_primary_type(filename: str) -> str:
         return "图生图"
     if lower.startswith("t2i") or "-t2i" in lower or "_t2i" in lower:
         return "文生图"
-    try:
-        meta = _load_wf_meta()
-        entry = _normalize_wf_meta_entry(name, meta.get(name, {}))
-        tags = entry.get("tags") or []
-        return tags[0] if tags else ""
-    except Exception:
-        return ""
+    return ""
 
 
 def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
@@ -1205,14 +1769,26 @@ def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
     try:
         if not record.get("thumb") and record.get("filename"):
             record["thumb"] = make_thumbnail(record.get("filename", "")) or ""
+        media_type = str(record.get("media_type") or output_media_type(record.get("filename", "")))
+        if media_type not in {"image", "video"}:
+            media_type = output_media_type(record.get("filename", ""))
+        actual_w, actual_h = get_media_size(record.get("filename", ""), media_type, record.get("thumb", ""))
+        if actual_w and actual_h:
+            record["width"] = actual_w
+            record["height"] = actual_h
         conn = sqlite3.connect(GEN_DB)
+        protection_status = str(record.get("protection_status") or IMAGE_PROTECTION_SAFE)
+        if protection_status not in {IMAGE_PROTECTION_PENDING, IMAGE_PROTECTION_SAFE, IMAGE_PROTECTION_PROTECTED, IMAGE_PROTECTION_ERROR}:
+            protection_status = IMAGE_PROTECTION_PENDING
         conn.execute(
             """INSERT OR REPLACE INTO generations
-               (id, workflow, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public, batch_id, batch_index, batch_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, workflow, media_type, image_path, thumb_path, prompt, width, height, seed, duration_sec, created_at, params, user_id, is_public, batch_id, batch_index, batch_count,
+                protection_status, protection_score, protection_reason, protection_source, protection_checked_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record["id"],
                 record.get("workflow", ""),
+                media_type,
                 record.get("filename", ""),
                 record.get("thumb", ""),
                 record.get("prompt", ""),
@@ -1227,12 +1803,62 @@ def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
                 record.get("batch_id", "") or "",
                 int(record.get("batch_index", 0) or 0),
                 int(record.get("batch_count", 1) or 1),
+                protection_status,
+                float(record.get("protection_score", 0) or 0),
+                record.get("protection_reason", "") or "",
+                record.get("protection_source", "") or "",
+                record.get("protection_checked_at", "") or "",
             ),
         )
         conn.commit()
         conn.close()
     except Exception as e:
         add_log("error", "db", f"SQLite insert failed: {e}", record.get("id", ""))
+
+
+def _update_generation_protection(
+    item_id: str,
+    status: str,
+    score: float = 0.0,
+    reason: str = "",
+    source: str = "",
+    checked_at: str | None = None,
+) -> None:
+    """Persist image protection status for a generation record."""
+    normalized = status if status in {IMAGE_PROTECTION_SAFE, IMAGE_PROTECTION_PROTECTED, IMAGE_PROTECTION_ERROR} else IMAGE_PROTECTION_ERROR
+    checked = checked_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(GEN_DB)
+    conn.execute(
+        """UPDATE generations
+           SET protection_status=?, protection_score=?, protection_reason=?, protection_source=?, protection_checked_at=?
+           WHERE id=?""",
+        (normalized, float(score or 0), reason or "", source or "", checked, item_id),
+    )
+    conn.commit()
+    conn.close()
+    for item in history:
+        if str(item.get("id") or "") == str(item_id):
+            item["protection_status"] = normalized
+            item["protection_score"] = float(score or 0)
+            item["protection_reason"] = reason or ""
+            item["protection_source"] = source or ""
+            item["protection_checked_at"] = checked
+            break
+
+
+def _update_generation_thumb(item_id: str, thumb: str) -> None:
+    if not item_id or not thumb:
+        return
+    conn = _db_connect()
+    try:
+        conn.execute("UPDATE generations SET thumb_path=? WHERE id=?", (thumb, item_id))
+        conn.commit()
+    finally:
+        conn.close()
+    for item in history:
+        if str(item.get("id") or "") == str(item_id):
+            item["thumb"] = thumb
+            break
 
 
 # ── Auth Helpers ──
@@ -1574,6 +2200,14 @@ _instance_last_active: dict[str, float] = {}
 _instance_group: dict[str, str] = {}
 _instance_start_grace: dict[str, float] = {}  # instance name -> ts of last start action
 START_GRACE_PERIOD = 90  # seconds to skip dead watcher check after intentional start
+DEFAULT_INSTANCE_IDLE_TIMEOUT = 900
+FIRERED_INSTANCE_IDLE_TIMEOUT = 2700
+
+
+def _idle_timeout_for_instance(instance_name: str) -> int:
+    if _instance_group.get(instance_name) == "i2i-firered":
+        return FIRERED_INSTANCE_IDLE_TIMEOUT
+    return DEFAULT_INSTANCE_IDLE_TIMEOUT
 
 def _refresh_instance_state():
     """Refresh per-instance semaphores and state dicts from current nodes."""
@@ -1595,6 +2229,8 @@ def _refresh_instance_state():
 # Affinity matching is done at the GROUP level, not filename level.
 MODEL_GROUPS = [
     # (group_name, keywords_in_filename)
+    ("flux2-klein",  ["flux2_klein", "flux2-klein", "flux-2-klein"]),
+    ("flux2-dev",    ["flux2_dev", "flux2-dev", "flux.2-dev"]),
     ("nunchaku",      ["nunchaku"]),
     ("z-image-turbo", ["z-image-turbo", "z_image_turbo", "z-image", "z-xxx", "z_xxx"]),
     ("seedvr",        ["seedvr"]),
@@ -1623,12 +2259,127 @@ def pick_affinity_instance(workflow_name: str) -> dict | None:
 
 # ── Background tasks (hold references to prevent GC) ──
 _background_tasks: list = []
+_image_protection_worker = ImageProtectionWorker()
+_image_protection_tasks: set[asyncio.Task] = set()
+
+
+def _image_protection_path(record: dict) -> str:
+    rel = record.get("thumb") or record.get("filename") or ""
+    return os.path.join(OUTPUT_DIR, rel)
+
+
+def _job_done_payload_from_records(job_id: str, records: list[dict], elapsed: float) -> dict:
+    cover = records[0] if records else {}
+    batch_count = len(records) or int(cover.get("batch_count", 1) or 1)
+    return {
+        "status": "done",
+        "message": f"完成 ({elapsed:.1f}s)",
+        "image": cover.get("filename", ""),
+        "media_type": cover.get("media_type", "image") or "image",
+        "thumb": cover.get("thumb", ""),
+        "images": [record.get("filename", "") for record in records],
+        "media_types": [record.get("media_type", "image") or "image" for record in records],
+        "thumbs": [record.get("thumb", "") for record in records],
+        "batch_id": job_id if batch_count > 1 else "",
+        "batch_count": batch_count,
+        "batch_items": records,
+        "elapsed": round(elapsed, 1),
+        "progress": {"pct": 100},
+        "protection_status": cover.get("protection_status", IMAGE_PROTECTION_SAFE) or IMAGE_PROTECTION_SAFE,
+        "protection_score": cover.get("protection_score", 0) or 0,
+        "protection_source": cover.get("protection_source", "") or "",
+        "protection_reason": cover.get("protection_reason", "") or "",
+    }
+
+
+def _apply_protection_result(record: dict, result: ImageProtectionResult) -> None:
+    _update_generation_protection(
+        record.get("id", ""),
+        status=result.status,
+        score=result.score,
+        reason=result.reason,
+        source=result.source,
+    )
+    record["protection_status"] = result.status
+    record["protection_score"] = result.score
+    record["protection_reason"] = result.reason
+    record["protection_source"] = result.source
+    record["protection_checked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _complete_image_protection_job(job_id: str, records: list[dict], elapsed: float) -> None:
+    if not records:
+        return
+    try:
+        for record in records:
+            media_type = str(record.get("media_type") or output_media_type(record.get("filename", "")) or "image")
+            if media_type == "video" and not record.get("thumb") and record.get("filename"):
+                thumb = make_thumbnail(record.get("filename", "")) or ""
+                if thumb:
+                    record["thumb"] = thumb
+                    _update_generation_thumb(record.get("id", ""), thumb)
+            if media_type != "image" and not (media_type == "video" and record.get("thumb")):
+                result = ImageProtectionResult(IMAGE_PROTECTION_SAFE, 0.0, "non-image media skipped", "media-type")
+                _apply_protection_result(record, result)
+                add_log("info", "image_protection", f"{record.get('id', '')}: skipped {media_type}", job_id)
+                continue
+            result = await asyncio.to_thread(
+                _check_image_protection_candidates,
+                _image_protection_worker,
+                record,
+                record.get("prompt", "") or record.get("prompt_preview", ""),
+            )
+            _apply_protection_result(record, result)
+            add_log("info", "image_protection", f"{record.get('id', '')}: {result.status} ({result.score:.3f})", job_id)
+        save_history()
+        if job_id and job_id in jobs:
+            jobs[job_id].update(_job_done_payload_from_records(job_id, records, elapsed))
+            save_jobs()
+            await broadcast({"type": "job_update", "job": jobs[job_id]})
+    except Exception as exc:
+        add_log("error", "image_protection", f"Image protection failed: {exc}", job_id)
+        for record in records:
+            result = ImageProtectionResult(IMAGE_PROTECTION_ERROR, 1.0, str(exc), "local-error")
+            try:
+                _apply_protection_result(record, result)
+            except Exception:
+                pass
+        save_history()
+        if job_id and job_id in jobs:
+            jobs[job_id].update(_job_done_payload_from_records(job_id, records, elapsed))
+            save_jobs()
+            await broadcast({"type": "job_update", "job": jobs[job_id]})
+
+
+def _schedule_image_protection(job_id: str, records: list[dict], elapsed: float) -> None:
+    task = asyncio.create_task(_complete_image_protection_job(job_id, records, elapsed))
+    _image_protection_tasks.add(task)
+    task.add_done_callback(lambda t: _image_protection_tasks.discard(t))
+
+
+def _pending_image_protection_records(limit: int = 100) -> list[dict]:
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT * FROM generations
+           WHERE COALESCE(protection_status, 'safe') = ?
+             AND COALESCE(deleted_at, '') = ''
+           ORDER BY datetime(created_at) ASC
+           LIMIT ?""",
+        (IMAGE_PROTECTION_PENDING, limit),
+    ).fetchall()
+    conn.close()
+    return [_gen_db_to_record(dict(row)) for row in rows]
+
+
+def _resume_pending_image_protection_checks() -> None:
+    for record in _pending_image_protection_records():
+        _schedule_image_protection("", [record], float(record.get("elapsed", 0) or 0))
 
 # ── Lifecycle ───────────────────────────────────────────────────────────
 
 async def _idle_instance_watcher():
     """Stop instances idle for more than 15 minutes to free VRAM."""
-    IDLE_TIMEOUT = 900
     while True:
         await asyncio.sleep(60)
         now = time.time()
@@ -1639,10 +2390,10 @@ async def _idle_instance_watcher():
             last = _instance_last_active.get(name, 0)
             if last == 0:
                 continue
-            active_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
-            if active_jobs:
+            if _has_active_instance_job(name):
                 continue
-            if now - last > IDLE_TIMEOUT:
+            idle_timeout = _idle_timeout_for_instance(name)
+            if now - last > idle_timeout:
                 node = _get_node_by_id(inst.get("_node_id", ""))
                 if node:
                     if not _check_service_active(node, inst):
@@ -1667,6 +2418,8 @@ async def _dead_instance_watcher():
             # Skip instances in grace period (recently started, still booting)
             grace_ts = _instance_start_grace.get(name, 0)
             if grace_ts and time.time() - grace_ts < START_GRACE_PERIOD:
+                continue
+            if _has_active_instance_job(name):
                 continue
             # Check systemd status via SSH or local
             active = _check_service_active(node, inst)
@@ -1727,14 +2480,31 @@ async def _stuck_job_watcher():
             asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
 
 
+async def _remote_prompt_adoption_watcher():
+    """Periodically recover remote prompts that survived a local restart."""
+    while True:
+        await asyncio.sleep(8)
+        for inst in _get_generation_instances():
+            if _is_prompt_aux_instance(inst):
+                continue
+            try:
+                remote_queue = _get_instance_queue_counts(inst.get("url", ""))
+                _adopt_untracked_remote_prompts(inst, remote_queue)
+            except Exception as e:
+                add_log("warn", "queue", f"远端任务找回检查失败: {inst.get('name', '')}", details=str(e)[:200])
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _inst_mgr, _job_runner
+    global _inst_mgr, _job_runner, _app_loop
+    _app_loop = asyncio.get_running_loop()
     _load_recent_logs()
+    _load_cancelled_remote_prompts()
     load_jobs()
     load_history()
     os.makedirs(HISTORY_DIR, exist_ok=True)
+    _load_system_settings()
     _init_gen_db()
     os.makedirs(WORKFLOW_DIR, exist_ok=True)
     _refresh_instance_state()
@@ -1766,6 +2536,7 @@ async def lifespan(app: FastAPI):
         history_dir=HISTORY_DIR,
         get_enabled_instances_fn=_get_generation_instances,
         insert_gen_fn=_insert_generation,
+        protection_check_fn=_schedule_image_protection,
         input_dir=COMFYUI_INPUT,
     )
     # Start the sequential job queue worker
@@ -1773,6 +2544,9 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(_dead_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
+    _background_tasks.append(asyncio.create_task(_remote_prompt_adoption_watcher()))
+    _resume_pending_image_protection_checks()
+    _resume_persisted_generation_jobs()
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", version=APP_VERSION, lifespan=lifespan)
@@ -2177,8 +2951,12 @@ def comfyui_get(path: str, base_url: str = None) -> dict:
         return json.loads(r.read())
 
 
+def _is_image_output_file(filename: str) -> bool:
+    return is_image_output(filename)
+
+
 def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, output_dir: str) -> list:
-    """Download output images from remote ComfyUI after generation.
+    """Download preferred output media from remote ComfyUI after generation.
     Returns list of local file paths that were downloaded."""
     try:
         history = comfyui_get(f"/history/{prompt_id}", base_url=base_url)
@@ -2186,24 +2964,27 @@ def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, out
             print(f"[download] No history entry for {prompt_id}")
             return []
         outputs = history[prompt_id].get("outputs", {})
-        images = []
-        for node_id, node_out in outputs.items():
-            for img in node_out.get("images", []):
-                images.append(img)
-        if not images:
-            print(f"[download] No output images in history for {prompt_id}")
+        media = collect_preferred_outputs(outputs)
+        if not media:
+            print(f"[download] No output media in history for {prompt_id}")
             return []
         downloaded = []
-        for img in images:
-            filename = img["filename"]
-            subfolder = img.get("subfolder", "")
-            img_type = img.get("type", "output")
-            local_path = os.path.join(output_dir, filename)
+        for ref in media:
+            filename = ref["filename"]
+            subfolder = ref.get("subfolder", "")
+            media_type = ref.get("type", "output")
+            rel_path = output_ref_rel_path(ref)
+            local_path = os.path.join(output_dir, rel_path)
             # Skip if already exists locally
             if os.path.isfile(local_path):
                 downloaded.append(local_path)
                 continue
-            view_url = f"{base_url}/view?filename={filename}&subfolder={subfolder}&type={img_type}"
+            query = urllib.parse.urlencode({
+                "filename": filename,
+                "subfolder": subfolder,
+                "type": media_type,
+            })
+            view_url = f"{base_url}/view?{query}"
             try:
                 with urllib.request.urlopen(view_url, timeout=120) as resp:
                     if resp.status == 200:
@@ -2211,7 +2992,7 @@ def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, out
                         with open(local_path, "wb") as f:
                             f.write(resp.read())
                         downloaded.append(local_path)
-                        print(f"[download] Saved {filename} ({len(downloaded)}/{len(images)})")
+                        print(f"[download] Saved {rel_path} ({len(downloaded)}/{len(media)})")
             except Exception as e:
                 print(f"[download] Failed to download {filename}: {e}")
         return downloaded
@@ -2228,6 +3009,25 @@ def _queue_prompt_id(item) -> str:
         return str(item[1] or "")
     if isinstance(item, dict):
         return str(item.get("prompt_id") or item.get("id") or "")
+    return ""
+
+
+def _queue_prompt_client_id(item) -> str:
+    candidates: list[dict] = []
+    if isinstance(item, list):
+        for idx in (3, 4):
+            if len(item) > idx and isinstance(item[idx], dict):
+                candidates.append(item[idx])
+    elif isinstance(item, dict):
+        candidates.append(item)
+        for key in ("extra_data", "metadata", "extra"):
+            meta = item.get(key)
+            if isinstance(meta, dict):
+                candidates.append(meta)
+    for meta in candidates:
+        client_id = str(meta.get("client_id") or meta.get("clientId") or "").strip()
+        if client_id:
+            return client_id
     return ""
 
 
@@ -2256,6 +3056,60 @@ def _get_instance_queue_size(base_url: str) -> int:
 
 
 _untracked_remote_cleanup_at: dict[str, float] = {}
+_cancelled_remote_prompts: dict[str, float] = {}
+
+
+def _remote_prompt_key(instance_name: str, prompt_id: str) -> str:
+    return f"{str(instance_name or '').strip()}:{str(prompt_id or '').strip()}"
+
+
+def _prune_cancelled_remote_prompts(now: float | None = None) -> None:
+    now = now or time.time()
+    cutoff = now - 24 * 3600
+    for key, ts in list(_cancelled_remote_prompts.items()):
+        try:
+            if float(ts or 0) < cutoff:
+                _cancelled_remote_prompts.pop(key, None)
+        except Exception:
+            _cancelled_remote_prompts.pop(key, None)
+
+
+def _save_cancelled_remote_prompts() -> None:
+    try:
+        _prune_cancelled_remote_prompts()
+        os.makedirs(os.path.dirname(CANCELLED_PROMPTS_FILE), exist_ok=True)
+        tmp_file = f"{CANCELLED_PROMPTS_FILE}.tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(_cancelled_remote_prompts, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, CANCELLED_PROMPTS_FILE)
+    except Exception:
+        pass
+
+
+def _load_cancelled_remote_prompts() -> None:
+    _cancelled_remote_prompts.clear()
+    if not os.path.isfile(CANCELLED_PROMPTS_FILE):
+        return
+    try:
+        with open(CANCELLED_PROMPTS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            _cancelled_remote_prompts.update({str(k): float(v or 0) for k, v in raw.items()})
+        _prune_cancelled_remote_prompts()
+    except Exception:
+        _cancelled_remote_prompts.clear()
+
+
+def _mark_remote_prompt_cancelled(instance_name: str, prompt_id: str) -> None:
+    if not prompt_id:
+        return
+    _cancelled_remote_prompts[_remote_prompt_key(instance_name, prompt_id)] = time.time()
+    _save_cancelled_remote_prompts()
+
+
+def _remote_prompt_was_cancelled(instance_name: str, prompt_id: str) -> bool:
+    _prune_cancelled_remote_prompts()
+    return _remote_prompt_key(instance_name, prompt_id) in _cancelled_remote_prompts
 
 
 def _active_prompt_ids_for_instance(instance_name: str) -> set[str]:
@@ -2269,32 +3123,282 @@ def _active_prompt_ids_for_instance(instance_name: str) -> set[str]:
 def _untracked_remote_prompt_ids(instance_name: str, remote_queue: dict) -> list[str]:
     known = _active_prompt_ids_for_instance(instance_name)
     remote_ids = list(remote_queue.get("running_prompt_ids") or []) + list(remote_queue.get("pending_prompt_ids") or [])
-    return [pid for pid in remote_ids if pid and pid not in known]
+    return [
+        pid for pid in remote_ids
+        if pid and pid not in known and not _remote_prompt_was_cancelled(instance_name, pid)
+    ]
+
+
+def _submit_log_entry_for_prompt_id(prompt_id: str) -> dict | None:
+    tail = str(prompt_id or "")[-12:]
+    if not tail:
+        return None
+    for entry in reversed(_log_buffer):
+        msg = str(entry.get("msg") or "")
+        if not msg.startswith("任务已提交:"):
+            continue
+        submitted_tail = msg[len("任务已提交:"):].strip()
+        if submitted_tail and (str(prompt_id).endswith(submitted_tail) or submitted_tail.endswith(tail)):
+            return entry
+    return None
+
+
+def _remote_queue_prompt_graph(inst: dict, prompt_id: str) -> dict:
+    try:
+        queue = comfyui_get("/queue", base_url=inst.get("url", ""))
+    except Exception:
+        return {}
+    for section in ("queue_running", "queue_pending"):
+        for item in queue.get(section, []) or []:
+            if _queue_prompt_id(item) != prompt_id:
+                continue
+            if isinstance(item, list) and len(item) > 2 and isinstance(item[2], dict):
+                return item[2]
+            if isinstance(item, dict):
+                prompt = item.get("prompt") or item.get("workflow")
+                if isinstance(prompt, dict):
+                    return prompt
+    return {}
+
+
+def _remote_queue_prompt_client_id(inst: dict, prompt_id: str) -> str:
+    try:
+        queue = comfyui_get("/queue", base_url=inst.get("url", ""))
+    except Exception:
+        return ""
+    for section in ("queue_running", "queue_pending"):
+        for item in queue.get(section, []) or []:
+            if _queue_prompt_id(item) == prompt_id:
+                return _queue_prompt_client_id(item)
+    return ""
+
+
+def _remote_graph_field_values(graph: dict) -> dict:
+    fields: dict[str, str] = {}
+    for node_id, node in graph.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            continue
+        for field in ("text", "value", "image"):
+            value = inputs.get(field)
+            if isinstance(value, str) and value.strip():
+                fields[f"{node_id}::{field}"] = value
+    return fields
+
+
+def _remote_graph_prompt_preview(graph: dict) -> str:
+    preferred: list[str] = []
+    fallback: list[str] = []
+    for node in graph.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            continue
+        title = str((node.get("_meta") or {}).get("title") or "").lower()
+        class_type = str(node.get("class_type") or "")
+        value = inputs.get("value")
+        text = inputs.get("text")
+        candidate = value if isinstance(value, str) and value.strip() else text
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        if "negative" in title or "负" in title:
+            continue
+        if class_type == "PrimitiveStringMultiline" or "prompt" in title:
+            preferred.append(candidate.strip())
+        else:
+            fallback.append(candidate.strip())
+    text = (preferred or fallback or [""])[0]
+    return text[:200]
+
+
+def _workflow_graph_for_resume(path: str, job: dict) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            graph = json.load(f)
+    except Exception:
+        return {}
+    fields = job.get("fields") or {}
+    if isinstance(graph, dict) and isinstance(fields, dict):
+        for key, val in fields.items():
+            if "::" not in str(key):
+                continue
+            nid, field = str(key).split("::", 1)
+            if nid in graph and isinstance(graph[nid], dict):
+                inputs = graph[nid].setdefault("inputs", {})
+                if isinstance(inputs, dict):
+                    inputs[field] = val
+    try:
+        seed = _job_seed_value(job)
+        for node in graph.values():
+            if isinstance(node, dict) and node.get("class_type") == "KSampler":
+                inputs = node.get("inputs") or {}
+                if isinstance(inputs, dict) and "seed" in inputs:
+                    inputs["seed"] = seed
+    except Exception:
+        pass
+    return graph if isinstance(graph, dict) else {}
+
+
+def _start_resume_ws_progress(job_id: str, inst: dict, graph: dict, prompt_id: str, client_id: str, timeout: int):
+    if not graph or not prompt_id or not client_id:
+        return None
+    try:
+        step_info = StepCalculator().calculate(graph)
+    except Exception:
+        return None
+    node_types = {
+        str(nid): str(node.get("class_type") or "")
+        for nid, node in graph.items()
+        if isinstance(node, dict) and node.get("class_type")
+    }
+
+    async def _progress_callback(progress: dict) -> None:
+        job = jobs.get(job_id)
+        if not job or job.get("status") not in ACTIVE_JOB_STATUSES:
+            return
+        pct = int(progress.get("pct", 0) or 0)
+        msg = str(progress.get("message") or "").strip()
+        progress_state = {"pct": pct}
+        for key in ("current_node", "sampler_cur", "sampler_total"):
+            if key in progress:
+                progress_state[key] = progress.get(key)
+        if msg:
+            job["message"] = msg
+        job["progress"] = progress_state
+        job["last_update"] = time.time()
+        job["resume_ws_active"] = True
+        save_jobs()
+        await broadcast({"type": "job_update", "job": job})
+
+    tracker = WSTracker(
+        job_id=job_id,
+        workflow=graph,
+        step_info=step_info,
+        instance_url=inst.get("url", ""),
+        node_types=node_types,
+        progress_callback=_progress_callback,
+        log_callback=add_log,
+        client_id=client_id,
+    )
+    tracker.WS_SILENT_TIMEOUT = min(tracker.WS_SILENT_TIMEOUT, 45.0)
+
+    async def _run_resume_ws():
+        try:
+            result = await tracker.resume(prompt_id, timeout=timeout)
+            if result.ok:
+                add_log("info", "queue", "重启恢复 WS 已收到完成事件", job_id, details=prompt_id)
+        except Exception as e:
+            job = jobs.get(job_id)
+            if job:
+                job["resume_ws_error"] = str(e)[:200]
+                save_jobs()
+            add_log("warn", "queue", f"重启恢复 WS 追踪失败: {e}", job_id, details=prompt_id)
+
+    return asyncio.create_task(_run_resume_ws())
+
+
+def _schedule_resume_tracker(job_id: str) -> bool:
+    if not _job_runner or job_id in _job_tasks:
+        return False
+    coro = _resume_persisted_generation_job(job_id)
+    try:
+        task = asyncio.create_task(coro)
+        _job_tasks[job_id] = task
+        return True
+    except RuntimeError:
+        loop = _app_loop
+        if loop and loop.is_running():
+            _job_tasks[job_id] = asyncio.run_coroutine_threadsafe(coro, loop)
+            return True
+        coro.close()
+        return False
+
+
+def _adopt_untracked_remote_prompts(inst: dict, remote_queue: dict) -> list[str]:
+    adopted: list[str] = []
+    inst_name = str(inst.get("name") or "")
+    for prompt_id in _untracked_remote_prompt_ids(inst_name, remote_queue):
+        entry = _submit_log_entry_for_prompt_id(prompt_id)
+        if not entry:
+            continue
+        workflow = str(entry.get("workflow") or "")
+        if not workflow or not _resolve_workflow(workflow):
+            continue
+        graph = _remote_queue_prompt_graph(inst, prompt_id)
+        client_id = _remote_queue_prompt_client_id(inst, prompt_id)
+        field_values = _remote_graph_field_values(graph) if graph else {}
+        suffix = str(entry.get("job_id") or "").strip()
+        job_id = next((jid for jid in jobs if suffix and str(jid).endswith(suffix)), "")
+        if not job_id:
+            job_id = f"job_recovered_{suffix or str(prompt_id)[-12:]}"
+        if job_id not in jobs:
+            created_at = float(entry.get("ts") or time.time())
+            workflow_type = str(entry.get("workflow_type") or _workflow_primary_type(workflow))
+            jobs[job_id] = {
+                "id": job_id,
+                "status": "generating",
+                "message": "已从远端队列找回，恢复追踪中...",
+                "workflow": workflow,
+                "workflow_type": workflow_type,
+                "prompt_preview": _remote_graph_prompt_preview(graph) or infer_generation_label(workflow, field_values, workflow_type)[:200],
+                "prompt_id": prompt_id,
+                "client_id": client_id,
+                "instance": inst_name,
+                "target_node_id": inst.get("_node_id", ""),
+                "target_url": inst.get("url", ""),
+                "fields": field_values,
+                "seed": "0",
+                "width": 0,
+                "height": 0,
+                "created_at_ts": created_at,
+                "submitted_at": created_at,
+                "generating_at": created_at,
+                "last_update": time.time(),
+                "user_id": str(entry.get("user_id") or ""),
+                "recovered_from_remote": True,
+                "progress": {"pct": 0},
+            }
+            adopted.append(prompt_id)
+            add_log("info", "queue", "已找回未追踪远端任务，恢复追踪", job_id, details=prompt_id)
+        else:
+            jobs[job_id]["prompt_id"] = prompt_id
+            if client_id:
+                jobs[job_id]["client_id"] = client_id
+            jobs[job_id]["instance"] = inst_name
+            jobs[job_id]["target_url"] = inst.get("url", "")
+            jobs[job_id]["status"] = "generating"
+            jobs[job_id]["message"] = "已从远端队列找回，恢复追踪中..."
+            jobs[job_id]["last_update"] = time.time()
+            if field_values and not jobs[job_id].get("fields"):
+                jobs[job_id]["fields"] = field_values
+            preview = _remote_graph_prompt_preview(graph)
+            if preview and not jobs[job_id].get("prompt_preview"):
+                jobs[job_id]["prompt_preview"] = preview
+            adopted.append(prompt_id)
+        _schedule_resume_tracker(job_id)
+    if adopted:
+        save_jobs()
+    return adopted
 
 
 def _cleanup_untracked_remote_prompts(inst: dict, remote_queue: dict) -> list[str]:
-    """Reject remote ComfyUI prompts that are not tracked by this frontend/backend job system."""
+    """Report untracked remote ComfyUI prompts without interrupting them."""
+    _adopt_untracked_remote_prompts(inst, remote_queue)
     prompt_ids = _untracked_remote_prompt_ids(inst.get("name", ""), remote_queue)
     if not prompt_ids:
         return []
     key = f"{inst.get('name', '')}:{','.join(prompt_ids)}"
     now = time.time()
-    if now - _untracked_remote_cleanup_at.get(key, 0) < 15:
+    if now - _untracked_remote_cleanup_at.get(key, 0) < 60:
         return prompt_ids
     _untracked_remote_cleanup_at[key] = now
-    base_url = inst.get("url", "")
-    try:
-        comfyui_post("/queue", {"delete": prompt_ids}, base_url=base_url)
-    except Exception:
-        pass
-    try:
-        comfyui_post("/interrupt", {}, base_url=base_url)
-    except Exception:
-        pass
     add_log(
         "warn",
         "queue",
-        f"已拒绝未追踪远端任务: {inst.get('name', '')}",
+        f"发现未追踪远端任务，已保留: {inst.get('name', '')}",
         details=",".join(prompt_ids),
     )
     return prompt_ids
@@ -2354,6 +3458,9 @@ EDITABLE_FIELDS = {
     "LoadImage": {
         "image": {"type": "image", "label": "参考图片"},
     },
+    "LoadVideo": {
+        "file": {"type": "video", "label": "参考视频"},
+    },
     "SeedVR2VideoUpscaler": {
         "seed":       {"type": "seed",   "label": "超分种子", "min": 0, "max": 4294967295},
         "resolution": {"type": "number", "label": "超分分辨率", "min": 512, "max": 8192, "step": 64},
@@ -2395,6 +3502,91 @@ def _normalize_seed_value_for_field(class_type: str, field: str, value):
     return seed
 
 
+def _first_latent_dimension_value(wf: dict, field_values: dict, dimension: str):
+    for key, value in (field_values or {}).items():
+        if "::" not in str(key):
+            continue
+        nid, field = str(key).split("::", 1)
+        if field != dimension:
+            continue
+        node = wf.get(nid, {})
+        if not isinstance(node, dict):
+            continue
+        if "LatentImage" in str(node.get("class_type") or ""):
+            return value
+    return None
+
+
+def _sync_flux2_scheduler_dimensions(wf: dict, field_values: dict) -> None:
+    width = _first_latent_dimension_value(wf, field_values, "width")
+    height = _first_latent_dimension_value(wf, field_values, "height")
+    if width is None and height is None:
+        return
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict) or node.get("class_type") != "Flux2Scheduler":
+            continue
+        inputs = node.get("inputs") or {}
+        if width is not None and "width" in inputs:
+            field_values.setdefault(f"{nid}::width", width)
+        if height is not None and "height" in inputs:
+            field_values.setdefault(f"{nid}::height", height)
+
+
+def _sync_ltx_video_timing(wf: dict, field_values: dict) -> None:
+    """Keep LTX video/audio timing nodes aligned when the card edits length/FPS."""
+    length = None
+    fps = None
+    width = None
+    audio_fps_node_id = None
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "EmptyLTXVLatentVideo":
+            length = field_values.get(f"{nid}::length", inputs.get("length", length))
+            width = field_values.get(f"{nid}::width", inputs.get("width", width))
+        elif ct == "LTXVConditioning" and fps is None:
+            candidate = field_values.get(f"{nid}::frame_rate")
+            if candidate is None:
+                candidate = _resolve_link(wf, inputs.get("frame_rate", fps))
+            if not isinstance(candidate, list):
+                fps = candidate
+        elif ct == "PrimitiveFloat" and str(node.get("_meta", {}).get("title") or "").lower() == "fps":
+            fps = field_values.get(f"{nid}::value", inputs.get("value", fps))
+        elif ct == "PrimitiveInt" and str(node.get("_meta", {}).get("title") or "").lower() == "audio fps":
+            audio_fps_node_id = str(nid)
+    if length is None and fps is None and width is None:
+        return
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if length is not None and ct == "LTXVEmptyLatentAudio" and "frames_number" in inputs:
+            field_values[f"{nid}::frames_number"] = length
+        if fps is not None and ct == "LTXVEmptyLatentAudio" and "frame_rate" in inputs:
+            try:
+                audio_fps = int(round(float(fps)))
+            except Exception:
+                audio_fps = fps
+            field_values[f"{nid}::frame_rate"] = [audio_fps_node_id, 0] if audio_fps_node_id else audio_fps
+        if fps is not None and ct == "CreateVideo" and "fps" in inputs:
+            field_values[f"{nid}::fps"] = fps
+        if fps is not None and ct == "PrimitiveInt" and str(node.get("_meta", {}).get("title") or "").lower() == "audio fps":
+            try:
+                field_values[f"{nid}::value"] = int(round(float(fps)))
+            except Exception:
+                field_values[f"{nid}::value"] = fps
+        if length is not None and ct == "VAEDecodeTiled" and "temporal_size" in inputs:
+            field_values[f"{nid}::temporal_size"] = length
+        if width is not None and ct == "VAEDecodeTiled" and "tile_size" in inputs:
+            try:
+                field_values[f"{nid}::tile_size"] = max(64, min(512, int(float(width))))
+            except Exception:
+                pass
+
+
 def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
     normalized = dict(field_values or {})
     for key, value in list(normalized.items()):
@@ -2409,6 +3601,8 @@ def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
             field,
             value,
         )
+    _sync_flux2_scheduler_dimensions(wf, normalized)
+    _sync_ltx_video_timing(wf, normalized)
     return normalized
 
 
@@ -2442,6 +3636,8 @@ def _auto_classify(ct: str, field: str, value) -> tuple:
             has_val = bool(value and str(value).strip())
             return ("user_input", True) if has_val else ("advanced", False)
     if ct == "LoadImage" and field == "image":
+        return ("user_input", True)
+    if ct == "LoadVideo" and field == "file":
         return ("user_input", True)
     if ct == "KSampler":
         return ("advanced", True)
@@ -2719,8 +3915,22 @@ def _parse_with_config(path: str, config: dict) -> dict:
     for nid, v in wf.items():
         if isinstance(v, dict):
             node_map[str(nid)] = v
+    zone_rank = {"user_input": 0, "advanced": 1, "output": 2, "hidden": 3}
+    def _field_cfg_order(item):
+        idx, cfg = item
+        cfg = cfg or {}
+        try:
+            order = int(cfg.get("order") or 0)
+        except (TypeError, ValueError):
+            order = 0
+        return (zone_rank.get(str(cfg.get("zone") or "hidden"), 99), order, idx)
+
+    config_fields = sorted(
+        enumerate(config.get("fields", [])),
+        key=_field_cfg_order,
+    )
     fields = []
-    for field_cfg in config.get("fields", []):
+    for _cfg_index, field_cfg in config_fields:
         key = field_cfg.get("key", "")
         if "::" not in key:
             continue
@@ -2794,6 +4004,7 @@ def _ws_client_can_receive(client_user: dict | None, data: dict) -> bool:
 
 
 async def broadcast(data: dict):
+    data = _enrich_broadcast_payload(data)
     dead = []
     for ws in ws_clients:
         if not _ws_client_can_receive(ws_client_users.get(ws), data):
@@ -2842,6 +4053,10 @@ NODE_STATUS_MAP = {
     "ImageScaleBy": "图像缩放...",
     "ImageScale": "图像缩放...",
     "ImageCompositeMasked": "合成图像...",
+    "LoadVideo": "加载视频...",
+    "GetVideoComponents": "解析视频...",
+    "CreateVideo": "创建视频...",
+    "SaveVideo": "保存视频...",
     "SaveImage": "保存图像...",
 }
 
@@ -3093,6 +4308,8 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         elapsed_start = time.time()
         client_id = uuid.uuid4().hex[:12]
+        jobs[job_id]["client_id"] = client_id
+        save_jobs()
         ws_ok = False
         pid = ""
         try:
@@ -3136,7 +4353,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 _download_remote_images_sync, job_id, pid, inst_url, OUTPUT_DIR
             )
             if downloaded:
-                print(f"[generate] Downloaded {len(downloaded)} image(s) for {job_id[-12:]}")
+                print(f"[generate] Downloaded {len(downloaded)} media file(s) for {job_id[-12:]}")
 
         if job_id not in jobs:
             return False, pid or ""
@@ -3149,38 +4366,38 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         if downloaded:
             for path in downloaded:
                 if path and os.path.isfile(path):
-                    sources.append((path, os.path.basename(path)))
+                    sources.append((path, os.path.basename(path), output_media_type(path)))
         if not sources:
             try:
                 hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
                 if pid in hist:
-                    for node_out in hist[pid].get("outputs", {}).values():
-                        for img in node_out.get("images", []):
-                            filename = img.get("filename", "")
-                            if not filename:
-                                continue
-                            src = os.path.join(OUTPUT_DIR, filename)
-                            if not os.path.isfile(src):
-                                matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
-                                if matches:
-                                    src = matches[0]
-                            if os.path.isfile(src):
-                                sources.append((src, filename))
+                    for ref in collect_preferred_outputs(hist[pid].get("outputs", {})):
+                        filename = ref.get("filename", "")
+                        rel_path = output_ref_rel_path(ref)
+                        if not filename or not rel_path:
+                            continue
+                        src = os.path.join(OUTPUT_DIR, rel_path)
+                        if not os.path.isfile(src):
+                            matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
+                            if matches:
+                                src = matches[0]
+                        if os.path.isfile(src):
+                            sources.append((src, filename, output_media_type(filename)))
             except Exception as e:
                 raise RuntimeError(_friendly_generation_error(e))
         if job_id not in jobs or jobs[job_id].get("status") == "error":
             return False, pid or ""
         deduped = []
         seen_paths = set()
-        for src, filename in sources:
+        for src, filename, media_type in sources:
             real_path = os.path.abspath(src)
             if real_path in seen_paths or not os.path.isfile(src):
                 continue
             seen_paths.add(real_path)
-            deduped.append((src, filename or os.path.basename(src)))
+            deduped.append((src, filename or os.path.basename(src), media_type or output_media_type(src)))
         sources = deduped
         if not sources:
-            raise RuntimeError("未找到输出图片")
+            raise RuntimeError("未找到输出媒体")
 
         gen_user_id = jobs[job_id].get("user_id", "anonymous") if job_id in jobs else "anonymous"
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -3188,10 +4405,10 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         wf_basename = os.path.basename(workflow_path).replace('.json', '')
         # Find next sequential number for this workflow today
-        existing = glob.glob(os.path.join(OUTPUT_DIR, subdir, f"{wf_basename}_*.png"))
+        existing = glob.glob(os.path.join(OUTPUT_DIR, subdir, f"{wf_basename}_*.*"))
         seq = 1
         for p in existing:
-            m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.png$", os.path.basename(p))
+            m = re.search(rf"{re.escape(wf_basename)}_(\d+)\.[^.]+$", os.path.basename(p))
             if m:
                 n = int(m.group(1))
                 if n >= seq: seq = n + 1
@@ -3207,15 +4424,17 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         batch_count = len(sources)
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         records = []
-        for idx, (src, filename) in enumerate(sources):
-            hist_name = f"{wf_basename}_{seq + idx:04d}.png"
+        for idx, (src, filename, media_type) in enumerate(sources):
+            ext = os.path.splitext(filename or src)[1].lower() or ".png"
+            hist_name = f"{wf_basename}_{seq + idx:04d}{ext}"
             shutil.copy2(src, os.path.join(output_subdir, hist_name))
             rel_path = f"{subdir}/{hist_name}"
-            actual_w, actual_h = get_image_size(rel_path)
             thumb_rel = make_thumbnail(rel_path) or ""
+            actual_w, actual_h = get_media_size(rel_path, media_type, thumb_rel)
             records.append({
                 "id": job_id if idx == 0 else f"{job_id}_{idx + 1:02d}",
                 "filename": rel_path,
+                "media_type": media_type,
                 "original": filename,
                 "workflow": os.path.basename(workflow_path),
                 "prompt": prompt_text, "seed": str(seed),
@@ -3228,6 +4447,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 "batch_id": job_id if batch_count > 1 else "",
                 "batch_index": idx,
                 "batch_count": batch_count,
+                "protection_status": IMAGE_PROTECTION_PENDING,
             })
         for record in reversed(records):
             history.insert(0, record)
@@ -3241,16 +4461,21 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         cover = records[0]
         jobs[job_id].update(
-            status="done", message=f"完成 ({elapsed:.1f}s)",
-            image=cover.get("filename", ""),
-            thumb=cover.get("thumb", ""),
+            status="checking", message="图片校验中",
+            protection_status=IMAGE_PROTECTION_PENDING,
+            pending_image=cover.get("filename", ""),
+            pending_media_type=cover.get("media_type", "image") or "image",
+            pending_thumb=cover.get("thumb", ""),
             images=[record.get("filename", "") for record in records],
+            media_types=[record.get("media_type", "image") or "image" for record in records],
             thumbs=[record.get("thumb", "") for record in records],
             batch_id=job_id if batch_count > 1 else "",
             batch_count=batch_count,
             batch_items=records,
             elapsed=round(elapsed, 1),
+            progress={"pct": 100},
         )
+        _schedule_image_protection(job_id, records, round(elapsed, 1))
         await broadcast({"type": "job_update", "job": jobs[job_id]})
 
     except Exception as e:
@@ -3275,18 +4500,283 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 def save_jobs():
     active = {k: v for k, v in jobs.items() if v.get("status") not in ("done", "error")}
     try:
-        with open(JOBS_FILE, "w") as f:
+        os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
+        tmp_file = f"{JOBS_FILE}.tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(list(active.values()), f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, JOBS_FILE)
     except Exception:
         pass
 
 
 def load_jobs():
-    if os.path.isfile(JOBS_FILE):
+    if not os.path.isfile(JOBS_FILE):
+        return
+    try:
+        with open(JOBS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        add_log("warn", "queue", f"恢复任务文件失败: {e}")
+        return
+    if isinstance(raw, dict):
+        raw_jobs = list(raw.values())
+    elif isinstance(raw, list):
+        raw_jobs = raw
+    else:
+        raw_jobs = []
+    restored = 0
+    now = time.time()
+    for item in raw_jobs:
+        if not isinstance(item, dict):
+            continue
+        job_id = str(item.get("id") or "")
+        status = str(item.get("status") or "")
+        if not job_id or status in ("done", "error", "cancelled"):
+            continue
+        job = dict(item)
+        job["id"] = job_id
+        job["status"] = status or "queued"
+        job["last_update"] = now
+        if job.get("prompt_id"):
+            job["message"] = "服务重启后恢复追踪中..."
+        jobs[job_id] = job
+        restored += 1
+    if restored:
+        add_log("info", "queue", f"已恢复 {restored} 个重启前活跃任务")
+
+
+def _job_log_suffix(job_id: str) -> str:
+    return str(job_id or "")[-12:]
+
+
+def _recent_submit_prompt_tail(job_id: str) -> str:
+    suffix = _job_log_suffix(job_id)
+    for entry in reversed(_log_buffer):
+        if str(entry.get("job_id") or "") != suffix:
+            continue
+        msg = str(entry.get("msg") or "")
+        for prefix in ("任务已提交:", "Prompt 已提交:"):
+            if msg.startswith(prefix):
+                return msg[len(prefix):].strip()
+    return ""
+
+
+def _recover_prompt_id_from_recent_logs(job: dict, inst: dict) -> str:
+    """Recover a full ComfyUI prompt_id from the persistent submit-log tail."""
+    tail = _recent_submit_prompt_tail(str(job.get("id") or ""))
+    if not tail:
+        return ""
+    candidates: list[str] = []
+    try:
+        remote_queue = _get_instance_queue_counts(inst.get("url", ""))
+        candidates.extend(str(pid) for pid in remote_queue.get("running_prompt_ids", []) if pid)
+        candidates.extend(str(pid) for pid in remote_queue.get("pending_prompt_ids", []) if pid)
+    except Exception:
+        pass
+    try:
+        hist = comfyui_get("/history", base_url=inst.get("url", ""))
+        if isinstance(hist, dict):
+            candidates.extend(str(pid) for pid in hist.keys() if pid)
+    except Exception:
+        pass
+    for pid in candidates:
+        if pid.endswith(tail):
+            return pid
+    return ""
+
+
+def _instance_for_job(job: dict) -> dict | None:
+    inst_name = str(job.get("instance") or "")
+    if not inst_name:
+        return None
+    for inst in _get_generation_instances():
+        if inst.get("name") == inst_name:
+            return inst
+    return None
+
+
+def _job_seed_value(job: dict) -> int:
+    try:
+        return int(job.get("seed") or 0)
+    except Exception:
+        return 0
+
+
+def _job_elapsed_from_resume(job: dict) -> float:
+    for key in ("generating_at", "submitted_at", "created_at_ts"):
         try:
-            os.remove(JOBS_FILE)
+            started_at = float(job.get(key) or 0)
         except Exception:
-            pass
+            started_at = 0
+        if started_at:
+            return max(0.0, time.time() - started_at)
+    return 0.0
+
+
+def _resume_persisted_generation_jobs() -> None:
+    for job_id, job in list(jobs.items()):
+        if job_id in _job_tasks:
+            continue
+        status = str(job.get("status") or "")
+        if job.get("prompt_id") or status in {"submitting", "generating", "downloading"}:
+            _job_tasks[job_id] = asyncio.create_task(_resume_persisted_generation_job(job_id))
+            continue
+        if status in {"queued", "dispatching", "preparing", "starting_comfyui"}:
+            path = _resolve_workflow(str(job.get("workflow") or ""))
+            if not path:
+                job["status"] = "error"
+                job["message"] = "服务重启后恢复失败：工作流文件不存在"
+                continue
+            job["status"] = "queued"
+            job["message"] = "服务重启后恢复排队..."
+            job["last_update"] = time.time()
+            _job_queue.put_nowait((
+                job_id,
+                path,
+                job.get("fields") or {},
+                _job_seed_value(job),
+                vllm_running(),
+                int(job.get("width") or 0),
+                int(job.get("height") or 0),
+                str(job.get("user_id") or ""),
+                str(job.get("preferred_instance") or ""),
+                str(job.get("preferred_node_id") or ""),
+            ))
+            add_log("info", "queue", "重启后已恢复排队任务", job_id)
+    save_jobs()
+
+
+async def _resume_persisted_generation_job(job_id: str) -> None:
+    job = jobs.get(job_id)
+    if not job:
+        return
+    inst = _instance_for_job(job)
+    if not inst:
+        job["status"] = "error"
+        job["message"] = "服务重启后恢复失败：找不到原出图实例"
+        save_jobs()
+        await broadcast({"type": "job_update", "job": job})
+        return
+    prompt_id = str(job.get("prompt_id") or "")
+    if not prompt_id:
+        prompt_id = _recover_prompt_id_from_recent_logs(job, inst)
+        if prompt_id:
+            job["prompt_id"] = prompt_id
+    if not prompt_id:
+        job["status"] = "error"
+        job["message"] = "服务重启后恢复失败：缺少 ComfyUI prompt_id，未重新提交以避免冲突"
+        save_jobs()
+        await broadcast({"type": "job_update", "job": job})
+        return
+    graph = _remote_queue_prompt_graph(inst, prompt_id)
+    client_id = str(job.get("client_id") or "").strip()
+    if not client_id:
+        client_id = _remote_queue_prompt_client_id(inst, prompt_id)
+        if client_id:
+            job["client_id"] = client_id
+    if graph and (not job.get("fields") or not job.get("prompt_preview")):
+        fields = _remote_graph_field_values(graph)
+        if fields and not job.get("fields"):
+            job["fields"] = fields
+        preview = _remote_graph_prompt_preview(graph)
+        if preview and not job.get("prompt_preview"):
+            job["prompt_preview"] = preview
+    path = _resolve_workflow(str(job.get("workflow") or ""))
+    if not path:
+        job["status"] = "error"
+        job["message"] = "服务重启后恢复失败：工作流文件不存在"
+        save_jobs()
+        await broadcast({"type": "job_update", "job": job})
+        return
+    if not graph:
+        graph = _workflow_graph_for_resume(path, job)
+
+    add_log("info", "queue", "服务重启后恢复任务追踪", job_id, details=prompt_id)
+    job["status"] = "generating"
+    job["message"] = "服务重启后恢复追踪中..."
+    job["last_update"] = time.time()
+    job["instance"] = inst.get("name", "")
+    job["progress"] = job.get("progress") or {"pct": 0}
+    save_jobs()
+    await broadcast({"type": "job_update", "job": job})
+
+    sem_key = inst.get("name", "")
+    sem = _instance_semas.setdefault(sem_key, asyncio.Semaphore(1)) if sem_key else None
+    acquired = False
+    ws_task = None
+    try:
+        timeout = _workflow_track_timeout(job, path)
+        ws_task = _start_resume_ws_progress(job_id, inst, graph, prompt_id, client_id, timeout)
+        if sem:
+            await sem.acquire()
+            acquired = True
+            job["sem_acquired"] = True
+        start = time.time()
+        while time.time() - start < timeout:
+            hist = {}
+            try:
+                hist = comfyui_get(f"/history/{prompt_id}", base_url=inst.get("url", ""))
+            except Exception:
+                hist = {}
+            if isinstance(hist, dict) and prompt_id in hist:
+                status = hist[prompt_id].get("status", {}) if isinstance(hist[prompt_id], dict) else {}
+                if status.get("status_str") == "error":
+                    raise RuntimeError("ComfyUI 执行出错")
+                if status.get("completed", False):
+                    if _job_runner:
+                        job["status"] = "downloading"
+                        job["message"] = "正在拉取图片..."
+                        job["progress"] = {"pct": 100}
+                        save_jobs()
+                        await broadcast({"type": "job_update", "job": job})
+                        await _job_runner._save_output(
+                            job_id=job_id,
+                            prompt_id=prompt_id,
+                            instance=inst,
+                            workflow_path=path,
+                            field_values=job.get("fields") or {},
+                            seed=_job_seed_value(job),
+                            elapsed=_job_elapsed_from_resume(job),
+                            img_width=int(job.get("width") or 0),
+                            img_height=int(job.get("height") or 0),
+                            user_id=str(job.get("user_id") or ""),
+                        )
+                        add_log("info", "queue", "重启恢复任务已保存输出", job_id, details=prompt_id)
+                    return
+            try:
+                remote_queue = _get_instance_queue_counts(inst.get("url", ""))
+                remote_ids = set(remote_queue.get("running_prompt_ids", []) + remote_queue.get("pending_prompt_ids", []))
+                if prompt_id not in remote_ids and not (isinstance(hist, dict) and prompt_id in hist):
+                    raise RuntimeError("ComfyUI 队列中已找不到该任务")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(5)
+        raise TimeoutError("恢复追踪超时")
+    except Exception as e:
+        if job_id in jobs and jobs[job_id].get("status") not in ("done",):
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["message"] = f"服务重启后恢复失败：{str(e)[:120]}"
+            save_jobs()
+            await broadcast({"type": "job_update", "job": jobs[job_id]})
+            add_log("error", "queue", jobs[job_id]["message"], job_id, details=prompt_id)
+    finally:
+        if acquired and sem:
+            try:
+                sem.release()
+            except ValueError:
+                pass
+        if job_id in jobs:
+            jobs[job_id]["sem_acquired"] = False
+        if ws_task and not ws_task.done():
+            ws_task.cancel()
+            try:
+                await ws_task
+            except asyncio.CancelledError:
+                pass
+        _job_tasks.pop(job_id, None)
+        save_jobs()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3295,6 +4785,7 @@ def load_jobs():
 
 HISTORY_FILE = os.path.join(HISTORY_DIR, "history.json")
 THUMB_SIZE = 400
+THUMB_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 
 
 def _project_ffmpeg_bin() -> str | None:
@@ -3305,6 +4796,28 @@ def _project_ffmpeg_bin() -> str | None:
         os.path.join(_BASE, ".venv", "bin", "ffmpeg"),
         os.path.join(_BASE, "bin", "ffmpeg"),
         os.path.join(_BASE, "tools", "ffmpeg", "ffmpeg"),
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        shutil.which("ffmpeg") or "",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _project_ffprobe_bin() -> str | None:
+    """Return an explicitly configured, project-local, or PATH ffprobe binary."""
+    ffmpeg = _project_ffmpeg_bin() or ""
+    candidates = [
+        os.environ.get("EZ_COMFYUI_FFPROBE", ""),
+        os.path.join(os.path.dirname(ffmpeg), "ffprobe") if ffmpeg else "",
+        os.path.join(_BASE, ".venv", "bin", "ffprobe"),
+        os.path.join(_BASE, "bin", "ffprobe"),
+        os.path.join(_BASE, "tools", "ffmpeg", "ffprobe"),
+        "/opt/homebrew/bin/ffprobe",
+        "/usr/local/bin/ffprobe",
+        shutil.which("ffprobe") or "",
     ]
     for candidate in candidates:
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
@@ -3315,7 +4828,7 @@ def _project_ffmpeg_bin() -> str | None:
 def _make_thumbnail_with_pillow(src: str, thumb_path: str) -> bool:
     """Create a thumbnail using the project Python environment."""
     try:
-        from PIL import Image, ImageOps
+        from PIL import Image, ImageOps, UnidentifiedImageError
         with Image.open(src) as img:
             img = ImageOps.exif_transpose(img)
             img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
@@ -3330,6 +4843,8 @@ def _make_thumbnail_with_pillow(src: str, thumb_path: str) -> bool:
                 img = img.convert("RGB")
             img.save(thumb_path, "JPEG", quality=82, optimize=True)
         return os.path.isfile(thumb_path)
+    except UnidentifiedImageError:
+        return False
     except Exception as e:
         add_log("warn", "thumbnail", f"pillow thumbnail failed: {e}", os.path.basename(src))
         return False
@@ -3351,6 +4866,8 @@ def make_thumbnail(rel_path: str) -> str | None:
     os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
     if _make_thumbnail_with_pillow(src, thumb_path):
         return thumb_rel
+    if os.path.splitext(basename)[1].lower() in THUMB_IMAGE_EXTS:
+        return None
     ffmpeg = _project_ffmpeg_bin()
     if not ffmpeg:
         add_log("warn", "thumbnail", "project ffmpeg not configured; thumbnail skipped", rel_path)
@@ -3371,10 +4888,17 @@ def make_thumbnail(rel_path: str) -> str | None:
     return None
 
 def get_image_size(rel_path: str) -> tuple[int, int]:
-    """Get PNG image dimensions from OUTPUT_DIR/{rel_path}."""
+    """Get image dimensions from OUTPUT_DIR/{rel_path}."""
     path = os.path.join(OUTPUT_DIR, rel_path)
     if not os.path.isfile(path):
         return 0, 0
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img)
+            return int(img.width or 0), int(img.height or 0)
+    except Exception:
+        pass
     try:
         with open(path, "rb") as f:
             f.seek(16)
@@ -3384,6 +4908,47 @@ def get_image_size(rel_path: str) -> tuple[int, int]:
             return w, h
     except Exception:
         return 0, 0
+
+
+def get_video_size(rel_path: str) -> tuple[int, int]:
+    """Get first video stream dimensions from OUTPUT_DIR/{rel_path}."""
+    path = os.path.join(OUTPUT_DIR, rel_path)
+    if not os.path.isfile(path):
+        return 0, 0
+    ffprobe = _project_ffprobe_bin()
+    if not ffprobe:
+        return 0, 0
+    try:
+        result = subprocess.run([
+            ffprobe,
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=s=x:p=0",
+            path,
+        ], capture_output=True, text=True, timeout=5)
+        line = (result.stdout or "").strip().splitlines()[0] if result.stdout else ""
+        match = re.search(r"(\d+)\s*x\s*(\d+)", line)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    except Exception:
+        return 0, 0
+    return 0, 0
+
+
+def get_media_size(rel_path: str, media_type: str = "", thumb_rel: str = "") -> tuple[int, int]:
+    """Return real media dimensions, falling back to preview thumbnail dimensions for video."""
+    normalized = str(media_type or output_media_type(rel_path)).lower()
+    if normalized == "video":
+        w, h = get_video_size(rel_path)
+        if w and h:
+            return w, h
+        if thumb_rel:
+            w, h = get_image_size(thumb_rel)
+            if w and h:
+                return w, h
+        return 0, 0
+    return get_image_size(rel_path)
 
 
 def load_history():
@@ -3400,16 +4965,23 @@ def load_history():
         if "seed" in h and not isinstance(h["seed"], str):
             h["seed"] = str(h["seed"])
             changed = True
-        if not h.get("width") or not h.get("height"):
-            w, ht = get_image_size(h.get("filename", ""))
-            if w > 0:
-                h["width"] = w
-                h["height"] = ht
-                changed = True
         if not h.get("thumb"):
             thumb = make_thumbnail(h.get("filename", ""))
             if thumb:
                 h["thumb"] = thumb
+                changed = True
+        media_type = str(h.get("media_type") or output_media_type(h.get("filename", "")))
+        if media_type == "video":
+            w, ht = get_video_size(h.get("filename", ""))
+            if w > 0 and ht > 0 and (h.get("width") != w or h.get("height") != ht):
+                h["width"] = w
+                h["height"] = ht
+                changed = True
+        if not h.get("width") or not h.get("height"):
+            w, ht = get_media_size(h.get("filename", ""), media_type, h.get("thumb", ""))
+            if w > 0 and ht > 0:
+                h["width"] = w
+                h["height"] = ht
                 changed = True
     if changed:
         save_history()
@@ -3436,6 +5008,8 @@ class GenerateRequest(BaseModel):
 class PromptOptimizeRequest(BaseModel):
     prompt: str
     max_new_tokens: int = 384
+    mode: str = "image"
+    prompt_context: dict = Field(default_factory=dict)
 
 
 class PromptTranslateRequest(BaseModel):
@@ -4036,6 +5610,7 @@ def api_workflow_dir_remove(path: str, current_user: dict = Depends(require_admi
 _UPLOAD_PASSTHROUGH_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 _UPLOAD_NORMALIZE_IMAGE_EXTS = {".tif", ".tiff", ".gif", ".jfif", ".jpe", ".avif", ".heic", ".heif", ""}
 _UPLOAD_ALLOWED_IMAGE_EXTS = _UPLOAD_PASSTHROUGH_IMAGE_EXTS | _UPLOAD_NORMALIZE_IMAGE_EXTS
+_UPLOAD_ALLOWED_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
 _UPLOAD_FORMAT_EXTS = {
     "PNG": {".png"},
     "JPEG": {".jpg", ".jpeg"},
@@ -4121,6 +5696,28 @@ async def api_upload_image(file: UploadFile = File(...), current_user: dict = De
     return {"ok": True, "filename": rel_name, "path": dest}
 
 
+@app.post("/api/upload-video")
+async def api_upload_video(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _UPLOAD_ALLOWED_VIDEO_EXTS:
+        raise HTTPException(400, f"Unsupported video format: {ext}")
+    unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}{ext}"
+    user_dir = _user_id(current_user) or "anonymous"
+    date_dir = datetime.now().strftime("%Y-%m-%d")
+    rel_name = f"{user_dir}/{date_dir}/{unique_name}"
+    dest = os.path.join(COMFYUI_INPUT, user_dir, date_dir, unique_name)
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"Video upload failed: {e}")
+    return {"ok": True, "filename": rel_name, "path": dest}
+
+
 @app.get("/api/input-image/{filename:path}")
 def api_input_image(filename: str):
     safe = filename.replace("\\", "/").lstrip("/")
@@ -4129,6 +5726,22 @@ def api_input_image(filename: str):
         raise HTTPException(404)
     ext = os.path.splitext(path)[1].lower()
     media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
+
+
+@app.get("/api/input-video/{filename:path}")
+def api_input_video(filename: str):
+    safe = filename.replace("\\", "/").lstrip("/")
+    path = _resolve_input_image_path(safe)
+    if not path:
+        raise HTTPException(404)
+    ext = os.path.splitext(path)[1].lower()
+    media = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".m4v": "video/x-m4v",
+    }.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
 
 
@@ -4397,7 +6010,11 @@ def api_get_wf_thumbnail(name: str):
         raise HTTPException(404)
     ext = os.path.splitext(path)[1].lower()
     media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "application/octet-stream")
-    return FileResponse(path, media_type=media)
+    return FileResponse(
+        path,
+        media_type=media,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.put("/api/workflows/{filename}/rename")
@@ -4439,6 +6056,8 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
     prompt = str(req.prompt or "").strip()
     if not prompt:
         raise HTTPException(400, "Prompt is required")
+    prompt_mode = "video_script" if str(req.mode or "").lower() in {"video", "video_script", "script"} else "image"
+    action_label = "视频脚本优化" if prompt_mode == "video_script" else "提示词优化"
     instances = _get_enabled_instances()
     if not instances:
         raise HTTPException(503, "No enabled ComfyUI instances available")
@@ -4452,20 +6071,22 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
             timeout=300,
             poll_interval=1,
             max_new_tokens=req.max_new_tokens,
+            prompt_mode=prompt_mode,
+            prompt_context=req.prompt_context if prompt_mode == "video_script" else {},
         )
         _mark_aux_instance_active(inst)
     except TimeoutError as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
-        raise HTTPException(504, f"提示词优化超时: {e}") from e
+        raise HTTPException(504, f"{action_label}超时: {e}") from e
     except RuntimeError as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
         status_code = 503 if "提示词独立实例" in str(e) else 500
-        raise HTTPException(status_code, f"提示词优化失败: {e}") from e
+        raise HTTPException(status_code, f"{action_label}失败: {e}") from e
     except Exception as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
-        raise HTTPException(500, f"提示词优化失败: {e}") from e
+        raise HTTPException(500, f"{action_label}失败: {e}") from e
     result["instance"] = inst.get("name", "")
-    add_log("info", "prompt_optimize", f"Prompt optimized by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+    add_log("info", "prompt_optimize", f"{action_label} by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
     return result
 
 
@@ -4656,7 +6277,12 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "last_update": now_ts,
         "user_id": user_id,
     }
+    jobs[job_id].update({
+        k: v for k, v in _job_with_time_estimate(jobs[job_id]).items()
+        if k.startswith("estimated_")
+    })
     add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
+    save_jobs()
 
     _job_queue.put_nowait((
         job_id, path, normalized_fields, seed, vllm_was, req.width, req.height, user_id,
@@ -4667,7 +6293,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
 @app.get("/api/jobs")
 def api_all_jobs(current_user: dict = Depends(get_current_user)):
-    return [j for j in jobs.values() if _can_access_job(j, current_user)]
+    return [_job_with_time_estimate(j) for j in jobs.values() if _can_access_job(j, current_user)]
 
 
 @app.get("/api/jobs/{job_id}")
@@ -4676,7 +6302,7 @@ def api_job_status(job_id: str, current_user: dict = Depends(get_current_user)):
         raise HTTPException(404)
     if not _can_access_job(jobs[job_id], current_user):
         raise HTTPException(403, "无权访问他人的任务")
-    return jobs[job_id]
+    return _job_with_time_estimate(jobs[job_id])
 
 
 @app.delete("/api/jobs/{job_id}")
@@ -4686,14 +6312,22 @@ async def api_cancel_job(job_id: str, current_user: dict = Depends(get_current_u
     job = jobs[job_id]
     if not _can_access_job(job, current_user):
         raise HTTPException(403, "只能取消自己的任务")
-    if job.get("status") == "generating":
+    prompt_id = str(job.get("prompt_id") or "")
+    inst_url = None
+    inst_name = str(job.get("instance") or "")
+    if prompt_id:
+        _mark_remote_prompt_cancelled(inst_name, prompt_id)
+    if prompt_id or job.get("status") == "generating":
         try:
-            inst_url = None
-            inst_name = job.get("instance", "")
             for inst in _get_enabled_instances():
                 if inst.get("name") == inst_name:
                     inst_url = inst.get("url")
                     break
+            if prompt_id:
+                comfyui_post("/queue", {"delete": [prompt_id]}, base_url=inst_url)
+        except Exception:
+            pass
+        try:
             comfyui_post("/interrupt", {}, base_url=inst_url)
         except Exception:
             pass
@@ -4759,7 +6393,13 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
         "preferred_instance": preferred_instance,
         "preferred_node_id": preferred_node_id,
         "queued_at": datetime.now().strftime("%H:%M:%S"),
+        "created_at_ts": time.time(),
     }
+    jobs[new_id].update({
+        k: v for k, v in _job_with_time_estimate(jobs[new_id]).items()
+        if k.startswith("estimated_")
+    })
+    save_jobs()
 
     _job_queue.put_nowait((
         new_id, path, fields, seed, vllm_was, width, height, user_id,
@@ -4811,6 +6451,8 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
         conditions.append("COALESCE(deleted_at, '') != ''")
     else:
         conditions.append("COALESCE(deleted_at, '') = ''")
+        conditions.append("COALESCE(protection_status, 'safe') != ?")
+        params.append(IMAGE_PROTECTION_PENDING)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     rows = [
         dict(r) for r in conn.execute(
@@ -4821,15 +6463,33 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
         ).fetchall()
     ]
     thumb_updates = []
+    dimension_updates = []
     for row in rows:
-        if row.get("thumb_path") or not row.get("image_path"):
+        if not row.get("image_path"):
             continue
-        thumb = make_thumbnail(row.get("image_path", "")) or ""
-        if thumb:
-            row["thumb_path"] = thumb
-            thumb_updates.append((thumb, row.get("id", "")))
+        if not row.get("thumb_path"):
+            thumb = make_thumbnail(row.get("image_path", "")) or ""
+            if thumb:
+                row["thumb_path"] = thumb
+                thumb_updates.append((thumb, row.get("id", "")))
+        media_type = str(row.get("media_type", "") or output_media_type(row.get("image_path", ""))).lower()
+        if media_type == "video":
+            w, h = get_video_size(row.get("image_path", ""))
+            if w and h and (row.get("width") != w or row.get("height") != h):
+                row["width"] = w
+                row["height"] = h
+                dimension_updates.append((w, h, row.get("id", "")))
+        if not row.get("width") or not row.get("height"):
+            w, h = get_media_size(row.get("image_path", ""), media_type, row.get("thumb_path", ""))
+            if w and h:
+                row["width"] = w
+                row["height"] = h
+                dimension_updates.append((w, h, row.get("id", "")))
     if thumb_updates:
         conn.executemany("UPDATE generations SET thumb_path=? WHERE id=?", thumb_updates)
+    if dimension_updates:
+        conn.executemany("UPDATE generations SET width=?, height=? WHERE id=?", dimension_updates)
+    if thumb_updates or dimension_updates:
         conn.commit()
     total = conn.execute(
         "SELECT COUNT(*) FROM generations" + where_clause,
@@ -4904,7 +6564,7 @@ def _history_input_image_refs(row) -> set[str]:
     if not isinstance(params, dict):
         return set()
     refs: set[str] = set()
-    image_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+    media_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".mp4", ".webm", ".mov", ".m4v")
     for key, value in params.items():
         if not isinstance(value, str):
             continue
@@ -4912,7 +6572,7 @@ def _history_input_image_refs(row) -> set[str]:
         if not (field.startswith("image") or field == "upload"):
             continue
         rel = value.replace("\\", "/").lstrip("/")
-        if rel.lower().endswith(image_exts):
+        if rel.lower().endswith(media_exts):
             refs.add(rel)
     return refs
 
@@ -5203,6 +6863,26 @@ class AdminUserCreateRequest(BaseModel):
     role: str = "user"
 
 
+class SiteNotificationCreateRequest(BaseModel):
+    title: str
+    content: str
+
+
+class SiteNotificationDismissRequest(BaseModel):
+    notification_id: Optional[int] = None
+
+
+def _site_notification_row(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "content": row["content"],
+        "created_by": row["created_by"] or "",
+        "created_by_username": row["created_by_username"] or "",
+        "created_at": row["created_at"],
+    }
+
+
 @app.post("/auth/register")
 def auth_register(req: AuthRequest):
     username = req.username.strip()
@@ -5376,6 +7056,123 @@ def api_user_delete(user_id: str, current_user: dict = Depends(require_admin)):
     if cur.rowcount == 0:
         raise HTTPException(404, "User not found")
     return {"ok": True}
+
+
+@app.get("/api/system-settings")
+def api_system_settings_get(current_user: dict = Depends(require_admin)):
+    return {"ok": True, "data": _load_system_settings()}
+
+
+@app.put("/api/system-settings")
+def api_system_settings_put(req: dict, current_user: dict = Depends(require_admin)):
+    return {"ok": True, "data": _update_system_settings(req)}
+
+
+@app.get("/api/site-notifications")
+def api_site_notifications(current_user: dict | None = Depends(get_current_user_optional)):
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    latest_row = conn.execute("SELECT COALESCE(MAX(id), 0) AS latest_id FROM site_notifications").fetchone()
+    latest_id = int(latest_row["latest_id"] or 0)
+    suppressed_until_id = 0
+    user_id = (current_user or {}).get("sub", "")
+    if user_id:
+        state = conn.execute(
+            "SELECT suppressed_until_id FROM site_notification_state WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        suppressed_until_id = int((state and state["suppressed_until_id"]) or 0)
+    rows = conn.execute(
+        """
+        SELECT n.id, n.title, n.content, n.created_by, n.created_at,
+               COALESCE(u.username, '') AS created_by_username
+          FROM site_notifications n
+          LEFT JOIN users u ON u.id = n.created_by
+         WHERE n.id > ?
+         ORDER BY n.id ASC
+        """,
+        (suppressed_until_id,),
+    ).fetchall()
+    conn.close()
+    return {
+        "ok": True,
+        "data": [_site_notification_row(row) for row in rows],
+        "latest_id": latest_id,
+        "suppressed_until_id": suppressed_until_id,
+    }
+
+
+@app.get("/api/site-notifications/admin")
+def api_site_notifications_admin(current_user: dict = Depends(require_admin)):
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT n.id, n.title, n.content, n.created_by, n.created_at,
+               COALESCE(u.username, '') AS created_by_username
+          FROM site_notifications n
+          LEFT JOIN users u ON u.id = n.created_by
+         ORDER BY n.id DESC
+         LIMIT 100
+        """
+    ).fetchall()
+    conn.close()
+    return {"ok": True, "data": [_site_notification_row(row) for row in rows]}
+
+
+@app.post("/api/site-notifications")
+def api_site_notification_create(req: SiteNotificationCreateRequest, current_user: dict = Depends(require_admin)):
+    title = (req.title or "").strip()
+    content = (req.content or "").strip()
+    if len(title) < 1:
+        raise HTTPException(400, "Notification title is required")
+    if len(content) < 1:
+        raise HTTPException(400, "Notification content is required")
+    if len(title) > 120:
+        raise HTTPException(400, "Notification title is too long")
+    if len(content) > 4000:
+        raise HTTPException(400, "Notification content is too long")
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.execute(
+        "INSERT INTO site_notifications (title, content, created_by) VALUES (?, ?, ?)",
+        (title, content, current_user.get("sub", "")),
+    )
+    conn.commit()
+    row = conn.execute(
+        """
+        SELECT n.id, n.title, n.content, n.created_by, n.created_at,
+               COALESCE(u.username, '') AS created_by_username
+          FROM site_notifications n
+          LEFT JOIN users u ON u.id = n.created_by
+         WHERE n.id=?
+        """,
+        (cur.lastrowid,),
+    ).fetchone()
+    conn.close()
+    return {"ok": True, "data": _site_notification_row(row)}
+
+
+@app.post("/api/site-notifications/dismiss")
+def api_site_notification_dismiss(req: SiteNotificationDismissRequest, current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(AUTH_DB)
+    latest_row = conn.execute("SELECT COALESCE(MAX(id), 0) FROM site_notifications").fetchone()
+    latest_id = int((latest_row and latest_row[0]) or 0)
+    target_id = int(req.notification_id or latest_id or 0)
+    target_id = max(0, min(target_id, latest_id))
+    conn.execute(
+        """
+        INSERT INTO site_notification_state (user_id, suppressed_until_id, updated_at)
+        VALUES (?, ?, datetime('now','localtime'))
+        ON CONFLICT(user_id) DO UPDATE SET
+          suppressed_until_id=max(site_notification_state.suppressed_until_id, excluded.suppressed_until_id),
+          updated_at=datetime('now','localtime')
+        """,
+        (current_user.get("sub", ""), target_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True, "suppressed_until_id": target_id}
 
 
 # ══════════════════════════════════════════════════════════════════════════

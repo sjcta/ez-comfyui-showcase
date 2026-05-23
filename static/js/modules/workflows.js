@@ -23,12 +23,28 @@
   // ── Manager toolbar state ──
   var _mgrFilter = '';  // '' = all
   var _mgrSearch = '';
-  var _mgrSortBy = 'manual';
-  var _mgrDragFname = '';
-  var _mgrDropFname = '';
-  var _mgrDropAfter = false;
-  // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
-  var _wfCardDownX = 0, _wfCardDownY = 0, _wfCardMoved = false;
+    var _mgrSortBy = 'manual';
+    var _mgrDragFname = '';
+    var _mgrDropFname = '';
+    var _mgrDropAfter = false;
+    var _wfThumbBust = {};
+    var _wfThumbBustSeq = 0;
+    // Drag-detection for card clicks (prevent drag-to-scroll from triggering select)
+    var _wfCardDownX = 0, _wfCardDownY = 0, _wfCardMoved = false;
+
+  function _setWorkflowThumbnailBust(fname, rel) {
+    var stamp = String(Date.now()) + '-' + (++_wfThumbBustSeq);
+    if (fname) _wfThumbBust[fname] = stamp;
+    if (rel) _wfThumbBust[rel] = stamp;
+    return stamp;
+  }
+
+  function _workflowThumbnailUrl(rel, fname) {
+    if (!rel) return '';
+    var url = API + '/api/workflows/thumbnail/' + rel;
+    var bust = _wfThumbBust[fname] || _wfThumbBust[rel] || '';
+    return bust ? url + (url.indexOf('?') >= 0 ? '&' : '?') + 'v=' + encodeURIComponent(bust) : url;
+  }
 
   function _latestWorkflowPreviewItems(items) {
     var previews = {};
@@ -51,6 +67,9 @@
   }
 
   function _isSensitiveWorkflowPreview(item, displayPrompt) {
+    var protectionStatus = String(item && item.protection_status || '').toLowerCase();
+    if (protectionStatus === 'protected' || protectionStatus === 'error' || protectionStatus === 'pending') return true;
+    if (protectionStatus === 'safe') return false;
     var text = [
       displayPrompt,
       item && item.prompt,
@@ -72,7 +91,7 @@
     }
     if (meta && meta.thumbnail) {
       return {
-        src: API + '/api/workflows/thumbnail/' + meta.thumbnail,
+        src: _workflowThumbnailUrl(meta.thumbnail, fname),
         sensitive: false,
       };
     }
@@ -124,8 +143,8 @@
     return [];
   }
 
-  function _workflowManagerThumbUrl(meta) {
-    return meta && meta.thumbnail ? API + '/api/workflows/thumbnail/' + meta.thumbnail : '';
+  function _workflowManagerThumbUrl(meta, fname) {
+    return meta && meta.thumbnail ? _workflowThumbnailUrl(meta.thumbnail, fname || meta.filename || '') : '';
   }
 
   function workflowDisplayName(fname, meta) {
@@ -243,12 +262,9 @@ async function onWfThumbUpload(e) {
       if (saved && saved.thumbnail) {
         A._wfMeta[A._wfEditFilename].thumbnail = saved.thumbnail;
       }
-      // Show preview
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        syncWfThumbPreview(ev.target.result);
-      };
-      reader.readAsDataURL(file);
+      var thumbRel = A._wfMeta[A._wfEditFilename].thumbnail || '';
+      _setWorkflowThumbnailBust(A._wfEditFilename, thumbRel);
+      syncWfThumbPreview(_workflowThumbnailUrl(thumbRel, A._wfEditFilename));
       renderWfGrid();
       loadWfMeta();
       loadWorkflows();
@@ -318,7 +334,7 @@ function openWfEdit(fname) {
       tagsDiv.appendChild(span);
     });
     // Thumbnail
-    const thumbUrl = meta.thumbnail ? `${API}/api/workflows/thumbnail/${meta.thumbnail}` : '';
+    const thumbUrl = meta.thumbnail ? _workflowThumbnailUrl(meta.thumbnail, fname) : '';
     syncWfThumbPreview(thumbUrl);
     // Clear tag input
     var tagInput = $('#wfEditTagInput');
@@ -359,6 +375,7 @@ function _tagCls(t) {
     if (t === '放大') return 'cat';
     if (t === '文生视频') return 't2v';
     if (t === '图生视频') return 'i2v';
+    if (/视频/.test(t)) return 'video';
     return 'res';
   }
 
@@ -427,9 +444,14 @@ function _tagCls(t) {
   }
 
   function _getPrimaryTag(fname, meta) {
+    return _primaryWorkflowTag(fname, meta);
+  }
+
+  function _primaryWorkflowTag(fname, meta) {
+    meta = meta || {};
     var tags = meta.tags || [];
     var typeTag = window.CW.getWFType(fname);
-    return typeTag ? typeTag.text : (tags[0] || '其他');
+    return tags[0] || (typeTag ? typeTag.text : '其他');
   }
 
   function mgrFilterTag(tag) {
@@ -495,7 +517,7 @@ function renderWfGrid() {
       var canManage = !!(isAdmin || (currentUid && String(meta.owner_id || '') === currentUid));
       const displayName = workflowDisplayName(fname, meta);
       const tags = meta.tags || [];
-      const thumbUrl = _workflowManagerThumbUrl(meta);
+      const thumbUrl = _workflowManagerThumbUrl(meta, fname);
       const sharedTag = meta.shared ? '<span class="wf-mgr-tag res">共享</span>' : '';
       const tagHtml = tags.map(function(t) {
         return '<span class="wf-mgr-tag ' + _tagCls(t) + '">' + escH(t) + '</span>';
@@ -858,6 +880,7 @@ async function selectWF(name) {
         step: f.step,
         min: f.min,
         max: f.max,
+        order: f.order,
       }));
       if (window.CW.renderAdvFields) window.CW.renderAdvFields(fields);
       // Quick form is dynamically built from workflow fields
@@ -918,8 +941,7 @@ async function loadWorkflows() {
       wfs.forEach(w => {
         const meta = A._wfMeta[w.name] || {};
         const tags = meta.tags || [];
-        const typeTag = window.CW.getWFType(w.name);
-        const mainTag = typeTag ? typeTag.text : (tags[0] || '其他');
+        const mainTag = _primaryWorkflowTag(w.name, meta);
         wfTagMap[w.name] = mainTag;
         wfAllTags[w.name] = tags;
       });
@@ -929,6 +951,7 @@ async function loadWorkflows() {
         if (t === '文生图') return 'wf-tag-t2i';
         if (t === '文生视频') return 'wf-tag-t2v';
         if (t === '图生视频') return 'wf-tag-i2v';
+        if (/视频/.test(t)) return 'wf-tag-video';
         if (t === '放大') return 'wf-tag-cat';
         if (/^\d+K$/.test(t)) return 'wf-tag-res';
         return '';
@@ -960,9 +983,7 @@ async function loadWorkflows() {
       const allTags = new Set();
       wfs.forEach(w => {
         const meta = A._wfMeta[w.name] || {};
-        const tags = meta.tags || [];
-        const typeTag = window.CW.getWFType(w.name);
-        const mainTag = typeTag ? typeTag.text : (tags[0] || '');
+        const mainTag = _primaryWorkflowTag(w.name, meta);
         wfTagMap[w.name] = mainTag;
         if (mainTag) allTags.add(mainTag);
       });
@@ -980,9 +1001,7 @@ async function loadWorkflows() {
         for (const t of sortedTags) {
           const catWfs = wfs.filter(w => {
             const meta = A._wfMeta[w.name] || {};
-            const tags = meta.tags || [];
-            const typeTag = window.CW.getWFType(w.name);
-            const mainTag = typeTag ? typeTag.text : (tags[0] || '');
+            const mainTag = _primaryWorkflowTag(w.name, meta);
             return mainTag === t;
           });
           tabHtml += `<button class="wf-tab wf-tab-${_tagCls(t)} ${A._currentTab === t ? 'active' : ''}" data-tab="${t}" onclick="CW.switchTab('${t}')"><span>${t}</span> (${catWfs.length})</button>`;
@@ -996,9 +1015,7 @@ async function loadWorkflows() {
       _applyTabFilter();
       var firstTextToImage = wfs.find(function(w) {
         var meta = A._wfMeta[w.name] || {};
-        var tags = meta.tags || [];
-        var typeTag = window.CW.getWFType(w.name);
-        var mainTag = typeTag ? typeTag.text : (tags[0] || '');
+        var mainTag = _primaryWorkflowTag(w.name, meta);
         return mainTag === '文生图';
       });
       const target =

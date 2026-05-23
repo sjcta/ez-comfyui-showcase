@@ -63,6 +63,100 @@
     return zone ? (zone.dataset.zone || 'hidden') : 'hidden';
   }
 
+  function compactNodeTitle(title) {
+    return String(title || '').split('(')[0].trim();
+  }
+
+  function formatNodeMeta(f) {
+    var nodeTitle = compactNodeTitle(f && f.node_title);
+    var classType = String((f && f.class_type) || '').trim();
+    if (nodeTitle && classType && nodeTitle !== classType) return nodeTitle + ' [' + classType + ']';
+    return nodeTitle || classType || 'Node';
+  }
+
+  function formatFieldTitle(f) {
+    var label = String((f && (f.label || f.field)) || '').trim();
+    var nodeTitle = compactNodeTitle(f && f.node_title);
+    if (label && nodeTitle) return label + ' [' + nodeTitle + ']';
+    return label || nodeTitle || '';
+  }
+
+  function formatFieldName(f) {
+    return String((f && (f.label || f.field)) || '').trim();
+  }
+
+  function formatNodeSubline(f) {
+    var nodeTitle = compactNodeTitle(f && f.node_title);
+    return nodeTitle ? '[' + nodeTitle + ']' : '';
+  }
+
+  function sortFieldsBySavedConfig(fields, config) {
+    if (!config || !config.fields || !config.fields.length) return fields;
+    var zoneRank = { user_input: 0, advanced: 1, output: 2, hidden: 3 };
+    var cfgMap = {};
+    for (var i = 0; i < config.fields.length; i++) {
+      var cfg = config.fields[i] || {};
+      if (!cfg.key) continue;
+      var order = Number(cfg.order != null ? cfg.order : i);
+      if (!Number.isFinite(order)) order = i;
+      cfgMap[cfg.key] = {
+        index: i,
+        zone: cfg.zone || 'hidden',
+        order: order,
+      };
+    }
+    fields.sort(function (a, b) {
+      var ca = cfgMap[a.key] || {};
+      var cb = cfgMap[b.key] || {};
+      var za = zoneRank[ca.zone || a.zone || 'hidden'];
+      var zb = zoneRank[cb.zone || b.zone || 'hidden'];
+      za = za == null ? 99 : za;
+      zb = zb == null ? 99 : zb;
+      if (za !== zb) return za - zb;
+      var oa = ca.order != null ? ca.order : 9999;
+      var ob = cb.order != null ? cb.order : 9999;
+      if (oa !== ob) return oa - ob;
+      return (ca.index != null ? ca.index : 9999) - (cb.index != null ? cb.index : 9999);
+    });
+    return fields;
+  }
+
+  function refreshCurrentWorkflowFields() {
+    if (!_nodeEditorFname || !A || A.currentWF !== _nodeEditorFname) return Promise.resolve();
+    return fetch(API + '/api/workflows/' + encodeURIComponent(_nodeEditorFname) + '/fields')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.fields) return;
+        var fields = d.fields || [];
+        A._wfFieldWorkflow = _nodeEditorFname;
+        A._wfFieldMeta = fields.map(function (f) {
+          return {
+            key: f.node_id + '::' + f.field,
+            node_id: f.node_id,
+            class_type: f.class_type,
+            field: f.field,
+            zone: f.zone,
+            visible: f.visible !== false,
+            type: f.type,
+            label: f.label,
+            value: f.value,
+            options: f.options,
+            step: f.step,
+            min: f.min,
+            max: f.max,
+            order: f.order,
+          };
+        });
+        window.__APP__._wfFieldWorkflow = A._wfFieldWorkflow;
+        window.__APP__._wfFieldMeta = A._wfFieldMeta;
+        if (window.CW && CW.renderAdvFields) CW.renderAdvFields(fields);
+        if (window.CW && CW.renderQuickForm) CW.renderQuickForm(fields);
+      })
+      .catch(function (e) {
+        console.warn('refresh workflow fields after node config save failed:', e && e.message ? e.message : e);
+      });
+  }
+
   function syncCardZoneState(card, zone) {
     if (!card) return;
     zone = zone || zoneNameForContainer(card.parentElement);
@@ -231,7 +325,7 @@ function saveNodeConfig() {
       body: JSON.stringify(config),
     }).then(function (r) {
       if (r.ok) {
-        closeNodeEditor();
+        refreshCurrentWorkflowFields().then(closeNodeEditor);
       }
     });
   }
@@ -267,6 +361,7 @@ function renderNodeEditor(analyze, config) {
           }
         }
       }
+      sortFieldsBySavedConfig(allFields, config);
     }
     var zoneMap = {
       user_input: 'neZoneUserInput',
@@ -292,21 +387,31 @@ function renderNodeEditor(analyze, config) {
       card.dataset.prevZone = originalZone !== 'hidden' ? originalZone : 'advanced';
       var valPreview = f.value !== undefined && f.value !== null ? String(f.value).substring(0, 80) : '';
       var visIcon = f.visible ? CW.icon('eye') : CW.icon('eye-off');
+      var nodeMeta = formatNodeMeta(f);
+      var fieldTitle = formatFieldTitle(f);
+      var fieldName = formatFieldName(f);
+      var nodeSubline = formatNodeSubline(f);
+      var fieldTitleAttr = (f.field || '') + (fieldTitle ? ' · ' + fieldTitle : '');
       card.innerHTML =
         '<div class="ne-field-top">' +
+        '<div class="ne-field-text">' +
         '<span class="ne-field-node" title="' +
-        escA(f.node_title) +
+        escA('[' + f.node_id + '] ' + f.class_type + (f.node_title ? ' · ' + f.node_title : '')) +
         '">[' +
         escH(f.node_id) +
         '] ' +
-        escH(f.class_type) +
+        escH(nodeMeta) +
         '</span>' +
+        '<div class="ne-field-name" title="' +
+        escA(fieldTitleAttr) +
+        '">' +
+        escH(fieldName || f.field) +
+        '</div>' +
+        (nodeSubline ? '<div class="ne-field-subline">' + escH(nodeSubline) + '</div>' : '') +
+        '</div>' +
         '<button class="ne-field-vis" title="' + (f.visible ? '当前可见，点击设为不可见' : '当前不可见，点击设为可见') + '">' +
         visIcon +
         '</button>' +
-        '</div>' +
-        '<div class="ne-field-name">' +
-        escH(f.field) +
         '</div>' +
         '<input class="ne-field-label-input" value="' +
         escA(f.label) +

@@ -1,9 +1,11 @@
+import asyncio
 import os
 import sqlite3
 import tempfile
 import unittest
 
 from fastapi import HTTPException
+from PIL import Image
 
 import app
 
@@ -66,6 +68,28 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["data"][0]["username"], "alice")
 
+    def test_invalid_output_file_does_not_pollute_user_logs_with_thumbnail_warnings(self):
+        image_path = os.path.join(app.OUTPUT_DIR, "hist-1.png")
+        with open(image_path, "wb") as f:
+            f.write(b"image")
+        app._insert_generation(
+            {
+                "id": "hist-1",
+                "workflow": "t2i-test.json",
+                "filename": "hist-1.png",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"][0]["thumb"], "")
+        self.assertFalse([entry for entry in app._log_buffer if entry.get("phase") == "thumbnail"])
+
     def test_history_orders_same_second_by_newer_insert_first(self):
         for item_id in ("job_1000_0001", "job_1002_0001", "job_1001_0001"):
             app._insert_generation(
@@ -91,6 +115,370 @@ class HistoryApiTest(unittest.TestCase):
             [item["sort_index"] for item in result["data"]],
             sorted([item["sort_index"] for item in result["data"]], reverse=True),
         )
+
+    def test_history_api_preserves_video_media_type(self):
+        video_path = os.path.join(app.OUTPUT_DIR, "clip.mp4")
+        with open(video_path, "wb") as f:
+            f.write(b"video")
+        app._insert_generation(
+            {
+                "id": "hist-video",
+                "workflow": "t2v-test.json",
+                "filename": "clip.mp4",
+                "media_type": "video",
+                "prompt": "video prompt",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["filename"], "clip.mp4")
+        self.assertEqual(result["data"][0]["media_type"], "video")
+
+    def test_video_records_fill_dimensions_from_thumbnail_when_probe_unavailable(self):
+        video_path = os.path.join(app.OUTPUT_DIR, "clip.mp4")
+        thumb_path = os.path.join(app.OUTPUT_DIR, "clip_thumb.jpg")
+        with open(video_path, "wb") as f:
+            f.write(b"video")
+        Image.new("RGB", (96, 54), (12, 32, 72)).save(thumb_path)
+
+        app._insert_generation(
+            {
+                "id": "hist-video",
+                "workflow": "t2v-test.json",
+                "filename": "clip.mp4",
+                "thumb": "clip_thumb.jpg",
+                "media_type": "video",
+                "prompt": "video prompt",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+
+        self.assertEqual(result["data"][0]["width"], 96)
+        self.assertEqual(result["data"][0]["height"], 54)
+
+    def test_history_api_replaces_thumbnail_dimensions_with_video_stream_dimensions(self):
+        video_path = os.path.join(app.OUTPUT_DIR, "clip.mp4")
+        thumb_path = os.path.join(app.OUTPUT_DIR, "clip_thumb.jpg")
+        with open(video_path, "wb") as f:
+            f.write(b"video")
+        Image.new("RGB", (220, 400), (12, 32, 72)).save(thumb_path)
+        old_get_video_size = app.get_video_size
+        app.get_video_size = lambda _rel: (0, 0)
+        app._insert_generation(
+            {
+                "id": "hist-video",
+                "workflow": "t2v-test.json",
+                "filename": "clip.mp4",
+                "thumb": "clip_thumb.jpg",
+                "media_type": "video",
+                "prompt": "video prompt",
+                "width": 220,
+                "height": 400,
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+        try:
+            app.get_video_size = lambda _rel: (704, 1280)
+            result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        finally:
+            app.get_video_size = old_get_video_size
+
+        self.assertEqual(result["data"][0]["width"], 704)
+        self.assertEqual(result["data"][0]["height"], 1280)
+
+    def test_video_records_skip_image_protection(self):
+        video_path = os.path.join(app.OUTPUT_DIR, "clip.mp4")
+        with open(video_path, "wb") as f:
+            f.write(b"video")
+        record = {
+            "id": "hist-video",
+            "workflow": "t2v-test.json",
+            "filename": "clip.mp4",
+            "media_type": "video",
+            "prompt": "video prompt",
+            "time": "2026-05-18 12:00:00",
+            "protection_status": "pending",
+        }
+        app._insert_generation(record, elapsed=3, user_id="u1")
+
+        asyncio.run(app._complete_image_protection_job("", [record], 3))
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["media_type"], "video")
+        self.assertEqual(result["data"][0]["protection_status"], "safe")
+        self.assertEqual(result["data"][0]["protection_source"], "media-type")
+
+    def test_video_records_with_thumbnail_run_preview_protection(self):
+        from modules.image_protection import ImageProtectionWorker
+
+        video_path = os.path.join(app.OUTPUT_DIR, "clip.mp4")
+        thumb_path = os.path.join(app.OUTPUT_DIR, "clip_thumb.jpg")
+        with open(video_path, "wb") as f:
+            f.write(b"video")
+        Image.new("RGB", (48, 48), (230, 180, 160)).save(thumb_path)
+        old_worker = app._image_protection_worker
+
+        def load_detector():
+            return lambda _path: [{"label": "EXPOSED_GENITALIA_F", "score": 0.88}]
+
+        app._image_protection_worker = ImageProtectionWorker(load_detector=load_detector, load_classifier=lambda: None)
+        try:
+            record = {
+                "id": "hist-video",
+                "workflow": "t2v-test.json",
+                "filename": "clip.mp4",
+                "thumb": "clip_thumb.jpg",
+                "media_type": "video",
+                "prompt": "video prompt",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "pending",
+            }
+            app._insert_generation(record, elapsed=3, user_id="u1")
+
+            asyncio.run(app._complete_image_protection_job("", [record], 3))
+            result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        finally:
+            app._image_protection_worker = old_worker
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["media_type"], "video")
+        self.assertEqual(result["data"][0]["protection_status"], "protected")
+        self.assertEqual(result["data"][0]["protection_source"], "detector")
+
+    def test_video_records_generate_thumbnail_before_preview_protection(self):
+        from modules.image_protection import ImageProtectionWorker
+
+        video_path = os.path.join(app.OUTPUT_DIR, "clip.mp4")
+        thumb_path = os.path.join(app.OUTPUT_DIR, "clip_thumb.jpg")
+        with open(video_path, "wb") as f:
+            f.write(b"video")
+        Image.new("RGB", (48, 48), (230, 180, 160)).save(thumb_path)
+        old_worker = app._image_protection_worker
+        old_make_thumbnail = app.make_thumbnail
+
+        def load_detector():
+            return lambda _path: [{"label": "EXPOSED_GENITALIA_F", "score": 0.88}]
+
+        app._image_protection_worker = ImageProtectionWorker(load_detector=load_detector, load_classifier=lambda: None)
+        try:
+            record = {
+                "id": "hist-video",
+                "workflow": "t2v-test.json",
+                "filename": "clip.mp4",
+                "media_type": "video",
+                "prompt": "video prompt",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "pending",
+            }
+            app._insert_generation(record, elapsed=3, user_id="u1")
+            record["thumb"] = ""
+            app.make_thumbnail = lambda _rel: "clip_thumb.jpg"
+
+            asyncio.run(app._complete_image_protection_job("", [record], 3))
+            result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        finally:
+            app._image_protection_worker = old_worker
+            app.make_thumbnail = old_make_thumbnail
+
+        self.assertEqual(result["data"][0]["thumb"], "clip_thumb.jpg")
+        self.assertEqual(result["data"][0]["protection_status"], "protected")
+        self.assertEqual(result["data"][0]["protection_source"], "detector")
+
+    def test_pending_protection_records_are_hidden_until_checked(self):
+        app._insert_generation(
+            {
+                "id": "hist-pending",
+                "workflow": "t2i-test.json",
+                "filename": "pending.png",
+                "prompt": "ambiguous prompt",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "pending",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+        app._insert_generation(
+            {
+                "id": "hist-safe",
+                "workflow": "t2i-test.json",
+                "filename": "safe.png",
+                "prompt": "plain prompt",
+                "time": "2026-05-18 12:01:00",
+                "protection_status": "safe",
+                "protection_score": 0.02,
+                "protection_source": "classifier",
+                "protection_reason": "safe content",
+                "protection_checked_at": "2026-05-18 12:01:03",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+
+        self.assertEqual([item["id"] for item in result["data"]], ["hist-safe"])
+        self.assertEqual(result["data"][0]["protection_status"], "safe")
+        self.assertEqual(result["data"][0]["protection_source"], "classifier")
+        self.assertAlmostEqual(result["data"][0]["protection_score"], 0.02)
+
+    def test_update_generation_protection_persists_result(self):
+        app._insert_generation(
+            {
+                "id": "hist-1",
+                "workflow": "t2i-test.json",
+                "filename": "hist-1.png",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        app._update_generation_protection(
+            "hist-1",
+            status="protected",
+            score=0.87,
+            reason="classifier matched unsafe label",
+            source="classifier",
+        )
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["protection_status"], "protected")
+        self.assertEqual(result["data"][0]["protection_source"], "classifier")
+        self.assertEqual(result["data"][0]["protection_reason"], "classifier matched unsafe label")
+        self.assertGreater(result["data"][0]["protection_checked_at"], "")
+
+    def test_legacy_prompt_rows_are_not_backfilled_when_prompt_protection_is_off(self):
+        image_path = os.path.join(app.OUTPUT_DIR, "legacy.png")
+        Image.new("RGB", (48, 48), (230, 180, 160)).save(image_path)
+        app._insert_generation(
+            {
+                "id": "hist-legacy",
+                "workflow": "t2i-test.json",
+                "filename": "legacy.png",
+                "prompt": "nsfw portrait",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        app._backfill_legacy_prompt_protection()
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["protection_status"], "safe")
+        self.assertEqual(result["data"][0]["protection_source"], "")
+
+    def test_legacy_prompt_backfill_does_not_override_checked_safe_rows(self):
+        app._insert_generation(
+            {
+                "id": "hist-checked",
+                "workflow": "t2i-test.json",
+                "filename": "checked.png",
+                "prompt": "nsfw word in prompt but classifier passed",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+                "protection_score": 0.98,
+                "protection_source": "classifier",
+                "protection_reason": "classifier safe",
+                "protection_checked_at": "2026-05-18 12:00:03",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        app._backfill_legacy_prompt_protection()
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["protection_status"], "safe")
+        self.assertEqual(result["data"][0]["protection_source"], "classifier")
+
+    def test_safe_heuristic_soft_nude_prompt_rows_stay_safe_when_detector_is_safe(self):
+        rel_path = "u1/2026-05-22/nsfw-risk.png"
+        abs_path = os.path.join(app.OUTPUT_DIR, rel_path)
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        img = Image.new("RGB", (48, 48), (8, 10, 12))
+        for x in range(24):
+            for y in range(48):
+                img.putpixel((x, y), (230, 180, 160))
+        img.save(abs_path)
+        app._insert_generation(
+            {
+                "id": "hist-heuristic-safe",
+                "workflow": "t2i-test.json",
+                "filename": rel_path,
+                "prompt": "人物没穿任何衣服，双手举起露出胸部，写实肖像",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+                "protection_score": 0.46,
+                "protection_source": "heuristic",
+                "protection_reason": "local heuristic skin_ratio=0.540",
+                "protection_checked_at": "2026-05-18 12:00:03",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        app._recheck_safe_heuristic_nsfw_risk_rows()
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["protection_status"], "safe")
+        self.assertEqual(result["data"][0]["protection_source"], "heuristic")
+        self.assertIn("skin_ratio", result["data"][0]["protection_reason"])
+
+    def test_safe_heuristic_full_nude_prompt_rows_stay_safe_when_prompt_protection_is_off(self):
+        rel_path = "u1/2026-05-22/full-nude-risk.png"
+        abs_path = os.path.join(app.OUTPUT_DIR, rel_path)
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        img = Image.new("RGB", (48, 48), (8, 10, 12))
+        for x in range(10, 30):
+            for y in range(48):
+                img.putpixel((x, y), (230, 180, 160))
+        img.save(abs_path)
+        app._insert_generation(
+            {
+                "id": "hist-full-nude-safe",
+                "workflow": "t2i-test.json",
+                "filename": rel_path,
+                "prompt": "人物全裸，裸体，全身裸体，写实肖像",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+                "protection_score": 0.58,
+                "protection_source": "heuristic",
+                "protection_reason": "local heuristic skin_ratio=0.420",
+                "protection_checked_at": "2026-05-18 12:00:03",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        app._recheck_safe_heuristic_nsfw_risk_rows()
+
+        result = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["data"][0]["protection_status"], "safe")
+        self.assertEqual(result["data"][0]["protection_source"], "heuristic")
+        self.assertIn("skin_ratio", result["data"][0]["protection_reason"])
 
     def test_delete_moves_record_to_trash_without_removing_files(self):
         image_path = os.path.join(app.OUTPUT_DIR, "hist-1.png")

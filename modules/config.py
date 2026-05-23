@@ -15,6 +15,7 @@ class NodeCategory:
         "KSampler",
         "KSamplerAdvanced",
         "SamplerCustom",
+        "SamplerCustomAdvanced",
         "FluxSampler",
     }
 
@@ -40,12 +41,17 @@ class NodeCategory:
         "VAEDecode",
         "EmptyLatentImage",
         "EmptySD3LatentImage",
+        "EmptyFlux2LatentImage",
         "ConditioningZeroOut",
         "ConditioningSetTimestepRange",
+        "FluxGuidance",
         "ImageScaleBy",
         "ImageScale",
         "ImageCompositeMasked",
         "LoadImage",
+        "LoadVideo",
+        "GetVideoComponents",
+        "CreateVideo",
         "JoinImageWithAlpha",
     }
 
@@ -64,11 +70,20 @@ class NodeCategory:
         "SeedVR2LoadVAEModel",
     }
 
+    FREE_RUNTIME: ClassVar[set[str]] = {
+        "BasicGuider",
+        "KSamplerSelect",
+        "RandomNoise",
+        "Flux2Scheduler",
+    }
+
 
 class ModelGroup:
     """工作流模型分组 — 控制实例亲和性路由。"""
 
     GROUPS: ClassVar[list[tuple[str, list[str]]]] = [
+        ("flux2-klein", ["flux2_klein", "flux2-klein", "flux-2-klein"]),
+        ("flux2-dev", ["flux2_dev", "flux2-dev", "flux.2-dev"]),
         ("nunchaku", ["nunchaku"]),
         ("z-image-turbo", ["z-image-turbo", "z_image_turbo", "z-image", "z-xxx", "z_xxx"]),
         ("seedvr", ["seedvr"]),
@@ -119,6 +134,7 @@ NODE_STATUS_MAP: dict[str, str] = {
     "KSampler": "采样中...",
     "KSamplerAdvanced": "高级采样中...",
     "SamplerCustom": "自定义采样中...",
+    "SamplerCustomAdvanced": "高级采样中...",
     "VAEDecode": "解码图像...",
     "VAEEncode": "编码图像...",
     "ImageUpscaleWithModel": "超分辨率放大...",
@@ -126,5 +142,9 @@ NODE_STATUS_MAP: dict[str, str] = {
     "ImageScaleBy": "图像缩放...",
     "ImageScale": "图像缩放...",
     "ImageCompositeMasked": "合成图像...",
+    "LoadVideo": "加载视频...",
+    "GetVideoComponents": "解析视频...",
+    "CreateVideo": "创建视频...",
+    "SaveVideo": "保存视频...",
     "SaveImage": "保存图像...",
 }

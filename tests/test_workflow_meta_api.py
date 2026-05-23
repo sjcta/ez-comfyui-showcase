@@ -73,6 +73,15 @@ class WorkflowMetaApiTest(unittest.TestCase):
 
         self.assertEqual(os.path.realpath(db_path), os.path.realpath(app.GEN_DB))
 
+    def test_workflow_thumbnail_response_disables_cache(self):
+        thumb_path = os.path.join(app.WORKFLOW_DIR, "a.png")
+        with open(thumb_path, "wb") as f:
+            f.write(b"png")
+
+        response = app.api_get_wf_thumbnail("a.png")
+
+        self.assertEqual(response.headers.get("cache-control"), "no-store, max-age=0")
+
 
 if __name__ == "__main__":
     unittest.main()

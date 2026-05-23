@@ -1,7 +1,11 @@
 import json
+from pathlib import Path
 import subprocess
 import textwrap
 import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PollManagerResumeTest(unittest.TestCase):
@@ -62,6 +66,17 @@ class PollManagerResumeTest(unittest.TestCase):
         self.assertFalse(data["jobExists"])
         self.assertGreaterEqual(data["loadHistory"], 1)
         self.assertGreaterEqual(data["rerender"], 1)
+
+    def test_status_change_keeps_previous_job_until_on_job_update(self):
+        source = (ROOT / "static/js/modules/poll_manager.js").read_text("utf-8")
+        self.assertIn("var prev = jobs[id];", source)
+        self.assertIn("self.onJobUpdate(sj);", source)
+        self.assertNotIn("jobs[id] = sj;\n            self.onJobUpdate(sj);", source)
+
+        app_source = (ROOT / "static/js/app.js").read_text("utf-8")
+        self.assertIn("const prev = jobs[id];", app_source)
+        self.assertIn("onJobUpdate(sj);", app_source)
+        self.assertNotIn("jobs[id] = sj;\n          onJobUpdate(sj);", app_source)
 
 
 if __name__ == "__main__":

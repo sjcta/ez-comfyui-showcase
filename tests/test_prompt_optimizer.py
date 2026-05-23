@@ -5,6 +5,7 @@ import app
 from modules.prompt_optimizer import (
     IMAGE_PROMPT_OPTIMIZATION_GUIDE,
     STRUCTURED_PROMPT_JSON_SCHEMA,
+    VIDEO_SCRIPT_OPTIMIZATION_GUIDE,
     _normalize_optimized_text,
     build_qwen_prompt_optimizer_workflow,
     build_qwen_prompt_language_switch_workflow,
@@ -16,6 +17,7 @@ from modules.prompt_optimizer import (
     normalize_language_switch_prompt,
     normalize_translated_prompt,
     parse_prompt_optimizer_output,
+    parse_video_script_optimizer_output,
     run_prompt_language_switcher,
 )
 
@@ -65,6 +67,87 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertIn("Preserve proper nouns", text)
         self.assertIn("黑猫警长", text)
         self.assertIn("classic Chinese animated police cat character", text)
+
+    def test_build_qwen_video_script_workflow_uses_video_guidance(self):
+        workflow = build_qwen_prompt_optimizer_workflow("一只猫穿过雨夜霓虹街道", prompt_mode="video_script")
+
+        text = workflow["1"]["inputs"]["text"]
+        self.assertIn("video script prompt optimizer", text)
+        self.assertIn("LTX / Sulphur and Seedance 2.0", text)
+        self.assertIn(VIDEO_SCRIPT_OPTIMIZATION_GUIDE, text)
+        self.assertIn("一只猫穿过雨夜霓虹街道", text)
+        self.assertNotIn(STRUCTURED_PROMPT_JSON_SCHEMA, text)
+        self.assertEqual(workflow["1"]["_meta"]["title"], "Qwen Video Script Optimizer")
+        self.assertEqual(workflow["2"]["_meta"]["title"], "Optimized Video Script")
+
+    def test_build_qwen_video_script_workflow_defaults_to_single_image_reference(self):
+        workflow = build_qwen_prompt_optimizer_workflow("吃棒棒糖的少女，特写镜头", prompt_mode="video_script")
+
+        text = workflow["1"]["inputs"]["text"]
+        self.assertIn("single uploaded image", text)
+        self.assertIn("Do not invent @图片, @视频, or @音频 reference placeholders", text)
+        self.assertIn("Do not include duration or aspect-ratio settings", text)
+        self.assertIn("Preserve user-provided second or frame timeline labels", text)
+        self.assertIn("人物、场景、氛围、动作、表情、镜头、光影", text)
+        self.assertNotIn("@图片1-@图片9", text)
+        self.assertNotIn("@视频1-@视频3", text)
+        self.assertNotIn("aspect ratio, duration", text)
+
+    def test_build_qwen_video_script_workflow_uses_current_timing_context(self):
+        workflow = build_qwen_prompt_optimizer_workflow(
+            "吃棒棒糖的少女，0-3秒含糖微动",
+            prompt_mode="video_script",
+            prompt_context={"duration_seconds": 10, "fps": 24},
+        )
+
+        text = workflow["1"]["inputs"]["text"]
+        self.assertIn("Current workflow timing: 10 seconds", text)
+        self.assertIn("24 fps", text)
+        self.assertIn("Keep timeline segments within this duration", text)
+
+    def test_parse_video_script_optimizer_output_skips_image_json_variant(self):
+        parsed = parse_video_script_optimizer_output(
+            "10秒雨夜霓虹街道，一只黑猫从画面左侧穿过，镜头低机位跟随，雨水反光，环境音为雨声。",
+            "雨夜黑猫",
+        )
+
+        self.assertEqual(parsed["prompt_mode"], "video_script")
+        self.assertEqual(parsed["cleaned_prompt"], "雨夜黑猫")
+        self.assertIn("镜头低机位跟随", parsed["optimized_prompt"])
+        self.assertNotIn("structured_prompt_json", parsed)
+
+    def test_parse_video_script_optimizer_output_removes_unsupported_reference_and_parameter_clauses(self):
+        parsed = parse_video_script_optimizer_output(
+            "吃棒棒糖的少女，特写镜头，糖身微晃，@视频1-@视频3 作为动作参考，"
+            "@图片1-@图片3 作为场景与光影参考，@音频1 作为环境音参考，"
+            "禁止文字、字幕、LOGO、水印、风格漂移、角色变脸，时长10秒，16:9，镜头保持柔焦与微晃。",
+            "吃棒棒糖的少女",
+        )
+
+        optimized = parsed["optimized_prompt"]
+        self.assertIn("吃棒棒糖的少女", optimized)
+        self.assertIn("镜头保持柔焦与微晃", optimized)
+        self.assertNotIn("@视频", optimized)
+        self.assertNotIn("@图片", optimized)
+        self.assertNotIn("@音频", optimized)
+        self.assertNotIn("禁止文字", optimized)
+        self.assertNotIn("LOGO", optimized)
+        self.assertNotIn("时长10秒", optimized)
+        self.assertNotIn("16:9", optimized)
+
+    def test_parse_video_script_optimizer_output_preserves_timeline_segments(self):
+        parsed = parse_video_script_optimizer_output(
+            "人物：吃棒棒糖的少女，0-3秒：含糖微动，3-6秒：轻抿糖身，"
+            "第24帧：眼神转向镜头，时长10秒，16:9。",
+            "吃棒棒糖的少女",
+        )
+
+        optimized = parsed["optimized_prompt"]
+        self.assertIn("0-3秒：含糖微动", optimized)
+        self.assertIn("3-6秒：轻抿糖身", optimized)
+        self.assertIn("第24帧：眼神转向镜头", optimized)
+        self.assertNotIn("时长10秒", optimized)
+        self.assertNotIn("16:9", optimized)
 
     def test_build_qwen_prompt_translator_workflow_outputs_chinese_prompt(self):
         workflow = build_qwen_prompt_translator_workflow("a sliced watermelon on a plate")
@@ -420,6 +503,52 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertEqual(result["optimized_prompt"], "fresh sliced watermelon, natural lighting")
         self.assertEqual(result["structured_prompt"]["subject"], "watermelon")
         self.assertIn("subject", result["structured_prompt_json"])
+
+    def test_api_prompt_optimize_passes_video_script_mode(self):
+        calls = []
+        old_runner = app.run_prompt_optimizer
+        old_instances = app._get_enabled_instances
+        old_picker = app._pick_ready_aux_instance
+        try:
+            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
+            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+
+            def fake_runner(prompt, base_url, post, get, **kwargs):
+                calls.append((
+                    prompt,
+                    base_url,
+                    kwargs.get("prompt_mode"),
+                    kwargs.get("max_new_tokens"),
+                    kwargs.get("prompt_context"),
+                ))
+                return {
+                    "ok": True,
+                    "provider": "comfyui-qwen3-vl-4b-4bit",
+                    "prompt_id": "p-video",
+                    "original_prompt": prompt,
+                    "cleaned_prompt": "雨夜黑猫",
+                    "optimized_prompt": "10秒雨夜霓虹街道，一只黑猫从画面左侧穿过，镜头低机位跟随。",
+                    "prompt_mode": "video_script",
+                }
+
+            app.run_prompt_optimizer = fake_runner
+            result = app.api_prompt_optimize(
+                app.PromptOptimizeRequest(
+                    prompt="雨夜黑猫",
+                    mode="video_script",
+                    max_new_tokens=768,
+                    prompt_context={"duration_seconds": 10, "fps": 24},
+                ),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app.run_prompt_optimizer = old_runner
+            app._get_enabled_instances = old_instances
+            app._pick_ready_aux_instance = old_picker
+
+        self.assertEqual(calls, [("雨夜黑猫", "http://prompt", "video_script", 768, {"duration_seconds": 10, "fps": 24})])
+        self.assertEqual(result["prompt_mode"], "video_script")
+        self.assertIn("黑猫", result["optimized_prompt"])
 
     def test_api_prompt_translate_auto_targets_english_for_chinese_prompt(self):
         calls = []

@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "workflow": "i2i-Qwen-Rapid.json",
+  "fields": [
+    {
+      "key": "78::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "115:111::prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 1,
+      "type": "textarea"
+    },
+    {
+      "key": "88::largest_size",
+      "zone": "advanced",
+      "visible": true,
+      "label": "输入最大边",
+      "order": 0,
+      "type": "number"
+    },
+    {
+      "key": "115:3::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 1,
+      "type": "seed"
+    },
+    {
+      "key": "115:3::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 2,
+      "type": "number",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "115:3::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 3,
+      "type": "number",
+      "step": 0.5,
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "115:3::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样器",
+      "order": 4,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "115:3::scheduler",
+      "zone": "advanced",
+      "visible": true,
+      "label": "scheduler",
+      "order": 5,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "115:3::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "denoise",
+      "order": 6,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "96::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "88::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "89::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "115:38::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "115:38::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "115:38::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "115:39::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "115:66::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "115:75::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 7,
+      "type": "number"
+    }
+  ]
+}

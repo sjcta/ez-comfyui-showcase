@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -8,6 +10,201 @@ from modules.ws_tracker import WSTracker, PromptStartTimeout, PromptSubmitError
 
 
 class ProgressCalculationTests(unittest.TestCase):
+    def test_tracker_uses_persisted_client_id_for_ws_and_prompt_submit(self):
+        workflow = {
+            "1": {
+                "class_type": "SaveImage",
+                "inputs": {},
+            },
+        }
+        step_info = StepCalculator().calculate(workflow)
+        captured = {}
+        tracker = WSTracker(
+            job_id="job-client-id-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+            client_id="client-persisted",
+        )
+
+        class CompleteWS:
+            async def recv(self):
+                return json.dumps({
+                    "type": "executing",
+                    "data": {"node": None, "prompt_id": "prompt-client"},
+                })
+
+            async def close(self):
+                pass
+
+        async def fake_connect(url, **_kwargs):
+            captured["ws_url"] = url
+            return CompleteWS()
+
+        def fake_post(_url, payload):
+            captured["payload"] = payload
+            return {"prompt_id": "prompt-client"}
+
+        async def run_track():
+            with mock.patch("modules.ws_tracker.websockets.client.connect", side_effect=fake_connect):
+                with mock.patch("modules.ws_tracker._http_post", side_effect=fake_post):
+                    return await tracker.track(timeout=5)
+
+        result = asyncio.run(run_track())
+
+        self.assertTrue(result.ok)
+        self.assertIn("clientId=client-persisted", captured["ws_url"])
+        self.assertEqual(captured["payload"]["client_id"], "client-persisted")
+
+    def test_waiting_for_execution_reports_zero_progress_until_nodes_start(self):
+        workflow = {
+            "1": {
+                "class_type": "KSampler",
+                "inputs": {"steps": 4},
+            },
+        }
+        step_info = StepCalculator().calculate(workflow)
+        progress_events = []
+        tracker = WSTracker(
+            job_id="job-waiting-progress-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+            progress_callback=lambda progress: progress_events.append(progress),
+        )
+        tracker.PROMPT_START_TIMEOUT = 0.01
+        tracker.WS_SILENT_TIMEOUT = 10
+
+        class QuietWS:
+            async def recv(self):
+                await asyncio.sleep(1)
+
+            async def close(self):
+                pass
+
+        async def fake_connect(*_args, **_kwargs):
+            return QuietWS()
+
+        async def run_timeout():
+            with mock.patch("modules.ws_tracker.websockets.client.connect", side_effect=fake_connect):
+                with mock.patch("modules.ws_tracker._http_post", return_value={"prompt_id": "prompt-waiting"}):
+                    with self.assertRaises(PromptStartTimeout):
+                        await tracker.track(timeout=5)
+
+        asyncio.run(run_timeout())
+
+        waiting = [event for event in progress_events if event.get("message") == "等待实例开始执行..."]
+        self.assertTrue(waiting)
+        self.assertEqual(waiting[-1]["pct"], 0)
+        submitting = [event for event in progress_events if event.get("message") == "提交工作流..."]
+        self.assertTrue(submitting)
+        self.assertEqual(submitting[-1]["pct"], 0)
+
+    def test_flux2_sampler_uses_scheduler_steps_so_setup_nodes_do_not_frontload_progress(self):
+        workflow_path = (
+            Path(__file__).resolve().parents[1]
+            / "data"
+            / "workflows"
+            / "DGX Spark"
+            / "t2i_flux2_dev_turbo_q4km.json"
+        )
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        step_info = StepCalculator().calculate(workflow)
+
+        self.assertIn("13", step_info.sampler_steps)
+        self.assertEqual(step_info.sampler_steps["13"], 8)
+        self.assertGreater(step_info.node_weights["13"], step_info.node_weights["38"] * 10)
+
+        tracker = WSTracker(
+            job_id="job-flux2-progress-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+        tracker._last_pct = 0
+
+        async def run_sequence():
+            pct_by_node = {}
+            for nid in ("10", "47", "48", "16", "38"):
+                await tracker._handle_executing(
+                    {"node": nid},
+                    step_info.total_units,
+                    step_info.node_weights,
+                )
+                pct_by_node[nid] = tracker._calc_pct()
+            return pct_by_node
+
+        pct_by_node = asyncio.run(run_sequence())
+
+        self.assertEqual(pct_by_node["10"], 0)
+        self.assertLess(pct_by_node["38"], 10)
+
+    def test_sampler_and_upscale_share_ninety_percent_budget(self):
+        workflow = {
+            "1": {"class_type": "LoadImage", "inputs": {"image": "input.png"}},
+            "2": {"class_type": "KSampler", "inputs": {"steps": 8, "denoise": 1.0}},
+            "3": {"class_type": "SeedVR2VideoUpscaler", "inputs": {"image": ["1", 0], "resolution": 2048}},
+            "4": {"class_type": "SaveImage", "inputs": {"images": ["3", 0]}},
+        }
+        step_info = StepCalculator().calculate(workflow)
+
+        self.assertAlmostEqual(step_info.total_units, 100.0)
+        self.assertAlmostEqual(step_info.node_weights["2"], 45.0)
+        self.assertAlmostEqual(step_info.node_weights["3"], 45.0)
+        self.assertAlmostEqual(step_info.node_weights["1"], 5.0)
+        self.assertAlmostEqual(step_info.node_weights["4"], 5.0)
+
+        tracker = WSTracker(
+            job_id="job-budget-progress-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+
+        async def run_sequence():
+            await tracker._handle_executing({"node": "1"}, step_info.total_units, step_info.node_weights)
+            await tracker._handle_executed({"node": "1"})
+            after_load = tracker._calc_pct()
+
+            await tracker._handle_executing({"node": "2"}, step_info.total_units, step_info.node_weights)
+            await tracker._handle_progress({"node": "2", "value": 1, "max": 8}, step_info.total_units, step_info.node_weights)
+            after_one_sampler_step = tracker._calc_pct()
+            await tracker._handle_progress({"node": "2", "value": 8, "max": 8}, step_info.total_units, step_info.node_weights)
+            after_sampler = tracker._calc_pct()
+
+            await tracker._handle_executing({"node": "3"}, step_info.total_units, step_info.node_weights)
+            await tracker._handle_progress({"node": "3", "value": 5, "max": 100}, step_info.total_units, step_info.node_weights)
+            after_upscale_five = tracker._calc_pct()
+            return after_load, after_one_sampler_step, after_sampler, after_upscale_five
+
+        after_load, after_one_sampler_step, after_sampler, after_upscale_five = asyncio.run(run_sequence())
+
+        self.assertAlmostEqual(after_load, 5.0)
+        self.assertAlmostEqual(after_one_sampler_step, 10.625)
+        self.assertAlmostEqual(after_sampler, 50.0)
+        self.assertAlmostEqual(after_upscale_five, 52.25)
+
+    def test_sampler_and_two_upscales_split_ninety_percent_three_ways(self):
+        workflow = {
+            "1": {"class_type": "LoadImage", "inputs": {"image": "input.png"}},
+            "2": {"class_type": "KSampler", "inputs": {"steps": 8, "denoise": 1.0}},
+            "3": {"class_type": "ImageUpscaleWithModel", "inputs": {"image": ["1", 0]}},
+            "4": {"class_type": "SeedVR2VideoUpscaler", "inputs": {"image": ["3", 0], "resolution": 4096}},
+            "5": {"class_type": "SaveImage", "inputs": {"images": ["4", 0]}},
+        }
+        step_info = StepCalculator().calculate(workflow)
+
+        self.assertAlmostEqual(step_info.total_units, 100.0)
+        self.assertAlmostEqual(step_info.node_weights["2"], 30.0)
+        self.assertAlmostEqual(step_info.node_weights["3"], 30.0)
+        self.assertAlmostEqual(step_info.node_weights["4"], 30.0)
+        self.assertAlmostEqual(step_info.node_weights["1"], 5.0)
+        self.assertAlmostEqual(step_info.node_weights["5"], 5.0)
+
     def test_prompt_submit_error_is_raised_with_details(self):
         workflow = {
             "1": {
@@ -187,10 +384,12 @@ class ProgressCalculationTests(unittest.TestCase):
             workflow_done,
         ) = asyncio.run(run_sequence())
 
-        self.assertGreater(first_sampler_started, 29)
-        self.assertGreater(first_sampler_done, 70)
+        self.assertGreater(first_sampler_started, 0)
+        self.assertLess(first_sampler_started, 10)
+        self.assertGreater(first_sampler_done, 49)
+        self.assertLess(first_sampler_done, 51)
         self.assertGreater(second_sampler_started, first_sampler_done)
-        self.assertGreater(second_sampler_done, 88)
+        self.assertGreater(second_sampler_done, 95)
         self.assertGreater(save_started, second_sampler_done)
         self.assertLess(save_started, 100)
         self.assertEqual(workflow_done, 100)

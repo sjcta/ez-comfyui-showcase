@@ -18,6 +18,11 @@
   var _historyHoverPreview = null;
   var _accountActiveTab = 'profile';
   var _usersCache = [];
+  var _notificationRecords = [];
+  var _siteNotificationItems = [];
+  var _siteNotificationIndex = 0;
+  var _siteNotificationLatestId = 0;
+  var _siteNotificationCheckStarted = false;
   var _historyCache = [];
   var _expandedHistoryPrompts = {};
   var _historyFavorites = {};
@@ -26,6 +31,11 @@
   function _historyFavoriteStorageKey() {
     var ident = _currentUser && (_currentUser.id || _currentUser.user_id || _currentUser.username);
     return 'cw_history_favorites:' + (ident ? String(ident) : 'guest');
+  }
+
+  function _siteNotificationMuteStorageKey() {
+    var ident = _currentUser && (_currentUser.id || _currentUser.user_id || _currentUser.username);
+    return 'cw_site_notifications_muted_until:' + (ident ? String(ident) : 'guest');
   }
 
   function _loadHistoryFavorites() {
@@ -135,6 +145,7 @@
           closeModal();
           CW.toast(okText, 'done');
           if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+          _scheduleSiteNotifications();
           return _currentUser;
         });
       }).catch(function() {
@@ -151,6 +162,7 @@
           closeModal();
           CW.toast(okText, 'done');
           if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+          _scheduleSiteNotifications();
           return data;
         });
       });
@@ -208,6 +220,7 @@
     if (!token) {
       _historyFavorites = _loadHistoryFavorites();
       _updateUI();
+      _scheduleSiteNotifications();
       return Promise.resolve(null);
     }
     return fetch(API + '/auth/me', {
@@ -227,12 +240,14 @@
       }).then(function() {
         _updateUI();
         if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+        _scheduleSiteNotifications();
         return user;
       });
     }).catch(function() {
       _clearToken();
       _updateUI();
       if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
+      _scheduleSiteNotifications();
       return null;
     });
   }
@@ -260,6 +275,8 @@
             '<button class="auth-dropdown-item" type="button" onclick="CW.auth.showAccountTab(\'history\')">' + (window.CW && CW.icon ? CW.icon('image') : '') + '出图历史</button>' +
             '<button class="auth-dropdown-item" type="button" onclick="CW.auth.showAccountTab(\'trash\')">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + '回收站</button>' +
             (_currentUser.role === 'admin' ? '<button class="auth-dropdown-item" type="button" onclick="CW.auth.showAccountTab(\'users\')">' + (window.CW && CW.icon ? CW.icon('users') : '') + '用户管理</button>' : '') +
+            (_currentUser.role === 'admin' ? '<button class="auth-dropdown-item" type="button" onclick="CW.auth.showAccountTab(\'notifications\')">' + (window.CW && CW.icon ? CW.icon('bell') : '') + '网站通知</button>' : '') +
+            (_currentUser.role === 'admin' ? '<button class="auth-dropdown-item" type="button" onclick="CW.auth.showSystemSettings()">' + (window.CW && CW.icon ? CW.icon('settings') : '') + '系统设置</button>' : '') +
             '<button class="auth-dropdown-item danger" type="button" onclick="CW.auth.logout()">' + (window.CW && CW.icon ? CW.icon('log-out') : '') + '退出登录</button>' +
           '</div>' +
         '</div>';
@@ -274,6 +291,11 @@
 
   function showLogin() { _showModal('login'); }
   function showRegister() { _showModal('register'); }
+
+  function _shouldAutoFocusAuthInput() {
+    if (!window.matchMedia) return true;
+    return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  }
 
   function _showModal(mode) {
     var old = $('#authModalOverlay');
@@ -298,7 +320,10 @@
     document.body.appendChild(overlay);
     if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, true);
     else overlay.classList.add('open');
-    setTimeout(function() { $('#authUsername').focus(); }, 100);
+    setTimeout(function() {
+      var input = $('#authUsername');
+      if (input && overlay.classList.contains('open') && _shouldAutoFocusAuthInput()) input.focus();
+    }, 320);
     $('#authSubmitBtn').onclick = function() {
       var u = $('#authUsername').value.trim();
       var p = $('#authPassword').value;
@@ -359,6 +384,7 @@
       '<button class="account-tab' + (initialTab === 'history' ? ' active' : '') + '" data-tab="history">出图历史</button>' +
       '<button class="account-tab' + (initialTab === 'trash' ? ' active' : '') + '" data-tab="trash">回收站</button>' +
       (_currentUser && _currentUser.role === 'admin' ? '<button class="account-tab' + (initialTab === 'users' ? ' active' : '') + '" data-tab="users">用户管理</button>' : '') +
+      (_currentUser && _currentUser.role === 'admin' ? '<button class="account-tab' + (initialTab === 'notifications' ? ' active' : '') + '" data-tab="notifications">网站通知</button>' : '') +
       '</div><div class="account-body" id="accountBody"></div></div></div>';
     var div = document.createElement('div');
     div.innerHTML = html;
@@ -385,9 +411,339 @@
     else el.remove();
   }
 
+  function _sysBool(id) {
+    var el = $('#' + id);
+    return !!(el && el.checked);
+  }
+
+  function _sysNumber(id, fallback) {
+    var el = $('#' + id);
+    var value = el ? Number(el.value) : NaN;
+    if (!Number.isFinite(value)) value = fallback;
+    return Math.max(0, Math.min(1, value));
+  }
+
+  function _sysText(id) {
+    var el = $('#' + id);
+    return el ? el.value : '';
+  }
+
+  function _settingsSwitch(id, label, hint, checked) {
+    return '<label class="system-settings-switch">' +
+      '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
+      '<span><strong>' + label + '</strong><small>' + hint + '</small></span>' +
+      '</label>';
+  }
+
+  function _settingsNumber(id, label, hint, value) {
+    var normalized = Number(value);
+    if (!Number.isFinite(normalized)) normalized = 0;
+    return '<label class="system-settings-field">' +
+      '<span>' + label + '</span>' +
+      '<input class="auth-input" id="' + id + '" type="number" min="0" max="1" step="0.01" value="' + escA(String(normalized)) + '">' +
+      '<small>' + hint + '</small>' +
+      '</label>';
+  }
+
+  function _settingsTextarea(id, label, value) {
+    return '<label class="system-settings-field system-settings-textarea">' +
+      '<span>' + label + '</span>' +
+      '<textarea class="auth-input" id="' + id + '" rows="4">' + escH(value || '') + '</textarea>' +
+      '</label>';
+  }
+
+  function _renderSystemSettings(data) {
+    var body = $('#systemSettingsBody');
+    if (!body) return;
+    var cfg = (data && data.image_protection) || {};
+    var patterns = cfg.prompt_patterns || {};
+    body.innerHTML =
+      '<div class="system-settings-section">' +
+        '<div class="account-panel-head"><strong>图片保护</strong><span>控制出图后的视觉审查、阈值和提示词兜底规则。</span></div>' +
+        '<div class="system-settings-grid">' +
+          _settingsSwitch('sysImageProtectionEnabled', '启用图片保护', '关闭后所有图片都会按 safe 处理。', cfg.enabled !== false) +
+          _settingsSwitch('sysDetectorEnabled', '启用视觉 detector', '使用轻量模型识别两点和性器官等视觉信号。', cfg.detector_enabled !== false) +
+          _settingsSwitch('sysPromptSignalsEnabled', '启用提示词保护', '开启后提示词规则可作为额外保护兜底。', !!cfg.prompt_signals_enabled) +
+          _settingsSwitch('sysPromptContextEnabled', '启用弱视觉提示词确认', '提示词不会单独保护，但可确认低置信度露点视觉信号。', cfg.prompt_context_enabled !== false) +
+          _settingsSwitch('sysVisualFallbackEnabled', '启用本地视觉兜底', 'detector 未命中时启用低成本像素兜底。', !!cfg.visual_fallback_enabled) +
+          _settingsNumber('sysDetectorThreshold', 'Detector 基础阈值', '单项检测低于该值会被忽略。', cfg.detector_threshold) +
+          _settingsNumber('sysPairedBreastThreshold', '成对两点阈值', '两侧 EXPOSED_BREAST_F 的较低分必须达到该值。', cfg.paired_breast_threshold) +
+          _settingsNumber('sysButtocksThreshold', '臀部裸露阈值', '背面全裸类 EXPOSED_BUTTOCKS 达到该值会保护。', cfg.buttocks_threshold) +
+          _settingsNumber('sysWeakBreastPromptThreshold', '弱露点确认阈值', '低置信度 EXPOSED_BREAST_F 加提示词风险达到该值会保护。', cfg.weak_breast_prompt_threshold) +
+          _settingsNumber('sysClassifierThreshold', '分类器阈值', '可选分类器 unsafe 分数阈值。', cfg.classifier_threshold) +
+          _settingsNumber('sysVisualIntimateSkinThreshold', '视觉兜底肤色阈值', '像素兜底进入细查的最低肤色占比。', cfg.visual_intimate_skin_threshold) +
+          _settingsNumber('sysStrongPromptSkinThreshold', '硬提示词肤色阈值', '提示词保护开启时，硬词命中所需肤色占比。', cfg.strong_prompt_skin_threshold) +
+          _settingsNumber('sysStrongNudeSkinThreshold', '裸体提示词肤色阈值', '提示词保护开启时，裸体词命中所需肤色占比。', cfg.strong_nude_skin_threshold) +
+          _settingsNumber('sysNsfwRiskSkinThreshold', '软提示词肤色阈值', '提示词保护开启时，软词命中所需肤色占比。', cfg.nsfw_risk_skin_threshold) +
+        '</div>' +
+      '</div>' +
+      '<div class="system-settings-section">' +
+        '<div class="account-panel-head"><strong>提示词管理</strong><span>按正则片段管理；提示词保护关闭时，不会单独保护，但仍可用于弱视觉二次确认。</span></div>' +
+        '<div class="system-settings-patterns">' +
+          _settingsTextarea('sysPromptPatternHard', '硬保护词', patterns.hard) +
+          _settingsTextarea('sysPromptPatternRisk', '软风险词', patterns.risk) +
+          _settingsTextarea('sysPromptPatternStrongNude', '裸体强信号词', patterns.strong_nude) +
+          _settingsTextarea('sysPromptPatternObsceneGesture', '不雅手势词', patterns.obscene_gesture) +
+        '</div>' +
+      '</div>';
+    var saveBtn = $('#systemSettingsSave');
+    if (saveBtn) saveBtn.onclick = saveSystemSettings;
+  }
+
+  function showSystemSettings() {
+    if (!_currentUser || _currentUser.role !== 'admin') return;
+    _closeDropdown();
+    var old = $('#systemSettingsOverlay');
+    if (old) old.remove();
+    var html = '<div class="auth-modal-overlay" id="systemSettingsOverlay" onclick="if(event.target===this)CW.auth.closeSystemSettings()">' +
+      '<div class="account-modal system-settings-modal">' +
+        '<div class="auth-modal-header"><span class="auth-modal-title">' + (window.CW && CW.icon ? CW.icon('settings', 18) : '') + '系统设置</span>' +
+        '<button class="auth-modal-close" type="button" onclick="CW.auth.closeSystemSettings()">×</button></div>' +
+        '<div class="account-body system-settings-body" id="systemSettingsBody"><div class="account-loading">加载中...</div></div>' +
+        '<div class="system-settings-footer"><button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.closeSystemSettings()">取消</button><button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" id="systemSettingsSave">保存设置</button></div>' +
+      '</div></div>';
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    var overlay = div.firstElementChild;
+    document.body.appendChild(overlay);
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, true);
+    else overlay.classList.add('open');
+    apiFetch(_withCacheBust(API + '/api/system-settings'), { cache: 'no-store' })
+      .then(function(r) { if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '加载失败'); }); return r.json(); })
+      .then(function(d) { _renderSystemSettings((d && d.data) || {}); })
+      .catch(function(e) {
+        var body = $('#systemSettingsBody');
+        if (body) body.innerHTML = '<div class="account-error">' + escH(e.message || '加载失败') + '</div>';
+      });
+  }
+
+  function closeSystemSettings() {
+    var el = $('#systemSettingsOverlay');
+    if (!el) return;
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(el, false, { removeAfterClose: true });
+    else el.remove();
+  }
+
+  function saveSystemSettings() {
+    var payload = {
+      image_protection: {
+        enabled: _sysBool('sysImageProtectionEnabled'),
+        detector_enabled: _sysBool('sysDetectorEnabled'),
+        prompt_signals_enabled: _sysBool('sysPromptSignalsEnabled'),
+        prompt_context_enabled: _sysBool('sysPromptContextEnabled'),
+        visual_fallback_enabled: _sysBool('sysVisualFallbackEnabled'),
+        detector_threshold: _sysNumber('sysDetectorThreshold', 0.45),
+        paired_breast_threshold: _sysNumber('sysPairedBreastThreshold', 0.56),
+        buttocks_threshold: _sysNumber('sysButtocksThreshold', 0.75),
+        weak_breast_prompt_threshold: _sysNumber('sysWeakBreastPromptThreshold', 0.52),
+        classifier_threshold: _sysNumber('sysClassifierThreshold', 0.68),
+        visual_intimate_skin_threshold: _sysNumber('sysVisualIntimateSkinThreshold', 0.40),
+        strong_prompt_skin_threshold: _sysNumber('sysStrongPromptSkinThreshold', 0.14),
+        strong_nude_skin_threshold: _sysNumber('sysStrongNudeSkinThreshold', 0.14),
+        nsfw_risk_skin_threshold: _sysNumber('sysNsfwRiskSkinThreshold', 0.18),
+        prompt_patterns: {
+          hard: _sysText('sysPromptPatternHard'),
+          risk: _sysText('sysPromptPatternRisk'),
+          strong_nude: _sysText('sysPromptPatternStrongNude'),
+          obscene_gesture: _sysText('sysPromptPatternObsceneGesture')
+        }
+      }
+    };
+    apiFetch(API + '/api/system-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '保存失败'); });
+      return r.json();
+    }).then(function(d) {
+      _renderSystemSettings((d && d.data) || {});
+      CW.toast('系统设置已保存', 'done');
+    }).catch(function(e) {
+      CW.toast(e.message || '保存失败', 'error');
+    });
+  }
+
+  function _getLocalNotificationMutedUntil() {
+    try {
+      return parseInt(localStorage.getItem(_siteNotificationMuteStorageKey()) || '0', 10) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function _setLocalNotificationMutedUntil(id) {
+    try {
+      localStorage.setItem(_siteNotificationMuteStorageKey(), String(Math.max(0, Number(id) || 0)));
+    } catch (e) {}
+  }
+
+  function _renderNotificationRecordRows() {
+    var rows = (_notificationRecords || []).map(function(n) {
+      return '<div class="notice-record-row">' +
+        '<div class="notice-record-main"><strong>' + escH(n.title || '-') + '</strong><span>' + escH(n.created_at || '-') + (n.created_by_username ? ' · ' + escH(n.created_by_username) : '') + '</span></div>' +
+        '<p>' + escH(n.content || '') + '</p>' +
+      '</div>';
+    }).join('');
+    return rows || '<div class="account-empty">暂无发送记录</div>';
+  }
+
+  function _renderNotificationsAdmin() {
+    var body = $('#accountBody');
+    if (!body) return;
+    body.innerHTML =
+      '<div class="account-section notice-admin-section">' +
+        '<div class="account-panel-head">' +
+          '<strong>网站通知</strong>' +
+          '<span>发送后会保存记录，并在普通用户打开界面时弹出展示。</span>' +
+        '</div>' +
+        '<div class="notice-compose-card">' +
+          '<input class="auth-input" id="siteNoticeTitle" maxlength="120" placeholder="通知标题">' +
+          '<textarea class="auth-input" id="siteNoticeContent" rows="5" maxlength="4000" placeholder="通知内容"></textarea>' +
+          '<div class="notice-compose-actions">' +
+            '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.sendSiteNotification()">发送通知</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="account-list-card notice-record-card">' +
+          '<div class="account-toolbar"><strong>发送记录</strong><span>' + escH(String((_notificationRecords || []).length)) + ' 条</span></div>' +
+          '<div id="siteNoticeRecords">' + _renderNotificationRecordRows() + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function _loadNotificationsAdmin() {
+    var body = $('#accountBody');
+    if (body) body.innerHTML = '<div class="account-loading">加载中...</div>';
+    apiFetch(_withCacheBust(API + '/api/site-notifications/admin'), { cache: 'no-store' }).then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '加载失败'); });
+      return r.json();
+    }).then(function(d) {
+      _notificationRecords = (d.data || []).slice();
+      _renderNotificationsAdmin();
+    }).catch(function(e) {
+      if (body) body.innerHTML = '<div class="account-error">' + escH(e.message || '加载失败') + '</div>';
+    });
+  }
+
+  function sendSiteNotification() {
+    if (!_currentUser || _currentUser.role !== 'admin') return;
+    var titleEl = $('#siteNoticeTitle');
+    var contentEl = $('#siteNoticeContent');
+    var title = titleEl ? titleEl.value.trim() : '';
+    var content = contentEl ? contentEl.value.trim() : '';
+    if (!title || !content) return CW.toast('请填写标题和内容', 'warn');
+    apiFetch(API + '/api/site-notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, content: content })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '发送失败'); });
+      return r.json();
+    }).then(function(d) {
+      if (titleEl) titleEl.value = '';
+      if (contentEl) contentEl.value = '';
+      if (d && d.data) _notificationRecords.unshift(d.data);
+      _renderNotificationsAdmin();
+      CW.toast('网站通知已发送', 'done');
+    }).catch(function(e) {
+      CW.toast(e.message || '发送失败', 'error');
+    });
+  }
+
+  function _closeSiteNotification() {
+    var el = $('#siteNotificationOverlay');
+    if (!el) return;
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(el, false, { removeAfterClose: true });
+    else el.remove();
+  }
+
+  function _renderSiteNotificationModal() {
+    var items = _siteNotificationItems || [];
+    var item = items[_siteNotificationIndex];
+    if (!item) {
+      _closeSiteNotification();
+      return;
+    }
+    var old = $('#siteNotificationOverlay');
+    if (old) old.remove();
+    var hasNext = _siteNotificationIndex < items.length - 1;
+    var html = '<div class="auth-modal-overlay site-notice-overlay" id="siteNotificationOverlay" onclick="if(event.target===this)CW.auth.closeSiteNotification()">' +
+      '<div class="site-notice-modal">' +
+        '<div class="auth-modal-header"><span class="auth-modal-title">' + (window.CW && CW.icon ? CW.icon('bell', 18) : '') + '网站通知</span>' +
+        '<button class="auth-modal-close" type="button" onclick="CW.auth.closeSiteNotification()">×</button></div>' +
+        '<div class="site-notice-body">' +
+          '<div class="site-notice-count">' + escH(String(_siteNotificationIndex + 1)) + ' / ' + escH(String(items.length)) + '</div>' +
+          '<h3>' + escH(item.title || '通知') + '</h3>' +
+          '<p>' + escH(item.content || '') + '</p>' +
+          '<span>' + escH(item.created_at || '') + '</span>' +
+        '</div>' +
+        '<div class="site-notice-actions">' +
+          '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.closeSiteNotification()">关闭</button>' +
+          '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.muteSiteNotifications()">不再通知</button>' +
+          (hasNext ? '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.nextSiteNotification()">下一条</button>' : '') +
+        '</div>' +
+      '</div></div>';
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    var overlay = div.firstElementChild;
+    document.body.appendChild(overlay);
+    if (window.CW && CW.setModalOpen) CW.setModalOpen(overlay, true);
+    else overlay.classList.add('open');
+  }
+
+  function nextSiteNotification() {
+    if (_siteNotificationIndex < (_siteNotificationItems || []).length - 1) {
+      _siteNotificationIndex += 1;
+      _renderSiteNotificationModal();
+    }
+  }
+
+  function muteSiteNotifications() {
+    var targetId = _siteNotificationLatestId || ((_siteNotificationItems || []).reduce(function(maxId, item) {
+      return Math.max(maxId, Number(item.id) || 0);
+    }, 0));
+    _setLocalNotificationMutedUntil(targetId);
+    if (_currentUser) {
+      apiFetch(API + '/api/site-notifications/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: targetId })
+      }).catch(function() {});
+    }
+    _closeSiteNotification();
+    CW.toast('已关闭当前通知', 'done');
+  }
+
+  function _checkSiteNotifications() {
+    return apiFetch(_withCacheBust(API + '/api/site-notifications'), { cache: 'no-store' }).then(function(r) {
+      if (!r.ok) return null;
+      return r.json();
+    }).then(function(d) {
+      if (!(d && d.ok)) return;
+      _siteNotificationLatestId = Number(d.latest_id || 0) || 0;
+      var localMutedUntil = _getLocalNotificationMutedUntil();
+      var items = (d.data || []).filter(function(item) {
+        return (Number(item.id) || 0) > localMutedUntil;
+      });
+      if (!items.length) return;
+      _siteNotificationItems = items;
+      _siteNotificationIndex = 0;
+      _renderSiteNotificationModal();
+    }).catch(function(e) {
+      console.warn('site notifications failed:', e && e.message ? e.message : e);
+    });
+  }
+
+  function _scheduleSiteNotifications() {
+    if (_siteNotificationCheckStarted) return;
+    _siteNotificationCheckStarted = true;
+    setTimeout(_checkSiteNotifications, 500);
+  }
+
   function _renderAccountTab(tab) {
     _accountActiveTab = tab || 'profile';
     if (tab === 'users') return _loadUsers();
+    if (tab === 'notifications') return _loadNotificationsAdmin();
     if (tab === 'history') {
       _historyFilters.trash = false;
       return _loadMyHistory();
@@ -1313,6 +1669,13 @@
     showAccount: showAccount,
     showAccountTab: showAccountTab,
     closeAccount: closeAccount,
+    showSystemSettings: showSystemSettings,
+    closeSystemSettings: closeSystemSettings,
+    saveSystemSettings: saveSystemSettings,
+    sendSiteNotification: sendSiteNotification,
+    closeSiteNotification: _closeSiteNotification,
+    nextSiteNotification: nextSiteNotification,
+    muteSiteNotifications: muteSiteNotifications,
     jumpToUser: jumpToUser,
     createUser: createUser,
     saveUser: saveUser,

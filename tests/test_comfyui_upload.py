@@ -11,10 +11,11 @@ class ComfyUIUploadTest(unittest.TestCase):
         workflow = {
             "1": {"class_type": "LoadImage", "inputs": {"image": "u1/2026-05-19/a.png"}},
             "2": {"class_type": "LoadImage", "inputs": {"image": "u1/2026-05-19/a.png"}},
+            "4": {"class_type": "LoadVideo", "inputs": {"file": "u1/2026-05-19/a.mp4"}},
             "3": {"class_type": "KSampler", "inputs": {"seed": 1}},
         }
 
-        self.assertEqual(workflow_load_images(workflow), ["u1/2026-05-19/a.png"])
+        self.assertEqual(workflow_load_images(workflow), ["u1/2026-05-19/a.png", "u1/2026-05-19/a.mp4"])
 
     def test_resolves_only_canonical_input_path(self):
         with tempfile.TemporaryDirectory() as tmp:

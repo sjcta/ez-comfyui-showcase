@@ -1,4 +1,4 @@
-"""Helpers for syncing local input images to remote ComfyUI instances."""
+"""Helpers for syncing local input media to remote ComfyUI instances."""
 
 from __future__ import annotations
 
@@ -12,20 +12,24 @@ from typing import Any
 
 
 def workflow_load_images(workflow: dict[str, Any]) -> list[str]:
-    """Return unique LoadImage filenames referenced by a workflow."""
-    images: list[str] = []
+    """Return unique LoadImage/LoadVideo filenames referenced by a workflow."""
+    media: list[str] = []
     seen: set[str] = set()
     for node in workflow.values():
-        if not isinstance(node, dict) or node.get("class_type") != "LoadImage":
+        if not isinstance(node, dict):
             continue
-        image = node.get("inputs", {}).get("image")
-        if not isinstance(image, str) or not image.strip():
+        class_type = node.get("class_type")
+        input_name = "image" if class_type == "LoadImage" else "file" if class_type == "LoadVideo" else ""
+        if not input_name:
             continue
-        name = image.strip()
+        value = node.get("inputs", {}).get(input_name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        name = value.strip()
         if name not in seen:
             seen.add(name)
-            images.append(name)
-    return images
+            media.append(name)
+    return media
 
 
 def _local_input_path(input_dir: str, image_name: str) -> str:
@@ -52,7 +56,7 @@ def _local_reference_path(input_dir: str, image_name: str) -> str:
 
 
 def upload_image_to_comfyui(base_url: str, image_path: str, image_name: str) -> dict:
-    """Upload one image to ComfyUI's input folder via /upload/image."""
+    """Upload one input media file to ComfyUI's input folder via /upload/image."""
     boundary = f"----ez-comfyui-{uuid.uuid4().hex}"
     mime = mimetypes.guess_type(image_name)[0] or "application/octet-stream"
     with open(image_path, "rb") as fh:
@@ -100,7 +104,7 @@ def upload_image_to_comfyui(base_url: str, image_path: str, image_name: str) -> 
 
 
 def ensure_workflow_images_available(workflow: dict[str, Any], input_dir: str, base_url: str) -> None:
-    """Upload local LoadImage files to the selected remote ComfyUI instance."""
+    """Upload local LoadImage/LoadVideo files to the selected remote ComfyUI instance."""
     for image_name in workflow_load_images(workflow):
         image_path = _local_reference_path(input_dir, image_name)
         if not os.path.isfile(image_path):
