@@ -7,7 +7,7 @@
   'use strict';
 
   var base = 'static/js';
-  var version = '1779574700';
+  var version = '1779574800';
   var runtimeApiBase = (location.protocol === 'file:')
     ? 'http://localhost:18000'
     : '';
@@ -130,14 +130,13 @@
     if (window.CW.pollManager && window.CW.pollManager.start) window.CW.pollManager.start();
     var authReady = window.CW.authReady || Promise.resolve(null);
     authReady.then(function(user) {
-      if (user && user.role) {
-        return loadLoggedInModules(user).then(function() {
-          if (window.CW.loadWorkflows) window.CW.loadWorkflows();
-          if (window.CW.loadHistory) window.CW.loadHistory();
-        });
-      }
       if (window.CW.loadWorkflows) window.CW.loadWorkflows();
       if (window.CW.loadHistory) window.CW.loadHistory();
+      if (user && user.role) {
+        return loadLoggedInModules(user).catch(function(err) {
+          console.warn('logged-in modules failed:', err && err.message ? err.message : err);
+        });
+      }
     });
   }
 

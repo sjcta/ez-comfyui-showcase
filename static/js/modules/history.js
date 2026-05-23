@@ -22,7 +22,7 @@
   var _lbLoadToken = 0;
   var _lbCurrentItem = null;
   var _lbFavorites = {};
-  var HISTORY_FETCH_LIMIT = 5000;
+  var HISTORY_FETCH_LIMIT = 300;
 
   function _lightboxImageUrl(filename) {
     return `${API}/api/images/${filename}`;
@@ -424,6 +424,26 @@ function _patchHistoryCardIndex(oldChild, newChild) {
     return true;
   }
 
+function _jobCardStatusClass(card) {
+    if (!card || !card.classList) return '';
+    var statuses = ['queued', 'preparing', 'dispatching', 'starting_comfyui', 'submitting', 'generating', 'downloading', 'checking'];
+    for (var i = 0; i < statuses.length; i++) {
+      if (card.classList.contains(statuses[i])) return statuses[i];
+    }
+    return '';
+  }
+
+function _patchStableJobCard(oldChild, newChild) {
+    if (!oldChild || !newChild || !oldChild.hasAttribute('data-job-id') || !newChild.hasAttribute('data-job-id')) return false;
+    var id = oldChild.getAttribute('data-job-id') || '';
+    if (!id || id !== (newChild.getAttribute('data-job-id') || '')) return false;
+    if (_jobCardStatusClass(oldChild) !== _jobCardStatusClass(newChild)) return false;
+    var job = jobs && jobs[id];
+    if (!job || job.status === 'done' || job.status === 'error') return false;
+    _patchJobCard(job);
+    return true;
+  }
+
 function _patchGalleryHTML(gallery, html) {
     var tpl = document.createElement('template');
     tpl.innerHTML = html;
@@ -440,7 +460,7 @@ function _patchGalleryHTML(gallery, html) {
       var childToPlace = newChild;
       if (oldChild) {
         delete oldByKey[key];
-        if (oldChild.outerHTML !== newChild.outerHTML && !_patchHistoryCardIndex(oldChild, newChild)) {
+        if (oldChild.outerHTML !== newChild.outerHTML && !_patchStableJobCard(oldChild, newChild) && !_patchHistoryCardIndex(oldChild, newChild)) {
           var replacingCursor = oldChild === cursor;
           var afterOldChild = oldChild.nextSibling;
           oldChild.replaceWith(newChild);

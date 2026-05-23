@@ -231,17 +231,9 @@
     }).then(function(user) {
       _currentUser = user;
       _historyFavorites = _loadHistoryFavorites();
-      return Promise.resolve(
-        window.CW && typeof window.CW.loadLoggedInModules === 'function'
-          ? window.CW.loadLoggedInModules(user)
-          : null
-      ).catch(function() {
-        return null;
-      }).then(function() {
-        _updateUI();
-        _scheduleSiteNotifications();
-        return user;
-      });
+      _updateUI();
+      _scheduleSiteNotifications();
+      return user;
     }).catch(function() {
       _clearToken();
       _updateUI();

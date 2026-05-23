@@ -27,6 +27,28 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertIn("if (_loadWorkflowsPromise) return _loadWorkflowsPromise;", workflows_js)
         self.assertIn("_loadWorkflowsPromise.finally(function()", workflows_js)
 
+    def test_logged_in_modules_do_not_block_primary_startup_data(self):
+        loader_js = (ROOT / "static/js/module_loader.js").read_text()
+        auth_ready_start = loader_js.index("authReady.then(function(user)")
+        load_workflows_pos = loader_js.index("window.CW.loadWorkflows", auth_ready_start)
+        load_logged_modules_pos = loader_js.index("loadLoggedInModules(user)", auth_ready_start)
+
+        self.assertLess(load_workflows_pos, load_logged_modules_pos)
+
+    def test_workflow_preview_uses_loaded_history_without_extra_fetch(self):
+        workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
+        preview_start = workflows_js.index("async function _loadWorkflowPreviewItems()")
+        preview_end = workflows_js.index("function _workflowManagerThumbUrl", preview_start)
+        preview_block = workflows_js[preview_start:preview_end]
+
+        self.assertIn("return historyItems.slice();", preview_block)
+        self.assertNotIn("/api/history?scope=mine&limit=300", preview_block)
+
+    def test_main_history_initial_fetch_is_bounded(self):
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+
+        self.assertIn("var HISTORY_FETCH_LIMIT = 300;", history_js)
+
 
 if __name__ == "__main__":
     unittest.main()

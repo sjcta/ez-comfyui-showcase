@@ -130,18 +130,7 @@
   }
 
   async function _loadWorkflowPreviewItems() {
-    var user = window.CW && CW.auth && typeof CW.auth.getCurrentUser === 'function'
-      ? CW.auth.getCurrentUser()
-      : null;
-    if (!user) return historyItems.slice();
-    try {
-      var r = await authFetch(API + '/api/history?scope=mine&limit=300');
-      var d = await r.json();
-      if (r.ok && d && d.ok) return d.data || [];
-    } catch (e) {
-      console.warn('workflow preview history failed:', e && e.message ? e.message : e);
-    }
-    return [];
+    return historyItems.slice();
   }
 
   function _workflowManagerThumbUrl(meta, fname) {

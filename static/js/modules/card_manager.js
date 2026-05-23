@@ -287,6 +287,27 @@
     return true;
   }
 
+  function _jobCardStatusClass(card) {
+    if (!card || !card.classList) return '';
+    var statuses = ['queued', 'preparing', 'dispatching', 'starting_comfyui', 'submitting', 'generating', 'downloading', 'checking'];
+    for (var i = 0; i < statuses.length; i++) {
+      if (card.classList.contains(statuses[i])) return statuses[i];
+    }
+    return '';
+  }
+
+  function _patchStableJobCard(oldChild, newChild) {
+    if (!oldChild || !newChild || !oldChild.hasAttribute('data-job-id') || !newChild.hasAttribute('data-job-id')) return false;
+    var id = oldChild.getAttribute('data-job-id') || '';
+    if (!id || id !== (newChild.getAttribute('data-job-id') || '')) return false;
+    if (_jobCardStatusClass(oldChild) !== _jobCardStatusClass(newChild)) return false;
+    var job = jobs && jobs[id];
+    if (!job || job.status === 'done' || job.status === 'error') return false;
+    var cm = window.CW && window.CW.cardManager;
+    if (cm && typeof cm.patchJobCard === 'function') cm.patchJobCard(job);
+    return true;
+  }
+
   function _patchGalleryHTML(gallery, html) {
     var tpl = document.createElement('template');
     tpl.innerHTML = html;
@@ -303,7 +324,7 @@
       var childToPlace = newChild;
       if (oldChild) {
         delete oldByKey[key];
-        if (oldChild.outerHTML !== newChild.outerHTML && !_patchHistoryCardIndex(oldChild, newChild)) {
+        if (oldChild.outerHTML !== newChild.outerHTML && !_patchStableJobCard(oldChild, newChild) && !_patchHistoryCardIndex(oldChild, newChild)) {
           var replacingCursor = oldChild === cursor;
           var afterOldChild = oldChild.nextSibling;
           oldChild.replaceWith(newChild);
