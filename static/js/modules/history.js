@@ -14,6 +14,7 @@
   var _pinnedHistoryIds = [];
   var _optimisticHistoryById = {};
   var _galleryBatchItems = {};
+  var _loadHistoryPromise = null;
   var lbIdx = -1;
   var lbItems = [];
   var _galleryFilters = { owner: 'all', type: '', style: '' };
@@ -1937,6 +1938,8 @@ async function delHist(id) {
   }
 
 async function loadHistory() {
+    if (_loadHistoryPromise) return _loadHistoryPromise;
+    _loadHistoryPromise = (async function() {
     try {
       var prevVisibleCount = _histVisibleCount || _lastRenderedHistCount || 0;
       var authHeaders = window.CW.auth.getAuthHeaders();
@@ -1972,6 +1975,10 @@ async function loadHistory() {
     } catch (e) {
       console.error('loadHistory:', e);
     }
+    })();
+    return _loadHistoryPromise.finally(function() {
+      _loadHistoryPromise = null;
+    });
   }
 
 

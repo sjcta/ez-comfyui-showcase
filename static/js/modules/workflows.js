@@ -6,6 +6,7 @@
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs, historyItems = A.historyItems;
+  var _loadWorkflowsPromise = null;
 
   function authFetch(url, opts) {
     opts = opts || {};
@@ -900,6 +901,8 @@ async function selectWF(name) {
   }
 
 async function loadWorkflows() {
+    if (_loadWorkflowsPromise) return _loadWorkflowsPromise;
+    _loadWorkflowsPromise = (async function() {
     try {
       const [r, metaR, previewItems] = await Promise.all([
         authFetch(`${API}/api/workflows`),
@@ -1029,6 +1032,10 @@ async function loadWorkflows() {
     } catch (e) {
       console.error("loadWorkflows:", e.message || "", e.stack || "(no stack)");
     }
+    })();
+    return _loadWorkflowsPromise.finally(function() {
+      _loadWorkflowsPromise = null;
+    });
   }
 
 

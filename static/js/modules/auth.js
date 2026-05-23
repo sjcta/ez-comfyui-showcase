@@ -239,14 +239,12 @@
         return null;
       }).then(function() {
         _updateUI();
-        if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
         _scheduleSiteNotifications();
         return user;
       });
     }).catch(function() {
       _clearToken();
       _updateUI();
-      if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
       _scheduleSiteNotifications();
       return null;
     });
