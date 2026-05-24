@@ -41,6 +41,7 @@ from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
 from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
+from modules.mobile_agent_routes import register_mobile_agent_routes
 from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
 from modules.prompt_labels import infer_generation_label
 from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
@@ -5841,6 +5842,19 @@ def _resolve_workflow(name: str, entry: dict | None = None) -> str | None:
         # Deterministic fallback for names without pinned metadata.
         return sorted(set(candidates))[0]
     return None
+
+
+register_mobile_agent_routes(app, {
+    "get_current_user": get_current_user,
+    "load_system_settings": _load_system_settings,
+    "load_wf_meta": _load_wf_meta,
+    "normalize_wf_meta_entry": _normalize_wf_meta_entry,
+    "resolve_workflow": _resolve_workflow,
+    "can_view_workflow": _can_view_workflow,
+    "analyze_workflow": analyze_workflow,
+    "add_log": add_log,
+    "user_id": _user_id,
+})
 
 
 def _auto_detect_tags(workflow_path: str) -> list[str]:
