@@ -19,6 +19,7 @@
     base + '/modules/workflows.js?v=' + version,
     base + '/modules/history.js?v=' + version,
     base + '/modules/generate.js?v=' + version,
+    base + '/modules/mobile_agent/mobile-agent.js?v=' + version,
     base + '/modules/auth.js?v=' + version,
     base + '/modules/card_manager.js?v=' + version,
     base + '/modules/poll_manager.js?v=' + version
@@ -120,6 +121,7 @@
       link.href = 'static/css/style.css?v=' + version;
       document.head.appendChild(link);
     }
+    await loadStylesheet('static/css/mobile-agent.css?v=' + version);
     await loadSprite('static/icons/sprite.svg?v=' + version);
     for (var i = 0; i < coreModules.length; i++) {
       await loadScript(coreModules[i]);

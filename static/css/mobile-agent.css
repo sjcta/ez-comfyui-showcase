@@ -1,0 +1,218 @@
+.mobile-agent {
+  display: none;
+  width: 100%;
+  min-height: calc(var(--vh, 1vh) * 100);
+  height: calc(var(--vh, 1vh) * 100);
+  overflow-x: hidden;
+  overflow-y: auto;
+  color: #f8fafc;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(28, 214, 184, 0.18), transparent 30%),
+    linear-gradient(180deg, #101820 0%, #17212b 52%, #0f141b 100%);
+}
+
+.mobile-agent.hidden {
+  display: none;
+}
+
+.mobile-agent-panel {
+  width: min(100%, 520px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 22px 18px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.mobile-agent-hero {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding-top: 10px;
+}
+
+.mobile-agent-avatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 20px;
+  color: #0d171d;
+  background: linear-gradient(135deg, #3ee7bd, #ffd166);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.mobile-agent h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.18;
+  font-weight: 760;
+}
+
+.mobile-agent p {
+  margin: 6px 0 0;
+  color: rgba(248, 250, 252, 0.72);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.mobile-agent-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.mobile-agent-compose span,
+.mobile-agent-section-label {
+  color: rgba(248, 250, 252, 0.64);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.mobile-agent-compose textarea {
+  width: 100%;
+  min-height: 148px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 14px;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.mobile-agent-compose textarea:focus {
+  border-color: rgba(62, 231, 189, 0.82);
+  box-shadow: 0 0 0 3px rgba(62, 231, 189, 0.16);
+}
+
+.mobile-agent-input-row,
+.mobile-agent-actions {
+  display: grid;
+  grid-template-columns: 44px 44px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.mobile-agent-icon-btn,
+.mobile-agent-send-btn,
+.mobile-agent-secondary-btn,
+.mobile-agent-back,
+.mobile-agent-chip {
+  border: 0;
+  border-radius: 8px;
+  min-height: 44px;
+  color: #f8fafc;
+  font: inherit;
+}
+
+.mobile-agent-icon-btn {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mobile-agent-icon-btn:disabled {
+  opacity: 0.45;
+}
+
+.mobile-agent-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  font-weight: 760;
+  color: #071016;
+  background: linear-gradient(135deg, #46e6bc, #ffd166);
+}
+
+.mobile-agent-send-btn:disabled {
+  opacity: 0.7;
+}
+
+.mobile-agent-secondary-btn,
+.mobile-agent-back {
+  padding: 0 14px;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mobile-agent-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-agent-summary {
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mobile-agent-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mobile-agent-chip {
+  padding: 0 14px;
+  min-height: 38px;
+  color: rgba(248, 250, 252, 0.9);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mobile-agent-actions {
+  grid-template-columns: 1fr 1.2fr;
+  margin-top: auto;
+}
+
+.mobile-agent-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #ffd6d6;
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.mobile-agent-voice-orb,
+.mobile-agent-spinner {
+  width: 86px;
+  height: 86px;
+  margin: 44px auto 4px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #071016;
+  background: linear-gradient(135deg, #46e6bc, #ffd166);
+}
+
+.mobile-agent-spinner {
+  border: 4px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #46e6bc;
+  background: transparent;
+  animation: mobile-agent-spin 1s linear infinite;
+}
+
+@keyframes mobile-agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 700px) {
+  .mobile-agent:not(.hidden) {
+    display: flex;
+  }
+
+  .mobile-agent-panel {
+    padding-top: 18px;
+  }
+}
