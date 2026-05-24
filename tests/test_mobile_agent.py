@@ -1,3 +1,6 @@
+import os
+import tempfile
+import textwrap
 import unittest
 
 from modules.mobile_agent import (
@@ -105,6 +108,23 @@ class MobileAgentTests(unittest.TestCase):
 
 
 class SpeechTranscriberTests(unittest.TestCase):
+    def _fake_command(self, body: str) -> str:
+        fd, path = tempfile.mkstemp(prefix="fake-whisper-", suffix=".py")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("#!/usr/bin/env python3\n")
+            f.write(textwrap.dedent(body).lstrip())
+        os.chmod(path, 0o755)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        return path
+
+    def _speech_temp_dirs(self) -> list[str]:
+        temp_root = tempfile.gettempdir()
+        return [
+            os.path.join(temp_root, name)
+            for name in os.listdir(temp_root)
+            if name.startswith("ez-speech-")
+        ]
+
     def test_missing_speech_backend_returns_editable_failure(self):
         result = SpeechTranscriber(command="definitely-missing-whisper").transcribe_bytes(
             b"fake audio",
@@ -122,6 +142,92 @@ class SpeechTranscriberTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertEqual(result["error_code"], "empty_audio")
+
+    def test_successful_transcription_reads_backend_txt(self):
+        command = self._fake_command(
+            """
+            import pathlib
+            import sys
+
+            audio_path = pathlib.Path(sys.argv[1])
+            output_dir = pathlib.Path(sys.argv[sys.argv.index("--output_dir") + 1])
+            (output_dir / f"{audio_path.stem}.txt").write_text("hello mobile creator\\n", encoding="utf-8")
+            """
+        )
+
+        result = SpeechTranscriber(command=command).transcribe_bytes(
+            b"fake audio",
+            filename="voice.webm",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], command)
+        self.assertEqual(result["transcript"], "hello mobile creator")
+        self.assertEqual(result["error_code"], "")
+        self.assertEqual(self._speech_temp_dirs(), [])
+
+    def test_nonzero_backend_returns_transcribe_failed(self):
+        command = self._fake_command(
+            """
+            import sys
+
+            print("backend failed badly", file=sys.stderr)
+            sys.exit(3)
+            """
+        )
+
+        result = SpeechTranscriber(command=command).transcribe_bytes(
+            b"fake audio",
+            filename="voice.webm",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "speech_transcribe_failed")
+        self.assertIn("backend failed badly", result["message"])
+        self.assertEqual(self._speech_temp_dirs(), [])
+
+    def test_backend_timeout_returns_speech_timeout(self):
+        command = self._fake_command(
+            """
+            import time
+
+            time.sleep(1)
+            """
+        )
+
+        result = SpeechTranscriber(command=command).transcribe_bytes(
+            b"fake audio",
+            filename="voice.webm",
+            timeout_ms=100,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "speech_timeout")
+        self.assertEqual(self._speech_temp_dirs(), [])
+
+    def test_malformed_long_filename_suffix_uses_safe_fallback(self):
+        command = self._fake_command(
+            """
+            import pathlib
+            import sys
+
+            audio_path = pathlib.Path(sys.argv[1])
+            if audio_path.suffix != ".webm":
+                print(f"unsafe suffix: {audio_path.suffix}", file=sys.stderr)
+                sys.exit(4)
+            output_dir = pathlib.Path(sys.argv[sys.argv.index("--output_dir") + 1])
+            (output_dir / f"{audio_path.stem}.txt").write_text("safe suffix", encoding="utf-8")
+            """
+        )
+
+        result = SpeechTranscriber(command=command).transcribe_bytes(
+            b"fake audio",
+            filename="voice." + ("a" * 300),
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["transcript"], "safe suffix")
+        self.assertEqual(self._speech_temp_dirs(), [])
 
 
 if __name__ == "__main__":
