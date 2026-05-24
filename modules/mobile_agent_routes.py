@@ -118,7 +118,10 @@ def _load_mobile_creator_settings(load_system_settings: Callable[[], dict[str, A
     configured = settings.get("mobile_creator") if isinstance(settings, dict) else {}
     if not isinstance(configured, dict):
         configured = {}
-    return {**DEFAULT_MOBILE_CREATOR_SETTINGS, **configured}
+    merged = {**DEFAULT_MOBILE_CREATOR_SETTINGS, **configured}
+    if not str(merged.get("default_text_to_image_workflow") or "").strip():
+        merged["default_text_to_image_workflow"] = DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"]
+    return merged
 
 
 def _resolve_workflow_entry(

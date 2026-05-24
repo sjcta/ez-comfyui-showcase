@@ -10,7 +10,7 @@ from modules.prompt_optimizer import clean_user_prompt
 
 DEFAULT_MOBILE_CREATOR_SETTINGS = {
     "enabled": True,
-    "default_text_to_image_workflow": "",
+    "default_text_to_image_workflow": "t2i-z-image.json",
     "allowed_styles": ["cinematic", "anime", "realistic"],
     "allowed_ratios": ["1:1", "3:4", "9:16"],
     "llm_timeout_ms": 8000,

@@ -202,28 +202,36 @@
     var styles = options.allowed_styles || data.allowed_styles || data.styles || data.style_chips || (selectedStyle ? [selectedStyle] : []);
     var ratios = options.allowed_ratios || data.allowed_ratios || data.aspect_ratios || data.ratios || (selectedRatio ? [selectedRatio] : []);
     var summary = data.display_summary || data.compiled_prompt || state.text || '请确认创作方案';
+    var workflowReady = !!data.resolved_workflow && !data.error_code;
+    var warning = state.error || (!workflowReady ? (data.question || '当前默认工作流暂不可用，请返回修改或联系管理员配置。') : '');
+    var workflowLabel = data.workflow_title || data.workflow_label || data.resolved_workflow || '';
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="confirm">' +
         '<button class="mobile-agent-back" type="button" data-action="home">' + icon('chevron-left') + ' 返回</button>' +
-        '<div class="mobile-agent-section-label">创作方案</div>' +
-        '<h1>确认后开始生成</h1>' +
-        '<p class="mobile-agent-summary">' + escH(summary) + '</p>' +
-        (state.error ? '<div class="mobile-agent-error" role="alert">' + escH(state.error) + '</div>' : '') +
-        '<div class="mobile-agent-selected">' +
-          (selectedStyle ? '<span>风格：' + escH(selectedStyle) + '</span>' : '') +
-          (selectedRatio ? '<span>画幅：' + escH(selectedRatio) + '</span>' : '') +
+        '<div class="mobile-agent-confirm-main">' +
+          '<div class="mobile-agent-section-label">EZ 已整理好方案</div>' +
+          '<h1>准备生成这张图</h1>' +
+          '<div class="mobile-agent-summary">' + escH(summary) + '</div>' +
+          (workflowReady ? '<div class="mobile-agent-workflow-status">已匹配工作流：' + escH(workflowLabel) + '</div>' : '') +
+          (warning ? '<div class="mobile-agent-error" role="alert">' + escH(warning) + '</div>' : '') +
         '</div>' +
-        '<div class="mobile-agent-chip-group" aria-label="风格">' + styles.map(function (item) {
-          var active = selectedStyle && String(item) === String(selectedStyle);
-          return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
-        }).join('') + '</div>' +
-        '<div class="mobile-agent-chip-group" aria-label="画幅">' + ratios.map(function (item) {
-          var active = selectedRatio && String(item) === String(selectedRatio);
-          return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
-        }).join('') + '</div>' +
+        '<div class="mobile-agent-option-block">' +
+          '<span>风格</span>' +
+          '<div class="mobile-agent-chip-group" aria-label="风格">' + styles.map(function (item) {
+            var active = selectedStyle && String(item) === String(selectedStyle);
+            return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
+          }).join('') + '</div>' +
+        '</div>' +
+        '<div class="mobile-agent-option-block">' +
+          '<span>画幅</span>' +
+          '<div class="mobile-agent-chip-group" aria-label="画幅">' + ratios.map(function (item) {
+            var active = selectedRatio && String(item) === String(selectedRatio);
+            return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
+          }).join('') + '</div>' +
+        '</div>' +
         '<div class="mobile-agent-actions">' +
           '<button class="mobile-agent-secondary-btn" type="button" data-action="home">返回修改</button>' +
-          '<button class="mobile-agent-send-btn" type="button" data-action="generate">' + icon('sparkles') + '<span>生成</span></button>' +
+          '<button class="mobile-agent-send-btn" type="button" data-action="generate"' + (workflowReady ? '' : ' disabled') + '>' + icon('sparkles') + '<span>生成</span></button>' +
         '</div>' +
       '</section>'
     );

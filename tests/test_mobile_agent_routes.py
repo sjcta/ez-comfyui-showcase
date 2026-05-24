@@ -3,7 +3,8 @@ import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from modules.mobile_agent_routes import register_mobile_agent_routes
+from modules.mobile_agent import DEFAULT_MOBILE_CREATOR_SETTINGS
+from modules.mobile_agent_routes import _load_mobile_creator_settings, register_mobile_agent_routes
 
 
 class MobileAgentRoutesTests(unittest.TestCase):
@@ -67,6 +68,14 @@ class MobileAgentRoutesTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["data"]["error_code"], "workflow_unavailable")
         self.assertTrue(result["data"]["needs_confirmation"])
+
+    def test_blank_default_workflow_setting_falls_back_to_mobile_default(self):
+        settings = _load_mobile_creator_settings(lambda: {"mobile_creator": {"default_text_to_image_workflow": ""}})
+
+        self.assertEqual(
+            settings["default_text_to_image_workflow"],
+            DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"],
+        )
 
     def test_understand_analysis_failure_requires_confirmation(self):
         api = FastAPI()

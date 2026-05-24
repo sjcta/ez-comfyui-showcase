@@ -406,11 +406,42 @@
   min-height: 42px;
 }
 
+.mobile-agent-panel[data-view="confirm"] {
+  gap: 14px;
+}
+
+.mobile-agent-confirm-main {
+  flex: 1 1 auto;
+  min-height: 250px;
+  display: grid;
+  gap: 12px;
+  align-content: center;
+  padding-top: 8px;
+}
+
+.mobile-agent-confirm-main h1 {
+  max-width: 360px;
+}
+
 .mobile-agent-summary {
-  padding: 16px 18px;
+  padding: 18px 20px;
   border-radius: 26px;
-  color: #e8eaed;
+  color: #f1f3f4;
   background: #1f2023;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.mobile-agent-workflow-status {
+  width: fit-content;
+  max-width: 100%;
+  padding: 9px 13px;
+  border-radius: 999px;
+  color: #ffd477;
+  background: #2b2519;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 700;
 }
 
 .mobile-agent-selected {
@@ -431,6 +462,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.mobile-agent-option-block {
+  display: grid;
+  gap: 10px;
+}
+
+.mobile-agent-option-block > span {
+  color: #9aa0a6;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .mobile-agent-chip {

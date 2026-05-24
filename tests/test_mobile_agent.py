@@ -80,6 +80,9 @@ class MobileAgentTests(unittest.TestCase):
         self.assertEqual(response["options"]["allowed_styles"], allowed_styles)
         self.assertEqual(response["options"]["allowed_ratios"], allowed_ratios)
 
+    def test_default_mobile_creator_workflow_is_text_to_image(self):
+        self.assertEqual(DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"], "t2i-z-image.json")
+
     def test_build_agent_response_handles_unavailable_workflow(self):
         response = build_agent_response(
             text="帮我出一张切成片的西瓜",
