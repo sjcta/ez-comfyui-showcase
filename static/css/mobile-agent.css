@@ -7,6 +7,7 @@
   --mobile-gradient: linear-gradient(135deg, #f59e0b 0%, #fbbf24 34%, #8b5cf6 66%, #3b82f6 100%);
   --mobile-gradient-warm: linear-gradient(135deg, #f59e0b 0%, #fbbf24 42%, #f43f5e 72%, #8b5cf6 100%);
   --mobile-button-gradient: linear-gradient(135deg, #7c3aed 0%, #a855f7 42%, #6366f1 72%, #3b82f6 100%);
+  --mobile-send-gradient: linear-gradient(135deg, #f59e0b 0%, #fbbf24 56%, #f97316 100%);
   display: none;
   width: 100%;
   min-height: calc(var(--vh, 1vh) * 100);
@@ -207,7 +208,7 @@
   justify-content: center;
   gap: 8px;
   color: #fff;
-  background: var(--mobile-gradient-warm);
+  background: var(--mobile-send-gradient);
 }
 
 .mobile-agent-voice-label {
@@ -263,7 +264,7 @@
   font-size: 15px;
   font-weight: 700;
   color: #fff;
-  background: var(--mobile-button-gradient);
+  background: var(--mobile-send-gradient);
   box-shadow: none;
   transition: padding 180ms ease, gap 180ms ease, min-width 180ms ease;
 }
@@ -276,6 +277,7 @@
   min-width: 0;
   padding: 0;
   gap: 0;
+  background: var(--mobile-button-gradient);
 }
 
 .mobile-agent-input-row.is-voice-active .mobile-agent-send-btn span {
