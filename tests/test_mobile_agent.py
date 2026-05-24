@@ -8,6 +8,7 @@ from modules.mobile_agent import (
     ratio_to_dimensions,
     build_agent_response,
 )
+from modules.speech_transcriber import SpeechTranscriber
 
 
 class MobileAgentTests(unittest.TestCase):
@@ -101,6 +102,26 @@ class MobileAgentTests(unittest.TestCase):
         fields = [{"node_id": "2", "field": "width", "label": "宽度", "class_type": "PrimitiveInt"}]
 
         self.assertEqual(build_generate_fields(fields, "未来城市雨夜"), {})
+
+
+class SpeechTranscriberTests(unittest.TestCase):
+    def test_missing_speech_backend_returns_editable_failure(self):
+        result = SpeechTranscriber(command="definitely-missing-whisper").transcribe_bytes(
+            b"fake audio",
+            filename="voice.webm",
+            timeout_ms=200,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["provider"], "none")
+        self.assertEqual(result["transcript"], "")
+        self.assertEqual(result["error_code"], "speech_backend_unavailable")
+
+    def test_empty_audio_returns_validation_failure(self):
+        result = SpeechTranscriber(command="whisper").transcribe_bytes(b"", filename="voice.webm")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "empty_audio")
 
 
 if __name__ == "__main__":
