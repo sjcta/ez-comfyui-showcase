@@ -1210,9 +1210,6 @@ def _init_gen_db():
             conn.execute(ddl)
         except sqlite3.OperationalError:
             pass
-    _backfill_legacy_prompt_protection(conn)
-    _recheck_safe_heuristic_nsfw_risk_rows(conn)
-    _recheck_safe_heuristic_video_rows(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_meta (
             filename TEXT PRIMARY KEY,
@@ -1246,6 +1243,23 @@ def _init_gen_db():
     _migrate_wf_meta_json_to_db()
     _migrate_legacy_wf_thumbnails()
     _migrate_wf_configs_to_db()
+
+
+def _run_startup_protection_migrations() -> None:
+    conn = sqlite3.connect(GEN_DB)
+    try:
+        _backfill_legacy_prompt_protection(conn)
+        _recheck_safe_heuristic_nsfw_risk_rows(conn)
+        _recheck_safe_heuristic_video_rows(conn)
+        conn.commit()
+    except Exception as exc:
+        add_log("warn", "image_protection", "历史图片保护检查后台维护失败", details=str(exc)[:300])
+    finally:
+        conn.close()
+
+
+async def _run_startup_protection_migrations_async() -> None:
+    await asyncio.to_thread(_run_startup_protection_migrations)
 
 
 def _init_auth_db():
@@ -1365,7 +1379,7 @@ def _backfill_legacy_prompt_protection(conn: sqlite3.Connection | None = None) -
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
     checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    worker = ImageProtectionWorker(load_detector=lambda: None, load_classifier=lambda: None)
     updates = []
     for row in rows:
         prompt = row["prompt"] or ""
@@ -1400,7 +1414,7 @@ def _recheck_safe_heuristic_nsfw_risk_rows(conn: sqlite3.Connection | None = Non
              AND COALESCE(deleted_at, '') = ''""",
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
-    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    worker = ImageProtectionWorker(load_detector=lambda: None, load_classifier=lambda: None)
     updates = []
     checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for row in rows:
@@ -1452,7 +1466,7 @@ def _recheck_safe_heuristic_video_rows(conn: sqlite3.Connection | None = None) -
              )""",
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
-    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    worker = ImageProtectionWorker(load_detector=lambda: None, load_classifier=lambda: None)
     updates = []
     checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for row in rows:
@@ -2561,6 +2575,7 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
     _background_tasks.append(asyncio.create_task(_remote_prompt_adoption_watcher()))
+    _background_tasks.append(asyncio.create_task(_run_startup_protection_migrations_async()))
     _resume_pending_image_protection_checks()
     _resume_persisted_generation_jobs()
     yield

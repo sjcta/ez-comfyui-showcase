@@ -387,6 +387,59 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(result["data"][0]["protection_status"], "safe")
         self.assertEqual(result["data"][0]["protection_source"], "")
 
+    def test_legacy_prompt_backfill_disables_detector_during_startup_migration(self):
+        image_path = os.path.join(app.OUTPUT_DIR, "legacy-detector.png")
+        Image.new("RGB", (48, 48), (230, 180, 160)).save(image_path)
+        app._insert_generation(
+            {
+                "id": "hist-legacy-detector",
+                "workflow": "t2i-test.json",
+                "filename": "legacy-detector.png",
+                "prompt": "nsfw portrait",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "safe",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+        old_worker = app.ImageProtectionWorker
+        created = []
+
+        class FakeWorker:
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+
+            def check(self, _image_path, _prompt=""):
+                return app.ImageProtectionResult("safe", 1.0, "fake", "test")
+
+        app.ImageProtectionWorker = FakeWorker
+        try:
+            app._backfill_legacy_prompt_protection()
+        finally:
+            app.ImageProtectionWorker = old_worker
+
+        self.assertEqual(len(created), 1)
+        self.assertIsNone(created[0]["load_detector"]())
+        self.assertIsNone(created[0]["load_classifier"]())
+
+    def test_init_gen_db_does_not_block_on_protection_backfills(self):
+        old_backfill = app._backfill_legacy_prompt_protection
+        old_recheck_nsfw = app._recheck_safe_heuristic_nsfw_risk_rows
+        old_recheck_video = app._recheck_safe_heuristic_video_rows
+
+        def fail_if_called(_conn=None):
+            raise AssertionError("protection backfill should not run during _init_gen_db")
+
+        app._backfill_legacy_prompt_protection = fail_if_called
+        app._recheck_safe_heuristic_nsfw_risk_rows = fail_if_called
+        app._recheck_safe_heuristic_video_rows = fail_if_called
+        try:
+            app._init_gen_db()
+        finally:
+            app._backfill_legacy_prompt_protection = old_backfill
+            app._recheck_safe_heuristic_nsfw_risk_rows = old_recheck_nsfw
+            app._recheck_safe_heuristic_video_rows = old_recheck_video
+
     def test_legacy_prompt_backfill_does_not_override_checked_safe_rows(self):
         app._insert_generation(
             {
