@@ -94,6 +94,15 @@ function makeContext(options = {}) {
           },
         });
       }
+      if (options.understandUnauthorized) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          json() {
+            return Promise.resolve({ detail: 'Not authenticated' });
+          },
+        });
+      }
       return Promise.resolve({
         ok: true,
         json() {
@@ -172,6 +181,14 @@ function makeContext(options = {}) {
   } else {
     context.CW = {};
   }
+  if (options.withLoggedOutAuth) {
+    context.loginShown = false;
+    context.CW.authReady = Promise.resolve(null);
+    context.CW.auth = {
+      getCurrentUser() { return null; },
+      showLogin() { context.loginShown = true; },
+    };
+  }
   return { context, root, calls };
 }
 
@@ -235,6 +252,30 @@ async function run() {
     assert(root.innerHTML.includes('需要登录后使用。'), 'understand failure should show backend error');
     assert(!root.innerHTML.includes('disabled>'), 'understand failure should re-enable the send button');
     assert(root.innerHTML.includes('<span>发送</span>'), 'understand failure should restore the send label');
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', understandUnauthorized: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    root.dispatch('input', { id: 'mobileAgentText', value: '一张海边日落' });
+    await context.CW.mobileAgent.submitUnderstand();
+
+    assert(root.innerHTML.includes('请先登录后使用移动端创作。'), 'unauthorized understand should show a clear login message');
+    assert(!root.innerHTML.includes('理解失败'), 'unauthorized understand should not fall back to generic failure');
+    assert(!root.innerHTML.includes('Not authenticated'), 'unauthorized understand should not leak backend auth text');
+  }
+
+  {
+    const { context, root, calls } = makeContext({ hash: '#mobile-agent', withLoggedOutAuth: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    root.dispatch('input', { id: 'mobileAgentText', value: '一张海边日落' });
+    await context.CW.mobileAgent.submitUnderstand();
+
+    assert(root.innerHTML.includes('请先登录后使用移动端创作。'), 'logged-out mobile agent should prompt for login before calling understand');
+    assert.strictEqual(context.loginShown, true, 'logged-out mobile agent should open the login modal when available');
+    assert.strictEqual(calls.length, 0, 'logged-out mobile agent should not call the understand API');
   }
 
   {

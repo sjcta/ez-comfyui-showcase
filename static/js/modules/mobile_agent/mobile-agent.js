@@ -67,6 +67,37 @@
     }
   }
 
+  function apiErrorMessage(payload, res, fallback) {
+    var detail = payload && payload.detail;
+    var message = payload && (payload.error || payload.message || payload.question);
+    if (Array.isArray(detail)) {
+      message = detail.map(function (item) {
+        return item && item.msg ? item.msg : String(item || '');
+      }).filter(Boolean).join('；');
+    } else if (detail != null) {
+      message = String(detail);
+    }
+    if ((res && res.status === 401) || /not authenticated/i.test(message || '')) {
+      return '请先登录后使用移动端创作。';
+    }
+    return message || fallback || '请求失败，请稍后重试。';
+  }
+
+  async function requireLoggedInForMobileAgent() {
+    if (!(window.CW && CW.auth)) return true;
+    if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
+      try { await window.CW.authReady; } catch (_) {}
+    }
+    if (typeof CW.auth.getCurrentUser !== 'function') return true;
+    if (CW.auth.getCurrentUser()) return true;
+    state.error = '请先登录后使用移动端创作。';
+    renderHome();
+    if (typeof CW.auth.showLogin === 'function') {
+      CW.auth.showLogin();
+    }
+    return false;
+  }
+
   function setRootHtml(html) {
     if (!state.root) return;
     state.root.innerHTML = html;
@@ -220,6 +251,11 @@
     state.loading = true;
     renderHome();
     try {
+      if (!(await requireLoggedInForMobileAgent())) {
+        state.loading = false;
+        renderHome();
+        return;
+      }
       var res = await authFetch(API + '/api/mobile-agent/understand', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -231,7 +267,7 @@
       });
       var payload = await res.json();
       if (!res.ok || payload.ok === false) {
-        throw new Error(payload.error || '理解失败');
+        throw new Error(apiErrorMessage(payload, res, '理解失败'));
       }
       state.understanding = payload.data || payload;
       state.mode = 'confirm';
