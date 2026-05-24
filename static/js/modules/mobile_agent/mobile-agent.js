@@ -105,10 +105,9 @@
     var micIcon = icon('mic');
     var sendIcon = icon('send');
     var imagePreview = state.sourceImageName
-      ? '<div class="mobile-agent-attachment">' +
+      ? '<div class="mobile-agent-compose-attachment" aria-label="' + escH(state.sourceImageName) + ' 图片已添加">' +
           (state.sourceImagePreviewUrl ? '<img src="' + escH(state.sourceImagePreviewUrl) + '" alt="已选择图片预览">' : '<span class="mobile-agent-attachment-icon">' + imageIcon + '</span>') +
-          '<div><strong>' + escH(state.sourceImageName) + '</strong><span>图片已添加</span></div>' +
-          '<button type="button" data-action="remove-image" aria-label="移除图片">×</button>' +
+          '<button class="mobile-agent-attachment-remove" type="button" data-action="remove-image" aria-label="移除图片">×</button>' +
         '</div>'
       : '';
     var voiceActive = state.voicePending || state.voiceRecording || state.voiceBusy;
@@ -133,9 +132,11 @@
         '</div>' +
         '<label class="mobile-agent-compose">' +
           '<span>描述你想生成的画面</span>' +
-          '<textarea id="mobileAgentText" rows="5" placeholder="例如：一张赛博朋克风格的城市夜景，霓虹灯，电影感" autocomplete="off">' + escH(state.text) + '</textarea>' +
+          '<div class="mobile-agent-compose-body' + (state.sourceImageName ? ' has-attachment' : '') + '">' +
+            '<textarea id="mobileAgentText" rows="5" placeholder="例如：一张赛博朋克风格的城市夜景，霓虹灯，电影感" autocomplete="off">' + escH(state.text) + '</textarea>' +
+            imagePreview +
+          '</div>' +
         '</label>' +
-        imagePreview +
         (voiceText ? '<div class="mobile-agent-voice-status" role="status">' + escH(voiceText) + '</div>' : '') +
         (state.error ? '<div class="mobile-agent-error" role="alert">' + escH(state.error) + '</div>' : '') +
         '<div class="mobile-agent-input-row' + (voiceActive ? ' is-voice-active' : '') + '">' +

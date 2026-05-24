@@ -196,6 +196,7 @@ async function run() {
     assert(root.innerHTML.includes('id="mobileAgentImageFile"'), 'home should include image file input');
     assert(root.innerHTML.includes('data-action="image"'), 'image icon should be clickable');
     assert(root.innerHTML.includes('data-action="voice"'), 'voice icon should be clickable');
+    assert(root.innerHTML.includes('mobile-agent-compose-body'), 'compose body should wrap text and attachments');
 
     root.dispatch('input', { id: 'mobileAgentText', value: '海边日落' });
     await context.CW.mobileAgent.submitUnderstand();
@@ -289,6 +290,20 @@ async function run() {
     assert(root.innerHTML.includes('麦克风授权没有生效'), 'permission failure after prompt should explain that authorization did not take effect');
     assert(!root.innerHTML.includes('Permission denied'), 'permission failure should not leak browser error text');
     assert.strictEqual(context.CW.mobileAgent.getVoiceDiagnostics().name, 'NotAllowedError');
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', withIcon: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+    root.dispatch('change', {
+      id: 'mobileAgentImageFile',
+      files: [{ name: 'face_front.png' }],
+    });
+
+    assert(root.innerHTML.includes('mobile-agent-compose-body has-attachment'), 'image attachment should live inside the compose body');
+    assert(root.innerHTML.includes('mobile-agent-compose-attachment'), 'image attachment should render as an inline compose thumbnail');
+    assert(root.innerHTML.includes('mobile-agent-attachment-remove'), 'image attachment should expose a circular remove badge');
+    assert(!root.innerHTML.includes('<strong>face_front.png</strong>'), 'image attachment should not render as a separate filename bar');
   }
 }
 
