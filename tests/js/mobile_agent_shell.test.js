@@ -128,6 +128,18 @@ function makeContext(options = {}) {
     };
     context.MediaRecorder = function MediaRecorder() {};
   }
+  if (options.withMissingMic) {
+    context.navigator = {
+      mediaDevices: {
+        getUserMedia() {
+          const err = new Error('Requested device not found');
+          err.name = 'NotFoundError';
+          return Promise.reject(err);
+        },
+      },
+    };
+    context.MediaRecorder = function MediaRecorder() {};
+  }
   context.window = context;
   context.__APP__ = {
     API: '',
@@ -232,6 +244,27 @@ async function run() {
     assert(root.innerHTML.includes('mobile-agent-wave'), 'voice capture should show waveform animation markup');
     assert(root.innerHTML.includes('正在录音识别'), 'voice capture should label the expanded recording button');
     assert(root.innerHTML.includes('data-view="home"'), 'voice button should not navigate to a separate screen');
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', withIcon: true, withMissingMic: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    await context.CW.mobileAgent.startVoiceCapture();
+
+    assert(root.innerHTML.includes('没有找到可用麦克风'), 'missing microphone should show a friendly localized error');
+    assert(!root.innerHTML.includes('Requested device not found'), 'missing microphone should not leak browser error text');
+    assert(!root.innerHTML.includes('is-voice-active'), 'missing microphone should collapse the recording pill');
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', withIcon: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    await context.CW.mobileAgent.startVoiceCapture();
+
+    assert(root.innerHTML.includes('当前浏览器没有开放麦克风接口'), 'browser without mediaDevices should explain that no permission prompt can open');
+    assert(!root.innerHTML.includes('media devices unavailable'), 'browser capability error should not leak implementation text');
   }
 }
 

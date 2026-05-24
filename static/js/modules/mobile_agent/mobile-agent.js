@@ -338,6 +338,25 @@
     }
   }
 
+  function voiceCaptureMessage(err) {
+    var name = err && err.name ? String(err.name) : '';
+    var message = err && err.message ? String(err.message) : '';
+    var raw = (name + ' ' + message).toLowerCase();
+    if (raw.indexOf('notfound') >= 0 || raw.indexOf('device not found') >= 0 || raw.indexOf('requested device not found') >= 0) {
+      return '没有找到可用麦克风，因此不会弹出授权框。请检查系统输入设备。';
+    }
+    if (raw.indexOf('notallowed') >= 0 || raw.indexOf('permission') >= 0 || raw.indexOf('denied') >= 0) {
+      return '麦克风权限未开启，请允许浏览器访问麦克风。';
+    }
+    if (raw.indexOf('notreadable') >= 0 || raw.indexOf('trackstart') >= 0 || raw.indexOf('hardware') >= 0) {
+      return '麦克风暂时不可用，可能正被其他应用占用。';
+    }
+    if (raw.indexOf('not supported') >= 0 || raw.indexOf('不支持') >= 0 || raw.indexOf('media devices unavailable') >= 0) {
+      return '当前浏览器没有开放麦克风接口，请使用 HTTPS 页面或 Chrome/Safari 再试。';
+    }
+    return '麦克风启动失败，请检查设备和浏览器权限。';
+  }
+
   async function transcribeVoiceChunks(chunks, mimeType) {
     stopVoiceStream();
     state.voiceRecorder = null;
@@ -392,13 +411,16 @@
     state.voiceStatus = '正在请求麦克风';
     renderHome();
     try {
-      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-        throw new Error('当前浏览器无法访问麦克风');
+      var mediaDevices = window.navigator && window.navigator.mediaDevices;
+      if (!mediaDevices || typeof mediaDevices.getUserMedia !== 'function') {
+        var unsupported = new Error('media devices unavailable');
+        unsupported.name = 'NotSupportedError';
+        throw unsupported;
       }
       if (typeof window.MediaRecorder !== 'function') {
         throw new Error('当前浏览器不支持录音');
       }
-      var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      var stream = await mediaDevices.getUserMedia({ audio: true });
       var recorder = new MediaRecorder(stream);
       state.voiceChunks = [];
       state.voiceMimeType = recorder.mimeType || 'audio/webm';
@@ -421,7 +443,7 @@
       state.voicePending = false;
       state.voiceRecording = false;
       state.voiceStatus = '';
-      state.error = err && err.message ? err.message : '麦克风启动失败。';
+      state.error = voiceCaptureMessage(err);
       renderHome();
     }
   }
