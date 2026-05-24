@@ -118,6 +118,16 @@ function makeContext(options = {}) {
     },
     window: null,
   };
+  if (options.withPendingMic) {
+    context.navigator = {
+      mediaDevices: {
+        getUserMedia() {
+          return new Promise(() => {});
+        },
+      },
+    };
+    context.MediaRecorder = function MediaRecorder() {};
+  }
   context.window = context;
   context.__APP__ = {
     API: '',
@@ -158,11 +168,19 @@ async function run() {
     const { context, root, calls } = makeContext({ hash: '#mobile-agent', withIcon: true });
     vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
     assert(root.innerHTML.includes('智能创作'), 'hash route should render mobile shell');
+    assert(root.innerHTML.includes('id="mobileAgentImageFile"'), 'home should include image file input');
+    assert(root.innerHTML.includes('data-action="image"'), 'image icon should be clickable');
+    assert(root.innerHTML.includes('data-action="voice"'), 'voice icon should be clickable');
 
     root.dispatch('input', { id: 'mobileAgentText', value: '海边日落' });
     await context.CW.mobileAgent.submitUnderstand();
 
     assert.strictEqual(calls[0].url, '/api/mobile-agent/understand');
+    assert.deepStrictEqual(JSON.parse(calls[0].request.body), {
+      text: '海边日落',
+      has_image: false,
+      has_video: false,
+    });
     assert(root.innerHTML.includes('后端摘要：海边日落'), 'confirm should render backend display summary');
     assert(root.innerHTML.includes('电影感'), 'confirm should render selected style and style chips');
     assert(root.innerHTML.includes('16:9'), 'confirm should render selected ratio and ratio chips');
@@ -197,6 +215,21 @@ async function run() {
     const { context, root } = makeContext({ pathname: '/', port: '18002', withIcon: true });
     vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
     assert(root.innerHTML.includes('智能创作'), 'isolated mobile test port should render mobile shell at root');
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', withIcon: true, withPendingMic: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    root.dispatch('click', {
+      closest(selector) {
+        if (selector !== '[data-action]') return null;
+        return { getAttribute() { return 'voice'; } };
+      },
+    });
+
+    assert(root.innerHTML.includes('正在请求麦克风'), 'voice button should start capture inline');
+    assert(root.innerHTML.includes('data-view="home"'), 'voice button should not navigate to a separate screen');
   }
 }
 
