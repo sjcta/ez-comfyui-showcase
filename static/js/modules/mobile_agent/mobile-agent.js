@@ -31,6 +31,7 @@
     sourceImageName: '',
     sourceImagePreviewUrl: '',
     voiceRecording: false,
+    voicePending: false,
     voiceBusy: false,
     voiceStatus: '',
     voiceRecorder: null,
@@ -109,7 +110,13 @@
           '<button type="button" data-action="remove-image" aria-label="移除图片">×</button>' +
         '</div>'
       : '';
-    var voiceText = state.voiceRecording ? '正在听，点击停止' : (state.voiceBusy ? '正在转写语音' : state.voiceStatus);
+    var voiceActive = state.voicePending || state.voiceRecording || state.voiceBusy;
+    var voiceLabel = state.voiceBusy ? '正在识别' : '正在录音识别';
+    var voiceWave = '<span class="mobile-agent-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
+    var voiceInner = voiceActive
+      ? micIcon + '<span class="mobile-agent-voice-label">' + voiceLabel + '</span>' + voiceWave
+      : micIcon;
+    var voiceText = voiceActive ? '' : state.voiceStatus;
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="home">' +
         '<input id="mobileAgentImageFile" class="mobile-agent-file" type="file" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif">' +
@@ -130,9 +137,9 @@
         imagePreview +
         (voiceText ? '<div class="mobile-agent-voice-status" role="status">' + escH(voiceText) + '</div>' : '') +
         (state.error ? '<div class="mobile-agent-error" role="alert">' + escH(state.error) + '</div>' : '') +
-        '<div class="mobile-agent-input-row">' +
+        '<div class="mobile-agent-input-row' + (voiceActive ? ' is-voice-active' : '') + '">' +
           '<button class="mobile-agent-icon-btn" type="button" data-action="image" title="图片输入" aria-label="图片输入">' + imageIcon + '</button>' +
-          '<button class="mobile-agent-icon-btn' + (state.voiceRecording ? ' is-recording' : '') + '" type="button" data-action="voice" title="' + (state.voiceRecording ? '停止录音' : '语音输入') + '" aria-label="' + (state.voiceRecording ? '停止录音' : '语音输入') + '"' + (state.voiceBusy ? ' disabled' : '') + '>' + micIcon + '</button>' +
+          '<button class="mobile-agent-icon-btn' + (voiceActive ? ' is-recording' : '') + '" type="button" data-action="voice" title="' + (voiceActive ? '停止录音' : '语音输入') + '" aria-label="' + (voiceActive ? '停止录音' : '语音输入') + '"' + (state.voiceBusy ? ' disabled' : '') + '>' + voiceInner + '</button>' +
           '<button class="mobile-agent-send-btn" type="button" data-action="understand" aria-label="发送理解"' + (state.loading ? ' disabled' : '') + '>' +
             '<span>' + (state.loading ? '理解中' : '发送') + '</span>' + sendIcon +
           '</button>' +
@@ -335,6 +342,7 @@
     stopVoiceStream();
     state.voiceRecorder = null;
     state.voiceRecording = false;
+    state.voicePending = false;
     if (!chunks || !chunks.length) {
       state.voiceStatus = '';
       renderHome();
@@ -380,6 +388,7 @@
       return;
     }
     state.error = '';
+    state.voicePending = true;
     state.voiceStatus = '正在请求麦克风';
     renderHome();
     try {
@@ -401,6 +410,7 @@
       };
       state.voiceStream = stream;
       state.voiceRecorder = recorder;
+      state.voicePending = false;
       state.voiceRecording = true;
       state.voiceStatus = '正在听，点击麦克风停止';
       recorder.start();
@@ -408,6 +418,7 @@
     } catch (err) {
       stopVoiceStream();
       state.voiceRecorder = null;
+      state.voicePending = false;
       state.voiceRecording = false;
       state.voiceStatus = '';
       state.error = err && err.message ? err.message : '麦克风启动失败。';
@@ -417,6 +428,7 @@
 
   function stopVoiceCapture() {
     var recorder = state.voiceRecorder;
+    state.voicePending = false;
     state.voiceRecording = false;
     state.voiceStatus = '正在转写语音';
     renderHome();

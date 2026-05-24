@@ -228,7 +228,9 @@ async function run() {
       },
     });
 
-    assert(root.innerHTML.includes('正在请求麦克风'), 'voice button should start capture inline');
+    assert(root.innerHTML.includes('is-voice-active'), 'voice capture should expand the composer row inline');
+    assert(root.innerHTML.includes('mobile-agent-wave'), 'voice capture should show waveform animation markup');
+    assert(root.innerHTML.includes('正在录音识别'), 'voice capture should label the expanded recording button');
     assert(root.innerHTML.includes('data-view="home"'), 'voice button should not navigate to a separate screen');
   }
 }

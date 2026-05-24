@@ -160,6 +160,14 @@
   align-items: center;
 }
 
+.mobile-agent-input-row {
+  transition: grid-template-columns 180ms ease;
+}
+
+.mobile-agent-input-row.is-voice-active {
+  grid-template-columns: 48px minmax(0, 1fr) 64px;
+}
+
 .mobile-agent-icon-btn,
 .mobile-agent-send-btn,
 .mobile-agent-secondary-btn,
@@ -180,6 +188,7 @@
   height: 48px;
   color: #c4c7c5;
   background: #2b2c2f;
+  transition: width 180ms ease, background 180ms ease, transform 180ms ease, padding 180ms ease;
 }
 
 .mobile-agent-icon-btn:not(:disabled) {
@@ -192,8 +201,49 @@
 }
 
 .mobile-agent-icon-btn.is-recording {
+  width: 100%;
+  padding: 0 13px;
+  display: inline-flex;
+  justify-content: center;
+  gap: 8px;
   color: #fff;
   background: var(--mobile-gradient-warm);
+}
+
+.mobile-agent-voice-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.mobile-agent-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.mobile-agent-wave i {
+  width: 3px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  animation: mobile-agent-wave 760ms ease-in-out infinite;
+}
+
+.mobile-agent-wave i:nth-child(2) {
+  animation-delay: 110ms;
+}
+
+.mobile-agent-wave i:nth-child(3) {
+  animation-delay: 220ms;
+}
+
+.mobile-agent-wave i:nth-child(4) {
+  animation-delay: 330ms;
 }
 
 .mobile-agent-icon-btn svg,
@@ -215,10 +265,26 @@
   color: #fff;
   background: var(--mobile-button-gradient);
   box-shadow: none;
+  transition: padding 180ms ease, gap 180ms ease, min-width 180ms ease;
 }
 
 .mobile-agent-send-btn:disabled {
   opacity: 0.7;
+}
+
+.mobile-agent-input-row.is-voice-active .mobile-agent-send-btn {
+  min-width: 0;
+  padding: 0;
+  gap: 0;
+}
+
+.mobile-agent-input-row.is-voice-active .mobile-agent-send-btn span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .mobile-agent-file {
@@ -385,6 +451,29 @@
 @keyframes mobile-agent-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes mobile-agent-wave {
+  0%,
+  100% {
+    transform: scaleY(0.65);
+    opacity: 0.7;
+  }
+
+  50% {
+    transform: scaleY(1.85);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-agent-input-row,
+  .mobile-agent-icon-btn,
+  .mobile-agent-send-btn,
+  .mobile-agent-wave i {
+    animation: none;
+    transition: none;
   }
 }
 
