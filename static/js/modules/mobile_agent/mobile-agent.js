@@ -99,7 +99,7 @@
   }
 
   function renderVoice() {
-    var transcribePath = '/api/mobile-agent/transcribe';
+    var transcribePath = API + '/api/mobile-agent/transcribe';
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="voice">' +
         '<button class="mobile-agent-back" type="button" data-action="home">' + icon('chevron-left') + ' 返回</button>' +
