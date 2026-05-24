@@ -74,6 +74,7 @@ function makeContext(options = {}) {
     console,
     document,
     localStorage: { getItem() { return ''; } },
+    isSecureContext: options.isSecureContext !== false,
     location: { hash: options.hash || '', protocol: 'http:', pathname: options.pathname || '/', port: options.port || '' },
     fetch(url, request) {
       calls.push({ url, request });
@@ -134,6 +135,18 @@ function makeContext(options = {}) {
         getUserMedia() {
           const err = new Error('Requested device not found');
           err.name = 'NotFoundError';
+          return Promise.reject(err);
+        },
+      },
+    };
+    context.MediaRecorder = function MediaRecorder() {};
+  }
+  if (options.withDeniedMic) {
+    context.navigator = {
+      mediaDevices: {
+        getUserMedia() {
+          const err = new Error('Permission denied');
+          err.name = 'NotAllowedError';
           return Promise.reject(err);
         },
       },
@@ -265,6 +278,17 @@ async function run() {
 
     assert(root.innerHTML.includes('当前浏览器没有开放麦克风接口'), 'browser without mediaDevices should explain that no permission prompt can open');
     assert(!root.innerHTML.includes('media devices unavailable'), 'browser capability error should not leak implementation text');
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', withIcon: true, withDeniedMic: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    await context.CW.mobileAgent.startVoiceCapture();
+
+    assert(root.innerHTML.includes('麦克风授权没有生效'), 'permission failure after prompt should explain that authorization did not take effect');
+    assert(!root.innerHTML.includes('Permission denied'), 'permission failure should not leak browser error text');
+    assert.strictEqual(context.CW.mobileAgent.getVoiceDiagnostics().name, 'NotAllowedError');
   }
 }
 

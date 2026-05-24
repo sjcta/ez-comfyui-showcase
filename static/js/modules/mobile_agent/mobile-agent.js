@@ -34,6 +34,7 @@
     voicePending: false,
     voiceBusy: false,
     voiceStatus: '',
+    lastVoiceError: null,
     voiceRecorder: null,
     voiceStream: null,
     voiceChunks: [],
@@ -342,11 +343,23 @@
     var name = err && err.name ? String(err.name) : '';
     var message = err && err.message ? String(err.message) : '';
     var raw = (name + ' ' + message).toLowerCase();
+    state.lastVoiceError = {
+      name: name,
+      message: message,
+      href: location.href,
+      isSecureContext: !!window.isSecureContext,
+      hasMediaDevices: !!(window.navigator && window.navigator.mediaDevices),
+      hasGetUserMedia: !!(window.navigator && window.navigator.mediaDevices && window.navigator.mediaDevices.getUserMedia),
+      hasMediaRecorder: typeof window.MediaRecorder === 'function'
+    };
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      return '当前页面不是安全上下文，手机浏览器可能无法完成麦克风授权。请使用 HTTPS 访问。';
+    }
     if (raw.indexOf('notfound') >= 0 || raw.indexOf('device not found') >= 0 || raw.indexOf('requested device not found') >= 0) {
       return '没有找到可用麦克风，因此不会弹出授权框。请检查系统输入设备。';
     }
     if (raw.indexOf('notallowed') >= 0 || raw.indexOf('permission') >= 0 || raw.indexOf('denied') >= 0) {
-      return '麦克风权限未开启，请允许浏览器访问麦克风。';
+      return '麦克风授权没有生效。请在浏览器网站设置和系统隐私设置中确认已允许麦克风，然后重试。';
     }
     if (raw.indexOf('notreadable') >= 0 || raw.indexOf('trackstart') >= 0 || raw.indexOf('hardware') >= 0) {
       return '麦克风暂时不可用，可能正被其他应用占用。';
@@ -407,6 +420,7 @@
       return;
     }
     state.error = '';
+    state.lastVoiceError = null;
     state.voicePending = true;
     state.voiceStatus = '正在请求麦克风';
     renderHome();
@@ -502,6 +516,7 @@
     submitGenerate: submitGenerate,
     startVoiceCapture: startVoiceCapture,
     stopVoiceCapture: stopVoiceCapture,
+    getVoiceDiagnostics: function () { return state.lastVoiceError ? Object.assign({}, state.lastVoiceError) : null; },
     open: openMobileAgent,
     close: hideMobileAgent
   };
