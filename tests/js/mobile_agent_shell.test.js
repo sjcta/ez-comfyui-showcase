@@ -74,7 +74,7 @@ function makeContext(options = {}) {
     console,
     document,
     localStorage: { getItem() { return ''; } },
-    location: { hash: options.hash || '', protocol: 'http:', pathname: options.pathname || '/' },
+    location: { hash: options.hash || '', protocol: 'http:', pathname: options.pathname || '/', port: options.port || '' },
     fetch(url, request) {
       calls.push({ url, request });
       if (url === '/api/generate') {
@@ -191,6 +191,12 @@ async function run() {
     assert(root.innerHTML.includes('需要登录后使用。'), 'understand failure should show backend error');
     assert(!root.innerHTML.includes('disabled>'), 'understand failure should re-enable the send button');
     assert(root.innerHTML.includes('<span>发送</span>'), 'understand failure should restore the send label');
+  }
+
+  {
+    const { context, root } = makeContext({ pathname: '/', port: '18002', withIcon: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+    assert(root.innerHTML.includes('智能创作'), 'isolated mobile test port should render mobile shell at root');
   }
 }
 

@@ -30,7 +30,23 @@
   };
 
   function icon(name) {
-    return window.CW && typeof CW.icon === 'function' ? CW.icon(name) : '';
+    var paths = {
+      mic: '<path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/><path d="M8 21h8"/>',
+      'chevron-left': '<path d="m15 18-6-6 6-6"/>',
+      sparkles: '<path d="M12 3l1.7 4.1L18 9l-4.3 1.9L12 15l-1.7-4.1L6 9l4.3-1.9L12 3Z"/><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14Z"/>'
+    };
+    if (paths[name]) {
+      return '<svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths[name] + '</svg>';
+    }
+    var rendered = window.CW && typeof CW.icon === 'function' ? CW.icon(name) : '';
+    if (rendered) return rendered;
+    var fallbackPaths = {
+      image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-5-5L5 19"/>',
+      send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>'
+    };
+    return fallbackPaths[name]
+      ? '<svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + fallbackPaths[name] + '</svg>'
+      : '';
   }
 
   function toast(message, type) {
@@ -52,6 +68,7 @@
     var path = String(location.pathname || '').replace(/\/+$/, '');
     return location.hash === '#mobile-agent' ||
       path === '/app' ||
+      (path === '' && String(location.port || '') === '18002') ||
       !!(document.body && document.body.dataset && document.body.dataset.mobileAgent === 'on');
   }
 
@@ -78,8 +95,11 @@
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="home">' +
         '<div class="mobile-agent-hero">' +
-          '<div class="mobile-agent-avatar" aria-hidden="true">EZ</div>' +
-          '<div>' +
+          '<div class="mobile-agent-brand">' +
+            '<span class="mobile-agent-logo-wrap"><img src="static/icons/ez-site-logo-64.png" alt="EZ ComfyUI logo"></span>' +
+            '<span class="mobile-agent-brand-title">Ez ComfyUI</span>' +
+          '</div>' +
+          '<div class="mobile-agent-copy">' +
             '<h1>智能创作</h1>' +
             '<p>说出想法，EZ 会先整理成可确认的创作方案。</p>' +
           '</div>' +
