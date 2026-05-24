@@ -8,6 +8,7 @@
   --mobile-gradient-warm: linear-gradient(135deg, #f59e0b 0%, #fbbf24 42%, #f43f5e 72%, #8b5cf6 100%);
   --mobile-button-gradient: linear-gradient(135deg, #7c3aed 0%, #a855f7 42%, #6366f1 72%, #3b82f6 100%);
   --mobile-send-gradient: linear-gradient(135deg, #f59e0b 0%, #fbbf24 56%, #f97316 100%);
+  --mobile-motion-duration: 300ms;
   display: none;
   width: 100%;
   min-height: calc(var(--vh, 1vh) * 100);
@@ -173,7 +174,7 @@
 }
 
 .mobile-agent-input-row {
-  transition: grid-template-columns 180ms ease;
+  transition: grid-template-columns var(--mobile-motion-duration) ease;
 }
 
 .mobile-agent-input-row.is-voice-active {
@@ -200,7 +201,12 @@
   height: 48px;
   color: #c4c7c5;
   background: #2b2c2f;
-  transition: width 180ms ease, background 180ms ease, transform 180ms ease, padding 180ms ease;
+  transition:
+    width var(--mobile-motion-duration) ease,
+    background var(--mobile-motion-duration) ease,
+    transform var(--mobile-motion-duration) ease,
+    padding var(--mobile-motion-duration) ease,
+    opacity var(--mobile-motion-duration) ease;
 }
 
 .mobile-agent-icon-btn:not(:disabled) {
@@ -220,6 +226,15 @@
   gap: 8px;
   color: #fff;
   background: var(--mobile-send-gradient);
+}
+
+.mobile-agent-icon-btn:active,
+.mobile-agent-send-btn:active,
+.mobile-agent-secondary-btn:active,
+.mobile-agent-back:active,
+.mobile-agent-chip:active,
+.mobile-agent-attachment-remove:active {
+  transform: scale(0.94);
 }
 
 .mobile-agent-voice-label {
@@ -277,7 +292,13 @@
   color: #fff;
   background: var(--mobile-send-gradient);
   box-shadow: none;
-  transition: padding 180ms ease, gap 180ms ease, min-width 180ms ease;
+  transition:
+    padding var(--mobile-motion-duration) ease,
+    gap var(--mobile-motion-duration) ease,
+    min-width var(--mobile-motion-duration) ease,
+    background var(--mobile-motion-duration) ease,
+    transform var(--mobile-motion-duration) ease,
+    opacity var(--mobile-motion-duration) ease;
 }
 
 .mobile-agent-send-btn:disabled {
@@ -359,6 +380,10 @@
   line-height: 1;
   display: grid;
   place-items: center;
+  transition:
+    transform var(--mobile-motion-duration) ease,
+    background var(--mobile-motion-duration) ease,
+    opacity var(--mobile-motion-duration) ease;
 }
 
 .mobile-agent-voice-status {
