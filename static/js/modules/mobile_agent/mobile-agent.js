@@ -184,6 +184,7 @@
       renderConfirm();
     } catch (err) {
       state.error = err && err.message ? err.message : '理解失败，请稍后重试。';
+      state.loading = false;
       renderHome();
     } finally {
       state.loading = false;

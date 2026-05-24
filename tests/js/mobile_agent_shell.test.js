@@ -85,6 +85,14 @@ function makeContext(options = {}) {
           },
         });
       }
+      if (options.understandFailure) {
+        return Promise.resolve({
+          ok: false,
+          json() {
+            return Promise.resolve({ ok: false, error: '需要登录后使用。' });
+          },
+        });
+      }
       return Promise.resolve({
         ok: true,
         json() {
@@ -171,6 +179,18 @@ async function run() {
       width: 720,
       height: 1280,
     });
+  }
+
+  {
+    const { context, root } = makeContext({ hash: '#mobile-agent', understandFailure: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+
+    root.dispatch('input', { id: 'mobileAgentText', value: '赛博朋克城市夜景' });
+    await context.CW.mobileAgent.submitUnderstand();
+
+    assert(root.innerHTML.includes('需要登录后使用。'), 'understand failure should show backend error');
+    assert(!root.innerHTML.includes('disabled>'), 'understand failure should re-enable the send button');
+    assert(root.innerHTML.includes('<span>发送</span>'), 'understand failure should restore the send label');
   }
 }
 
