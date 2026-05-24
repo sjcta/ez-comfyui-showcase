@@ -86,9 +86,41 @@
       "key": "320:313::text",
       "zone": "advanced",
       "visible": true,
-      "label": "text",
+      "label": "负面提示词",
       "order": 4,
       "type": "textarea"
+    },
+    {
+      "key": "320:288::strength",
+      "zone": "advanced",
+      "visible": true,
+      "label": "高清参考图强度",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "320:296::strength",
+      "zone": "advanced",
+      "visible": true,
+      "label": "初始参考图强度",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "320:285::strength_model",
+      "zone": "advanced",
+      "visible": true,
+      "label": "蒸馏 LoRA 强度",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "320:279::ckpt_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "ckpt_name",
+      "order": 8,
+      "type": "text"
     },
     {
       "key": "75::filename_prefix",
@@ -107,19 +139,11 @@
       "type": "text"
     },
     {
-      "key": "320:279::ckpt_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "ckpt_name",
-      "order": 1,
-      "type": "text"
-    },
-    {
       "key": "320:280::sampler_name",
       "zone": "hidden",
       "visible": false,
       "label": "sampler_name",
-      "order": 2,
+      "order": 1,
       "type": "text"
     },
     {
@@ -127,7 +151,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "sigmas",
-      "order": 3,
+      "order": 2,
       "type": "text"
     },
     {
@@ -135,7 +159,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "cfg",
-      "order": 4,
+      "order": 3,
       "type": "number"
     },
     {
@@ -143,31 +167,15 @@
       "zone": "hidden",
       "visible": false,
       "label": "lora_name",
-      "order": 5,
+      "order": 4,
       "type": "text"
-    },
-    {
-      "key": "320:285::strength_model",
-      "zone": "hidden",
-      "visible": false,
-      "label": "strength_model",
-      "order": 6,
-      "type": "number"
     },
     {
       "key": "320:286::longer_edge",
       "zone": "hidden",
       "visible": false,
       "label": "longer_edge",
-      "order": 7,
-      "type": "number"
-    },
-    {
-      "key": "320:288::strength",
-      "zone": "hidden",
-      "visible": false,
-      "label": "strength",
-      "order": 8,
+      "order": 5,
       "type": "number"
     },
     {
@@ -175,7 +183,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "img_compression",
-      "order": 9,
+      "order": 6,
       "type": "number"
     },
     {
@@ -183,7 +191,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "resize_type",
-      "order": 10,
+      "order": 7,
       "type": "text"
     },
     {
@@ -191,7 +199,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "resize_type.crop",
-      "order": 11,
+      "order": 8,
       "type": "text"
     },
     {
@@ -199,7 +207,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "sampler_name",
-      "order": 12,
+      "order": 9,
       "type": "text"
     },
     {
@@ -207,23 +215,15 @@
       "zone": "hidden",
       "visible": false,
       "label": "scale_method",
-      "order": 13,
+      "order": 10,
       "type": "text"
-    },
-    {
-      "key": "320:296::strength",
-      "zone": "hidden",
-      "visible": false,
-      "label": "strength",
-      "order": 14,
-      "type": "number"
     },
     {
       "key": "320:295::batch_size",
       "zone": "hidden",
       "visible": false,
       "label": "batch_size",
-      "order": 15,
+      "order": 11,
       "type": "number"
     },
     {
@@ -231,7 +231,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "batch_size",
-      "order": 16,
+      "order": 12,
       "type": "number"
     },
     {
@@ -239,7 +239,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "sigmas",
-      "order": 17,
+      "order": 13,
       "type": "text"
     },
     {
@@ -247,7 +247,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "model_name",
-      "order": 18,
+      "order": 14,
       "type": "text"
     },
     {
@@ -255,7 +255,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "cfg",
-      "order": 19,
+      "order": 15,
       "type": "number"
     },
     {
@@ -263,7 +263,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "tile_size",
-      "order": 20,
+      "order": 16,
       "type": "number"
     },
     {
@@ -271,7 +271,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "overlap",
-      "order": 21,
+      "order": 17,
       "type": "number"
     },
     {
@@ -279,7 +279,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "temporal_size",
-      "order": 22,
+      "order": 18,
       "type": "number"
     },
     {
@@ -287,7 +287,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "temporal_overlap",
-      "order": 23,
+      "order": 19,
       "type": "number"
     },
     {
@@ -295,7 +295,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "ckpt_name",
-      "order": 24,
+      "order": 20,
       "type": "text"
     },
     {
@@ -303,7 +303,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "text_encoder",
-      "order": 25,
+      "order": 21,
       "type": "text"
     },
     {
@@ -311,7 +311,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "ckpt_name",
-      "order": 26,
+      "order": 22,
       "type": "text"
     },
     {
@@ -319,7 +319,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "device",
-      "order": 27,
+      "order": 23,
       "type": "text"
     },
     {
@@ -327,7 +327,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 28,
+      "order": 24,
       "type": "text"
     },
     {
@@ -335,7 +335,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 29,
+      "order": 25,
       "type": "text"
     },
     {
@@ -343,7 +343,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 30,
+      "order": 26,
       "type": "text"
     },
     {
@@ -351,7 +351,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 31,
+      "order": 27,
       "type": "text"
     }
   ]

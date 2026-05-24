@@ -1,0 +1,345 @@
+{
+  "3940": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
+    }
+  },
+  "4960": {
+    "class_type": "LTXAVTextEncoderLoader",
+    "inputs": {
+      "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
+      "ckpt_name": "ltx-2-19b-dev-fp8.safetensors",
+      "device": "default"
+    }
+  },
+  "2483": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4960",
+        0
+      ],
+      "text": "A cinematic close-up of a tattoo artist drawing a clean black dragon tattoo stencil on a forearm, crisp ink lines, studio lighting, detailed skin texture, smooth camera push-in, realistic motion, subtle studio ambience."
+    },
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "2612": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4960",
+        0
+      ],
+      "text": "low quality, blurry, muddy detail, distorted anatomy, bad hands, flicker, jitter, noisy audio, harsh noise, speech, talking, subtitles, watermark, cartoon, game, childish"
+    },
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "4978": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 24
+    },
+    "_meta": {
+      "title": "fps"
+    }
+  },
+  "4986": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 24
+    },
+    "_meta": {
+      "title": "audio fps"
+    }
+  },
+  "4979": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 121
+    },
+    "_meta": {
+      "title": "number of frames"
+    }
+  },
+  "1241": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "2483",
+        0
+      ],
+      "negative": [
+        "2612",
+        0
+      ],
+      "frame_rate": [
+        "4978",
+        0
+      ]
+    }
+  },
+  "3059": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "width": 960,
+      "height": 544,
+      "length": [
+        "4979",
+        0
+      ],
+      "batch_size": 1
+    }
+  },
+  "4831": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_ancestral_cfg_pp"
+    }
+  },
+  "4968": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "3940",
+        0
+      ],
+      "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
+      "strength_model": 0.2
+    }
+  },
+  "4964": {
+    "class_type": "GuiderParameters",
+    "inputs": {
+      "modality": "VIDEO",
+      "cfg": 3,
+      "stg": 1,
+      "perturb_attn": true,
+      "rescale": 0.9,
+      "modality_scale": 3,
+      "skip_step": 0,
+      "cross_attn": true,
+      "parameters": [
+        "4963",
+        0
+      ]
+    }
+  },
+  "4808": {
+    "class_type": "MultimodalGuider",
+    "inputs": {
+      "model": [
+        "4968",
+        0
+      ],
+      "positive": [
+        "1241",
+        0
+      ],
+      "negative": [
+        "1241",
+        1
+      ],
+      "parameters": [
+        "4964",
+        0
+      ],
+      "skip_blocks": "28"
+    }
+  },
+  "4966": {
+    "class_type": "LTXVScheduler",
+    "inputs": {
+      "steps": 15,
+      "max_shift": 2.05,
+      "base_shift": 0.95,
+      "stretch": true,
+      "terminal": 0.1,
+      "latent": [
+        "4528",
+        0
+      ]
+    }
+  },
+  "4814": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 42
+    }
+  },
+  "4802": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "4814",
+        0
+      ],
+      "guider": [
+        "4808",
+        0
+      ],
+      "sampler": [
+        "4831",
+        0
+      ],
+      "sigmas": [
+        "4966",
+        0
+      ],
+      "latent_image": [
+        "4528",
+        0
+      ]
+    }
+  },
+  "4983": {
+    "class_type": "LTXVTiledVAEDecode",
+    "inputs": {
+      "vae": [
+        "3940",
+        2
+      ],
+      "latents": [
+        "4824",
+        0
+      ],
+      "horizontal_tiles": 2,
+      "vertical_tiles": 2,
+      "overlap": 6,
+      "last_frame_fix": false,
+      "working_device": "auto",
+      "working_dtype": "auto"
+    }
+  },
+  "4819": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "4983",
+        0
+      ],
+      "fps": [
+        "4978",
+        0
+      ]
+    }
+  },
+  "4823": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "4819",
+        0
+      ],
+      "filename_prefix": "video/t2v_ltx23_tattoo",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  },
+  "2004": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "参考图（图生视频）"
+    }
+  },
+  "4977": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": true
+    },
+    "_meta": {
+      "title": "bypass_i2v"
+    }
+  },
+  "3159": {
+    "class_type": "LTXVImgToVideoConditionOnly",
+    "inputs": {
+      "vae": [
+        "3940",
+        2
+      ],
+      "image": [
+        "2004",
+        0
+      ],
+      "latent": [
+        "3059",
+        0
+      ],
+      "strength": 0.7,
+      "bypass": [
+        "4977",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTXV I2V Conditioning"
+    }
+  },
+  "4010": {
+    "class_type": "LTXVAudioVAELoader",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
+    }
+  },
+  "3980": {
+    "class_type": "LTXVEmptyLatentAudio",
+    "inputs": {
+      "frames_number": [
+        "4979",
+        0
+      ],
+      "frame_rate": [
+        "4986",
+        0
+      ],
+      "batch_size": 1,
+      "audio_vae": [
+        "4010",
+        0
+      ]
+    }
+  },
+  "4528": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "3159",
+        0
+      ],
+      "audio_latent": [
+        "3980",
+        0
+      ]
+    }
+  },
+  "4824": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "4802",
+        0
+      ]
+    }
+  },
+  "4963": {
+    "class_type": "GuiderParameters",
+    "inputs": {
+      "modality": "AUDIO",
+      "cfg": 7,
+      "stg": 1,
+      "perturb_attn": true,
+      "rescale": 0.7,
+      "modality_scale": 3,
+      "skip_step": 0,
+      "cross_attn": true
+    }
+  }
+}

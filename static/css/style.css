@@ -1133,6 +1133,21 @@ a { color: var(--accent); text-decoration: none; }
   transition: width .3s ease;
 }
 
+.gi-progress-top.progress-unknown {
+  overflow: hidden;
+}
+
+.gi-progress-top.progress-unknown .gi-progress-fill {
+  width: 34% !important;
+  min-width: 34%;
+  animation: gi-progress-unknown 1.2s ease-in-out infinite;
+}
+
+@keyframes gi-progress-unknown {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
+}
+
 .gi-prompt {
   font-size: 11px;
   color: var(--text);

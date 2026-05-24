@@ -100,6 +100,60 @@ class InstanceIdleGuardTest(unittest.TestCase):
         self.assertIn("systemctl", cmd)
         self.assertLess(cmd.index("2222"), cmd.index("sjcta@10.10.10.75"))
 
+    def test_remote_status_checks_place_ssh_port_before_destination(self):
+        calls = []
+
+        class Result:
+            returncode = 0
+            stdout = "ok\n"
+            stderr = ""
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            return Result()
+
+        node = {
+            "id": "n1",
+            "name": "DGX Spark",
+            "host": "10.10.10.75",
+            "connection": "remote-ssh",
+            "ssh_config": {"user": "sjcta", "port": 2222},
+        }
+
+        with mock.patch("app.subprocess.run", side_effect=fake_run):
+            self.assertTrue(app._check_node_ssh(node))
+            app._run_remote_gpu_query(node)
+
+        self.assertGreaterEqual(len(calls), 2)
+        for cmd in calls:
+            self.assertEqual(cmd[:4], ["ssh", "-p", "2222", "sjcta@10.10.10.75"])
+            self.assertLess(cmd.index("2222"), cmd.index("sjcta@10.10.10.75"))
+
+    def test_remote_service_active_places_ssh_port_before_destination(self):
+        calls = []
+
+        class Result:
+            stdout = "active\n"
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            return Result()
+
+        node = {
+            "id": "n1",
+            "name": "DGX Spark",
+            "host": "10.10.10.75",
+            "connection": "remote-ssh",
+            "ssh_config": {"user": "sjcta", "port": 2222},
+        }
+        inst = {"id": "i1", "name": "B", "service": "comfyui-b"}
+
+        with mock.patch("app.subprocess.run", side_effect=fake_run):
+            self.assertTrue(app._check_service_active(node, inst))
+
+        self.assertEqual(calls[0][:4], ["ssh", "-p", "2222", "sjcta@10.10.10.75"])
+        self.assertLess(calls[0].index("2222"), calls[0].index("sjcta@10.10.10.75"))
+
     def test_submitting_jobs_use_short_stuck_timeout(self):
         job = {"status": "submitting", "last_update": 100.0}
 

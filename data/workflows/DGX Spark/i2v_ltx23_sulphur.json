@@ -202,7 +202,7 @@
   },
   "320:288": {
     "inputs": {
-      "strength": 1,
+      "strength": 0.35,
       "bypass": [
         "320:302",
         0
@@ -599,22 +599,24 @@
   },
   "320:315": {
     "inputs": {
-      "tile_size": 768,
-      "overlap": 64,
-      "temporal_size": 4096,
-      "temporal_overlap": 4,
-      "samples": [
-        "320:309",
-        0
-      ],
       "vae": [
         "320:316",
         2
-      ]
+      ],
+      "latents": [
+        "320:309",
+        0
+      ],
+      "horizontal_tiles": 2,
+      "vertical_tiles": 2,
+      "overlap": 6,
+      "last_frame_fix": true,
+      "working_device": "auto",
+      "working_dtype": "auto"
     },
-    "class_type": "VAEDecodeTiled",
+    "class_type": "LTXVTiledVAEDecode",
     "_meta": {
-      "title": "VAE解码（分块）"
+      "title": "LTXV VAE解码（分块尾帧修复）"
     }
   },
   "320:316": {

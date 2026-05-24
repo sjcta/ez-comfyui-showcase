@@ -2446,10 +2446,13 @@ def _check_service_active(node: dict, instance: dict) -> bool:
             ssh = _resolve_ssh_config(node.get("ssh_config", {}))
             cmd = []
             if ssh.get("auth") == "password" and ssh.get("password"):
-                cmd = ["sshpass", "-p", ssh["password"], "ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
+                cmd = ["sshpass", "-p", ssh["password"], "ssh",
+                       "-p", str(ssh.get("port", 22)),
+                       f"{ssh.get('user', 'root')}@{node['host']}"]
             else:
-                cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
-            cmd += ["-p", str(ssh.get("port", 22)), "systemctl", "--user", "is-active", svc]
+                cmd = ["ssh", "-p", str(ssh.get("port", 22)),
+                       f"{ssh.get('user', 'root')}@{node['host']}"]
+            cmd += ["systemctl", "--user", "is-active", svc]
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             return r.stdout.strip() == "active"
     except Exception:
@@ -2711,11 +2714,13 @@ def _build_ssh_command(node: dict, remote_args: list[str]) -> list[str]:
     if ssh.get("auth") == "password" and ssh.get("password"):
         cmd = [
             "sshpass", "-p", ssh["password"], "ssh",
+            "-p", str(ssh.get("port", 22)),
             f"{ssh.get('user', 'root')}@{node['host']}",
         ]
     else:
-        cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}"]
-    return cmd + ["-p", str(ssh.get("port", 22))] + remote_args
+        cmd = ["ssh", "-p", str(ssh.get("port", 22)),
+               f"{ssh.get('user', 'root')}@{node['host']}"]
+    return cmd + remote_args
 
 
 def _parse_meminfo_stats(out: str, base: dict | None = None) -> dict:
@@ -7221,12 +7226,12 @@ def _check_node_ssh(node: dict) -> bool:
         ssh = _resolve_ssh_config(node.get("ssh_config", {}))
         if ssh.get("auth") == "password" and ssh.get("password"):
             cmd = ["sshpass", "-p", ssh["password"], "ssh",
-                   f"{ssh.get('user', 'root')}@{node['host']}",
                    "-p", str(ssh.get("port", 22)),
+                   f"{ssh.get('user', 'root')}@{node['host']}",
                    "-o", "ConnectTimeout=5", "echo", "ok"]
         else:
-            cmd = ["ssh", f"{ssh.get('user', 'root')}@{node['host']}",
-                   "-p", str(ssh.get("port", 22)),
+            cmd = ["ssh", "-p", str(ssh.get("port", 22)),
+                   f"{ssh.get('user', 'root')}@{node['host']}",
                    "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
                    "echo", "ok"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)

@@ -187,7 +187,7 @@
       "视频制作"
     ],
     "owner_id": "1ec621fd",
-    "shared": false,
+    "shared": true,
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_sulphur.json",
     "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
@@ -309,5 +309,17 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_nunchaku_seedvr4k.json",
     "thumbnail": "DGX Spark/t2i_nunchaku_seedvr4k.png",
     "sort_order": 17
+  },
+  "t2v_sulphur2_q4.json": {
+    "name": "LTX 2.3 文/图生视频（纹身/无音频）",
+    "tags": [
+      "文生视频",
+      "图生视频",
+      "Video"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": false,
+    "source": "DGX Spark",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2v_sulphur2_q4.json"
   }
 }

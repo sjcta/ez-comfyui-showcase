@@ -624,7 +624,7 @@
         var host = n.host || '?';
         var port = ssh.port || 22;
         var auth = ssh.auth || 'password';
-        var cmd = 'ssh ' + user + '@' + host + ' -p ' + port;
+        var cmd = 'ssh -p ' + port + ' ' + user + '@' + host;
         contentEl.innerHTML = '<div class="result-panel">'
           + '<div class="result-section-caption">连接摘要</div>'
           + '<div class="result-list-stack">'

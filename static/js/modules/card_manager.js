@@ -415,6 +415,17 @@
     return status === 'generating' || status === 'downloading' || status === 'checking';
   }
 
+  function _jobProgressPct(j) {
+    var pct = Number(j && j.progress ? j.progress.pct : 0);
+    if (!isFinite(pct)) pct = 0;
+    return Math.max(0, Math.min(100, pct));
+  }
+
+  function _jobProgressClass(j) {
+    var status = j && j.status;
+    return _jobProgressPct(j) <= 0 && (status === 'generating' || status === 'submitting') ? ' progress-unknown' : '';
+  }
+
   function _jobTimerHtml(j) {
     if (!_jobShowsTimer(j)) return '';
     var ts = _jobTimerTs(j);
@@ -485,7 +496,7 @@
       (tagHtml || instBadge ? '<div class="gi-tags-row">' + tagHtml + instBadge + '</div>' : '') +
       '</div>' +
       '<div class="gi-info" onclick="event.stopPropagation();CW.restoreJob(\'' + escA(j.id) + '\')">' +
-      (j.status === 'generating' || j.status === 'submitting' ? '<div class="gi-progress-top"><div class="gi-progress-fill" style="width:' + (j.progress ? j.progress.pct : 0) + '%"></div></div>' : '') +
+      (j.status === 'generating' || j.status === 'submitting' ? '<div class="gi-progress-top' + _jobProgressClass(j) + '"><div class="gi-progress-fill" style="width:' + _jobProgressPct(j) + '%"></div></div>' : '') +
       (wfLabel ? '<div class="gi-wf-label" title="' + escA(wfLabel) + '">' + escH(wfLabel) + '</div>' : '') +
       '<div class="gi-prompt" title="' + escA(j.prompt_preview || label) + '">' + escH(j.prompt_preview || label) + '</div>' +
       (j.status !== 'generating' && j.status !== 'submitting' ? '<div class="gi-meta">' +
@@ -589,12 +600,15 @@
       if (bar) bar.style.display = 'none';
     } else {
       var bar2 = card.querySelector('.gi-progress-top');
-      if (bar2) bar2.style.display = '';
+      if (bar2) {
+        bar2.style.display = '';
+        bar2.classList.toggle('progress-unknown', _jobProgressPct(job) <= 0 && (job.status === 'generating' || job.status === 'submitting'));
+      }
     }
 
     // ── Progress bar ──
     var bar3 = card.querySelector('.gi-progress-fill');
-    if (bar3) bar3.style.width = (job.progress ? job.progress.pct : 0) + '%';
+    if (bar3) bar3.style.width = _jobProgressPct(job) + '%';
 
     // ── Timer ──
     var timerEl = card.querySelector('.gi-timer');
