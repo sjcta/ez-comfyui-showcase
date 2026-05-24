@@ -39,14 +39,28 @@ class MobileAgentTests(unittest.TestCase):
         self.assertEqual(compiled["aspect_ratio"], "9:16")
         self.assertEqual(compiled["style"], "cinematic")
 
+    def test_prompt_compiler_invalid_explicit_ratio_falls_back_consistently(self):
+        compiled = PromptCompiler().compile("帮我出一张未来城市雨夜", aspect_ratio="16:9")
+
+        self.assertEqual(compiled["aspect_ratio"], "1:1")
+        self.assertEqual(compiled["width"], 1024)
+        self.assertEqual(compiled["height"], 1024)
+
     def test_ratio_to_dimensions_uses_mobile_creator_defaults(self):
         self.assertEqual(ratio_to_dimensions("9:16"), {"width": 720, "height": 1280})
         self.assertEqual(ratio_to_dimensions("1:1"), {"width": 1024, "height": 1024})
 
     def test_build_agent_response_uses_internal_workflow_alias(self):
+        allowed_styles = ["realistic"]
+        allowed_ratios = ["1:1", "3:4"]
         response = build_agent_response(
-            text="帮我出一张切成片的西瓜",
-            settings={**DEFAULT_MOBILE_CREATOR_SETTINGS, "default_text_to_image_workflow": "t2i-z-image.json"},
+            text="帮我出一张手机壁纸，切成片的西瓜，电影感",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+                "allowed_styles": allowed_styles,
+                "allowed_ratios": allowed_ratios,
+            },
             workflow_available=True,
         )
 
@@ -55,8 +69,12 @@ class MobileAgentTests(unittest.TestCase):
         self.assertEqual(response["resolved_workflow"], "t2i-z-image.json")
         self.assertFalse(response["needs_confirmation"])
         self.assertIn("compiled_prompt", response)
-        self.assertIn("style", response["options"])
-        self.assertIn("aspect_ratio", response["options"])
+        self.assertEqual(response["style"], "")
+        self.assertEqual(response["aspect_ratio"], "1:1")
+        self.assertEqual(response["options"]["style"], "")
+        self.assertEqual(response["options"]["aspect_ratio"], "1:1")
+        self.assertEqual(response["options"]["allowed_styles"], allowed_styles)
+        self.assertEqual(response["options"]["allowed_ratios"], allowed_ratios)
 
     def test_build_agent_response_handles_unavailable_workflow(self):
         response = build_agent_response(

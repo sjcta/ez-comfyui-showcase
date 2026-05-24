@@ -108,8 +108,8 @@ class PromptCompiler:
 
     def compile(self, text: str, style: str = "", aspect_ratio: str = "") -> dict[str, Any]:
         cleaned = clean_user_prompt(text)
-        selected_ratio = aspect_ratio or _detect_aspect_ratio(text)
-        selected_style = style or _detect_style(text)
+        selected_ratio = _normalize_ratio(aspect_ratio or _detect_aspect_ratio(text))
+        selected_style = _normalize_style(style or _detect_style(text))
         prompt = _strip_ratio_and_style_words(cleaned)
         prompt = _normalize_prompt_separators(prompt)
 
@@ -138,6 +138,11 @@ def build_agent_response(
     merged_settings = {**DEFAULT_MOBILE_CREATOR_SETTINGS, **(settings or {})}
     route = IntentRouter().classify(text, has_image=has_image, has_video=has_video)
     compiled = PromptCompiler().compile(text)
+    allowed_styles = _normalize_allowed_styles(merged_settings.get("allowed_styles"))
+    allowed_ratios = _normalize_allowed_ratios(merged_settings.get("allowed_ratios"))
+    selected_style = _normalize_style(compiled["style"], allowed_styles)
+    selected_ratio = _normalize_ratio(compiled["aspect_ratio"], allowed_ratios)
+    dimensions = ratio_to_dimensions(selected_ratio)
     resolved_workflow = merged_settings.get("default_text_to_image_workflow", "")
 
     needs_confirmation = route["intent"] != "text_to_image" or not workflow_available
@@ -155,19 +160,21 @@ def build_agent_response(
         "raw_text": str(text or ""),
         "display_summary": _build_display_summary(route["intent"], compiled["compiled_prompt"]),
         "compiled_prompt": compiled["compiled_prompt"],
-        "style": compiled["style"],
-        "aspect_ratio": compiled["aspect_ratio"],
-        "width": compiled["width"],
-        "height": compiled["height"],
+        "style": selected_style,
+        "aspect_ratio": selected_ratio,
+        "width": dimensions["width"],
+        "height": dimensions["height"],
         "workflow": "default_text_to_image",
         "resolved_workflow": resolved_workflow,
         "needs_confirmation": needs_confirmation,
         "error_code": error_code,
         "options": {
-            "style": compiled["style"],
-            "aspect_ratio": compiled["aspect_ratio"],
-            "width": compiled["width"],
-            "height": compiled["height"],
+            "style": selected_style,
+            "aspect_ratio": selected_ratio,
+            "width": dimensions["width"],
+            "height": dimensions["height"],
+            "allowed_styles": allowed_styles,
+            "allowed_ratios": allowed_ratios,
         },
     }
 
@@ -215,6 +222,38 @@ def _detect_style(text: str) -> str:
     if any(word in normalized for word in ("真实", "写实", "摄影", "照片", "realistic", "photoreal")):
         return "realistic"
     return ""
+
+
+def _normalize_style(style: str, allowed_styles: list[str] | None = None) -> str:
+    selected = str(style or "").strip()
+    allowed = allowed_styles if allowed_styles is not None else DEFAULT_MOBILE_CREATOR_SETTINGS["allowed_styles"]
+    return selected if selected in allowed else ""
+
+
+def _normalize_ratio(ratio: str, allowed_ratios: list[str] | None = None) -> str:
+    selected = str(ratio or "").strip()
+    allowed = allowed_ratios if allowed_ratios is not None else DEFAULT_MOBILE_CREATOR_SETTINGS["allowed_ratios"]
+    if selected in _RATIO_DIMENSIONS and selected in allowed:
+        return selected
+    if "1:1" in allowed:
+        return "1:1"
+    for candidate in allowed:
+        if candidate in _RATIO_DIMENSIONS:
+            return candidate
+    return "1:1"
+
+
+def _normalize_allowed_styles(styles: Any) -> list[str]:
+    if not isinstance(styles, list):
+        return list(DEFAULT_MOBILE_CREATOR_SETTINGS["allowed_styles"])
+    return [style for style in styles if style in _STYLE_HINTS]
+
+
+def _normalize_allowed_ratios(ratios: Any) -> list[str]:
+    if not isinstance(ratios, list):
+        return list(DEFAULT_MOBILE_CREATOR_SETTINGS["allowed_ratios"])
+    normalized = [ratio for ratio in ratios if ratio in _RATIO_DIMENSIONS]
+    return normalized or ["1:1"]
 
 
 def _strip_ratio_and_style_words(text: str) -> str:
