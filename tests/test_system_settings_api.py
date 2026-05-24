@@ -53,6 +53,32 @@ class SystemSettingsApiTests(unittest.TestCase):
         loaded = app.api_system_settings_get(current_user={"sub": "admin", "role": "admin"})
         self.assertEqual(loaded["data"]["image_protection"]["prompt_patterns"]["strong_nude"], "全裸|裸体|bare")
 
+    def test_admin_can_read_and_update_mobile_creator_settings(self):
+        result = app.api_system_settings_put(
+            {
+                "mobile_creator": {
+                    "enabled": True,
+                    "default_text_to_image_workflow": "t2i-test.json",
+                    "allowed_styles": ["cinematic", "realistic"],
+                    "allowed_ratios": ["1:1", "9:16"],
+                    "speech_timeout_ms": 4321,
+                }
+            },
+            current_user={"sub": "admin", "role": "admin"},
+        )
+
+        self.assertTrue(result["ok"])
+        settings = result["data"]["mobile_creator"]
+        self.assertTrue(settings["enabled"])
+        self.assertEqual(settings["default_text_to_image_workflow"], "t2i-test.json")
+        self.assertEqual(settings["allowed_styles"], ["cinematic", "realistic"])
+        self.assertEqual(settings["allowed_ratios"], ["1:1", "9:16"])
+        self.assertEqual(settings["speech_timeout_ms"], 4321)
+
+        loaded = app.api_system_settings_get(current_user={"sub": "admin", "role": "admin"})
+        self.assertEqual(loaded["data"]["mobile_creator"]["default_text_to_image_workflow"], "t2i-test.json")
+        self.assertEqual(loaded["data"]["mobile_creator"]["speech_timeout_ms"], 4321)
+
     def test_non_admin_cannot_read_system_settings(self):
         with self.assertRaises(HTTPException) as ctx:
             app.api_system_settings_get(current_user=app.require_admin({"sub": "user1", "role": "user"}))

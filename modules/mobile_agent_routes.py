@@ -13,7 +13,6 @@ from modules.mobile_agent import (
     build_agent_response,
     build_generate_fields,
 )
-from modules.speech_transcriber import SpeechTranscriber
 
 
 class MobileAgentUnderstandRequest(BaseModel):
@@ -32,6 +31,7 @@ def register_mobile_agent_routes(app, deps: dict[str, Callable[..., Any]]) -> No
     analyze_workflow = deps["analyze_workflow"]
     add_log = deps["add_log"]
     user_id = deps["user_id"]
+    speech_transcriber_factory = deps["speech_transcriber_factory"]
 
     @app.post("/api/mobile-agent/understand")
     def api_mobile_agent_understand(
@@ -68,7 +68,7 @@ def register_mobile_agent_routes(app, deps: dict[str, Callable[..., Any]]) -> No
                     f"workflow analysis failed: {e}",
                     details=traceback.format_exc(limit=5),
                 )
-                data["field_values"] = {}
+                _mark_workflow_mapping_failed(data)
         else:
             data["field_values"] = {}
         add_log(
@@ -87,7 +87,8 @@ def register_mobile_agent_routes(app, deps: dict[str, Callable[..., Any]]) -> No
     ):
         try:
             content = await file.read()
-            result = SpeechTranscriber().transcribe_bytes(
+            transcriber = speech_transcriber_factory()
+            result = transcriber.transcribe_bytes(
                 content,
                 filename=file.filename or "voice.webm",
                 timeout_ms=timeout_ms,
@@ -130,3 +131,11 @@ def _resolve_workflow_entry(
     meta = load_wf_meta() or {}
     entry = meta.get(workflow_name, {}) if isinstance(meta, dict) else {}
     return normalize_wf_meta_entry(workflow_name, entry)
+
+
+def _mark_workflow_mapping_failed(data: dict[str, Any]) -> None:
+    data["field_values"] = {}
+    data["needs_confirmation"] = True
+    data["error_code"] = "workflow_analysis_failed"
+    data["question"] = "工作流字段解析失败，请稍后重试或在高级工作流界面手动填写提示词。"
+    data["message"] = "Workflow analysis failed while mapping the compiled prompt to generation fields."

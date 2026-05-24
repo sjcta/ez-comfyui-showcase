@@ -41,10 +41,12 @@ from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
 from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
+from modules.mobile_agent import DEFAULT_MOBILE_CREATOR_SETTINGS
 from modules.mobile_agent_routes import register_mobile_agent_routes
 from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
 from modules.prompt_labels import infer_generation_label
 from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
+from modules.speech_transcriber import SpeechTranscriber
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
@@ -1039,7 +1041,16 @@ def _json_loads_safe(value, default):
 def _normalize_system_settings(raw: dict | None) -> dict:
     raw = raw if isinstance(raw, dict) else {}
     image_settings = raw.get("image_protection") if isinstance(raw.get("image_protection"), dict) else {}
-    return {"image_protection": configure_image_protection(image_settings)}
+    mobile_settings = raw.get("mobile_creator") if isinstance(raw.get("mobile_creator"), dict) else {}
+    return {
+        "image_protection": configure_image_protection(image_settings),
+        "mobile_creator": _normalize_mobile_creator_settings(mobile_settings),
+    }
+
+
+def _normalize_mobile_creator_settings(settings: dict | None) -> dict:
+    settings = settings if isinstance(settings, dict) else {}
+    return {**DEFAULT_MOBILE_CREATOR_SETTINGS, **settings}
 
 
 def _load_system_settings() -> dict:
@@ -1064,6 +1075,10 @@ def _update_system_settings(patch: dict | None) -> dict:
         image_current = dict(current.get("image_protection") or {})
         image_current.update(patch["image_protection"])
         current["image_protection"] = image_current
+    if isinstance(patch.get("mobile_creator"), dict):
+        mobile_current = dict(current.get("mobile_creator") or {})
+        mobile_current.update(patch["mobile_creator"])
+        current["mobile_creator"] = mobile_current
     updated = _normalize_system_settings(current)
     _save_system_settings(updated)
     return updated
@@ -5854,6 +5869,7 @@ register_mobile_agent_routes(app, {
     "analyze_workflow": analyze_workflow,
     "add_log": add_log,
     "user_id": _user_id,
+    "speech_transcriber_factory": SpeechTranscriber,
 })
 
 
