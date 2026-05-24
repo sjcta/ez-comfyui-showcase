@@ -37,6 +37,16 @@ class MobileAgentUiContractTests(unittest.TestCase):
         self.assertNotIn("CW.icon('send'", js)
         self.assertNotIn("CW.icon('mic'", js)
 
+    def test_generate_handoff_calls_existing_generate_api(self):
+        js = (ROOT / "static/js/modules/mobile_agent/mobile-agent.js").read_text()
+
+        self.assertIn("function submitGenerate", js)
+        self.assertIn("/api/generate", js)
+        self.assertIn("resolved_workflow", js)
+        self.assertIn("field_values", js)
+        self.assertIn("width", js)
+        self.assertIn("height", js)
+
     def test_mobile_agent_executable_behavior(self):
         result = subprocess.run(
             ["node", "tests/js/mobile_agent_shell.test.js"],

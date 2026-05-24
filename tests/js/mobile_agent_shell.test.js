@@ -77,6 +77,14 @@ function makeContext(options = {}) {
     location: { hash: options.hash || '', protocol: 'http:', pathname: '/' },
     fetch(url, request) {
       calls.push({ url, request });
+      if (url === '/api/generate') {
+        return Promise.resolve({
+          ok: true,
+          json() {
+            return Promise.resolve({ job_id: 'job_mobile_1', seed: 123 });
+          },
+        });
+      }
       return Promise.resolve({
         ok: true,
         json() {
@@ -87,6 +95,10 @@ function makeContext(options = {}) {
               compiled_prompt: 'fallback prompt',
               style: '电影感',
               aspect_ratio: '16:9',
+              resolved_workflow: 't2i-test.json',
+              field_values: { '1::text': 'prompt' },
+              width: 720,
+              height: 1280,
               options: {
                 allowed_styles: ['电影感', '写实'],
                 allowed_ratios: ['16:9', '1:1'],
@@ -142,6 +154,17 @@ async function run() {
     assert(root.innerHTML.includes('16:9'), 'confirm should render selected ratio and ratio chips');
     assert(root.innerHTML.includes('写实'), 'confirm should render allowed style chips');
     assert(root.innerHTML.includes('1:1'), 'confirm should render allowed ratio chips');
+
+    await context.CW.mobileAgent.submitGenerate();
+
+    assert.strictEqual(calls[1].url, '/api/generate');
+    const generateBody = JSON.parse(calls[1].request.body);
+    assert.deepStrictEqual(generateBody, {
+      workflow: 't2i-test.json',
+      fields: { '1::text': 'prompt' },
+      width: 720,
+      height: 1280,
+    });
   }
 }
 

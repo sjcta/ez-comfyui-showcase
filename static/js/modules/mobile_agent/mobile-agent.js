@@ -125,6 +125,7 @@
         '<div class="mobile-agent-section-label">创作方案</div>' +
         '<h1>确认后开始生成</h1>' +
         '<p class="mobile-agent-summary">' + escH(summary) + '</p>' +
+        (state.error ? '<div class="mobile-agent-error" role="alert">' + escH(state.error) + '</div>' : '') +
         '<div class="mobile-agent-selected">' +
           (selectedStyle ? '<span>风格：' + escH(selectedStyle) + '</span>' : '') +
           (selectedRatio ? '<span>画幅：' + escH(selectedRatio) + '</span>' : '') +
@@ -187,10 +188,39 @@
     }
   }
 
-  function submitGenerate() {
+  async function submitGenerate() {
+    var data = state.understanding || {};
+    state.error = '';
+    if (!data.resolved_workflow || data.error_code) {
+      state.error = data.question || '默认工作流暂不可用。';
+      if (state.mode === 'confirm' || state.understanding) renderConfirm();
+      else renderHome();
+      return;
+    }
     state.mode = 'generating';
     renderGenerating();
-    toast('移动端生成将在下一步接入', 'info');
+    try {
+      var res = await authFetch(API + '/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflow: data.resolved_workflow,
+          fields: data.field_values || {},
+          width: data.width || 0,
+          height: data.height || 0
+        })
+      });
+      var payload = await res.json();
+      if (!res.ok || payload.detail) {
+        throw new Error(payload.detail || '提交生成失败。');
+      }
+      state.jobId = payload.job_id;
+      toast('已开始生成', 'success');
+    } catch (err) {
+      state.error = err && err.message ? err.message : '提交生成失败。';
+      state.mode = 'confirm';
+      renderConfirm();
+    }
   }
 
   function syncRoute() {
