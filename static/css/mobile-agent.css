@@ -11,6 +11,13 @@
     linear-gradient(180deg, #101820 0%, #17212b 52%, #0f141b 100%);
 }
 
+.mobile-agent:not(.hidden) {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+}
+
 .mobile-agent.hidden {
   display: none;
 }
@@ -157,6 +164,20 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.mobile-agent-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: rgba(248, 250, 252, 0.76);
+  font-size: 13px;
+}
+
+.mobile-agent-selected span {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .mobile-agent-chip-group {
   display: flex;
   flex-wrap: wrap;
@@ -168,6 +189,11 @@
   min-height: 38px;
   color: rgba(248, 250, 252, 0.9);
   background: rgba(255, 255, 255, 0.1);
+}
+
+.mobile-agent-chip.is-selected {
+  color: #071016;
+  background: #46e6bc;
 }
 
 .mobile-agent-actions {
@@ -208,10 +234,6 @@
 }
 
 @media (max-width: 700px) {
-  .mobile-agent:not(.hidden) {
-    display: flex;
-  }
-
   .mobile-agent-panel {
     padding-top: 18px;
   }

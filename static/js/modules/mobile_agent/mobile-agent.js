@@ -25,7 +25,8 @@
     text: '',
     understanding: null,
     loading: false,
-    error: ''
+    error: '',
+    active: false
   };
 
   function icon(name) {
@@ -42,12 +43,36 @@
     if (!state.root) return;
     state.root.innerHTML = html;
     state.root.classList.remove('hidden');
+    if (document.body && document.body.setAttribute) {
+      document.body.setAttribute('data-mobile-agent-active', 'on');
+    }
+  }
+
+  function isRouteActive() {
+    return location.hash === '#mobile-agent' ||
+      !!(document.body && document.body.dataset && document.body.dataset.mobileAgent === 'on');
+  }
+
+  function hideMobileAgent() {
+    state.active = false;
+    if (!state.root) return;
+    state.root.classList.add('hidden');
+    state.root.innerHTML = '';
+    if (document.body && document.body.removeAttribute) {
+      document.body.removeAttribute('data-mobile-agent-active');
+    }
+  }
+
+  function activateMobileAgent() {
+    if (!state.root) return;
+    state.active = true;
+    renderHome();
   }
 
   function renderHome() {
-    var imageIcon = CW.icon('image');
-    var micIcon = CW.icon('mic');
-    var sendIcon = CW.icon('send');
+    var imageIcon = icon('image');
+    var micIcon = icon('mic');
+    var sendIcon = icon('send');
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="home">' +
         '<div class="mobile-agent-hero">' +
@@ -78,7 +103,7 @@
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="voice">' +
         '<button class="mobile-agent-back" type="button" data-action="home">' + icon('chevron-left') + ' 返回</button>' +
-        '<div class="mobile-agent-voice-orb">' + CW.icon('mic') + '</div>' +
+        '<div class="mobile-agent-voice-orb">' + icon('mic') + '</div>' +
         '<h1>语音输入</h1>' +
         '<p>录音与转写会接入 <code>' + escH(transcribePath) + '</code>，当前先保留入口。</p>' +
         '<button class="mobile-agent-send-btn" type="button" data-action="home">完成</button>' +
@@ -88,20 +113,29 @@
 
   function renderConfirm() {
     var data = state.understanding || {};
-    var styles = data.styles || data.style_chips || ['写实', '电影感', '精致细节'];
-    var ratios = data.aspect_ratios || data.ratios || ['1:1', '3:4', '16:9'];
-    var summary = data.summary || data.prompt || state.text || '请确认创作方案';
+    var options = data.options || {};
+    var selectedStyle = data.style || data.selected_style || '';
+    var selectedRatio = data.aspect_ratio || data.selected_ratio || '';
+    var styles = options.allowed_styles || data.allowed_styles || data.styles || data.style_chips || (selectedStyle ? [selectedStyle] : []);
+    var ratios = options.allowed_ratios || data.allowed_ratios || data.aspect_ratios || data.ratios || (selectedRatio ? [selectedRatio] : []);
+    var summary = data.display_summary || data.compiled_prompt || state.text || '请确认创作方案';
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="confirm">' +
         '<button class="mobile-agent-back" type="button" data-action="home">' + icon('chevron-left') + ' 返回</button>' +
         '<div class="mobile-agent-section-label">创作方案</div>' +
         '<h1>确认后开始生成</h1>' +
         '<p class="mobile-agent-summary">' + escH(summary) + '</p>' +
+        '<div class="mobile-agent-selected">' +
+          (selectedStyle ? '<span>风格：' + escH(selectedStyle) + '</span>' : '') +
+          (selectedRatio ? '<span>画幅：' + escH(selectedRatio) + '</span>' : '') +
+        '</div>' +
         '<div class="mobile-agent-chip-group" aria-label="风格">' + styles.map(function (item) {
-          return '<button type="button" class="mobile-agent-chip">' + escH(item) + '</button>';
+          var active = selectedStyle && String(item) === String(selectedStyle);
+          return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
         }).join('') + '</div>' +
         '<div class="mobile-agent-chip-group" aria-label="画幅">' + ratios.map(function (item) {
-          return '<button type="button" class="mobile-agent-chip">' + escH(item) + '</button>';
+          var active = selectedRatio && String(item) === String(selectedRatio);
+          return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
         }).join('') + '</div>' +
         '<div class="mobile-agent-actions">' +
           '<button class="mobile-agent-secondary-btn" type="button" data-action="home">返回修改</button>' +
@@ -159,6 +193,22 @@
     toast('移动端生成将在下一步接入', 'info');
   }
 
+  function syncRoute() {
+    if (!state.root) return;
+    if (isRouteActive()) {
+      activateMobileAgent();
+    } else {
+      hideMobileAgent();
+    }
+  }
+
+  function openMobileAgent() {
+    if (location.hash !== '#mobile-agent') {
+      location.hash = '#mobile-agent';
+    }
+    activateMobileAgent();
+  }
+
   function onInput(event) {
     if (event.target && event.target.id === 'mobileAgentText') {
       state.text = event.target.value;
@@ -181,7 +231,8 @@
     state.root.dataset.mobileAgentReady = '1';
     state.root.addEventListener('input', onInput);
     state.root.addEventListener('click', onClick);
-    renderHome();
+    if (window.addEventListener) window.addEventListener('hashchange', syncRoute);
+    syncRoute();
   }
 
   window.CW = window.CW || {};
@@ -192,7 +243,9 @@
     renderConfirm: renderConfirm,
     renderGenerating: renderGenerating,
     submitUnderstand: submitUnderstand,
-    submitGenerate: submitGenerate
+    submitGenerate: submitGenerate,
+    open: openMobileAgent,
+    close: hideMobileAgent
   };
   window.CW.initMobileAgent = initMobileAgent;
 

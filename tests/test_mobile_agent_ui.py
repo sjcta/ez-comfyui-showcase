@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import unittest
 
 
@@ -16,8 +17,7 @@ class MobileAgentUiContractTests(unittest.TestCase):
     def test_mobile_agent_root_exists(self):
         html = (ROOT / "static/index.html").read_text()
 
-        self.assertIn('id="mobileAgentRoot"', html)
-        self.assertIn('class="mobile-agent"', html)
+        self.assertIn('<main class="mobile-agent hidden" id="mobileAgentRoot" aria-label="移动端智能创作入口"></main>', html)
 
     def test_mobile_agent_module_renders_core_states(self):
         js = (ROOT / "static/js/modules/mobile_agent/mobile-agent.js").read_text()
@@ -27,11 +27,26 @@ class MobileAgentUiContractTests(unittest.TestCase):
         self.assertIn("function renderConfirm", js)
         self.assertIn("function renderGenerating", js)
         self.assertIn("function submitUnderstand", js)
+        self.assertIn("function openMobileAgent", js)
         self.assertIn("/api/mobile-agent/understand", js)
         self.assertIn("/api/mobile-agent/transcribe", js)
         self.assertIn("CW.mobileAgent", js)
-        self.assertIn("CW.icon('send'", js)
-        self.assertIn("CW.icon('mic'", js)
+        self.assertIn("function icon", js)
+        self.assertIn("icon('send'", js)
+        self.assertIn("icon('mic'", js)
+        self.assertNotIn("CW.icon('send'", js)
+        self.assertNotIn("CW.icon('mic'", js)
+
+    def test_mobile_agent_executable_behavior(self):
+        result = subprocess.run(
+            ["node", "tests/js/mobile_agent_shell.test.js"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_mobile_agent_css_is_mobile_first_and_scoped(self):
         css = (ROOT / "static/css/mobile-agent.css").read_text()
@@ -42,6 +57,7 @@ class MobileAgentUiContractTests(unittest.TestCase):
         self.assertIn("@media (max-width: 700px)", css)
         self.assertIn("height: calc(var(--vh, 1vh) * 100", css)
         self.assertIn("overflow-x: hidden", css)
+        self.assertIn("position: fixed", css)
 
 
 if __name__ == "__main__":
