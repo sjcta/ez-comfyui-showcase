@@ -49,7 +49,9 @@
   }
 
   function isRouteActive() {
+    var path = String(location.pathname || '').replace(/\/+$/, '');
     return location.hash === '#mobile-agent' ||
+      path === '/app' ||
       !!(document.body && document.body.dataset && document.body.dataset.mobileAgent === 'on');
   }
 

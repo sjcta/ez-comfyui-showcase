@@ -74,7 +74,7 @@ function makeContext(options = {}) {
     console,
     document,
     localStorage: { getItem() { return ''; } },
-    location: { hash: options.hash || '', protocol: 'http:', pathname: '/' },
+    location: { hash: options.hash || '', protocol: 'http:', pathname: options.pathname || '/' },
     fetch(url, request) {
       calls.push({ url, request });
       if (url === '/api/generate') {
@@ -138,6 +138,12 @@ async function run() {
     vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
     assert.strictEqual(root.innerHTML, '', 'module should not render by default');
     assert(root.classList.contains('hidden'), 'root should remain hidden by default');
+  }
+
+  {
+    const { context, root } = makeContext({ pathname: '/app/', withIcon: true });
+    vm.runInNewContext(SOURCE, context, { filename: 'mobile-agent.js' });
+    assert(root.innerHTML.includes('智能创作'), 'app subpath should render mobile shell by default');
   }
 
   {
