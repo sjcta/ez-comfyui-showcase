@@ -106,7 +106,7 @@ function _isGenerationStatusToast(message, type) {
   if (type === 'queued' || type === 'generating') return true;
   if (_isGenerationStartToast(text, type)) return true;
   if ((type === 'done' && /结束出图/.test(text)) || (type === 'error' && /失败/.test(text))) return true;
-  return /(排队中|出图中|拉取图片|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
+  return /(排队中|出图中|保存结果|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
 }
 
 function _hasChinese(text) {

@@ -50,6 +50,21 @@ class PromptSubmitError(RuntimeError):
     """Raised when ComfyUI rejects the prompt before it enters the queue."""
 
 
+def _is_transient_http_error(err: Exception) -> bool:
+    """Return True for transport errors that should not stop polling."""
+    text = str(err)
+    transient_markers = (
+        "Connection refused",
+        "Errno 61",
+        "Errno 111",
+        "timed out",
+        "Temporary failure",
+        "Connection reset",
+        "Remote end closed connection",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
 # ── HTTP 辅助函数（纯同步，通过 asyncio.to_thread 调用） ────────────────
 
 import urllib.request
@@ -587,7 +602,9 @@ class WSTracker:
                     if status.get("status_str") == "error":
                         msgs = status.get("messages", [])
                         raise RuntimeError(str(msgs)[:300] if msgs else "ComfyUI 执行出错")
-            except RuntimeError:
+            except RuntimeError as e:
+                if _is_transient_http_error(e):
+                    continue
                 raise
             except Exception:
                 pass

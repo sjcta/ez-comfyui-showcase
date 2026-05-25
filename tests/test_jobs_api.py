@@ -28,6 +28,27 @@ class JobsApiTest(unittest.TestCase):
 
         self.assertEqual([job["id"] for job in result], ["job-user"])
 
+    def test_jobs_list_uses_snapshot_when_jobs_change_during_render(self):
+        app.jobs["job-user"] = {"id": "job-user", "user_id": "u1", "status": "generating"}
+        app.jobs["job-other"] = {"id": "job-other", "user_id": "u1", "status": "queued"}
+        original_can_access = app._can_access_job
+        mutated = False
+
+        def mutating_can_access(job, current_user):
+            nonlocal mutated
+            if not mutated:
+                mutated = True
+                app.jobs["job-new"] = {"id": "job-new", "user_id": "u1", "status": "queued"}
+            return original_can_access(job, current_user)
+
+        try:
+            app._can_access_job = mutating_can_access
+            result = app.api_all_jobs(current_user={"sub": "u1", "role": "user"})
+        finally:
+            app._can_access_job = original_can_access
+
+        self.assertEqual({job["id"] for job in result}, {"job-user", "job-other"})
+
 
 if __name__ == "__main__":
     unittest.main()

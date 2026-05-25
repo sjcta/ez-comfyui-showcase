@@ -90,7 +90,7 @@ class StatusButtonRuntimeTest(unittest.TestCase):
 
         self.assertEqual(data["initial"], "A: 30% | B: 10%")
         self.assertEqual(data["afterJobUpdate"], "A: 30% | B: 22%")
-        self.assertEqual(data["afterStatusRefresh"], "出图中 22%")
+        self.assertEqual(data["afterStatusRefresh"], "运行中 22%")
 
     def test_untracked_remote_running_is_not_displayed_as_zero_percent(self):
         script = textwrap.dedent(

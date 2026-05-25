@@ -81,6 +81,38 @@
       "max": 1
     },
     {
+      "key": "170:166::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "170:165::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "170:155::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "170:154::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 7,
+      "type": "number"
+    },
+    {
       "key": "9::filename_prefix",
       "zone": "output",
       "visible": true,
@@ -129,27 +161,11 @@
       "type": "text"
     },
     {
-      "key": "170:165::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 5,
-      "type": "number"
-    },
-    {
-      "key": "170:166::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 6,
-      "type": "number"
-    },
-    {
       "key": "170:168::value",
       "zone": "hidden",
       "visible": false,
       "label": "value",
-      "order": 7,
+      "order": 5,
       "type": "toggle"
     },
     {
@@ -157,31 +173,15 @@
       "zone": "hidden",
       "visible": false,
       "label": "vae_name",
-      "order": 8,
+      "order": 6,
       "type": "text"
-    },
-    {
-      "key": "170:154::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 9,
-      "type": "number"
-    },
-    {
-      "key": "170:155::value",
-      "zone": "hidden",
-      "visible": false,
-      "label": "value",
-      "order": 10,
-      "type": "number"
     },
     {
       "key": "170:145::shift",
       "zone": "hidden",
       "visible": false,
       "label": "shift",
-      "order": 11,
+      "order": 7,
       "type": "number"
     },
     {
@@ -189,7 +189,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "strength",
-      "order": 12,
+      "order": 8,
       "type": "number"
     },
     {
@@ -197,7 +197,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "reference_latents_method",
-      "order": 13,
+      "order": 9,
       "type": "text"
     },
     {
@@ -205,7 +205,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "lora_name",
-      "order": 14,
+      "order": 10,
       "type": "text"
     },
     {
@@ -213,7 +213,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "strength_model",
-      "order": 15,
+      "order": 11,
       "type": "number"
     },
     {
@@ -221,7 +221,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "unet_name",
-      "order": 16,
+      "order": 12,
       "type": "text"
     }
   ]

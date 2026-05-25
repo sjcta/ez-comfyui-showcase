@@ -293,9 +293,14 @@ JOB_STAGE_TIMEOUT_MESSAGES = {
     "preparing": "准备阶段超时",
     "submitting": "提交阶段超时",
     "generating": "生成阶段超时（长时间无进度）",
-    "downloading": "拉取图片超时",
+    "downloading": "保存结果超时",
 }
 VIDEO_GENERATING_TIMEOUT = 3600
+INSTANCE_DOWN_ACTIVE_JOB_GRACE_SEC = 30
+GPU_STALL_SECONDS = 60
+GPU_STALL_SAMPLE_INTERVAL = 10
+GPU_STALL_RETRY_LIMIT = 3
+GPU_STALL_JOB_STATUSES = {"starting_comfyui", "preparing", "submitting", "generating", "downloading"}
 
 def _is_node_connected(nid: str) -> bool:
     return _connected_nodes.get(nid, True)
@@ -391,6 +396,257 @@ def _finalize_stuck_job(job_id: str, job: dict, now: float | None = None) -> Non
     task = _job_tasks.pop(job_id, None)
     if task and not task.done():
         task.cancel()
+
+
+def _finalize_instance_jobs(instance_name: str, message: str = "实例已停止") -> list[str]:
+    now = time.time()
+    affected: list[str] = []
+    for job_id, job in list(jobs.items()):
+        if job.get("instance") != instance_name or job.get("status") not in ACTIVE_JOB_STATUSES:
+            continue
+        job["status"] = "error"
+        job["message"] = message
+        job["last_update"] = now
+        task = _job_tasks.pop(job_id, None)
+        if task and not task.done():
+            task.cancel()
+        affected.append(job_id)
+    if affected:
+        save_jobs()
+    return affected
+
+
+def _finalize_interrupted_instance_jobs(instance_name: str, is_active: bool, now: float | None = None) -> list[str]:
+    """Fail jobs that were already running when their ComfyUI instance disappeared."""
+    if is_active:
+        return []
+    now = now or time.time()
+    affected: list[str] = []
+    interrupted_statuses = {"starting_comfyui", "submitting", "generating", "downloading"}
+    for job_id, job in list(jobs.items()):
+        if job.get("instance") != instance_name or job.get("status") not in interrupted_statuses:
+            continue
+        last = _job_last_activity_ts(job)
+        if last and now - last < INSTANCE_DOWN_ACTIVE_JOB_GRACE_SEC:
+            continue
+        job["status"] = "error"
+        job["message"] = "实例已停止，任务已中断"
+        job["last_update"] = now
+        task = _job_tasks.pop(job_id, None)
+        if task and not task.done():
+            task.cancel()
+        affected.append(job_id)
+    if affected:
+        save_jobs()
+        add_log("warn", "queue", f"实例 {instance_name} 已停止，已结束 {len(affected)} 个残留任务")
+    return affected
+
+
+def _job_gpu_sample(stats: dict | None) -> tuple[int, int, int] | None:
+    if not isinstance(stats, dict):
+        return None
+    try:
+        total = int(float(stats.get("vram_total_mb") or 0))
+        used = int(round(float(stats.get("vram_used_mb") or 0)))
+        util = int(round(float(stats.get("util_pct") or 0)))
+    except (TypeError, ValueError):
+        return None
+    if total <= 0:
+        return None
+    return used, util, total
+
+
+def _job_progress_monitor_fields(job: dict) -> dict:
+    progress = job.get("progress") if isinstance(job.get("progress"), dict) else {}
+    return {
+        "progress_pct": _job_progress_pct(job),
+        "current_node": str(progress.get("current_node") or ""),
+        "sampler_cur": progress.get("sampler_cur"),
+        "sampler_total": progress.get("sampler_total"),
+    }
+
+
+def _gpu_activity_sample_signature(sample: dict) -> tuple:
+    return (
+        sample.get("status"),
+        sample.get("progress_pct"),
+        sample.get("current_node"),
+        sample.get("sampler_cur"),
+        sample.get("sampler_total"),
+        sample.get("vram_used_mb"),
+    )
+
+
+def _gpu_activity_history_with_current(previous: dict | None, current: dict, now: float) -> list[dict]:
+    raw_samples = []
+    if isinstance(previous, dict):
+        samples = previous.get("samples")
+        if isinstance(samples, list):
+            raw_samples = [s for s in samples if isinstance(s, dict)]
+        elif previous.get("sampled_at") is not None:
+            raw_samples = [previous]
+
+    cutoff = now - GPU_STALL_SECONDS
+    older = [s for s in raw_samples if float(s.get("sampled_at") or 0) < cutoff]
+    recent = [s for s in raw_samples if float(s.get("sampled_at") or 0) >= cutoff]
+    history = older[-1:] + recent + [current]
+    return history[-20:]
+
+
+def _gpu_activity_idle_since(history: list[dict], now: float) -> float:
+    if not history:
+        return 0.0
+    current = history[-1]
+    if int(current.get("util_pct") or 0) > 0:
+        return 0.0
+    current_signature = _gpu_activity_sample_signature(current)
+    stable_since = float(current.get("sampled_at") or now)
+    for sample in reversed(history):
+        if int(sample.get("util_pct") or 0) > 0:
+            break
+        if _gpu_activity_sample_signature(sample) != current_signature:
+            break
+        stable_since = float(sample.get("sampled_at") or stable_since)
+    return stable_since
+
+
+def _job_gpu_activity_stalled(job_id: str, job: dict, stats: dict | None, now: float | None = None) -> bool:
+    status = str(job.get("status") or "")
+    if status not in GPU_STALL_JOB_STATUSES:
+        _job_gpu_activity_watch.pop(job_id, None)
+        return False
+    sample = _job_gpu_sample(stats)
+    if sample is None:
+        _job_gpu_activity_watch.pop(job_id, None)
+        return False
+    vram_used, util, total = sample
+    now = now or time.time()
+    previous = _job_gpu_activity_watch.get(job_id)
+    progress_fields = _job_progress_monitor_fields(job)
+    previous_sample = None
+    if isinstance(previous, dict):
+        previous_samples = previous.get("samples")
+        if isinstance(previous_samples, list) and previous_samples:
+            previous_sample = previous_samples[-1]
+        else:
+            previous_sample = previous
+    stage_or_progress_changed = (
+        not previous_sample
+        or previous_sample.get("status") != status
+        or previous_sample.get("progress_pct") != progress_fields["progress_pct"]
+        or previous_sample.get("current_node") != progress_fields["current_node"]
+        or previous_sample.get("sampler_cur") != progress_fields["sampler_cur"]
+        or previous_sample.get("sampler_total") != progress_fields["sampler_total"]
+    )
+    vram_changed = bool(previous_sample) and previous_sample.get("vram_used_mb") != vram_used
+    gpu_working = util > 0
+    last_gpu_active_at = now if gpu_working else float((previous or {}).get("last_gpu_active_at") or 0)
+
+    current_sample = {
+        "status": status,
+        **progress_fields,
+        "vram_used_mb": vram_used,
+        "vram_total_mb": total,
+        "util_pct": util,
+        "sampled_at": now,
+    }
+    history = _gpu_activity_history_with_current(previous, current_sample, now)
+    idle_since = _gpu_activity_idle_since(history, now)
+
+    monitor = {
+        **current_sample,
+        "vram_changed": vram_changed,
+        "stage_or_progress_changed": stage_or_progress_changed,
+        "samples": history,
+        "idle_since": idle_since,
+        "last_gpu_active_at": last_gpu_active_at,
+    }
+    _job_gpu_activity_watch[job_id] = monitor
+    job["runtime_monitor"] = dict(monitor)
+    if idle_since <= 0:
+        return False
+    return now - idle_since >= GPU_STALL_SECONDS
+
+
+def _clear_job_runtime_fields(job: dict) -> None:
+    for key in (
+        "prompt_id",
+        "client_id",
+        "submitted_at",
+        "generating_at",
+        "ws_error",
+        "trace",
+        "sem_acquired",
+    ):
+        job.pop(key, None)
+
+
+async def _restart_gpu_stalled_job(job_id: str, job: dict, instance: dict, now: float | None = None) -> bool:
+    now = now or time.time()
+    retry_count = int(job.get("gpu_stall_retry_count") or 0) + 1
+    if retry_count > GPU_STALL_RETRY_LIMIT:
+        job["status"] = "error"
+        job["message"] = f"GPU 连续无工作，已重试 {GPU_STALL_RETRY_LIMIT} 次仍失败"
+        job["last_update"] = now
+        save_jobs()
+        await broadcast({"type": "job_update", "job": job})
+        return False
+
+    prompt_id = str(job.get("prompt_id") or "")
+    inst_url = str(instance.get("url") or "")
+    if prompt_id and inst_url:
+        try:
+            comfyui_post("/queue", {"delete": [prompt_id]}, base_url=inst_url)
+        except Exception:
+            pass
+    if inst_url:
+        try:
+            comfyui_post("/interrupt", {}, base_url=inst_url)
+        except Exception:
+            pass
+
+    node = _get_node_by_id(instance.get("_node_id", ""))
+    if node:
+        _managed_instance_action(node, instance, "restart", reason="gpu-stall")
+
+    task = _job_tasks.pop(job_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    path = _resolve_workflow(str(job.get("workflow") or ""))
+    if not path:
+        job["status"] = "error"
+        job["message"] = "GPU 静止后重启任务失败：工作流文件不存在"
+        job["last_update"] = now
+        save_jobs()
+        await broadcast({"type": "job_update", "job": job})
+        return False
+
+    _clear_job_runtime_fields(job)
+    job["status"] = "queued"
+    job["message"] = "检测到 GPU 60 秒窗口无波动，正在重启任务..."
+    job["progress"] = {"pct": 0}
+    job["last_update"] = now
+    job["gpu_stall_retry_count"] = retry_count
+    _job_gpu_activity_watch.pop(job_id, None)
+    save_jobs()
+    await broadcast({"type": "job_update", "job": job})
+
+    if job_id not in _queued_dispatch_job_ids():
+        _job_queue.put_nowait((
+            job_id,
+            path,
+            job.get("fields") or {},
+            _job_seed_value(job),
+            vllm_running(),
+            int(job.get("width") or 0),
+            int(job.get("height") or 0),
+            str(job.get("user_id") or ""),
+            str(job.get("preferred_instance") or ""),
+            str(job.get("preferred_node_id") or ""),
+        ))
+    add_log("warn", "stuck", f"任务 GPU {GPU_STALL_SECONDS}s 窗口无波动，已重启任务 {retry_count}/{GPU_STALL_RETRY_LIMIT}", job_id)
+    return True
 
 def _resolve_secret_value(value: str) -> str:
     """Resolve config secrets. Use env:NAME in JSON to avoid storing cleartext."""
@@ -636,11 +892,23 @@ def _run_instance_action(node: dict, instance: dict, action: str) -> bool:
     return ok
 
 
+def _managed_instance_action(node: dict | None, instance: dict, action: str, reason: str = "") -> bool:
+    """Route lifecycle actions through InstanceManager when it is available."""
+    if _inst_mgr is not None:
+        return _inst_mgr.run_action(instance, action, node=node, reason=reason)
+    if not node:
+        node = _get_node_by_id(instance.get("_node_id", ""))
+    if not node:
+        return False
+    return _run_instance_action(node, instance, action)
+
+
 # ── 任务队列：per-instance semaphores for parallel routing ──
 _job_queue: asyncio.Queue = asyncio.Queue()
 _inst_mgr: InstanceManager | None = None
 _job_runner: JobRunner | None = None
 _app_loop: asyncio.AbstractEventLoop | None = None
+_job_gpu_activity_watch: dict[str, dict] = {}
 
 async def _queue_worker():
     """Global generation dispatcher.
@@ -2185,6 +2453,8 @@ ws_clients: list[WebSocket] = []
 ws_client_users: dict[WebSocket, dict] = {}
 gpu_cache: dict = {"ts": 0, "data": None}
 node_gpu_cache: dict = {}
+NODE_GPU_CACHE_TTL = 5
+NODE_GPU_STALE_TTL = 60
 
 # ── Model Affinity Routing ──────────────────────────────────────────────
 # Per-instance semaphores: one concurrent job per ComfyUI instance
@@ -2401,7 +2671,7 @@ async def _idle_instance_watcher():
                         _instance_group[name] = ""
                         continue
                     add_log("warn", "idle", f"Stopping idle {name} ({now - last:.0f}s idle)")
-                    _run_instance_action(node, inst, "stop")
+                    _managed_instance_action(node, inst, "stop", reason="idle")
 
 
 async def _dead_instance_watcher():
@@ -2425,7 +2695,7 @@ async def _dead_instance_watcher():
             active = _check_service_active(node, inst)
             if active and not comfyui_up(inst["url"]):
                 add_log("warn", "dead", f"Instance {name} unresponsive, restarting...")
-                _run_instance_action(node, inst, "restart")
+                _managed_instance_action(node, inst, "restart", reason="dead")
                 for _ in range(90):
                     if comfyui_up(inst["url"]):
                         add_log("info", "dead", f"Instance {name} recovered")
@@ -2459,6 +2729,13 @@ def _check_service_active(node: dict, instance: dict) -> bool:
         pass
     return False
 
+
+def _managed_service_active(instance: dict) -> bool:
+    node = _get_node_by_id(instance.get("_node_id", ""))
+    if not node:
+        return False
+    return _check_service_active(node, instance)
+
 async def _stuck_job_watcher():
     """Fail jobs that exceed their current stage timeout and release their instance."""
     while True:
@@ -2477,10 +2754,37 @@ async def _stuck_job_watcher():
                     if inst["name"] == inst_name:
                         node = _get_node_by_id(inst.get("_node_id", ""))
                         if node:
-                            _run_instance_action(node, inst, "stop")
+                            _managed_instance_action(node, inst, "stop", reason="stuck-job")
                         break
             save_jobs()
             asyncio.ensure_future(broadcast({"type": "job_update", "job": j}))
+
+
+async def _gpu_stall_watcher():
+    """Restart jobs whose current stage has no GPU or VRAM activity for a minute."""
+    while True:
+        await asyncio.sleep(GPU_STALL_SAMPLE_INTERVAL)
+        now = time.time()
+        instances = {inst.get("name"): inst for inst in _get_generation_instances()}
+        gpu_by_node: dict[str, dict] = {}
+        monitored = False
+        for job_id, job in list(jobs.items()):
+            if job.get("status") not in GPU_STALL_JOB_STATUSES:
+                _job_gpu_activity_watch.pop(job_id, None)
+                continue
+            inst = instances.get(job.get("instance"))
+            if not inst:
+                _job_gpu_activity_watch.pop(job_id, None)
+                continue
+            node_id = inst.get("_node_id", "")
+            if node_id not in gpu_by_node:
+                gpu_by_node[node_id] = await asyncio.to_thread(get_node_gpu_stats, _get_node_by_id(node_id))
+            monitored = True
+            if not _job_gpu_activity_stalled(job_id, job, gpu_by_node.get(node_id), now=now):
+                continue
+            await _restart_gpu_stalled_job(job_id, job, inst, now=now)
+        if monitored:
+            save_jobs()
 
 
 async def _remote_prompt_adoption_watcher():
@@ -2511,9 +2815,14 @@ async def lifespan(app: FastAPI):
     _init_gen_db()
     os.makedirs(WORKFLOW_DIR, exist_ok=True)
     _refresh_instance_state()
-    _inst_mgr = InstanceManager(_get_enabled_instances)
+    _inst_mgr = InstanceManager(_get_generation_instances)
     _inst_mgr._get_node_by_id = _get_node_by_id
     _inst_mgr._run_instance_action = _run_instance_action
+    _inst_mgr._has_active_jobs = _has_active_instance_job
+    _inst_mgr._last_active = _instance_last_active
+    _inst_mgr._start_grace = _instance_start_grace
+    _inst_mgr._idle_timeout_provider = _idle_timeout_for_instance
+    _inst_mgr._service_active_checker = _managed_service_active
     _job_runner = JobRunner(
         inst_mgr=_inst_mgr,
         jobs=jobs,
@@ -2531,7 +2840,7 @@ async def lifespan(app: FastAPI):
         stop_vllm_fn=stop_vllm,
         start_vllm_fn=start_vllm,
         get_node_by_id_fn=_get_node_by_id,
-        run_instance_action_fn=_run_instance_action,
+        run_instance_action_fn=_managed_instance_action,
         instance_semas=_instance_semas,
         instance_group=_instance_group,
         instance_last_active=_instance_last_active,
@@ -2544,9 +2853,9 @@ async def lifespan(app: FastAPI):
     )
     # Start the sequential job queue worker
     _background_tasks.append(asyncio.create_task(_queue_worker()))
-    _background_tasks.append(asyncio.create_task(_dead_instance_watcher()))
-    _background_tasks.append(asyncio.create_task(_idle_instance_watcher()))
+    _inst_mgr.start_background_tasks()
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
+    _background_tasks.append(asyncio.create_task(_gpu_stall_watcher()))
     _background_tasks.append(asyncio.create_task(_remote_prompt_adoption_watcher()))
     _resume_pending_image_protection_checks()
     _resume_persisted_generation_jobs()
@@ -2595,6 +2904,47 @@ if static_dir.is_dir():
 #  GPU / Service helpers
 # ══════════════════════════════════════════════════════════════════════════
 
+_NVIDIA_NA_VALUES = {"[N/A]", "[N/A ]", "N/A", ""}
+
+
+def _gpu_float(value: str | int | float | None) -> float:
+    text = str(value if value is not None else "").strip()
+    if text in _NVIDIA_NA_VALUES:
+        return 0.0
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_gpu_process_memory_used(out: str) -> int:
+    total = 0
+    for line in (out or "").strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2:
+            continue
+        used = _gpu_float(parts[1])
+        if used > 0:
+            total += int(round(used))
+    return total
+
+
+def _query_local_gpu_process_memory_used() -> int:
+    try:
+        out = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_memory,name,process_name",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            timeout=5,
+        )
+        return _parse_gpu_process_memory_used(out)
+    except Exception:
+        return 0
+
+
 def get_gpu_stats() -> dict:
     """Return GPU memory/util/temp.  GB10 unified memory → /proc/meminfo.  Cached 3 s."""
     now = time.time()
@@ -2603,6 +2953,8 @@ def get_gpu_stats() -> dict:
 
     temp, util = 0, 0
     mem_used_mb, mem_total_mb = 0, 1
+    system_used_mb, system_total_mb = 0, 0
+    source = ""
 
     # nvidia-smi for temp + util
     try:
@@ -2614,16 +2966,16 @@ def get_gpu_stats() -> dict:
         ).strip()
         parts = [x.strip() for x in out.split(",")]
         raw_used, raw_total = parts[0], parts[1]
-        temp = int(float(parts[2])) if parts[2] not in ('[N/A]','[N/A ]','N/A') else 0
-        util = int(float(parts[3])) if parts[3] not in ('[N/A]','[N/A ]','N/A') else 0
-        if raw_used not in ('[N/A]','[N/A ]','N/A'):
-            mem_used_mb = float(raw_used)
-        if raw_total not in ('[N/A]','[N/A ]','N/A'):
-            mem_total_mb = float(raw_total)
+        temp = int(_gpu_float(parts[2]))
+        util = int(_gpu_float(parts[3]))
+        mem_used_mb = _gpu_float(raw_used)
+        mem_total_mb = _gpu_float(raw_total) or mem_total_mb
+        if mem_total_mb > 1:
+            source = "nvidia-smi"
     except Exception:
         pass
 
-    if mem_used_mb == 0 and mem_total_mb <= 1:
+    if mem_total_mb <= 1:
         try:
             out = subprocess.check_output(
                 ["sh", "-lc", "command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=memory.used,memory.total,temperature.gpu,utilization.gpu --format=csv,noheader,nounits | head -n 1"],
@@ -2632,24 +2984,32 @@ def get_gpu_stats() -> dict:
             if out:
                 parts = [x.strip() for x in out.split(",")]
                 raw_used, raw_total = parts[0], parts[1]
-                temp = int(float(parts[2])) if parts[2] not in ('[N/A]','[N/A ]','N/A') else temp
-                util = int(float(parts[3])) if parts[3] not in ('[N/A]','[N/A ]','N/A') else util
-                if raw_used not in ('[N/A]','[N/A ]','N/A'):
-                    mem_used_mb = float(raw_used)
-                if raw_total not in ('[N/A]','[N/A ]','N/A'):
-                    mem_total_mb = float(raw_total)
+                temp = int(_gpu_float(parts[2])) or temp
+                util = int(_gpu_float(parts[3])) or util
+                mem_used_mb = _gpu_float(raw_used) or mem_used_mb
+                mem_total_mb = _gpu_float(raw_total) or mem_total_mb
+                if mem_total_mb > 1:
+                    source = "nvidia-smi"
         except Exception:
             pass
 
-    # GB10 unified memory: use /proc/meminfo
-    try:
-        mi = Path("/proc/meminfo").read_text()
-        total_kb = int(re.search(r"MemTotal:\s+(\d+)", mi).group(1))
-        avail_kb = int(re.search(r"MemAvailable:\s+(\d+)", mi).group(1))
-        mem_total_mb = total_kb / 1024
-        mem_used_mb = (total_kb - avail_kb) / 1024
-    except Exception:
-        pass
+    if mem_total_mb <= 1:
+        process_used_mb = _query_local_gpu_process_memory_used()
+        try:
+            mi = Path("/proc/meminfo").read_text()
+            total_kb = int(re.search(r"MemTotal:\s+(\d+)", mi).group(1))
+            avail_kb = int(re.search(r"MemAvailable:\s+(\d+)", mi).group(1))
+            system_total_mb = total_kb / 1024
+            system_used_mb = (total_kb - avail_kb) / 1024
+            mem_total_mb = system_total_mb
+            if process_used_mb > 0:
+                mem_used_mb = process_used_mb
+                source = "process-sum"
+            else:
+                mem_used_mb = system_used_mb
+                source = "meminfo"
+        except Exception:
+            pass
 
     if mem_used_mb == 0 and mem_total_mb <= 1:
         try:
@@ -2657,6 +3017,7 @@ def get_gpu_stats() -> dict:
             mem_used_mb = float(os.environ.get("EZ_GPU_USED_MB", "0") or 0)
             temp = temp or int(float(os.environ.get("EZ_GPU_TEMP_C", "0") or 0))
             util = util or int(float(os.environ.get("EZ_GPU_UTIL_PCT", "0") or 0))
+            source = "env" if mem_total_mb else source
         except Exception:
             pass
 
@@ -2667,6 +3028,9 @@ def get_gpu_stats() -> dict:
         "vram_pct": pct,
         "temp_c": temp,
         "util_pct": util,
+        "memory_source": source,
+        "system_used_mb": round(system_used_mb),
+        "system_total_mb": round(system_total_mb),
     }
     gpu_cache["ts"] = now
     gpu_cache["data"] = data
@@ -2680,9 +3044,55 @@ def _empty_gpu_stats(message: str = "", detail: str = "") -> dict:
         "vram_pct": 0,
         "temp_c": 0,
         "util_pct": 0,
+        "memory_source": "",
+        "system_used_mb": 0,
+        "system_total_mb": 0,
         "message": message,
         "detail": detail,
     }
+
+
+def _gpu_stats_has_vram(data: dict | None) -> bool:
+    try:
+        return float((data or {}).get("vram_total_mb") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _node_gpu_cache_record(data: dict, now: float, previous: dict | None = None) -> dict:
+    record = {"ts": now, "data": data}
+    if _gpu_stats_has_vram(data) and not data.get("stale"):
+        record["good_data"] = dict(data)
+        record["good_ts"] = now
+    elif previous:
+        if previous.get("good_data"):
+            record["good_data"] = dict(previous["good_data"])
+            record["good_ts"] = float(previous.get("good_ts") or previous.get("ts") or now)
+        elif _gpu_stats_has_vram(previous.get("data")):
+            record["good_data"] = dict(previous["data"])
+            record["good_ts"] = float(previous.get("ts") or now)
+    return record
+
+
+def _cached_stale_gpu_stats(cached: dict | None, failed: dict, now: float) -> dict | None:
+    if not cached:
+        return None
+    good = cached.get("good_data")
+    good_ts = float(cached.get("good_ts") or 0)
+    if not good and _gpu_stats_has_vram(cached.get("data")):
+        good = cached.get("data")
+        good_ts = float(cached.get("ts") or 0)
+    if not good or not _gpu_stats_has_vram(good):
+        return None
+    age = max(0.0, now - good_ts)
+    if age > NODE_GPU_STALE_TTL:
+        return None
+    data = dict(good)
+    data["message"] = "VRAM 使用缓存值"
+    data["detail"] = str((failed or {}).get("detail") or (failed or {}).get("message") or "")[:240]
+    data["stale"] = True
+    data["stale_age_sec"] = int(round(age))
+    return data
 
 
 def _parse_nvidia_smi_stats(out: str) -> dict:
@@ -2693,10 +3103,10 @@ def _parse_nvidia_smi_stats(out: str) -> dict:
     if len(parts) < 4:
         return _empty_gpu_stats("VRAM 未上报")
     raw_used, raw_total, raw_temp, raw_util = parts[:4]
-    used = 0 if raw_used in ("[N/A]", "[N/A ]", "N/A") else float(raw_used or 0)
-    total = 0 if raw_total in ("[N/A]", "[N/A ]", "N/A") else float(raw_total or 0)
-    temp = 0 if raw_temp in ("[N/A]", "[N/A ]", "N/A") else int(float(raw_temp or 0))
-    util = 0 if raw_util in ("[N/A]", "[N/A ]", "N/A") else int(float(raw_util or 0))
+    used = _gpu_float(raw_used)
+    total = _gpu_float(raw_total)
+    temp = int(_gpu_float(raw_temp))
+    util = int(_gpu_float(raw_util))
     pct = round(used / total * 100, 1) if total else 0
     return {
         "vram_used_mb": round(used),
@@ -2704,6 +3114,9 @@ def _parse_nvidia_smi_stats(out: str) -> dict:
         "vram_pct": pct,
         "temp_c": temp,
         "util_pct": util,
+        "memory_source": "nvidia-smi" if total else "",
+        "system_used_mb": 0,
+        "system_total_mb": 0,
         "message": "",
         "detail": "",
     }
@@ -2723,7 +3136,7 @@ def _build_ssh_command(node: dict, remote_args: list[str]) -> list[str]:
     return cmd + remote_args
 
 
-def _parse_meminfo_stats(out: str, base: dict | None = None) -> dict:
+def _parse_meminfo_stats(out: str, base: dict | None = None, process_used_mb: int = 0) -> dict:
     base = dict(base or _empty_gpu_stats())
     try:
         total = re.search(r"MemTotal:\s+(\d+)", out or "")
@@ -2731,12 +3144,16 @@ def _parse_meminfo_stats(out: str, base: dict | None = None) -> dict:
         if not total or not avail:
             return base
         total_mb = int(total.group(1)) / 1024
-        used_mb = total_mb - (int(avail.group(1)) / 1024)
+        system_used_mb = total_mb - (int(avail.group(1)) / 1024)
+        used_mb = float(process_used_mb or 0) or system_used_mb
         pct = round(used_mb / total_mb * 100, 1) if total_mb else 0
         base.update({
             "vram_used_mb": round(used_mb),
             "vram_total_mb": round(total_mb),
             "vram_pct": pct,
+            "memory_source": "process-sum" if process_used_mb else "meminfo",
+            "system_used_mb": round(system_used_mb),
+            "system_total_mb": round(total_mb),
             "message": "",
         })
     except Exception:
@@ -2756,10 +3173,17 @@ def _run_remote_gpu_query(node: dict) -> dict:
     data = _parse_nvidia_smi_stats(r.stdout)
     if data.get("vram_total_mb", 0) > 0:
         return data
+    proc_cmd = _build_ssh_command(node, [
+        "nvidia-smi",
+        "--query-compute-apps=pid,used_memory,name,process_name",
+        "--format=csv,noheader,nounits",
+    ])
+    proc = subprocess.run(proc_cmd, capture_output=True, text=True, timeout=8)
+    process_used_mb = _parse_gpu_process_memory_used(proc.stdout) if proc.returncode == 0 else 0
     mem_cmd = _build_ssh_command(node, ["cat", "/proc/meminfo"])
     mem = subprocess.run(mem_cmd, capture_output=True, text=True, timeout=8)
     if mem.returncode == 0:
-        return _parse_meminfo_stats(mem.stdout, data)
+        return _parse_meminfo_stats(mem.stdout, data, process_used_mb=process_used_mb)
     data["message"] = data.get("message") or "VRAM 暂不可用"
     data["detail"] = (mem.stderr or data.get("detail") or "VRAM 未获取到").strip()[:240]
     return data
@@ -2779,13 +3203,18 @@ def get_node_gpu_stats(node: dict | None) -> dict:
     now = time.time()
     key = node.get("id") or node.get("host") or ""
     cached = node_gpu_cache.get(key)
-    if cached and now - cached.get("ts", 0) < 5:
+    if cached and now - cached.get("ts", 0) < NODE_GPU_CACHE_TTL:
         return cached["data"]
     try:
         data = _run_remote_gpu_query(node)
     except Exception as e:
         data = _empty_gpu_stats("VRAM 暂不可用", str(e)[:240])
-    node_gpu_cache[key] = {"ts": now, "data": data}
+    if not _gpu_stats_has_vram(data):
+        stale = _cached_stale_gpu_stats(cached, data, now)
+        if stale:
+            node_gpu_cache[key] = _node_gpu_cache_record(stale, now, cached)
+            return stale
+    node_gpu_cache[key] = _node_gpu_cache_record(data, now, cached)
     return data
 
 
@@ -2843,7 +3272,7 @@ def _ensure_aux_instance_ready(
         raise RuntimeError(f"实例 {name} 缺少设备信息，无法自动启动")
 
     add_log("info", phase, f"启动 ComfyUI 实例 {name}...", details="coldstart")
-    if not _run_instance_action(node, inst, "start"):
+    if not _managed_instance_action(node, inst, "start", reason=phase):
         raise RuntimeError(f"实例 {name} 启动命令失败")
 
     deadline = time.time() + float(timeout or 180.0)
@@ -3507,6 +3936,27 @@ def _normalize_seed_value_for_field(class_type: str, field: str, value):
     return seed
 
 
+def _apply_generated_seed_to_seed_fields(wf: dict, field_values: dict, seed: int) -> None:
+    try:
+        seed_value = int(seed)
+    except (TypeError, ValueError):
+        return
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        ct = str(node.get("class_type") or "")
+        title = str((node.get("_meta") or {}).get("title") or "")
+        for field in list(inputs.keys()):
+            if not _looks_like_seed_field(ct, title, str(field)):
+                continue
+            value = _normalize_seed_value_for_field(ct, str(field), seed_value)
+            inputs[field] = value
+            field_values[f"{nid}::{field}"] = value
+
+
 def _first_latent_dimension_value(wf: dict, field_values: dict, dimension: str):
     for key, value in (field_values or {}).items():
         if "::" not in str(key):
@@ -4051,18 +4501,18 @@ NODE_STATUS_MAP = {
     "KSampler": "采样中...",
     "KSamplerAdvanced": "高级采样中...",
     "SamplerCustom": "自定义采样中...",
-    "VAEDecode": "解码图像...",
-    "VAEEncode": "编码图像...",
+    "VAEDecode": "解码内容...",
+    "VAEEncode": "编码内容...",
     "ImageUpscaleWithModel": "超分辨率放大...",
     "SeedVR2VideoUpscaler": "超分辨率放大...",
-    "ImageScaleBy": "图像缩放...",
-    "ImageScale": "图像缩放...",
-    "ImageCompositeMasked": "合成图像...",
+    "ImageScaleBy": "缩放内容...",
+    "ImageScale": "缩放内容...",
+    "ImageCompositeMasked": "合成内容...",
     "LoadVideo": "加载视频...",
     "GetVideoComponents": "解析视频...",
     "CreateVideo": "创建视频...",
     "SaveVideo": "保存视频...",
-    "SaveImage": "保存图像...",
+    "SaveImage": "保存结果...",
 }
 
 
@@ -4291,7 +4741,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             await broadcast({"type": "job_update", "job": jobs[job_id]})
             node = _get_node_by_id(inst.get("_node_id", ""))
             if node:
-                _run_instance_action(node, inst, "start")
+                _managed_instance_action(node, inst, "start", reason="generate")
             else:
                 svc = f"comfyui-{inst['name'].lower()}"
                 subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
@@ -4351,7 +4801,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         downloaded = []
         if ws_ok and pid:
             jobs[job_id]["status"] = "downloading"
-            jobs[job_id]["message"] = "正在拉取图片..."
+            jobs[job_id]["message"] = "正在保存结果..."
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
             downloaded = await asyncio.to_thread(
@@ -4466,7 +4916,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         cover = records[0]
         jobs[job_id].update(
-            status="checking", message="图片校验中",
+            status="checking", message="内容校验中",
             protection_status=IMAGE_PROTECTION_PENDING,
             pending_image=cover.get("filename", ""),
             pending_media_type=cover.get("media_type", "image") or "image",
@@ -4618,6 +5068,53 @@ def _job_elapsed_from_resume(job: dict) -> float:
     return 0.0
 
 
+def _queued_dispatch_job_ids() -> set[str]:
+    queued_ids: set[str] = set()
+    for item in list(getattr(_job_queue, "_queue", []) or []):
+        if isinstance(item, (list, tuple)) and item:
+            queued_ids.add(str(item[0]))
+    return queued_ids
+
+
+def _kick_queued_generation_jobs(reason: str = "") -> list[str]:
+    queued_statuses = {"queued", "dispatching", "preparing", "starting_comfyui"}
+    already_queued = _queued_dispatch_job_ids()
+    requeued: list[str] = []
+    for job_id, job in list(jobs.items()):
+        if job_id in _job_tasks or job_id in already_queued:
+            continue
+        status = str(job.get("status") or "")
+        if job.get("prompt_id") or status not in queued_statuses:
+            continue
+        path = _resolve_workflow(str(job.get("workflow") or ""))
+        if not path:
+            job["status"] = "error"
+            job["message"] = "恢复排队失败：工作流文件不存在"
+            job["last_update"] = time.time()
+            continue
+        job["status"] = "queued"
+        job["message"] = f"{reason}恢复排队..." if reason else "恢复排队..."
+        job["last_update"] = time.time()
+        _job_queue.put_nowait((
+            job_id,
+            path,
+            job.get("fields") or {},
+            _job_seed_value(job),
+            vllm_running(),
+            int(job.get("width") or 0),
+            int(job.get("height") or 0),
+            str(job.get("user_id") or ""),
+            str(job.get("preferred_instance") or ""),
+            str(job.get("preferred_node_id") or ""),
+        ))
+        already_queued.add(job_id)
+        requeued.append(job_id)
+        add_log("info", "queue", f"{reason}已恢复排队任务" if reason else "已恢复排队任务", job_id)
+    if requeued:
+        save_jobs()
+    return requeued
+
+
 def _resume_persisted_generation_jobs() -> None:
     for job_id, job in list(jobs.items()):
         if job_id in _job_tasks:
@@ -4625,29 +5122,7 @@ def _resume_persisted_generation_jobs() -> None:
         status = str(job.get("status") or "")
         if job.get("prompt_id") or status in {"submitting", "generating", "downloading"}:
             _job_tasks[job_id] = asyncio.create_task(_resume_persisted_generation_job(job_id))
-            continue
-        if status in {"queued", "dispatching", "preparing", "starting_comfyui"}:
-            path = _resolve_workflow(str(job.get("workflow") or ""))
-            if not path:
-                job["status"] = "error"
-                job["message"] = "服务重启后恢复失败：工作流文件不存在"
-                continue
-            job["status"] = "queued"
-            job["message"] = "服务重启后恢复排队..."
-            job["last_update"] = time.time()
-            _job_queue.put_nowait((
-                job_id,
-                path,
-                job.get("fields") or {},
-                _job_seed_value(job),
-                vllm_running(),
-                int(job.get("width") or 0),
-                int(job.get("height") or 0),
-                str(job.get("user_id") or ""),
-                str(job.get("preferred_instance") or ""),
-                str(job.get("preferred_node_id") or ""),
-            ))
-            add_log("info", "queue", "重启后已恢复排队任务", job_id)
+    _kick_queued_generation_jobs("重启后")
     save_jobs()
 
 
@@ -4730,7 +5205,7 @@ async def _resume_persisted_generation_job(job_id: str) -> None:
                 if status.get("completed", False):
                     if _job_runner:
                         job["status"] = "downloading"
-                        job["message"] = "正在拉取图片..."
+                        job["message"] = "正在保存结果..."
                         job["progress"] = {"pct": 100}
                         save_jobs()
                         await broadcast({"type": "job_update", "job": job})
@@ -5115,9 +5590,11 @@ def api_status(
     node_gpu = _gpu_stats_for_status_node(visible_instances, target_node_id, target_instance)
     for inst in visible_instances:
         node_id = inst.get("_node_id", "")
-        remote_queue = _get_instance_queue_counts(inst["url"])
-        grp = _instance_group.get(inst["name"], "")
         name = inst["name"]
+        remote_queue = _get_instance_queue_counts(inst["url"])
+        is_active = comfyui_up(base_url=inst["url"])
+        _finalize_interrupted_instance_jobs(name, is_active)
+        grp = _instance_group.get(name, "")
         is_prompt_aux = _is_prompt_aux_instance(inst)
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
         local_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
@@ -5143,7 +5620,7 @@ def api_status(
             "node_connection": inst.get("_node_connection", "local"),
             "role": "prompt_aux" if is_prompt_aux else "generation",
             "prompt_aux": is_prompt_aux,
-            "up": comfyui_up(base_url=inst["url"]),
+            "up": is_active,
             "queue": q_size,
             "queue_running": q_run,
             "queue_pending": q_pend,
@@ -5183,7 +5660,7 @@ def api_comfyui(action: str, current_user: dict = Depends(require_admin)):
         for inst in _get_enabled_instances():
             node = _get_node_by_id(inst.get("_node_id", ""))
             if node:
-                _run_instance_action(node, inst, "start")
+                _managed_instance_action(node, inst, "start", reason="api-comfyui")
             else:
                 svc = f"comfyui-{inst['name'].lower()}"
                 subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
@@ -5194,16 +5671,14 @@ def api_comfyui(action: str, current_user: dict = Depends(require_admin)):
         for inst in _get_enabled_instances():
             node = _get_node_by_id(inst.get("_node_id", ""))
             if node:
-                _run_instance_action(node, inst, "stop")
+                _managed_instance_action(node, inst, "stop", reason="api-comfyui")
             else:
                 svc = f"comfyui-{inst['name'].lower()}"
                 subprocess.run(["systemctl", "--user", "stop", svc], capture_output=True, timeout=5)
             _instance_group[inst["name"]] = ""
             results.append(f"{inst['name']} 已停止")
-            for jid, jb in list(jobs.items()):
-                if jb.get("instance") == inst["name"] and jb.get("status") in ACTIVE_JOB_STATUSES:
-                    jb["status"] = "error"
-                    jb["message"] = "实例已停止"
+            _finalize_instance_jobs(inst["name"], "实例已停止")
+        _kick_queued_generation_jobs("实例停止后")
         return {"ok": True, "msg": "; ".join(results)}
     raise HTTPException(400)
 
@@ -5271,6 +5746,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
         remote_queue = _get_instance_queue_counts(inst["url"])
+        _finalize_interrupted_instance_jobs(name, is_active)
         inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
         local_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
         local_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
@@ -5325,22 +5801,20 @@ def api_comfyui_instance(instance: str, action: str, current_user: dict = Depend
     node = _get_node_by_id(inst.get("_node_id", ""))
     if action == "start":
         if node:
-            _run_instance_action(node, inst, "start")
+            _managed_instance_action(node, inst, "start", reason="api-comfyui-instance")
         else:
             svc = f"comfyui-{inst['name'].lower()}"
             subprocess.run(["systemctl", "--user", "start", svc], capture_output=True, timeout=5, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "XDG_RUNTIME_DIR": "/run/user/1000"})
         return {"ok": True, "msg": f"{inst['name']} 启动中"}
     elif action == "stop":
         if node:
-            _run_instance_action(node, inst, "stop")
+            _managed_instance_action(node, inst, "stop", reason="api-comfyui-instance")
         else:
             svc = f"comfyui-{inst['name'].lower()}"
             subprocess.run(["systemctl", "--user", "stop", svc], capture_output=True, timeout=5)
         _instance_group[inst["name"]] = ""
-        for jid, jb in list(jobs.items()):
-            if jb.get("instance") == inst["name"] and jb.get("status") in ("generating", "dispatching", "preparing"):
-                jb["status"] = "error"
-                jb["message"] = "实例已停止"
+        _finalize_instance_jobs(inst["name"], "实例已停止")
+        _kick_queued_generation_jobs("实例停止后")
         return {"ok": True, "msg": f"{inst['name']} 已停止"}
     raise HTTPException(400)
 
@@ -6238,6 +6712,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
     user_id = current_user.get("sub", "")
     job_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
+    random_seed_requested = req.seed is None
     seed = req.seed if req.seed is not None else random.randint(0, 2**63)
     vllm_was = vllm_running()
 
@@ -6245,6 +6720,8 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         with open(path) as f:
             wf_check = json.load(f)
         normalized_fields = _normalize_workflow_field_values(wf_check, req.fields)
+        if random_seed_requested:
+            _apply_generated_seed_to_seed_fields(wf_check, normalized_fields, seed)
         for key, val in normalized_fields.items():
             if "::" not in key:
                 continue
@@ -6298,7 +6775,8 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
 
 @app.get("/api/jobs")
 def api_all_jobs(current_user: dict = Depends(get_current_user)):
-    return [_job_with_time_estimate(j) for j in jobs.values() if _can_access_job(j, current_user)]
+    snapshot = list(jobs.values())
+    return [_job_with_time_estimate(j) for j in snapshot if _can_access_job(j, current_user)]
 
 
 @app.get("/api/jobs/{job_id}")
@@ -6342,6 +6820,7 @@ async def api_cancel_job(job_id: str, current_user: dict = Depends(get_current_u
     _job_tasks.pop(job_id, None)
     del jobs[job_id]
     save_jobs()
+    _kick_queued_generation_jobs("取消后")
     await broadcast({"type": "job_cancelled", "job_id": job_id})
     return {"ok": True}
 
@@ -6377,6 +6856,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
         with open(path) as f:
             wf_check = json.load(f)
         fields = _normalize_workflow_field_values(wf_check, fields)
+        _apply_generated_seed_to_seed_fields(wf_check, fields, seed)
     except Exception:
         pass
 
@@ -7447,7 +7927,7 @@ def api_node_instance_start(nid: str, iid: str, current_user: dict = Depends(get
         raise HTTPException(404, "Instance not found")
     if node.get("connection") == "remote-http":
         raise HTTPException(400, "Cannot start instance via remote-http")
-    if _run_instance_action(node, inst, "start"):
+    if _managed_instance_action(node, inst, "start", reason="node-api"):
         return {"ok": True}
     raise HTTPException(500, "Failed to start instance")
 
@@ -7460,8 +7940,10 @@ def api_node_instance_stop(nid: str, iid: str, current_user: dict = Depends(get_
         raise HTTPException(404, "Instance not found")
     if node.get("connection") == "remote-http":
         raise HTTPException(400, "Cannot stop instance via remote-http")
-    if _run_instance_action(node, inst, "stop"):
+    if _managed_instance_action(node, inst, "stop", reason="node-api"):
         _instance_group[inst["name"]] = ""
+        _finalize_instance_jobs(inst["name"], "实例已停止")
+        _kick_queued_generation_jobs("实例停止后")
         return {"ok": True}
     raise HTTPException(500, "Failed to stop instance")
 
@@ -7474,7 +7956,7 @@ def api_node_instance_restart(nid: str, iid: str, current_user: dict = Depends(g
         raise HTTPException(404, "Instance not found")
     if node.get("connection") == "remote-http":
         raise HTTPException(400, "Cannot restart instance via remote-http")
-    if _run_instance_action(node, inst, "restart"):
+    if _managed_instance_action(node, inst, "restart", reason="node-api"):
         return {"ok": True}
     raise HTTPException(500, "Failed to restart instance")
 
@@ -7486,7 +7968,7 @@ def api_node_instance_force_restart(nid: str, iid: str, current_user: dict = Dep
         raise HTTPException(404, "Instance not found")
     if node.get("connection") == "remote-http":
         raise HTTPException(400, "Cannot force-restart instance via remote-http")
-    if _run_instance_action(node, inst, "force-restart"):
+    if _managed_instance_action(node, inst, "force-restart", reason="node-api"):
         return {"ok": True}
     raise HTTPException(500, "Failed to force-restart instance")
 

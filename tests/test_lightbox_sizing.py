@@ -51,6 +51,37 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertNotIn("_resetLightboxFullLayer()", body[:set_modal_idx])
         self.assertNotIn("_clearLightboxDisplaySize()", body[:set_modal_idx])
 
+    def test_lightbox_exposes_click_toggle_image_compare_for_i2i_history(self):
+        js = pathlib.Path("static/js/modules/history.js").read_text()
+        css = pathlib.Path("static/css/style.css").read_text()
+        html = pathlib.Path("static/index.html").read_text()
+        sprite = pathlib.Path("static/icons/sprite.svg").read_text()
+
+        self.assertIn('id="lbCompareBtn"', html)
+        self.assertIn("图片对比", html)
+        self.assertIn('class="lb-action-btn lb-compare"', html)
+        self.assertIn("lb-compare-icon", html)
+        self.assertIn('href="#icon-compare"', html)
+        self.assertIn('id="icon-compare"', sprite)
+        self.assertIn('fill="currentColor" stroke="none"', sprite)
+        self.assertIn('<path d="M20 11v2"/>', sprite)
+        self.assertIn("onclick=\"if(window.CW&&CW.toggleLBCompareImage)", html)
+        self.assertNotIn("onmouseenter=\"if(window.CW&&CW.showLBOriginalImage)", html)
+        self.assertNotIn("onpointerdown=\"if(window.CW&&CW.showLBOriginalImage)", html)
+        self.assertIn("function _historyOriginalImageRef", js)
+        self.assertIn("function _syncLightboxCompare", js)
+        self.assertIn("function showLBOriginalImage", js)
+        self.assertIn("function restoreLBGeneratedImage", js)
+        self.assertIn("function toggleLBCompareImage", js)
+        self.assertIn("/api/input-image/", js)
+        self.assertIn("_syncLightboxCompare(h)", js)
+        self.assertIn("window.CW.toggleLBCompareImage = toggleLBCompareImage", js)
+        self.assertNotIn("lb-action-row", html)
+        self.assertNotIn(".lb-action-row", css)
+        self.assertRegex(css, r"\.lb-compare\s*\{[^}]*left:\s*max\(24px,\s*env\(safe-area-inset-left\)\)", re.S)
+        self.assertRegex(css, r"\.lb-compare\s*\{[^}]*bottom:\s*calc\(max\(24px,\s*env\(safe-area-inset-bottom\)\)\s*\+\s*72px\)", re.S)
+        self.assertRegex(css, r"\.lb-compare\.is-active\s*\{[^}]*color:\s*#f59e0b", re.S)
+
 
 if __name__ == "__main__":
     unittest.main()

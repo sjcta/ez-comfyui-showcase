@@ -50,6 +50,7 @@ class InstanceManager:
 
     # ── 常量 ─────────────────────────────────────────────────────────────
     START_TIMEOUT: int = 300          # 冷启动超时（秒）
+    FORCE_RESTART_AFTER: float = 30.0  # 冷启动未就绪时先强制清一次旧进程
     HEALTH_CACHE_SECS: float = 15.0   # health() 缓存有效期
     GRACE_SECS: float = 90.0          # 启动后防御期（不死检测）
     IDLE_TIMEOUT: float = 900.0       # 空闲超时（秒，15 分钟）
@@ -81,6 +82,11 @@ class InstanceManager:
         # 后台任务（防止 GC）
         self._dead_check_task: asyncio.Task | None = None
         self._idle_reap_task: asyncio.Task | None = None
+
+        # App-level hooks. app.py injects these so lifecycle decisions and
+        # remote/local systemd execution stay behind one manager boundary.
+        self._service_active_checker: Callable[[dict], bool] | None = None
+        self._idle_timeout_provider: Callable[[str], float] | None = None
 
     # ── 公共 API ─────────────────────────────────────────────────────────
 
@@ -125,11 +131,19 @@ class InstanceManager:
 
             # 等待实例就绪
             deadline = time.time() + timeout
+            started_at = time.time()
+            forced_restart = False
             while time.time() < deadline:
                 await asyncio.sleep(2)
                 if await self.health(instance, force=True):
                     self._last_active[name] = time.time()
                     return True
+                if not forced_restart and time.time() - started_at >= self.FORCE_RESTART_AFTER:
+                    forced_restart = True
+                    if not await self.force_restart(instance):
+                        raise TimeoutError(f"实例 {name} 强制重启命令失败")
+                    self._start_grace[name] = time.time()
+                    self._health_cache.pop(name, None)
 
             # 更新最后的 health 尝试
             await self.health(instance, force=True)
@@ -208,24 +222,7 @@ class InstanceManager:
         Returns:
             True 表示启动命令已成功发出（不保证就绪）。
         """
-        name = instance.get("name", "unknown")
-        node = self._get_node_by_id(instance.get("_node_id", ""))
-
-        if node:
-            return self._run_instance_action(node, instance, "start")
-        else:
-            svc = f"comfyui-{name.lower()}"
-            result = subprocess.run(
-                ["systemctl", "--user", "start", svc],
-                capture_output=True,
-                timeout=10,
-                env={
-                    **os.environ,
-                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                    "XDG_RUNTIME_DIR": "/run/user/1000",
-                },
-            )
-            return result.returncode == 0
+        return self.run_action(instance, "start")
 
     async def stop(self, instance: dict) -> bool:
         """停止实例（调用 systemctl --user stop）。
@@ -236,24 +233,7 @@ class InstanceManager:
         Returns:
             True 表示停止命令已成功发出。
         """
-        name = instance.get("name", "unknown")
-        node = self._get_node_by_id(instance.get("_node_id", ""))
-
-        if node:
-            return self._run_instance_action(node, instance, "stop")
-        else:
-            svc = f"comfyui-{name.lower()}"
-            result = subprocess.run(
-                ["systemctl", "--user", "stop", svc],
-                capture_output=True,
-                timeout=10,
-                env={
-                    **os.environ,
-                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                    "XDG_RUNTIME_DIR": "/run/user/1000",
-                },
-            )
-            return result.returncode == 0
+        return self.run_action(instance, "stop")
 
     async def restart(self, instance: dict) -> bool:
         """重启实例。
@@ -264,9 +244,78 @@ class InstanceManager:
         Returns:
             True 表示重启命令已成功发出。
         """
-        await self.stop(instance)
-        await asyncio.sleep(1)
-        return await self.start(instance)
+        return self.run_action(instance, "restart")
+
+    async def force_restart(self, instance: dict) -> bool:
+        """强制重启实例，用于冷启动时清理残留进程。"""
+        return self.run_action(instance, "force-restart")
+
+    def run_action(self, instance: dict, action: str, node: dict | None = None, reason: str = "") -> bool:
+        """Run a lifecycle action and update manager state in one place."""
+        name = instance.get("name", "unknown")
+        node = node or self._get_node_by_id(instance.get("_node_id", ""))
+        ok = False
+
+        if node:
+            ok = self._run_instance_action(node, instance, action)
+        elif action == "force-restart":
+            ok = self._run_local_force_restart(instance)
+        else:
+            ok = self._run_local_systemctl(instance, action)
+
+        if ok:
+            now = time.time()
+            self._health_cache.pop(name, None)
+            if action in ("start", "restart", "force-restart"):
+                self._start_grace[name] = now
+            elif action == "stop":
+                self._last_active[name] = 0
+                self._start_grace.pop(name, None)
+        return ok
+
+    def _run_local_systemctl(self, instance: dict, action: str) -> bool:
+        name = instance.get("name", "unknown")
+        svc = instance.get("service", f"comfyui-{name.lower()}")
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", action, svc],
+                capture_output=True,
+                timeout=10,
+                env={
+                    **os.environ,
+                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                    "XDG_RUNTIME_DIR": "/run/user/1000",
+                },
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _run_local_force_restart(self, instance: dict) -> bool:
+        name = instance.get("name", "unknown")
+        svc = instance.get("service", f"comfyui-{name.lower()}")
+        env = {
+            **os.environ,
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+            "XDG_RUNTIME_DIR": "/run/user/1000",
+        }
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "kill", "-s", "KILL", svc],
+                capture_output=True,
+                timeout=10,
+                env=env,
+            )
+            time.sleep(2)
+            result = subprocess.run(
+                ["systemctl", "--user", "start", svc],
+                capture_output=True,
+                timeout=10,
+                env=env,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     # ── 后台协程 ─────────────────────────────────────────────────────────
 
@@ -297,7 +346,9 @@ class InstanceManager:
                 try:
                     up = await self.health(inst, force=True)
                     if not up:
-                        svc_active = self._check_service_active(name)
+                        if self._has_active_jobs(name):
+                            continue
+                        svc_active = self._check_service_active_for_instance(inst)
                         if svc_active:
                             # 服务 active 但 health 失败 → 重启
                             await self.restart(inst)
@@ -316,7 +367,8 @@ class InstanceManager:
             for inst in self._nodes_provider():
                 name = inst.get("name", "")
                 last_active = self._last_active.get(name, 0)
-                if last_active > 0 and (now - last_active) > self.IDLE_TIMEOUT:
+                idle_timeout = self._idle_timeout_for_instance(name)
+                if last_active > 0 and (now - last_active) > idle_timeout:
                     # 检查是否有活跃 job（通过系统负载判断）
                     if not self._has_active_jobs(name):
                         await self.stop(inst)
@@ -367,6 +419,19 @@ class InstanceManager:
             return result.stdout.decode().strip() == "active"
         except (subprocess.TimeoutExpired, OSError):
             return False
+
+    def _check_service_active_for_instance(self, instance: dict) -> bool:
+        if self._service_active_checker:
+            return bool(self._service_active_checker(instance))
+        return self._check_service_active(str(instance.get("name") or ""))
+
+    def _idle_timeout_for_instance(self, name: str) -> float:
+        if self._idle_timeout_provider:
+            try:
+                return float(self._idle_timeout_provider(name))
+            except Exception:
+                pass
+        return self.IDLE_TIMEOUT
 
     @staticmethod
     def _get_pid(name: str) -> int:

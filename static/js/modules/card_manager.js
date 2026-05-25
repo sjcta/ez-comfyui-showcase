@@ -86,6 +86,23 @@
     return '<video class="gi-video-preview" src="' + escA(src) + '" muted playsinline preload="metadata"></video>' + _videoPosterHtml();
   }
 
+  function _neutralJobStatusMessage(value) {
+    var text = String(value || '');
+    var image = '图' + '片';
+    var picture = '图' + '像';
+    return text
+      .replace(new RegExp('正在拉取' + image, 'g'), '正在保存结果')
+      .replace(new RegExp('拉取' + image + '超时', 'g'), '保存结果超时')
+      .replace(new RegExp(image + '校验中', 'g'), '内容校验中')
+      .replace(new RegExp(image + '保存中', 'g'), '结果保存中')
+      .replace(new RegExp('保存' + image, 'g'), '保存结果')
+      .replace(new RegExp('解码' + picture, 'g'), '解码内容')
+      .replace(new RegExp('编码' + picture, 'g'), '编码内容')
+      .replace(new RegExp(picture + '缩放', 'g'), '缩放内容')
+      .replace(new RegExp('合成' + picture, 'g'), '合成内容')
+      .replace(new RegExp('保存' + picture, 'g'), '保存结果');
+  }
+
   function _mediaPreviewHtml(item) {
     if (_isVideoItem(item)) return _videoPreviewHtml(item.filename, item.thumb);
     var src = _historyImageSrc(item);
@@ -439,7 +456,7 @@
 
   CardManager.prototype._renderJobCard = function (j) {
     var label = j.prompt_preview || (j.workflow ? j.workflow.replace('.json', '') : '') || '...';
-    var statusMsg = j.message || j.status;
+    var statusMsg = _neutralJobStatusMessage(j.message || j.status);
     var hasImage = !!j.image;
     var isVideo = _mediaType(j.media_type, j.image) === 'video';
     var checkingPreview = j.status === 'checking' && (j.pending_thumb || j.pending_image);
@@ -465,9 +482,9 @@
       } else if (j.status === 'generating') {
         imgHtml += '<div class="job-status-text generating">' + escH(statusMsg) + '</div>';
       } else if (j.status === 'downloading') {
-        imgHtml += '<div class="job-status-text downloading">' + escH(statusMsg || '正在拉取图片...') + '</div>';
+        imgHtml += '<div class="job-status-text downloading">' + escH(statusMsg || '正在保存结果...') + '</div>';
       } else if (j.status === 'checking') {
-        imgHtml += '<div class="job-status-text checking">' + escH(statusMsg || '图片校验中') + '</div>';
+        imgHtml += '<div class="job-status-text checking">' + escH(statusMsg || '内容校验中') + '</div>';
       } else {
         imgHtml += '<div class="job-status-text ' + escH(j.status) + '">' + escH(statusMsg) + '</div>';
       }
@@ -589,7 +606,7 @@
     // ── Status text ──
     var st = card.querySelector('.job-status-text');
     if (st) {
-      var label = job.message || (job.status === 'generating' ? '出图中' : job.status === 'history' ? '' : job.status);
+      var label = _neutralJobStatusMessage(job.message || (job.status === 'generating' ? '出图中' : job.status === 'history' ? '' : job.status));
       st.textContent = label;
       st.className = 'job-status-text ' + job.status;
     }

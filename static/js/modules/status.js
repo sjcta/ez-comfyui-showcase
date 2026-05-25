@@ -177,7 +177,7 @@
       }).join(' | ');
     }
     if ((summaries || []).length === 1 && summaries[0].text) return summaries[0].text;
-    return '出图中 ' + _clampPct(fallbackPct) + '%';
+    return '运行中 ' + _clampPct(fallbackPct) + '%';
   }
 
   function _safeVramMessage(gpu) {

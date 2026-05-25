@@ -252,7 +252,7 @@
       var toastByStatus = {
         queued: ['排队中', 'queued'],
         generating: ['出图中', 'generating'],
-        checking: ['图片校验中', 'generating'],
+        checking: ['内容校验中', 'generating'],
         done: ['结束出图', 'done'],
         error: ['失败', 'error']
       };

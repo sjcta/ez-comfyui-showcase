@@ -181,6 +181,18 @@
     "thumbnail": "DGX Spark/i2i_flux2_klein.webp",
     "sort_order": 2
   },
+  "i2v_ltx23_10eros.json": {
+    "name": "LTX2.3 10Eros",
+    "tags": [
+      "视频制作"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "DGX Spark",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_10eros.json",
+    "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
+    "sort_order": 24
+  },
   "i2v_ltx23_sulphur.json": {
     "name": "LTX2.3 Sulphur",
     "tags": [

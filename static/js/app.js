@@ -198,7 +198,7 @@
         return i.up && i.queue_pending > 0;
       }).length;
       if (!anyUp) comfyState.textContent = '全部关闭';
-      else if (busyCount > 0) comfyState.textContent = '出图中 ' + runningPct + '%';
+      else if (busyCount > 0) comfyState.textContent = '运行中 ' + runningPct + '%';
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
       else comfyState.textContent = '待机(' + upCount + ')';
     }

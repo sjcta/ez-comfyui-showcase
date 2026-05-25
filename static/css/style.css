@@ -1937,6 +1937,7 @@ select { cursor: pointer; }
   z-index: 10046;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
 }
 
@@ -1991,6 +1992,22 @@ select { cursor: pointer; }
   transition: background .18s, transform .18s, box-shadow .18s;
 }
 .lb-download:hover { background: rgba(180,83,9,.36); transform: translateY(-1px); }
+
+.lb-compare {
+  position: absolute;
+  left: max(24px, env(safe-area-inset-left));
+  bottom: calc(max(24px, env(safe-area-inset-bottom)) + 72px);
+  z-index: 10046;
+  color: rgba(241,245,249,.92);
+  touch-action: none;
+}
+.lb-compare.is-active {
+  color: #f59e0b;
+  background: rgba(146,64,14,.28);
+}
+.lb-compare-icon {
+  display: block;
+}
 
 .lb-loading {
   color: var(--dim); font-size: 14px;
@@ -10095,6 +10112,10 @@ body.node-dragging-active * {
     right: max(16px, env(safe-area-inset-right));
     bottom: calc(max(16px, env(safe-area-inset-bottom)) + 68px);
     gap: 12px;
+  }
+  .lb-compare {
+    left: max(16px, env(safe-area-inset-left));
+    bottom: calc(max(16px, env(safe-area-inset-bottom)) + 68px);
   }
   .lb-action-btn,
   .lb-download,

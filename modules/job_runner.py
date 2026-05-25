@@ -46,6 +46,20 @@ def _friendly_generation_error(err: Exception) -> str:
     return text[:200]
 
 
+def _is_transient_comfyui_error(err: Exception) -> bool:
+    text = str(err)
+    markers = (
+        "Connection refused",
+        "Errno 61",
+        "Errno 111",
+        "timed out",
+        "Temporary failure",
+        "Connection reset",
+        "Remote end closed connection",
+    )
+    return any(marker in text for marker in markers)
+
+
 def _filter_retry_instances(instances: list[dict], workflow_name: str, failed_instances: set[str]) -> list[dict]:
     if not failed_instances or len(failed_instances) >= len(instances):
         return instances
@@ -561,17 +575,19 @@ class JobRunner:
                             not isinstance(check, dict) or prompt_id not in check
                         ):
                             break
-                    except RuntimeError:
+                    except RuntimeError as e:
+                        if _is_transient_comfyui_error(e):
+                            continue
                         raise
                     except Exception:
                         pass
 
             elapsed = time.time() - elapsed_start
 
-            # ── Phase 7: 下载输出图片_ (由 _save_output 负责下载) ─────
+            # ── Phase 7: 保存输出结果（由 _save_output 负责下载/入库） ─────
             if prompt_id:
                 self._jobs[job_id]["status"] = "downloading"
-                self._jobs[job_id]["message"] = "正在拉取图片..."
+                self._jobs[job_id]["message"] = "正在保存结果..."
                 self._jobs[job_id]["progress"] = {"pct": 100}
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
@@ -958,7 +974,7 @@ class JobRunner:
             if self._protection_check:
                 self._jobs[job_id].update(
                     status="checking",
-                    message="图片校验中",
+                    message="内容校验中",
                     protection_status="pending",
                     pending_image=cover.get("filename", ""),
                     pending_media_type=cover.get("media_type", "image") or "image",

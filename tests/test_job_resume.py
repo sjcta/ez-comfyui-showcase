@@ -101,6 +101,29 @@ class JobResumeTest(unittest.TestCase):
         self.assertEqual(created[0].cr_code.co_name, "fake_resume")
         created[0].close()
 
+    def test_missing_in_memory_queued_job_is_requeued(self):
+        old_queue = app._job_queue
+        app._job_queue = asyncio.Queue()
+        app.jobs["job-queued"] = {
+            "id": "job-queued",
+            "status": "queued",
+            "workflow": "i2v_ltx23_sulphur.json",
+            "fields": {"1::text": "hello"},
+            "seed": "123",
+            "width": 1280,
+            "height": 720,
+            "user_id": "u1",
+        }
+
+        try:
+            with mock.patch("app._resolve_workflow", return_value="/tmp/i2v_ltx23_sulphur.json"), \
+                    mock.patch("app.add_log"):
+                requeued = app._kick_queued_generation_jobs("test")
+        finally:
+            app._job_queue = old_queue
+
+        self.assertEqual(requeued, ["job-queued"])
+
     def test_prompt_id_can_be_recovered_from_recent_submit_log_tail(self):
         job_id = "job_1234567890_running"
         app._log_buffer.append({

@@ -271,6 +271,45 @@ class ProgressCalculationTests(unittest.TestCase):
 
         asyncio.run(run_timeout())
 
+    def test_http_polling_keeps_waiting_after_transient_connection_refused(self):
+        workflow = {
+            "1": {
+                "class_type": "SaveVideo",
+                "inputs": {},
+            },
+        }
+        step_info = StepCalculator().calculate(workflow)
+        tracker = WSTracker(
+            job_id="job-http-transient-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+        tracker.HTTP_POLL_INTERVAL = 0
+        tracker._start_time = 0
+        tracker._prompt_id = "prompt-video"
+        calls = []
+
+        def fake_get(_url):
+            calls.append(_url)
+            if len(calls) == 1:
+                raise RuntimeError(
+                    "HTTP GET http://127.0.0.1:8190/history/prompt-video 失败: "
+                    "<urlopen error [Errno 61] Connection refused>"
+                )
+            return {"prompt-video": {"status": {"completed": True}}}
+
+        async def run_poll():
+            with mock.patch("modules.ws_tracker._http_get", side_effect=fake_get):
+                return await tracker._http_poll_track(timeout=1)
+
+        result = asyncio.run(run_poll())
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.prompt_id, "prompt-video")
+        self.assertGreaterEqual(len(calls), 2)
+
     def test_normal_nodes_complete_on_executed_not_executing(self):
         workflow = {
             "1": {

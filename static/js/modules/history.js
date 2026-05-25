@@ -23,10 +23,19 @@
   var _lbLoadToken = 0;
   var _lbCurrentItem = null;
   var _lbFavorites = {};
+  var _lbCompareState = {
+    generatedSrc: '',
+    originalSrc: '',
+    showingOriginal: false,
+  };
   var HISTORY_FETCH_LIMIT = 300;
 
   function _lightboxImageUrl(filename) {
     return `${API}/api/images/${filename}`;
+  }
+
+  function _lightboxInputImageUrl(filename) {
+    return `${API}/api/input-image/${filename}`;
   }
 
   function _mediaType(itemOrType, filename) {
@@ -69,6 +78,78 @@
     link.setAttribute('download', downloadName);
     link.dataset.url = url;
     link.dataset.filename = downloadName;
+  }
+
+  function _historyOriginalImageRef(item) {
+    if (!item || _isVideoItem(item)) return '';
+    var fields = item.field_values || item.fields || {};
+    if (!fields || typeof fields !== 'object') return '';
+    var imageExts = /\.(png|jpe?g|webp|bmp)(\?|$)/i;
+    for (var key in fields) {
+      if (!Object.prototype.hasOwnProperty.call(fields, key)) continue;
+      var value = fields[key];
+      if (typeof value !== 'string') continue;
+      var field = String(key || '').split('::').pop().toLowerCase();
+      if (!(field.indexOf('image') === 0 || field === 'upload')) continue;
+      var rel = value.replace(/\\/g, '/').replace(/^\/+/, '');
+      if (imageExts.test(rel)) return rel;
+    }
+    return '';
+  }
+
+  function _setCompareButtonActive(active) {
+    var btn = $('#lbCompareBtn');
+    if (!btn) return;
+    btn.classList.toggle('is-active', !!active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+
+  function _syncLightboxCompare(item) {
+    var btn = $('#lbCompareBtn');
+    var originalRef = _historyOriginalImageRef(item);
+    var canCompare = !!(item && item.filename && originalRef);
+    _lbCompareState = {
+      generatedSrc: canCompare ? _lightboxImageUrl(item.filename) : '',
+      originalSrc: canCompare ? _lightboxInputImageUrl(originalRef) : '',
+      showingOriginal: false,
+    };
+    if (btn) {
+      btn.style.display = canCompare ? '' : 'none';
+      btn.disabled = !canCompare;
+      btn.classList.toggle('is-disabled', !canCompare);
+      btn.classList.remove('is-active');
+      btn.setAttribute('aria-pressed', 'false');
+      btn.title = '图片对比';
+    }
+  }
+
+  function _setLightboxCompareImage(src, showingOriginal) {
+    if (!src) return;
+    var fullImg = $('#lbFullImg');
+    var lbImg = $('#lbImg');
+    var stage = $('#lbStage');
+    if (stage) stage.classList.add('is-live');
+    if (lbImg) {
+      lbImg.src = '';
+      lbImg.classList.remove('lb-visible', 'lb-preview', 'lb-ready');
+    }
+    _lbCompareState.showingOriginal = !!showingOriginal;
+    _setCompareButtonActive(!!showingOriginal);
+    if (!fullImg) return;
+    var token = ++_lbLoadToken;
+    var loader = new Image();
+    loader.onload = function () {
+      if (token !== _lbLoadToken) return;
+      fullImg.src = src;
+      fullImg.classList.add('lb-full-visible');
+    };
+    loader.onerror = function () {
+      if (token !== _lbLoadToken) return;
+      _lbCompareState.showingOriginal = false;
+      _setCompareButtonActive(false);
+      if (window.CW && CW.toast) CW.toast('原图加载失败', 'error');
+    };
+    loader.src = src;
   }
 
   function _syncLightboxActions(item) {
@@ -167,9 +248,26 @@ function _attachSentinel() {
     return `<div class="gi-timer-row"><span class="gi-timer" data-ts="${escA(ts)}" data-estimate-label="${escA(estimateLabel)}">${escH(timerText)}</span></div>`;
   }
 
+  function _neutralJobStatusMessage(value) {
+    const text = String(value || '');
+    const image = '图' + '片';
+    const picture = '图' + '像';
+    return text
+      .replace(new RegExp('正在拉取' + image, 'g'), '正在保存结果')
+      .replace(new RegExp('拉取' + image + '超时', 'g'), '保存结果超时')
+      .replace(new RegExp(image + '校验中', 'g'), '内容校验中')
+      .replace(new RegExp(image + '保存中', 'g'), '结果保存中')
+      .replace(new RegExp('保存' + image, 'g'), '保存结果')
+      .replace(new RegExp('解码' + picture, 'g'), '解码内容')
+      .replace(new RegExp('编码' + picture, 'g'), '编码内容')
+      .replace(new RegExp(picture + '缩放', 'g'), '缩放内容')
+      .replace(new RegExp('合成' + picture, 'g'), '合成内容')
+      .replace(new RegExp('保存' + picture, 'g'), '保存结果');
+  }
+
   function _renderJobCard(j) {
     const label = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
-    const statusMsg = j.message || j.status;
+    const statusMsg = _neutralJobStatusMessage(j.message || j.status);
     const hasImage = !!j.image;
     const isVideo = _mediaType(j.media_type, j.image) === 'video';
     const checkingPreview = j.status === 'checking' && (j.pending_thumb || j.pending_image);
@@ -196,9 +294,9 @@ function _attachSentinel() {
       } else if (j.status === 'generating') {
         imgHtml += `<div class="job-status-text generating">${escH(statusMsg)}</div>`;
       } else if (j.status === 'downloading') {
-        imgHtml += `<div class="job-status-text downloading">${escH(statusMsg || '正在拉取图片...')}</div>`;
+        imgHtml += `<div class="job-status-text downloading">${escH(statusMsg || '正在保存结果...')}</div>`;
       } else if (j.status === 'checking') {
-        imgHtml += `<div class="job-status-text checking">${escH(statusMsg || '图片校验中')}</div>`;
+        imgHtml += `<div class="job-status-text checking">${escH(statusMsg || '内容校验中')}</div>`;
       } else {
         imgHtml += `<div class="job-status-text ${escH(j.status)}">${escH(statusMsg)}</div>`;
       }
@@ -252,7 +350,7 @@ function _attachSentinel() {
     // Status text — update in image area
     const st = card.querySelector('.job-status-text');
     if (st) {
-      const label = job.message || (job.status === 'generating' ? '出图中' : job.status);
+      const label = _neutralJobStatusMessage(job.message || (job.status === 'generating' ? '出图中' : job.status));
       st.textContent = label;
       st.className = `job-status-text ${job.status}`;
     }
@@ -1760,6 +1858,7 @@ function renderLB(sourceEl) {
     const h = _batchCover(lbItems[lbIdx]);
     _syncLightboxDownload(h.filename);
     _syncLightboxActions(h);
+    _syncLightboxCompare(h);
     $('#lbInfo').textContent = h.prompt || '—';
     $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
     $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
@@ -1793,6 +1892,7 @@ function renderLB(sourceEl) {
     document.querySelectorAll('.lb-flight').forEach(function(el) { el.remove(); });
     _syncLightboxDownload('');
     _syncLightboxActions(null);
+    _syncLightboxCompare(null);
     lbIdx = -1;
   }
 
@@ -1843,6 +1943,7 @@ function openJobLB(filename, label, sourceEl, mediaType) {
     // Show a single-item lightbox for a job image
     _syncLightboxDownload(filename);
     _syncLightboxActions(null);
+    _syncLightboxCompare(null);
     $('#lbInfo').textContent = label || '';
     $('#lbPrev').style.display = 'none';
     $('#lbNext').style.display = 'none';
@@ -1886,6 +1987,28 @@ function openBatchLB(batchId, sourceEl) {
 	    if (window.CW && typeof window.CW.renderGallery === 'function') window.CW.renderGallery();
 	    if (window.CW && CW.toast) CW.toast(_lbFavorites[key] ? '已收藏' : '已取消收藏', 'done');
 	  }
+
+  function showLBOriginalImage(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!_lbCompareState.originalSrc || _lbCompareState.showingOriginal) return;
+    _setLightboxCompareImage(_lbCompareState.originalSrc, true);
+  }
+
+  function restoreLBGeneratedImage(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!_lbCompareState.generatedSrc || !_lbCompareState.showingOriginal) return;
+    _setLightboxCompareImage(_lbCompareState.generatedSrc, false);
+  }
+
+  function toggleLBCompareImage(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!_lbCompareState.originalSrc || !_lbCompareState.generatedSrc) return;
+    if (_lbCompareState.showingOriginal) {
+      restoreLBGeneratedImage(e);
+    } else {
+      showLBOriginalImage(e);
+    }
+  }
 
   function toggleLBShare() {
     if (!_historyActionState(_lbCurrentItem).canShare) return;
@@ -2064,6 +2187,9 @@ function renderGallery() {
   window.CW.downloadLB = downloadLB;
   window.CW.lbNav = lbNav;
   window.CW.toggleLBFavorite = toggleLBFavorite;
+  window.CW.showLBOriginalImage = showLBOriginalImage;
+  window.CW.restoreLBGeneratedImage = restoreLBGeneratedImage;
+  window.CW.toggleLBCompareImage = toggleLBCompareImage;
   window.CW.toggleLBShare = toggleLBShare;
   window.CW.loadHistory = loadHistory;
   // Data-only refresh (no gallery re-render)

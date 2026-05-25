@@ -1,0 +1,423 @@
+{
+  "version": 1,
+  "workflow": "i2v_ltx23_10eros.json",
+  "fields": [
+    {
+      "key": "269::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "320:319::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "320:312::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 2,
+      "type": "number"
+    },
+    {
+      "key": "320:299::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 3,
+      "type": "number"
+    },
+    {
+      "key": "320:301::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "长度（秒）",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "320:300::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "帧率",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "320:302::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "是否切换文生视频？",
+      "order": 0,
+      "type": "toggle"
+    },
+    {
+      "key": "75::codec",
+      "zone": "advanced",
+      "visible": true,
+      "label": "视频编码",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "320:277::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "二阶段噪声种子",
+      "order": 2,
+      "type": "seed"
+    },
+    {
+      "key": "320:276::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "初始噪声种子",
+      "order": 3,
+      "type": "seed"
+    },
+    {
+      "key": "320:313::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 4,
+      "type": "textarea"
+    },
+    {
+      "key": "320:288::strength",
+      "zone": "advanced",
+      "visible": true,
+      "label": "高清参考图强度",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "320:296::strength",
+      "zone": "advanced",
+      "visible": true,
+      "label": "初始参考图强度",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "320:285::strength_model",
+      "zone": "advanced",
+      "visible": true,
+      "label": "蒸馏 LoRA 强度",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "320:330::ckpt_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "10Eros Checkpoint模型",
+      "order": 8,
+      "type": "text",
+      "help": "默认 ltx/10Eros_v1-fp8mixed_learned.safetensors；Q4/Q8 GGUF 文件仍保留在 unet/gguf 目录中，需要 GGUF loader 工作流时再切回。"
+    },
+    {
+      "key": "320:279::ckpt_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "音频 VAE / 支撑组件",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "75::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "输出前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "75::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "320:280::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sampler_name",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "320:281::sigmas",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sigmas",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "320:282::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 3,
+      "type": "number"
+    },
+    {
+      "key": "320:285::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "320:286::longer_edge",
+      "zone": "hidden",
+      "visible": false,
+      "label": "longer_edge",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "320:289::img_compression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "img_compression",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "320:290::resize_type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "resize_type",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "320:290::resize_type.crop",
+      "zone": "hidden",
+      "visible": false,
+      "label": "resize_type.crop",
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "320:291::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sampler_name",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "320:290::scale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scale_method",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "320:295::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "batch_size",
+      "order": 11,
+      "type": "number"
+    },
+    {
+      "key": "320:305::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "batch_size",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "320:306::sigmas",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sigmas",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "320:311::model_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model_name",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "320:314::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 15,
+      "type": "number"
+    },
+    {
+      "key": "320:315::horizontal_tiles",
+      "zone": "hidden",
+      "visible": false,
+      "label": "horizontal_tiles",
+      "order": 16,
+      "type": "number"
+    },
+    {
+      "key": "320:315::overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "overlap",
+      "order": 17,
+      "type": "number"
+    },
+    {
+      "key": "320:315::vertical_tiles",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vertical_tiles",
+      "order": 18,
+      "type": "number"
+    },
+    {
+      "key": "320:315::last_frame_fix",
+      "zone": "hidden",
+      "visible": false,
+      "label": "last_frame_fix",
+      "order": 19,
+      "type": "toggle"
+    },
+    {
+      "key": "320:316::ckpt_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ckpt_name",
+      "order": 20,
+      "type": "text"
+    },
+    {
+      "key": "320:317::text_encoder",
+      "zone": "hidden",
+      "visible": false,
+      "label": "text_encoder",
+      "order": 21,
+      "type": "text"
+    },
+    {
+      "key": "320:317::ckpt_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ckpt_name",
+      "order": 22,
+      "type": "text"
+    },
+    {
+      "key": "320:317::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 23,
+      "type": "text"
+    },
+    {
+      "key": "320:323::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 24,
+      "type": "text"
+    },
+    {
+      "key": "320:294::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 25,
+      "type": "text"
+    },
+    {
+      "key": "320:292::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 26,
+      "type": "text"
+    },
+    {
+      "key": "320:298::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 27,
+      "type": "text"
+    },
+    {
+      "key": "320:308::bypass_tiling",
+      "zone": "advanced",
+      "visible": true,
+      "label": "跳过二阶段分块",
+      "order": 10,
+      "type": "toggle"
+    },
+    {
+      "key": "320:308::tile_axis",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分块方向",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "320:308::n_tiles",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分块数量",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "320:308::tile_overlap",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分块重叠",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "320:308::max_size_for_no_tile",
+      "zone": "advanced",
+      "visible": true,
+      "label": "小尺寸免分块阈值",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "320:308::audio_pass",
+      "zone": "advanced",
+      "visible": true,
+      "label": "音频传递模式",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "320:308::audio_carrier_tile",
+      "zone": "advanced",
+      "visible": true,
+      "label": "音频承载分块",
+      "order": 16,
+      "type": "text"
+    }
+  ]
+}
