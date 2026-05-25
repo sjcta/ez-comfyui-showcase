@@ -77,6 +77,40 @@ class MobileAgentRoutesTests(unittest.TestCase):
             DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"],
         )
 
+    def test_understand_uses_image_to_image_workflow_for_result_followup(self):
+        self.settings = {"mobile_creator": {
+            "default_text_to_image_workflow": self.workflow_name,
+            "default_image_to_image_workflow": "i2i-test.json",
+        }}
+        api = FastAPI()
+        register_mobile_agent_routes(api, {
+            "get_current_user": lambda: {"sub": "user1", "role": "user"},
+            "load_system_settings": lambda: self.settings,
+            "load_wf_meta": lambda: {"i2i-test.json": {}},
+            "normalize_wf_meta_entry": lambda filename, entry: entry or {},
+            "resolve_workflow": lambda filename, entry=None: f"/tmp/{filename}" if filename == "i2i-test.json" else None,
+            "can_view_workflow": lambda filename, entry, user: filename == "i2i-test.json",
+            "analyze_workflow": lambda path: {"fields": [
+                {"node_id": "1", "field": "text", "label": "提示词", "class_type": "Text Multiline", "zone": "user_input"}
+            ]},
+            "add_log": lambda *args, **kwargs: self.logs.append((args, kwargs)),
+            "user_id": lambda user: user.get("sub", ""),
+            "speech_transcriber_factory": self._speech_transcriber_factory,
+        })
+
+        response = TestClient(api).post("/api/mobile-agent/understand", json={
+            "text": "改成赛博朋克风格",
+            "context": {"last_result": {"image": "user1/2026-05-25/cat.png", "id": "job1"}},
+        })
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["intent"], "image_to_image")
+        self.assertEqual(data["workflow"], "default_image_to_image")
+        self.assertEqual(data["resolved_workflow"], "i2i-test.json")
+        self.assertEqual(data["source_result"]["image"], "user1/2026-05-25/cat.png")
+        self.assertEqual(data["field_values"], {"1::text": data["compiled_prompt"]})
+
     def test_understand_analysis_failure_requires_confirmation(self):
         api = FastAPI()
         register_mobile_agent_routes(api, {

@@ -6,10 +6,11 @@ import traceback
 from typing import Any, Callable
 
 from fastapi import Depends, File, Form, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from modules.mobile_agent import (
     DEFAULT_MOBILE_CREATOR_SETTINGS,
+    IntentRouter,
     build_agent_response,
     build_generate_fields,
 )
@@ -19,6 +20,7 @@ class MobileAgentUnderstandRequest(BaseModel):
     text: str = ""
     has_image: bool = False
     has_video: bool = False
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 def register_mobile_agent_routes(app, deps: dict[str, Callable[..., Any]]) -> None:
@@ -39,7 +41,14 @@ def register_mobile_agent_routes(app, deps: dict[str, Callable[..., Any]]) -> No
         current_user: dict = Depends(get_current_user),
     ):
         mobile_settings = _load_mobile_creator_settings(load_system_settings)
-        workflow_name = str(mobile_settings.get("default_text_to_image_workflow") or "").strip()
+        route_preview = IntentRouter().classify(
+            req.text,
+            has_image=req.has_image,
+            has_video=req.has_video,
+            context=req.context,
+        )
+        workflow_setting = _workflow_setting_for_intent(route_preview.get("intent", ""))
+        workflow_name = str(mobile_settings.get(workflow_setting) or "").strip()
         workflow_entry = _resolve_workflow_entry(workflow_name, load_wf_meta, normalize_wf_meta_entry)
         workflow_path = resolve_workflow(workflow_name, workflow_entry) if workflow_name else None
         workflow_available = bool(
@@ -53,6 +62,7 @@ def register_mobile_agent_routes(app, deps: dict[str, Callable[..., Any]]) -> No
             workflow_available=workflow_available,
             has_image=req.has_image,
             has_video=req.has_video,
+            context=req.context,
         )
         if workflow_available:
             try:
@@ -122,6 +132,12 @@ def _load_mobile_creator_settings(load_system_settings: Callable[[], dict[str, A
     if not str(merged.get("default_text_to_image_workflow") or "").strip():
         merged["default_text_to_image_workflow"] = DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"]
     return merged
+
+
+def _workflow_setting_for_intent(intent: str) -> str:
+    if intent == "image_to_image":
+        return "default_image_to_image_workflow"
+    return "default_text_to_image_workflow"
 
 
 def _resolve_workflow_entry(

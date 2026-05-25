@@ -49,6 +49,7 @@ class FakeElement {
 
 function makeContext(options = {}) {
   const root = new FakeElement('mobileAgentRoot');
+  const storage = Object.assign({}, options.storage || {});
   const body = {
     dataset: options.bodyDataset || {},
     setAttribute() {},
@@ -73,7 +74,12 @@ function makeContext(options = {}) {
   const context = {
     console,
     document,
-    localStorage: { getItem() { return ''; } },
+    localStorage: {
+      getItem(key) { return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : ''; },
+      setItem(key, value) { storage[key] = String(value); },
+      removeItem(key) { delete storage[key]; },
+      _dump() { return Object.assign({}, storage); },
+    },
     isSecureContext: options.isSecureContext !== false,
     location: { hash: options.hash || '', protocol: 'http:', pathname: options.pathname || '/', port: options.port || '' },
     fetch(url, request) {
@@ -103,17 +109,20 @@ function makeContext(options = {}) {
           },
         });
       }
+      const body = request && request.body ? JSON.parse(request.body) : {};
       return Promise.resolve({
         ok: true,
         json() {
           return Promise.resolve({
             ok: true,
             data: {
+              intent: body.context && body.context.last_result ? 'image_to_image' : 'text_to_image',
               display_summary: '后端摘要：海边日落',
               compiled_prompt: 'fallback prompt',
               style: '电影感',
               aspect_ratio: '16:9',
-              resolved_workflow: 't2i-test.json',
+              workflow: body.context && body.context.last_result ? 'default_image_to_image' : 'default_text_to_image',
+              resolved_workflow: body.context && body.context.last_result ? 'i2i-test.json' : 't2i-test.json',
               field_values: { '1::text': 'prompt' },
               width: 720,
               height: 1280,
@@ -189,7 +198,7 @@ function makeContext(options = {}) {
       showLogin() { context.loginShown = true; },
     };
   }
-  return { context, root, calls };
+  return { context, root, calls, storage };
 }
 
 async function run() {
@@ -223,7 +232,14 @@ async function run() {
       text: '海边日落',
       has_image: false,
       has_video: false,
+      context: {
+        last_result: null,
+        messages: [{ role: 'user', text: '海边日落' }],
+      },
     });
+    assert(root.innerHTML.includes('mobile-agent-chat'), 'submit should switch into a conversation view');
+    assert(root.innerHTML.includes('mobile-agent-message-user'), 'conversation should keep the user message');
+    assert(root.innerHTML.includes('mobile-agent-confirm-card'), 'assistant response should render as an inline confirmation card');
     assert(root.innerHTML.includes('后端摘要：海边日落'), 'confirm should render backend display summary');
     assert(root.innerHTML.includes('电影感'), 'confirm should render selected style and style chips');
     assert(root.innerHTML.includes('16:9'), 'confirm should render selected ratio and ratio chips');
@@ -240,6 +256,27 @@ async function run() {
       width: 720,
       height: 1280,
     });
+    assert(root.innerHTML.includes('正在生成'), 'generation submit should append a pending assistant message');
+
+    context.CW.mobileAgent.handleJobUpdate({
+      id: 'job_mobile_1',
+      status: 'done',
+      image: 'user1/2026-05-25/cat.png',
+      thumb: 'user1/2026-05-25/cat-thumb.jpg',
+      media_type: 'image',
+      workflow: 't2i-test.json',
+    });
+
+    assert(root.innerHTML.includes('/api/thumbs/user1/2026-05-25/cat-thumb.jpg'), 'completed job should render image result in the conversation');
+    assert(root.innerHTML.includes('生成完成'), 'completed job should label the result as done');
+    assert(context.CW.mobileAgent.getConversationContext().last_result.image === 'user1/2026-05-25/cat.png', 'completed job should become the next-turn image context');
+
+    root.dispatch('input', { id: 'mobileAgentText', value: '改成赛博朋克风格' });
+    await context.CW.mobileAgent.submitUnderstand();
+
+    const followupBody = JSON.parse(calls[2].request.body);
+    assert.strictEqual(followupBody.context.last_result.image, 'user1/2026-05-25/cat.png');
+    assert.strictEqual(followupBody.text, '改成赛博朋克风格');
   }
 
   {

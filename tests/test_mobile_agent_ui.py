@@ -26,8 +26,12 @@ class MobileAgentUiContractTests(unittest.TestCase):
         self.assertIn("function renderVoice", js)
         self.assertIn("function renderConfirm", js)
         self.assertIn("function renderGenerating", js)
+        self.assertIn("function renderConversation", js)
         self.assertIn("function submitUnderstand", js)
         self.assertIn("function openMobileAgent", js)
+        self.assertIn("mobile-agent-chat", js)
+        self.assertIn("mobile-agent-confirm-card", js)
+        self.assertIn("mobile-agent-result-card", js)
         self.assertIn("mobile-agent-confirm-main", js)
         self.assertIn("mobile-agent-option-block", js)
         self.assertIn("mobile-agent-workflow-status", js)
@@ -49,6 +53,8 @@ class MobileAgentUiContractTests(unittest.TestCase):
         self.assertIn("field_values", js)
         self.assertIn("width", js)
         self.assertIn("height", js)
+        self.assertIn("handleJobUpdate", js)
+        self.assertIn("getConversationContext", js)
 
     def test_mobile_agent_executable_behavior(self):
         result = subprocess.run(
@@ -66,6 +72,9 @@ class MobileAgentUiContractTests(unittest.TestCase):
 
         self.assertIn(".mobile-agent", css)
         self.assertIn(".mobile-agent-panel", css)
+        self.assertIn(".mobile-agent-chat", css)
+        self.assertIn(".mobile-agent-message-user", css)
+        self.assertIn(".mobile-agent-result-card", css)
         self.assertIn(".mobile-agent-input-row", css)
         self.assertIn("--mobile-motion-duration: 300ms", css)
         self.assertIn("grid-template-columns var(--mobile-motion-duration) ease", css)

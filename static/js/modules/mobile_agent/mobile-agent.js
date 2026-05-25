@@ -18,12 +18,17 @@
     }
     return fetch(url, opts);
   };
+  var STORAGE_KEY = 'ez_mobile_agent_thread:v1';
 
   var state = {
     root: null,
     mode: 'home',
     text: '',
     understanding: null,
+    messages: [],
+    lastResult: null,
+    pendingMessageId: '',
+    pendingJobId: '',
     loading: false,
     error: '',
     active: false,
@@ -65,6 +70,70 @@
     if (window.CW && typeof CW.showToast === 'function') {
       CW.showToast(message, type || 'info');
     }
+  }
+
+  function makeId(prefix) {
+    return String(prefix || 'msg') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function loadConversation() {
+    if (!window.localStorage) return;
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      state.messages = Array.isArray(parsed.messages) ? parsed.messages.slice(-40) : [];
+      state.lastResult = parsed.lastResult || null;
+      state.pendingMessageId = parsed.pendingMessageId || '';
+      state.pendingJobId = parsed.pendingJobId || '';
+      var lastConfirm = state.messages.slice().reverse().find(function (msg) {
+        return msg && msg.type === 'confirm' && msg.data;
+      });
+      state.understanding = lastConfirm ? lastConfirm.data : null;
+    } catch (_) {}
+  }
+
+  function saveConversation() {
+    if (!window.localStorage) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        messages: state.messages.slice(-40),
+        lastResult: state.lastResult || null,
+        pendingMessageId: state.pendingMessageId || '',
+        pendingJobId: state.pendingJobId || ''
+      }));
+    } catch (_) {}
+  }
+
+  function addMessage(message) {
+    var msg = Object.assign({ id: makeId('msg'), role: 'assistant', type: 'text', text: '' }, message || {});
+    state.messages.push(msg);
+    state.messages = state.messages.slice(-40);
+    saveConversation();
+    return msg;
+  }
+
+  function updateMessage(id, patch) {
+    for (var i = 0; i < state.messages.length; i++) {
+      if (state.messages[i] && state.messages[i].id === id) {
+        state.messages[i] = Object.assign({}, state.messages[i], patch || {});
+        saveConversation();
+        return state.messages[i];
+      }
+    }
+    return null;
+  }
+
+  function getConversationContext() {
+    var textMessages = state.messages.filter(function (msg) {
+      return msg && msg.text && (msg.role === 'user' || msg.role === 'assistant');
+    }).slice(-8).map(function (msg) {
+      return { role: msg.role, text: msg.text };
+    });
+    return {
+      last_result: state.lastResult || null,
+      messages: textMessages
+    };
   }
 
   function apiErrorMessage(payload, res, fallback) {
@@ -131,7 +200,7 @@
     renderHome();
   }
 
-  function renderHome() {
+  function renderComposer() {
     var imageIcon = icon('image');
     var micIcon = icon('mic');
     var sendIcon = icon('send');
@@ -147,7 +216,30 @@
     var voiceInner = voiceActive
       ? micIcon + '<span class="mobile-agent-voice-label">' + voiceLabel + '</span>' + voiceWave
       : micIcon;
+    return '' +
+      '<label class="mobile-agent-compose">' +
+        '<span>描述你想生成或修改的画面</span>' +
+        '<div class="mobile-agent-compose-body' + (state.sourceImageName ? ' has-attachment' : '') + '">' +
+          '<textarea id="mobileAgentText" rows="5" placeholder="' + (state.lastResult ? '例如：改成赛博朋克风格，背景换成雨夜' : '例如：一张赛博朋克风格的城市夜景，霓虹灯，电影感') + '" autocomplete="off">' + escH(state.text) + '</textarea>' +
+          imagePreview +
+        '</div>' +
+      '</label>' +
+      '<div class="mobile-agent-input-row' + (voiceActive ? ' is-voice-active' : '') + '">' +
+        '<button class="mobile-agent-icon-btn" type="button" data-action="image" title="图片输入" aria-label="图片输入">' + imageIcon + '</button>' +
+        '<button class="mobile-agent-icon-btn' + (voiceActive ? ' is-recording' : '') + '" type="button" data-action="voice" title="' + (voiceActive ? '停止录音' : '语音输入') + '" aria-label="' + (voiceActive ? '停止录音' : '语音输入') + '"' + (state.voiceBusy ? ' disabled' : '') + '>' + voiceInner + '</button>' +
+        '<button class="mobile-agent-send-btn" type="button" data-action="understand" aria-label="发送理解"' + (state.loading ? ' disabled' : '') + '>' +
+          '<span>' + (state.loading ? '理解中' : '发送') + '</span>' + sendIcon +
+        '</button>' +
+      '</div>';
+  }
+
+  function renderHome() {
+    var voiceActive = state.voicePending || state.voiceRecording || state.voiceBusy;
     var voiceText = voiceActive ? '' : state.voiceStatus;
+    if (state.messages.length) {
+      renderConversation();
+      return;
+    }
     setRootHtml(
       '<section class="mobile-agent-panel" data-view="home">' +
         '<input id="mobileAgentImageFile" class="mobile-agent-file" type="file" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif">' +
@@ -161,24 +253,102 @@
             '<p>说出想法，EZ 会先整理成可确认的创作方案。</p>' +
           '</div>' +
         '</div>' +
-        '<label class="mobile-agent-compose">' +
-          '<span>描述你想生成的画面</span>' +
-          '<div class="mobile-agent-compose-body' + (state.sourceImageName ? ' has-attachment' : '') + '">' +
-            '<textarea id="mobileAgentText" rows="5" placeholder="例如：一张赛博朋克风格的城市夜景，霓虹灯，电影感" autocomplete="off">' + escH(state.text) + '</textarea>' +
-            imagePreview +
-          '</div>' +
-        '</label>' +
+        renderComposer() +
         (voiceText ? '<div class="mobile-agent-voice-status" role="status">' + escH(voiceText) + '</div>' : '') +
         (state.error ? '<div class="mobile-agent-error" role="alert">' + escH(state.error) + '</div>' : '') +
-        '<div class="mobile-agent-input-row' + (voiceActive ? ' is-voice-active' : '') + '">' +
-          '<button class="mobile-agent-icon-btn" type="button" data-action="image" title="图片输入" aria-label="图片输入">' + imageIcon + '</button>' +
-          '<button class="mobile-agent-icon-btn' + (voiceActive ? ' is-recording' : '') + '" type="button" data-action="voice" title="' + (voiceActive ? '停止录音' : '语音输入') + '" aria-label="' + (voiceActive ? '停止录音' : '语音输入') + '"' + (state.voiceBusy ? ' disabled' : '') + '>' + voiceInner + '</button>' +
-          '<button class="mobile-agent-send-btn" type="button" data-action="understand" aria-label="发送理解"' + (state.loading ? ' disabled' : '') + '>' +
-            '<span>' + (state.loading ? '理解中' : '发送') + '</span>' + sendIcon +
-          '</button>' +
-        '</div>' +
       '</section>'
     );
+  }
+
+  function mediaSrc(item) {
+    if (!item) return '';
+    if (item.thumb) return API + '/api/thumbs/' + item.thumb;
+    if (item.image) return API + '/api/images/' + item.image;
+    if (item.filename) return API + '/api/images/' + item.filename;
+    return item.url || '';
+  }
+
+  function renderConfirmCard(data, messageId) {
+    data = data || {};
+    var options = data.options || {};
+    var selectedStyle = data.style || data.selected_style || '';
+    var selectedRatio = data.aspect_ratio || data.selected_ratio || '';
+    var styles = options.allowed_styles || data.allowed_styles || data.styles || data.style_chips || (selectedStyle ? [selectedStyle] : []);
+    var ratios = options.allowed_ratios || data.allowed_ratios || data.aspect_ratios || data.ratios || (selectedRatio ? [selectedRatio] : []);
+    var summary = data.display_summary || data.compiled_prompt || state.text || '请确认创作方案';
+    var workflowReady = !!data.resolved_workflow && !data.error_code;
+    var warning = !workflowReady ? (data.question || '当前默认工作流暂不可用，请返回修改或联系管理员配置。') : '';
+    var workflowLabel = data.workflow_title || data.workflow_label || data.resolved_workflow || '';
+    var title = data.intent === 'image_to_image' ? '准备修改这张图' : '准备生成这张图';
+    return '' +
+      '<div class="mobile-agent-confirm-card">' +
+        '<div class="mobile-agent-section-label">EZ 已整理好方案</div>' +
+        '<h2>' + escH(title) + '</h2>' +
+        '<div class="mobile-agent-summary">' + escH(summary) + '</div>' +
+        (workflowReady ? '<div class="mobile-agent-workflow-status">已匹配工作流：' + escH(workflowLabel) + '</div>' : '') +
+        (warning ? '<div class="mobile-agent-error" role="alert">' + escH(warning) + '</div>' : '') +
+        '<div class="mobile-agent-option-block">' +
+          '<span>风格</span>' +
+          '<div class="mobile-agent-chip-group" aria-label="风格">' + styles.map(function (item) {
+            var active = selectedStyle && String(item) === String(selectedStyle);
+            return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
+          }).join('') + '</div>' +
+        '</div>' +
+        '<div class="mobile-agent-option-block">' +
+          '<span>画幅</span>' +
+          '<div class="mobile-agent-chip-group" aria-label="画幅">' + ratios.map(function (item) {
+            var active = selectedRatio && String(item) === String(selectedRatio);
+            return '<button type="button" class="mobile-agent-chip' + (active ? ' is-selected' : '') + '">' + escH(item) + '</button>';
+          }).join('') + '</div>' +
+        '</div>' +
+        '<button class="mobile-agent-send-btn" type="button" data-action="generate" data-message-id="' + escH(messageId || '') + '"' + (workflowReady ? '' : ' disabled') + '>' + icon('sparkles') + '<span>生成</span></button>' +
+      '</div>';
+  }
+
+  function renderMessage(msg) {
+    if (!msg) return '';
+    if (msg.role === 'user') {
+      return '<article class="mobile-agent-message mobile-agent-message-user"><div>' + escH(msg.text || '') + '</div></article>';
+    }
+    if (msg.type === 'confirm') {
+      return '<article class="mobile-agent-message mobile-agent-message-assistant">' + renderConfirmCard(msg.data || {}, msg.id) + '</article>';
+    }
+    if (msg.type === 'result') {
+      var src = mediaSrc(msg);
+      return '<article class="mobile-agent-message mobile-agent-message-assistant">' +
+        '<div class="mobile-agent-result-card">' +
+          (src ? '<img src="' + escH(src) + '" alt="生成结果">' : '') +
+          '<div>生成完成</div>' +
+        '</div>' +
+      '</article>';
+    }
+    if (msg.type === 'status') {
+      return '<article class="mobile-agent-message mobile-agent-message-assistant"><div class="mobile-agent-status-card">' + escH(msg.text || '正在生成') + '</div></article>';
+    }
+    return '<article class="mobile-agent-message mobile-agent-message-assistant"><div>' + escH(msg.text || '') + '</div></article>';
+  }
+
+  function renderConversation() {
+    var voiceActive = state.voicePending || state.voiceRecording || state.voiceBusy;
+    var voiceText = voiceActive ? '' : state.voiceStatus;
+    setRootHtml(
+      '<section class="mobile-agent-panel" data-view="conversation">' +
+        '<input id="mobileAgentImageFile" class="mobile-agent-file" type="file" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif">' +
+        '<div class="mobile-agent-chat" aria-live="polite">' + state.messages.map(renderMessage).join('') + '</div>' +
+        renderComposer() +
+        (voiceText ? '<div class="mobile-agent-voice-status" role="status">' + escH(voiceText) + '</div>' : '') +
+        (state.error ? '<div class="mobile-agent-error" role="alert">' + escH(state.error) + '</div>' : '') +
+      '</section>'
+    );
+    scrollChatToLatest();
+  }
+
+  function scrollChatToLatest() {
+    if (!window.setTimeout) return;
+    setTimeout(function () {
+      var chat = state.root && state.root.querySelector ? state.root.querySelector('.mobile-agent-chat') : null;
+      if (chat) chat.scrollTop = chat.scrollHeight;
+    }, 0);
   }
 
   function renderVoice() {
@@ -251,7 +421,8 @@
   async function submitUnderstand() {
     if (state.loading) return;
     state.error = '';
-    if (!state.text.trim()) {
+    var requestText = state.text.trim();
+    if (!requestText) {
       state.error = '先输入一点创作想法。';
       renderHome();
       return;
@@ -264,13 +435,17 @@
         renderHome();
         return;
       }
+      addMessage({ role: 'user', type: 'text', text: requestText });
+      state.text = '';
+      renderHome();
       var res = await authFetch(API + '/api/mobile-agent/understand', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: state.text,
+          text: requestText,
           has_image: !!state.sourceImageFile,
-          has_video: false
+          has_video: false,
+          context: getConversationContext()
         })
       });
       var payload = await res.json();
@@ -278,10 +453,19 @@
         throw new Error(apiErrorMessage(payload, res, '理解失败'));
       }
       state.understanding = payload.data || payload;
+      addMessage({
+        role: 'assistant',
+        type: 'confirm',
+        text: state.understanding.display_summary || state.understanding.compiled_prompt || '已整理好创作方案',
+        data: state.understanding
+      });
       state.mode = 'confirm';
-      renderConfirm();
+      saveConversation();
+      state.loading = false;
+      renderHome();
     } catch (err) {
       state.error = err && err.message ? err.message : '理解失败，请稍后重试。';
+      addMessage({ role: 'assistant', type: 'error', text: state.error });
       state.loading = false;
       renderHome();
     } finally {
@@ -289,17 +473,19 @@
     }
   }
 
-  async function submitGenerate() {
-    var data = state.understanding || {};
+  async function submitGenerate(messageId) {
+    var confirmMessage = messageId ? state.messages.find(function (msg) { return msg && msg.id === messageId; }) : null;
+    var data = (confirmMessage && confirmMessage.data) || state.understanding || {};
     state.error = '';
     if (!data.resolved_workflow || data.error_code) {
       state.error = data.question || '默认工作流暂不可用。';
-      if (state.mode === 'confirm' || state.understanding) renderConfirm();
-      else renderHome();
+      renderHome();
       return;
     }
     state.mode = 'generating';
-    renderGenerating();
+    var pending = addMessage({ role: 'assistant', type: 'status', text: '正在生成' });
+    state.pendingMessageId = pending.id;
+    renderHome();
     try {
       var res = await authFetch(API + '/api/generate', {
         method: 'POST',
@@ -316,11 +502,46 @@
         throw new Error(payload.detail || '提交生成失败。');
       }
       state.jobId = payload.job_id;
+      state.pendingJobId = payload.job_id || '';
+      saveConversation();
       toast('已开始生成', 'success');
+      renderHome();
     } catch (err) {
       state.error = err && err.message ? err.message : '提交生成失败。';
-      state.mode = 'confirm';
-      renderConfirm();
+      updateMessage(state.pendingMessageId, { type: 'error', text: state.error });
+      renderHome();
+    }
+  }
+
+  function handleJobUpdate(job) {
+    if (!job || !state.pendingJobId || String(job.id || '') !== String(state.pendingJobId)) return;
+    if (job.status === 'done' || job.status === 'checking') {
+      var result = {
+        id: job.id || state.pendingJobId,
+        image: job.image || '',
+        thumb: job.thumb || '',
+        media_type: job.media_type || 'image',
+        workflow: job.workflow || '',
+        prompt: job.prompt_preview || ''
+      };
+      state.lastResult = result;
+      updateMessage(state.pendingMessageId, Object.assign({
+        role: 'assistant',
+        type: 'result',
+        text: '生成完成'
+      }, result));
+      state.pendingJobId = '';
+      state.pendingMessageId = '';
+      saveConversation();
+      renderHome();
+      return;
+    }
+    if (job.status === 'error') {
+      updateMessage(state.pendingMessageId, { role: 'assistant', type: 'error', text: job.message || '生成失败' });
+      state.pendingJobId = '';
+      state.pendingMessageId = '';
+      saveConversation();
+      renderHome();
     }
   }
 
@@ -536,13 +757,14 @@
     }
     if (action === 'voice') startVoiceCapture();
     if (action === 'understand') submitUnderstand();
-    if (action === 'generate') submitGenerate();
+    if (action === 'generate') submitGenerate(btn.getAttribute('data-message-id') || '');
   }
 
   function initMobileAgent() {
     state.root = $('#mobileAgentRoot');
     if (!state.root || state.root.dataset.mobileAgentReady === '1') return;
     state.root.dataset.mobileAgentReady = '1';
+    loadConversation();
     state.root.addEventListener('input', onInput);
     state.root.addEventListener('change', onChange);
     state.root.addEventListener('click', onClick);
@@ -556,9 +778,12 @@
     renderHome: renderHome,
     renderVoice: renderVoice,
     renderConfirm: renderConfirm,
+    renderConversation: renderConversation,
     renderGenerating: renderGenerating,
     submitUnderstand: submitUnderstand,
     submitGenerate: submitGenerate,
+    handleJobUpdate: handleJobUpdate,
+    getConversationContext: getConversationContext,
     startVoiceCapture: startVoiceCapture,
     stopVoiceCapture: stopVoiceCapture,
     getVoiceDiagnostics: function () { return state.lastVoiceError ? Object.assign({}, state.lastVoiceError) : null; },

@@ -226,6 +226,9 @@
    */
   PollManager.prototype.onJobUpdate = function (job) {
     if (!job || !job.id) return;
+    if (window.CW.mobileAgent && typeof window.CW.mobileAgent.handleJobUpdate === 'function') {
+      window.CW.mobileAgent.handleJobUpdate(job);
+    }
     if (!_isJobVisibleToCurrentUser(job)) {
       if (jobs[job.id]) {
         delete jobs[job.id];

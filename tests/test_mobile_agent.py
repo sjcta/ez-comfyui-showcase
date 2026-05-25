@@ -35,6 +35,23 @@ class MobileAgentTests(unittest.TestCase):
         self.assertEqual(result["intent"], "unsupported_image_edit")
         self.assertIn("图片编辑", result["question"])
 
+    def test_followup_edit_after_result_routes_to_image_to_image(self):
+        result = IntentRouter().classify(
+            "改成赛博朋克风格",
+            context={"last_result": {"image": "user1/2026-05-25/cat.png", "id": "job1"}},
+        )
+
+        self.assertEqual(result["intent"], "image_to_image")
+        self.assertEqual(result["reason"], "followup_edit_last_result")
+        self.assertGreaterEqual(result["confidence"], 0.8)
+
+    def test_followup_edit_without_result_asks_for_context(self):
+        result = IntentRouter().classify("改成赛博朋克风格")
+
+        self.assertEqual(result["intent"], "clarify")
+        self.assertEqual(result["reason"], "missing_edit_context")
+        self.assertIn("上一张", result["question"])
+
     def test_prompt_compiler_removes_request_words_and_detects_ratio(self):
         compiled = PromptCompiler().compile("帮我出一张手机壁纸，未来城市雨夜，电影感")
 
@@ -82,6 +99,36 @@ class MobileAgentTests(unittest.TestCase):
 
     def test_default_mobile_creator_workflow_is_text_to_image(self):
         self.assertEqual(DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"], "t2i-z-image.json")
+        self.assertIn("default_image_to_image_workflow", DEFAULT_MOBILE_CREATOR_SETTINGS)
+
+    def test_build_agent_response_uses_image_to_image_workflow_for_result_followup(self):
+        response = build_agent_response(
+            text="改成赛博朋克风格",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_image_to_image_workflow": "i2i-test.json",
+            },
+            workflow_available=True,
+            context={"last_result": {"image": "user1/2026-05-25/cat.png", "id": "job1"}},
+        )
+
+        self.assertEqual(response["intent"], "image_to_image")
+        self.assertEqual(response["workflow"], "default_image_to_image")
+        self.assertEqual(response["resolved_workflow"], "i2i-test.json")
+        self.assertEqual(response["source_result"]["image"], "user1/2026-05-25/cat.png")
+        self.assertFalse(response["needs_confirmation"])
+
+    def test_image_to_image_followup_without_workflow_explains_configuration(self):
+        response = build_agent_response(
+            text="改成赛博朋克风格",
+            settings=DEFAULT_MOBILE_CREATOR_SETTINGS,
+            workflow_available=False,
+            context={"last_result": {"image": "user1/2026-05-25/cat.png", "id": "job1"}},
+        )
+
+        self.assertEqual(response["intent"], "image_to_image")
+        self.assertEqual(response["error_code"], "workflow_unavailable")
+        self.assertIn("图生图工作流", response["question"])
 
     def test_build_agent_response_handles_unavailable_workflow(self):
         response = build_agent_response(

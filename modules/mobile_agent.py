@@ -11,6 +11,7 @@ from modules.prompt_optimizer import clean_user_prompt
 DEFAULT_MOBILE_CREATOR_SETTINGS = {
     "enabled": True,
     "default_text_to_image_workflow": "t2i-z-image.json",
+    "default_image_to_image_workflow": "",
     "allowed_styles": ["cinematic", "anime", "realistic"],
     "allowed_ratios": ["1:1", "3:4", "9:16"],
     "llm_timeout_ms": 8000,
@@ -59,9 +60,17 @@ def ratio_to_dimensions(ratio: str) -> dict[str, int]:
 class IntentRouter:
     """Classify a mobile creator request without side effects."""
 
-    def classify(self, text: str, has_image: bool = False, has_video: bool = False) -> dict[str, Any]:
+    def classify(
+        self,
+        text: str,
+        has_image: bool = False,
+        has_video: bool = False,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         raw_text = str(text or "").strip()
         normalized = raw_text.lower()
+        context = context if isinstance(context, dict) else {}
+        last_result = context.get("last_result") if isinstance(context.get("last_result"), dict) else {}
 
         if has_video or _contains_any(normalized, _VIDEO_WORDS):
             return {
@@ -77,6 +86,21 @@ class IntentRouter:
                 "confidence": 0.6,
                 "reason": "image_edit_not_supported",
                 "question": "当前移动创作助手暂不支持图片编辑，请先描述要生成的新图片。",
+            }
+
+        if _looks_like_followup_edit(normalized):
+            if last_result:
+                return {
+                    "intent": "image_to_image",
+                    "confidence": 0.86,
+                    "reason": "followup_edit_last_result",
+                    "question": "",
+                }
+            return {
+                "intent": "clarify",
+                "confidence": 0.5,
+                "reason": "missing_edit_context",
+                "question": "我还没有可修改的上一张结果，请先生成一张图，或上传一张要修改的图片。",
             }
 
         if len(clean_user_prompt(raw_text)) < 4:
@@ -133,24 +157,32 @@ def build_agent_response(
     workflow_available: bool = True,
     has_image: bool = False,
     has_video: bool = False,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the constrained response contract for the mobile creator agent."""
     merged_settings = {**DEFAULT_MOBILE_CREATOR_SETTINGS, **(settings or {})}
-    route = IntentRouter().classify(text, has_image=has_image, has_video=has_video)
+    context = context if isinstance(context, dict) else {}
+    route = IntentRouter().classify(text, has_image=has_image, has_video=has_video, context=context)
     compiled = PromptCompiler().compile(text)
     allowed_styles = _normalize_allowed_styles(merged_settings.get("allowed_styles"))
     allowed_ratios = _normalize_allowed_ratios(merged_settings.get("allowed_ratios"))
     selected_style = _normalize_style(compiled["style"], allowed_styles)
     selected_ratio = _normalize_ratio(compiled["aspect_ratio"], allowed_ratios)
     dimensions = ratio_to_dimensions(selected_ratio)
-    resolved_workflow = merged_settings.get("default_text_to_image_workflow", "")
+    is_image_to_image = route["intent"] == "image_to_image"
+    workflow_alias = "default_image_to_image" if is_image_to_image else "default_text_to_image"
+    workflow_setting = "default_image_to_image_workflow" if is_image_to_image else "default_text_to_image_workflow"
+    resolved_workflow = merged_settings.get(workflow_setting, "")
+    source_result = context.get("last_result") if isinstance(context.get("last_result"), dict) else {}
 
-    needs_confirmation = route["intent"] != "text_to_image" or not workflow_available
+    needs_confirmation = route["intent"] not in ("text_to_image", "image_to_image") or not workflow_available
     error_code = ""
-    if route["intent"] != "text_to_image":
+    if route["intent"] not in ("text_to_image", "image_to_image"):
         error_code = route["reason"]
     elif not workflow_available:
         error_code = "workflow_unavailable"
+        if route["intent"] == "image_to_image" and not route.get("question"):
+            route["question"] = "当前未配置图生图工作流，请先在移动端创作设置中配置默认图生图工作流。"
 
     return {
         "intent": route["intent"],
@@ -164,8 +196,9 @@ def build_agent_response(
         "aspect_ratio": selected_ratio,
         "width": dimensions["width"],
         "height": dimensions["height"],
-        "workflow": "default_text_to_image",
+        "workflow": workflow_alias,
         "resolved_workflow": resolved_workflow,
+        "source_result": source_result,
         "needs_confirmation": needs_confirmation,
         "error_code": error_code,
         "options": {
@@ -196,6 +229,11 @@ def _contains_any(text: str, words: tuple[str, ...]) -> bool:
 
 def _looks_like_image_edit(text: str) -> bool:
     return _contains_any(text, _IMAGE_EDIT_WORDS) and ("图" in text or "image" in text or "photo" in text)
+
+
+def _looks_like_followup_edit(text: str) -> bool:
+    stripped = str(text or "").strip()
+    return bool(stripped) and _contains_any(stripped, _IMAGE_EDIT_WORDS)
 
 
 def _has_visual_subject(text: str) -> bool:
