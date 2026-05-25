@@ -61,7 +61,7 @@ This batch addresses the highest-risk findings from the v4 pipeline/code review:
 - Add role-based authorization instead of treating all authenticated users as privileged.
 - Finish replacing the legacy inline generation path with `JobRunner + InstanceManager + WSTracker`.
 - Move existing local secrets out of any deployed config before production use.
-- Continue removing inline styles and emoji icons to fully satisfy `PROJECT_STANDARDS.md`.
+- Continue removing inline styles and emoji icons to fully satisfy [`PROJECT_STANDARDS.md`](../project/PROJECT_STANDARDS.md).
 
 ## Follow-up Batch
 

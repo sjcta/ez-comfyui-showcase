@@ -2,7 +2,7 @@
 
 Multi-instance ComfyUI Web Management & Generation Platform.
 
-Current version: **v4.3.0**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
+Current version: **v4.3.0**. The canonical project version is stored in [`VERSION`](../../VERSION) and exposed by `/api/version`.
 
 Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel generation ComfyUI instances (A:8190 / B:8189) plus an isolated prompt auxiliary instance (Prompt:8191) behind an intelligent scheduler.
 
@@ -21,10 +21,10 @@ Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel g
 
 ## Screenshots
 
-![主界面](screenshots/01_main_dashboard.png)
+![主界面](../../screenshots/01_main_dashboard.png)
 *主界面 — 左侧生成控制面板（工作流选择、Prompt 输入、尺寸预设、参数调节）+ 右侧出图历史画廊*
 
-![工作流管理](screenshots/04_workflow_management.png)
+![工作流管理](../../screenshots/04_workflow_management.png)
 *工作流管理页 — 管理 10 条预置工作流（文生图/图生图/放大），支持排序、编辑、节点查看、下载、删除和拖拽上传*
 
 ## Tech Stack
@@ -55,7 +55,7 @@ Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel g
 │           └── ui.js           # 通用 UI 组件
 ├── i2i-FireRed-Edit-1.1.json   # 图生图 workflow
 ├── i2i_Qwen_Edit.json          # Qwen 编辑 workflow
-└── README.md
+└── docs/project/README.md
 ```
 
 ## Quick Start
@@ -95,7 +95,7 @@ python3 app.py --port 9091
 
 ## Version History
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full user-facing update notes.
+See [`CHANGELOG.md`](../releases/CHANGELOG.md) for the full user-facing update notes.
 
 | Version | Highlights |
 |---------|-----------|

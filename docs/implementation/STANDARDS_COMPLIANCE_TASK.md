@@ -1,7 +1,7 @@
 # 首批规范化整改
 
-> 基于 `PROJECT_STANDARDS.md` 对现有代码进行整改，使其符合项目规范。
-> 所有修改须同时遵守 PROJECT_STANDARDS.md 中的四条规范。
+> 基于 [`PROJECT_STANDARDS.md`](../project/PROJECT_STANDARDS.md) 对现有代码进行整改，使其符合项目规范。
+> 所有修改须同时遵守 [`PROJECT_STANDARDS.md`](../project/PROJECT_STANDARDS.md) 中的四条规范。
 
 ## 整改项
 
