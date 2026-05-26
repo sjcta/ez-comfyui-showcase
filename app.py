@@ -42,7 +42,9 @@ import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
 from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.mobile_agent import DEFAULT_MOBILE_CREATOR_SETTINGS
+from modules.mobile_agent_llm import build_mobile_agent_llm_provider
 from modules.mobile_agent_routes import register_mobile_agent_routes
+from modules.mobile_agent_threads import MobileAgentThreadStore
 from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
 from modules.prompt_labels import infer_generation_label
 from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
@@ -71,6 +73,7 @@ APP_VERSION = _read_app_version()
 
 # ── Auth config
 AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "auth.db")
+mobile_agent_thread_store = MobileAgentThreadStore(AUTH_DB)
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or "ez-comfyui-showcase-local-jwt-secret-v1"
 if not os.environ.get("JWT_SECRET_KEY"):
     print("[auth] JWT_SECRET_KEY is not set; using a stable local development secret.")
@@ -1050,7 +1053,17 @@ def _normalize_system_settings(raw: dict | None) -> dict:
 
 def _normalize_mobile_creator_settings(settings: dict | None) -> dict:
     settings = settings if isinstance(settings, dict) else {}
-    return {**DEFAULT_MOBILE_CREATOR_SETTINGS, **settings}
+    merged = {**DEFAULT_MOBILE_CREATOR_SETTINGS, **settings}
+    merged["llm_enabled"] = bool(merged.get("llm_enabled", True))
+    provider = str(merged.get("llm_provider") or "openai_compatible").strip()
+    merged["llm_provider"] = provider if provider in ("openai_compatible", "llama_cpp_gguf") else "openai_compatible"
+    for key in ("llm_base_url", "llm_model", "llm_api_key", "llm_gguf_model", "llm_mmproj_model"):
+        merged[key] = str(merged.get(key) or "").strip()
+    try:
+        merged["llm_timeout_ms"] = max(1000, min(60000, int(merged.get("llm_timeout_ms") or 8000)))
+    except Exception:
+        merged["llm_timeout_ms"] = DEFAULT_MOBILE_CREATOR_SETTINGS["llm_timeout_ms"]
+    return merged
 
 
 def _load_system_settings() -> dict:
@@ -1316,6 +1329,8 @@ def _init_auth_db():
     """)
     conn.commit()
     conn.close()
+    mobile_agent_thread_store.db_path = AUTH_DB
+    mobile_agent_thread_store.init_db()
 
 
 def _gen_db_to_record(row: dict) -> dict:
@@ -2835,8 +2850,8 @@ def _gpu_stats_for_status_node(instances: list[dict], target_node_id: str = "", 
 
 def comfyui_up(base_url: str = None) -> bool:
     try:
-        with urllib.request.urlopen(f"{(base_url or COMFYUI_URL)}/system_stats", timeout=3) as r:
-            return r.status == 200
+        comfyui_get("/system_stats", base_url=base_url)
+        return True
     except Exception:
         return False
 
@@ -2973,13 +2988,40 @@ def comfyui_post(path: str, data: dict, base_url: str = None) -> dict:
         if body:
             detail = f"{detail}; {body[:500]}"
         raise RuntimeError(f"HTTP POST {url} 失败: {detail}") from e
+    except (urllib.error.URLError, OSError) as e:
+        return _comfyui_curl_json("POST", url, data=data, timeout=30, source_error=e)
 
 
 def comfyui_get(path: str, base_url: str = None) -> dict:
     url = (base_url or COMFYUI_URL) + path
     req = urllib.request.Request(url, method="GET")
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except (urllib.error.URLError, OSError) as e:
+        return _comfyui_curl_json("GET", url, timeout=10, source_error=e)
+
+
+def _comfyui_curl_json(method: str, url: str, data: dict | None = None, timeout: int = 30, source_error: Exception | None = None) -> dict:
+    """Fallback for environments where the app Python cannot route to LAN hosts."""
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError(f"HTTP {method} {url} 失败: {source_error}") from source_error
+    cmd = [curl, "-sS", "--max-time", str(max(1, int(timeout))), "-X", method.upper()]
+    if data is not None:
+        cmd += ["-H", "Content-Type: application/json", "--data-binary", json.dumps(data)]
+    cmd.append(url)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=max(2, int(timeout) + 2))
+    except Exception as e:
+        raise RuntimeError(f"HTTP {method} {url} curl fallback failed: {e}") from e
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or str(source_error or "")).strip()
+        raise RuntimeError(f"HTTP {method} {url} 失败: {detail[:500]}") from source_error
+    try:
+        return json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"HTTP {method} {url} 返回非 JSON: {(result.stdout or '')[:200]}") from e
 
 
 def _is_image_output_file(filename: str) -> bool:
@@ -4314,6 +4356,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         if not comfyui_up(base_url=inst_url):
             jobs[job_id]["status"] = "starting_comfyui"
             jobs[job_id]["message"] = f"启动 ComfyUI #{inst['name']}..."
+            jobs[job_id]["last_update"] = time.time()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
             node = _get_node_by_id(inst.get("_node_id", ""))
             if node:
@@ -5029,6 +5072,7 @@ def save_history():
 class GenerateRequest(BaseModel):
     workflow: str
     fields: dict[str, object] = {}
+    creative_brief: dict[str, object] = {}
     seed: int | None = None
     width: int = 0
     height: int = 0
@@ -5876,6 +5920,7 @@ def _resolve_workflow(name: str, entry: dict | None = None) -> str | None:
 
 register_mobile_agent_routes(app, {
     "get_current_user": get_current_user,
+    "get_current_user_optional": get_current_user_optional,
     "load_system_settings": _load_system_settings,
     "load_wf_meta": _load_wf_meta,
     "normalize_wf_meta_entry": _normalize_wf_meta_entry,
@@ -5885,6 +5930,8 @@ register_mobile_agent_routes(app, {
     "add_log": add_log,
     "user_id": _user_id,
     "speech_transcriber_factory": SpeechTranscriber,
+    "mobile_thread_store": mobile_agent_thread_store,
+    "mobile_agent_llm_factory": lambda settings: build_mobile_agent_llm_provider(APP_ROOT, settings),
 })
 
 
@@ -6313,6 +6360,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "workflow": req.workflow, "seed": str(seed),
         "workflow_type": workflow_type,
         "prompt_preview": prompt_preview,
+        "creative_brief": req.creative_brief or {},
         "width": req.width, "height": req.height,
         "fields": normalized_fields,
         "preferred_instance": req.preferred_instance or "",
@@ -6328,6 +6376,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     })
     add_log("info", "queue", f"Job queued: {req.workflow}", job_id)
     save_jobs()
+    bg.add_task(broadcast, {"type": "job_update", "job": jobs[job_id]})
 
     _job_queue.put_nowait((
         job_id, path, normalized_fields, seed, vllm_was, req.width, req.height, user_id,
@@ -6341,9 +6390,50 @@ def api_all_jobs(current_user: dict = Depends(get_current_user)):
     return [_job_with_time_estimate(j) for j in jobs.values() if _can_access_job(j, current_user)]
 
 
+def _completed_job_status_from_history(job_id: str, current_user: dict) -> dict | None:
+    try:
+        conn = sqlite3.connect(GEN_DB)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT rowid AS history_rowid, *
+               FROM generations
+               WHERE COALESCE(deleted_at, '') = ''
+                 AND (batch_id = ? OR id = ?)
+               ORDER BY batch_index ASC, datetime(created_at) ASC""",
+            (job_id, job_id),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return None
+    if not rows:
+        return None
+    records = [_gen_db_to_record(dict(row)) for row in rows]
+    uid = _user_id(current_user or {})
+    if not _is_admin_user(current_user) and not any(
+        record.get("is_public") or (uid and record.get("user_id") == uid)
+        for record in records
+    ):
+        raise HTTPException(403, "无权访问他人的任务")
+    elapsed = float(records[0].get("elapsed", 0) or 0)
+    payload = _job_done_payload_from_records(job_id, records, elapsed)
+    payload.update({
+        "id": job_id,
+        "workflow": records[0].get("workflow", ""),
+        "workflow_type": records[0].get("workflow_type", ""),
+        "prompt_preview": records[0].get("prompt", ""),
+        "fields": records[0].get("field_values", {}),
+        "user_id": records[0].get("user_id", ""),
+        "history_restored": True,
+    })
+    return payload
+
+
 @app.get("/api/jobs/{job_id}")
 def api_job_status(job_id: str, current_user: dict = Depends(get_current_user)):
     if job_id not in jobs:
+        restored = _completed_job_status_from_history(job_id, current_user)
+        if restored:
+            return restored
         raise HTTPException(404)
     if not _can_access_job(jobs[job_id], current_user):
         raise HTTPException(403, "无权访问他人的任务")
@@ -6386,6 +6476,87 @@ async def api_cancel_job(job_id: str, current_user: dict = Depends(get_current_u
     return {"ok": True}
 
 
+def _find_job_instance(job: dict) -> tuple[dict | None, dict | None, str]:
+    inst_name = str(job.get("instance") or job.get("preferred_instance") or "")
+    inst_url = str(job.get("target_url") or "")
+    for inst in _get_enabled_instances():
+        if inst_name and inst.get("name") != inst_name:
+            continue
+        node = _get_node_by_id(inst.get("_node_id", ""))
+        if inst_url and not inst.get("url"):
+            inst = dict(inst)
+            inst["url"] = inst_url
+        return inst, node, inst.get("url") or inst_url
+    if inst_url:
+        return {"name": inst_name, "url": inst_url, "_node_id": job.get("target_node_id", "")}, None, inst_url
+    return None, None, inst_url
+
+
+def _release_retry_semaphore(job: dict) -> bool:
+    inst_name = str(job.get("instance") or "")
+    if not inst_name or not job.get("sem_acquired"):
+        return False
+    sem = _instance_semas.get(inst_name)
+    if not sem:
+        return False
+    try:
+        if hasattr(sem, "locked") and not sem.locked():
+            return False
+        sem.release()
+        job["sem_acquired"] = False
+        return True
+    except Exception:
+        return False
+
+
+def _recover_failed_job_before_retry(job_id: str, job: dict) -> dict:
+    prompt_id = str(job.get("prompt_id") or "")
+    inst_name = str(job.get("instance") or "")
+    inst, node, inst_url = _find_job_instance(job)
+    recovery = {
+        "job_id": job_id,
+        "prompt_id": prompt_id,
+        "instance": inst_name,
+        "queue_deleted": False,
+        "interrupted": False,
+        "force_restarted": False,
+        "semaphore_released": False,
+        "errors": [],
+    }
+
+    task = _job_tasks.get(job_id)
+    if task and not task.done():
+        task.cancel()
+    _job_tasks.pop(job_id, None)
+
+    if prompt_id:
+        _mark_remote_prompt_cancelled(inst_name, prompt_id)
+        try:
+            comfyui_post("/queue", {"delete": [prompt_id]}, base_url=inst_url or None)
+            recovery["queue_deleted"] = True
+        except Exception as exc:
+            recovery["errors"].append(f"queue_delete: {exc}")
+
+    if prompt_id or job.get("status") in ("error", "generating", "submitting", "downloading"):
+        try:
+            comfyui_post("/interrupt", {}, base_url=inst_url or None)
+            recovery["interrupted"] = True
+        except Exception as exc:
+            recovery["errors"].append(f"interrupt: {exc}")
+
+    recovery["semaphore_released"] = _release_retry_semaphore(job)
+
+    if inst and node:
+        try:
+            recovery["force_restarted"] = bool(_run_instance_action(node, inst, "force-restart"))
+        except Exception as exc:
+            recovery["errors"].append(f"force_restart: {exc}")
+    elif inst_name:
+        recovery["errors"].append("force_restart: instance node not found")
+
+    return recovery
+
+
 @app.post("/api/jobs/{job_id}/retry")
 def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if job_id not in jobs:
@@ -6405,6 +6576,8 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     height = old.get("height", 0)
     preferred_instance = old.get("preferred_instance", "")
     preferred_node_id = old.get("preferred_node_id", "")
+    creative_brief = old.get("creative_brief") if isinstance(old.get("creative_brief"), dict) else {}
+    retry_count = int(old.get("manual_retry_count") or old.get("retry_count") or 0) + 1
 
     meta = _load_wf_meta()
     entry = _normalize_wf_meta_entry(wf, meta.get(wf, {}))
@@ -6420,6 +6593,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     except Exception:
         pass
 
+    recovery = _recover_failed_job_before_retry(job_id, old)
     del jobs[job_id]
 
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
@@ -6435,16 +6609,22 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
         "user_id": user_id,
         "width": width, "height": height,
         "fields": fields,
+        "creative_brief": creative_brief,
+        "retry_of": job_id,
+        "manual_retry_count": retry_count,
+        "retry_recovery": recovery,
         "preferred_instance": preferred_instance,
         "preferred_node_id": preferred_node_id,
         "queued_at": datetime.now().strftime("%H:%M:%S"),
         "created_at_ts": time.time(),
+        "last_update": time.time(),
     }
     jobs[new_id].update({
         k: v for k, v in _job_with_time_estimate(jobs[new_id]).items()
         if k.startswith("estimated_")
     })
     save_jobs()
+    bg.add_task(broadcast, {"type": "job_update", "job": jobs[new_id]})
 
     _job_queue.put_nowait((
         new_id, path, fields, seed, vllm_was, width, height, user_id,

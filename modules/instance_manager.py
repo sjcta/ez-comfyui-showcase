@@ -10,6 +10,7 @@ Ez ComfyUI v4.0 重构。
 
 import asyncio
 import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -340,7 +341,19 @@ class InstanceManager:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status == 200
         except (urllib.error.URLError, OSError, ValueError):
-            return False
+            curl = shutil.which("curl")
+            if not curl:
+                return False
+            try:
+                result = subprocess.run(
+                    [curl, "-sS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", f"{url.rstrip('/')}/system_stats"],
+                    capture_output=True,
+                    text=True,
+                    timeout=7,
+                )
+                return result.returncode == 0 and result.stdout.strip() == "200"
+            except Exception:
+                return False
 
     @staticmethod
     def _check_service_active(name: str) -> bool:

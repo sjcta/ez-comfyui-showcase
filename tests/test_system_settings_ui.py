@@ -34,6 +34,22 @@ class SystemSettingsUiTests(unittest.TestCase):
         self.assertIn(".system-settings-grid", css)
         self.assertIn(".system-settings-switch", css)
 
+    def test_system_settings_modal_has_mobile_llm_api_controls(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text("utf-8")
+        for token in (
+            "移动端对话模型",
+            "sysMobileLlmEnabled",
+            "sysMobileLlmProvider",
+            "sysMobileLlmBaseUrl",
+            "sysMobileLlmModel",
+            "sysMobileLlmApiKey",
+            "sysMobileLlmGgufModel",
+            "sysMobileLlmMmprojModel",
+            "llm_base_url",
+            "llm_model",
+        ):
+            self.assertIn(token, auth_js)
+
 
 if __name__ == "__main__":
     unittest.main()

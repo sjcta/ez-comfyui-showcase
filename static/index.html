@@ -12,8 +12,38 @@
 if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
+(function () {
+  var path = String(location.pathname || '').replace(/\/+$/, '');
+  if (path === '/app' || location.hash === '#mobile-agent') {
+    document.documentElement.classList.add('mobile-agent-boot');
+  }
+})();
 </script>
-<script src="static/js/module_loader.js?v=1779647400"></script>
+<style>
+html.mobile-agent-boot,
+html.mobile-agent-boot body {
+  min-height: 100%;
+  margin: 0;
+  background:
+    radial-gradient(circle at 18% 4%, rgba(245, 158, 11, 0.16), transparent 34%),
+    radial-gradient(circle at 82% 2%, rgba(139, 92, 246, 0.12), transparent 30%),
+    #131314;
+}
+
+html.mobile-agent-boot body > :not(#mobileAgentRoot):not(.auth-modal-overlay),
+body[data-mobile-agent-active="on"] > :not(#mobileAgentRoot):not(.auth-modal-overlay) {
+  display: none !important;
+}
+
+html.mobile-agent-boot #mobileAgentRoot,
+body[data-mobile-agent-active="on"] #mobileAgentRoot {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex !important;
+}
+</style>
+<script src="static/js/module_loader.js?v=1779822700"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>

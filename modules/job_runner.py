@@ -337,6 +337,7 @@ class JobRunner:
             self._jobs[job_id]["status"] = "starting_comfyui"
             self._jobs[job_id]["message"] = f"启动 ComfyUI #{instance['name']}..."
             self._jobs[job_id]["progress"] = {"pct": 0}
+            self._jobs[job_id]["last_update"] = time.time()
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
             try:
@@ -345,6 +346,7 @@ class JobRunner:
                 self._add_log("warn", "coldstart", f"冷启动失败: {e}", job_id)
                 self._jobs[job_id]["message"] = f"实例 {instance['name']} 首次启动未就绪，正在重试..."
                 self._jobs[job_id]["progress"] = {"pct": 0}
+                self._jobs[job_id]["last_update"] = time.time()
                 await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
                 # 兜底：直接使用 app 级别的启动方法
                 node = self._get_node_by_id(instance.get("_node_id", ""))

@@ -336,6 +336,13 @@ function showPromptResultToast(prompt, meta) {
 }
 
 function showToast(message, type) {
+  var mobileRoot = document.getElementById('mobileAgentRoot');
+  var loc = typeof location !== 'undefined' ? location : { pathname: '', hash: '' };
+  var mobilePath = String(loc.pathname || '').replace(/\/+$/, '') === '/app' || loc.hash === '#mobile-agent';
+  var mobileActive = mobilePath ||
+    !!(document.body && document.body.dataset && document.body.dataset.mobileAgentActive === 'on') ||
+    !!(mobileRoot && mobileRoot.classList && !mobileRoot.classList.contains('hidden'));
+  if (mobileActive) return;
   var container = _ensureToastContainer();
   type = type || 'info';
   var aliases = {

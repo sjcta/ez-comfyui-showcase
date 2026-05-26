@@ -38,6 +38,15 @@
     return 'cw_site_notifications_muted_until:' + (ident ? String(ident) : 'guest');
   }
 
+  function _isMobileAgentRoute() {
+    var path = String(location.pathname || '').replace(/\/+$/, '');
+    var root = document.getElementById('mobileAgentRoot');
+    return path === '/app' ||
+      location.hash === '#mobile-agent' ||
+      !!(document.body && document.body.dataset && document.body.dataset.mobileAgentActive === 'on') ||
+      !!(root && !root.classList.contains('hidden'));
+  }
+
   function _loadHistoryFavorites() {
     var storageKey = _historyFavoriteStorageKey();
     try {
@@ -435,6 +444,22 @@
       '</label>';
   }
 
+  function _settingsText(id, label, hint, value, type) {
+    return '<label class="system-settings-field">' +
+      '<span>' + label + '</span>' +
+      '<input class="auth-input" id="' + id + '" type="' + (type || 'text') + '" value="' + escA(value || '') + '">' +
+      '<small>' + hint + '</small>' +
+      '</label>';
+  }
+
+  function _settingsSelect(id, label, hint, value, options) {
+    var html = '<label class="system-settings-field"><span>' + label + '</span><select class="auth-input" id="' + id + '">';
+    (options || []).forEach(function(opt) {
+      html += '<option value="' + escA(opt.value) + '"' + (String(value || '') === opt.value ? ' selected' : '') + '>' + escH(opt.label) + '</option>';
+    });
+    return html + '</select><small>' + hint + '</small></label>';
+  }
+
   function _settingsTextarea(id, label, value) {
     return '<label class="system-settings-field system-settings-textarea">' +
       '<span>' + label + '</span>' +
@@ -447,7 +472,24 @@
     if (!body) return;
     var cfg = (data && data.image_protection) || {};
     var patterns = cfg.prompt_patterns || {};
+    var mobile = (data && data.mobile_creator) || {};
     body.innerHTML =
+      '<div class="system-settings-section">' +
+        '<div class="account-panel-head"><strong>移动端对话模型</strong><span>控制 V5 手机端 Agent 的本地大模型 API、GGUF 路径和超时。</span></div>' +
+        '<div class="system-settings-grid">' +
+          _settingsSwitch('sysMobileLlmEnabled', '启用对话模型', '关闭后移动端仅使用规则回退，不请求本地模型。', mobile.llm_enabled !== false) +
+          _settingsSelect('sysMobileLlmProvider', '模型接入方式', 'OpenAI-compatible 推荐用于 llama-server / Ollama / LM Studio。', mobile.llm_provider || 'openai_compatible', [
+            { value: 'openai_compatible', label: 'OpenAI-compatible API' },
+            { value: 'llama_cpp_gguf', label: 'Python GGUF 内嵌加载' }
+          ]) +
+          _settingsText('sysMobileLlmBaseUrl', 'API 地址', '例如：http://127.0.0.1:8080/v1', mobile.llm_base_url || '') +
+          _settingsText('sysMobileLlmModel', '模型名称', '例如：gemma-4-e2b；由本地服务识别。', mobile.llm_model || 'gemma-4-e2b') +
+          _settingsText('sysMobileLlmApiKey', 'API Key', '本地服务通常可以留空；外部 API 才需要。', mobile.llm_api_key || '', 'password') +
+          _settingsText('sysMobileLlmGgufModel', 'GGUF 主模型路径', 'Python GGUF 模式使用；OpenAI API 模式可留空。', mobile.llm_gguf_model || '') +
+          _settingsText('sysMobileLlmMmprojModel', '多模态 mmproj 路径', '图像理解需要 mmproj；当前先作为后续视觉能力配置。', mobile.llm_mmproj_model || '') +
+          _settingsText('sysMobileLlmTimeoutMs', '对话超时 ms', '建议 8000-30000，手机端会先显示思考气泡。', String(mobile.llm_timeout_ms || 8000), 'number') +
+        '</div>' +
+      '</div>' +
       '<div class="system-settings-section">' +
         '<div class="account-panel-head"><strong>图片保护</strong><span>控制出图后的视觉审查、阈值和提示词兜底规则。</span></div>' +
         '<div class="system-settings-grid">' +
@@ -537,6 +579,16 @@
           strong_nude: _sysText('sysPromptPatternStrongNude'),
           obscene_gesture: _sysText('sysPromptPatternObsceneGesture')
         }
+      },
+      mobile_creator: {
+        llm_enabled: _sysBool('sysMobileLlmEnabled'),
+        llm_provider: _sysText('sysMobileLlmProvider') || 'openai_compatible',
+        llm_base_url: _sysText('sysMobileLlmBaseUrl'),
+        llm_model: _sysText('sysMobileLlmModel') || 'gemma-4-e2b',
+        llm_api_key: _sysText('sysMobileLlmApiKey'),
+        llm_gguf_model: _sysText('sysMobileLlmGgufModel'),
+        llm_mmproj_model: _sysText('sysMobileLlmMmprojModel'),
+        llm_timeout_ms: parseInt(_sysText('sysMobileLlmTimeoutMs') || '8000', 10) || 8000
       }
     };
     apiFetch(API + '/api/system-settings', {
@@ -705,6 +757,7 @@
   }
 
   function _checkSiteNotifications() {
+    if (_isMobileAgentRoute()) return Promise.resolve(null);
     return apiFetch(_withCacheBust(API + '/api/site-notifications'), { cache: 'no-store' }).then(function(r) {
       if (!r.ok) return null;
       return r.json();
@@ -725,6 +778,7 @@
   }
 
   function _scheduleSiteNotifications() {
+    if (_isMobileAgentRoute()) return;
     if (_siteNotificationCheckStarted) return;
     _siteNotificationCheckStarted = true;
     setTimeout(_checkSiteNotifications, 500);

@@ -96,6 +96,188 @@ class MobileAgentTests(unittest.TestCase):
         self.assertEqual(response["options"]["aspect_ratio"], "1:1")
         self.assertEqual(response["options"]["allowed_styles"], allowed_styles)
         self.assertEqual(response["options"]["allowed_ratios"], allowed_ratios)
+        self.assertFalse(response["option_requirements"]["style"])
+        self.assertFalse(response["option_requirements"]["aspect_ratio"])
+
+    def test_generic_creation_request_stays_in_chat_before_confirm_card(self):
+        response = build_agent_response(
+            text="我想要出一张图",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+        )
+
+        self.assertEqual(response["response_type"], "chat")
+        self.assertEqual(response["intent"], "clarify")
+        self.assertTrue(response["needs_confirmation"])
+        self.assertEqual(response["resolved_workflow"], "")
+        self.assertIn("想做什么主体", response["assistant_message"])
+        self.assertIn("subject", response["missing_slots"])
+
+    def test_greeting_stays_in_chat_instead_of_generation_card(self):
+        response = build_agent_response(
+            text="你好",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+        )
+
+        self.assertEqual(response["response_type"], "chat")
+        self.assertEqual(response["intent"], "clarify")
+        self.assertTrue(response["needs_confirmation"])
+        self.assertNotEqual(response["response_type"], "confirm")
+        self.assertNotIn("text_to_image", response["intent"])
+        self.assertIn("你好", response["assistant_message"])
+
+    def test_capability_question_answers_as_general_chat(self):
+        response = build_agent_response(
+            text="你会干嘛？",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+        )
+
+        self.assertEqual(response["response_type"], "chat")
+        self.assertEqual(response["intent"], "general_chat")
+        self.assertEqual(response["resolved_workflow"], "")
+        self.assertNotIn("我先记下", response["assistant_message"])
+        self.assertIn("出图方案", response["assistant_message"])
+
+    def test_general_question_does_not_reuse_previous_brief_context(self):
+        response = build_agent_response(
+            text="机器人以后可以照顾老人么？",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+            context={
+                "messages": [
+                    {"role": "user", "text": "你会干嘛？"},
+                    {"role": "assistant", "text": "我可以帮你整理出图方案。"},
+                ],
+            },
+        )
+
+        self.assertEqual(response["response_type"], "chat")
+        self.assertEqual(response["intent"], "general_chat")
+        self.assertEqual(response["resolved_workflow"], "")
+        self.assertNotIn("你会干嘛", response["assistant_message"])
+        self.assertIn("照顾老人", response["assistant_message"])
+
+    def test_explicit_generation_request_ignores_previous_general_question(self):
+        response = build_agent_response(
+            text="帮我出一张雨夜里的赛博朋克猫咪，霓虹灯，电影感",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+            context={
+                "messages": [
+                    {"role": "user", "text": "机器人以后可以照顾老人么？"},
+                    {"role": "assistant", "text": "可以，未来有机会。"},
+                    {"role": "user", "text": "帮我出一张雨夜里的赛博朋克猫咪，霓虹灯，电影感"},
+                ],
+            },
+        )
+
+        self.assertEqual(response["response_type"], "confirm")
+        self.assertNotIn("机器人以后可以照顾老人", response["compiled_prompt"])
+        self.assertIn("赛博朋克猫咪", response["compiled_prompt"])
+
+    def test_explicit_generation_request_ignores_previous_greeting(self):
+        response = build_agent_response(
+            text="帮我出一张雨夜里的赛博朋克猫咪，霓虹灯，电影感",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+            context={
+                "messages": [
+                    {"role": "user", "text": "你好"},
+                    {"role": "assistant", "text": "你好，我可以帮你整理出图方案。"},
+                    {"role": "user", "text": "帮我出一张雨夜里的赛博朋克猫咪，霓虹灯，电影感"},
+                ],
+            },
+        )
+
+        self.assertEqual(response["response_type"], "confirm")
+        self.assertNotIn("你好", response["compiled_prompt"])
+        self.assertIn("赛博朋克猫咪", response["compiled_prompt"])
+
+    def test_multiturn_brief_waits_until_requirements_are_specific(self):
+        response = build_agent_response(
+            text="漫画风",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+            context={
+                "messages": [
+                    {"role": "user", "text": "我想要出一张图"},
+                    {"role": "assistant", "text": "想做什么主体？"},
+                    {"role": "user", "text": "猫"},
+                    {"role": "assistant", "text": "想要什么风格或场景？"},
+                    {"role": "user", "text": "漫画风"},
+                ]
+            },
+        )
+
+        self.assertEqual(response["response_type"], "chat")
+        self.assertEqual(response["intent"], "clarify")
+        self.assertIn("猫", response["draft_requirement"]["subject"])
+        self.assertEqual(response["draft_requirement"]["style"], "anime")
+        self.assertIn("scene", response["missing_slots"])
+
+    def test_multiturn_brief_confirms_after_subject_style_and_scene(self):
+        response = build_agent_response(
+            text="在咖啡馆里",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+            context={
+                "messages": [
+                    {"role": "user", "text": "我想要出一张图"},
+                    {"role": "assistant", "text": "想做什么主体？"},
+                    {"role": "user", "text": "猫"},
+                    {"role": "assistant", "text": "想要什么风格或场景？"},
+                    {"role": "user", "text": "漫画风"},
+                    {"role": "user", "text": "在咖啡馆里"},
+                ]
+            },
+        )
+
+        self.assertEqual(response["response_type"], "confirm")
+        self.assertEqual(response["intent"], "text_to_image")
+        self.assertFalse(response["needs_confirmation"])
+        self.assertIn("猫", response["compiled_prompt"])
+        self.assertIn("咖啡馆", response["compiled_prompt"])
+        self.assertEqual(response["style"], "anime")
+        self.assertEqual(response["draft_requirement"]["scene"], "在咖啡馆里")
+
+    def test_build_agent_response_marks_missing_options_for_mobile_guidance(self):
+        response = build_agent_response(
+            text="帮我出一张切成片的西瓜",
+            settings={
+                **DEFAULT_MOBILE_CREATOR_SETTINGS,
+                "default_text_to_image_workflow": "t2i-z-image.json",
+            },
+            workflow_available=True,
+        )
+
+        self.assertTrue(response["option_requirements"]["style"])
+        self.assertTrue(response["option_requirements"]["aspect_ratio"])
 
     def test_default_mobile_creator_workflow_is_text_to_image(self):
         self.assertEqual(DEFAULT_MOBILE_CREATOR_SETTINGS["default_text_to_image_workflow"], "t2i-z-image.json")
@@ -150,6 +332,19 @@ class MobileAgentTests(unittest.TestCase):
         result = build_generate_fields(fields, "未来城市雨夜")
 
         self.assertEqual(result, {"1::text": "未来城市雨夜"})
+
+    def test_build_generate_fields_maps_source_result_to_load_image_field(self):
+        fields = [
+            {"node_id": "1", "field": "text", "label": "提示词", "class_type": "Text Multiline", "zone": "user_input"},
+            {"node_id": "40", "field": "image", "label": "参考图片", "class_type": "LoadImage", "zone": "user_input"},
+        ]
+
+        result = build_generate_fields(fields, "改成赛博朋克风格", source_result={"image": "user1/2026-05-25/cat.png"})
+
+        self.assertEqual(result, {
+            "1::text": "改成赛博朋克风格",
+            "40::image": "user1/2026-05-25/cat.png",
+        })
 
     def test_build_generate_fields_returns_empty_when_no_prompt_field_exists(self):
         fields = [{"node_id": "2", "field": "width", "label": "宽度", "class_type": "PrimitiveInt"}]

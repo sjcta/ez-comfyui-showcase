@@ -61,6 +61,13 @@ class SystemSettingsApiTests(unittest.TestCase):
                     "default_text_to_image_workflow": "t2i-test.json",
                     "allowed_styles": ["cinematic", "realistic"],
                     "allowed_ratios": ["1:1", "9:16"],
+                    "llm_enabled": True,
+                    "llm_provider": "openai_compatible",
+                    "llm_base_url": "http://127.0.0.1:8080/v1",
+                    "llm_model": "gemma-4-e2b",
+                    "llm_api_key": "local-key",
+                    "llm_gguf_model": "/Users/ai/projects/ez-comfyui-showcase/model/gemma-4-E2B-it-Q4_K_M.gguf",
+                    "llm_mmproj_model": "/Users/ai/projects/ez-comfyui-showcase/model/mmproj-Gemma-4-E2B-f16.gguf",
                     "speech_timeout_ms": 4321,
                 }
             },
@@ -73,10 +80,18 @@ class SystemSettingsApiTests(unittest.TestCase):
         self.assertEqual(settings["default_text_to_image_workflow"], "t2i-test.json")
         self.assertEqual(settings["allowed_styles"], ["cinematic", "realistic"])
         self.assertEqual(settings["allowed_ratios"], ["1:1", "9:16"])
+        self.assertTrue(settings["llm_enabled"])
+        self.assertEqual(settings["llm_provider"], "openai_compatible")
+        self.assertEqual(settings["llm_base_url"], "http://127.0.0.1:8080/v1")
+        self.assertEqual(settings["llm_model"], "gemma-4-e2b")
+        self.assertEqual(settings["llm_api_key"], "local-key")
+        self.assertTrue(settings["llm_gguf_model"].endswith("gemma-4-E2B-it-Q4_K_M.gguf"))
+        self.assertTrue(settings["llm_mmproj_model"].endswith("mmproj-Gemma-4-E2B-f16.gguf"))
         self.assertEqual(settings["speech_timeout_ms"], 4321)
 
         loaded = app.api_system_settings_get(current_user={"sub": "admin", "role": "admin"})
         self.assertEqual(loaded["data"]["mobile_creator"]["default_text_to_image_workflow"], "t2i-test.json")
+        self.assertEqual(loaded["data"]["mobile_creator"]["llm_base_url"], "http://127.0.0.1:8080/v1")
         self.assertEqual(loaded["data"]["mobile_creator"]["speech_timeout_ms"], 4321)
 
     def test_non_admin_cannot_read_system_settings(self):

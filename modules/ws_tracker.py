@@ -9,12 +9,16 @@ Ez ComfyUI v4.0 重构。
 
 import asyncio
 import json
+import shutil
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 import websockets.client
+import urllib.error
+import urllib.request
 
 from modules.config import NODE_STATUS_MAP
 from modules.step_calculator import StepInfo
@@ -88,7 +92,9 @@ def _http_post(url: str, data: dict) -> dict:
             detail = f"{detail}; {body[:500]}"
         raise RuntimeError(f"HTTP POST {url} 失败: {detail}") from e
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"HTTP POST {url} 失败: {e}") from e
+        if isinstance(e, json.JSONDecodeError):
+            raise RuntimeError(f"HTTP POST {url} 失败: {e}") from e
+        return _curl_json("POST", url, data=data, timeout=30, source_error=e)
 
 
 def _http_get(url: str, timeout: int = 15) -> dict | list:
@@ -109,7 +115,36 @@ def _http_get(url: str, timeout: int = 15) -> dict | list:
             raw = resp.read().decode("utf-8")
             return json.loads(raw)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"HTTP GET {url} 失败: {e}") from e
+        if isinstance(e, json.JSONDecodeError):
+            raise RuntimeError(f"HTTP GET {url} 失败: {e}") from e
+        return _curl_json("GET", url, timeout=timeout, source_error=e)
+
+
+def _curl_json(
+    method: str,
+    url: str,
+    data: dict | None = None,
+    timeout: int = 30,
+    source_error: Exception | None = None,
+) -> dict | list:
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError(f"HTTP {method} {url} 失败: {source_error}") from source_error
+    cmd = [curl, "-sS", "--max-time", str(max(1, int(timeout))), "-X", method.upper()]
+    if data is not None:
+        cmd += ["-H", "Content-Type: application/json", "--data-binary", json.dumps(data)]
+    cmd.append(url)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=max(2, int(timeout) + 2))
+    except Exception as e:
+        raise RuntimeError(f"HTTP {method} {url} curl fallback failed: {e}") from e
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or str(source_error or "")).strip()
+        raise RuntimeError(f"HTTP {method} {url} 失败: {detail[:500]}") from source_error
+    try:
+        return json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"HTTP {method} {url} 返回非 JSON: {(result.stdout or '')[:200]}") from e
 
 
 def _build_ws_url(instance_url: str, client_id: str) -> str:
@@ -545,6 +580,11 @@ class WSTracker:
                     {"prompt": self._workflow, "client_id": self._client_id},
                 )
                 self._prompt_id = resp.get("prompt_id", "")
+                if not self._prompt_id:
+                    raise RuntimeError(f"ComfyUI 返回无 prompt_id: {json.dumps(resp)[:200]}")
+                await self._report_progress({
+                    "pct": 0, "message": "等待实例开始执行...", "current_node": ""
+                })
             except Exception as e:
                 self._log("error", "http", f"HTTP fallback prompt 提交失败: {e}", self._job_id)
                 raise PromptSubmitError(str(e)) from e
