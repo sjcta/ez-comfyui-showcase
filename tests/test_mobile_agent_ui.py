@@ -249,6 +249,8 @@ class MobileAgentUiContractTests(unittest.TestCase):
         self.assertIn(".mobile-agent-hero", css)
         self.assertIn("position: relative;\n  display: flex;\n  align-items: center;\n  justify-content: center;", css)
         self.assertIn(".mobile-agent-copy {\n  position: static;", css)
+        self.assertIn(".mobile-agent-copy p", css)
+        self.assertNotIn(".mobile-agent p {\n  margin: 0;", css)
         self.assertIn(".mobile-agent-topbar", css)
         self.assertIn(".mobile-agent-avatar", css)
         self.assertIn(".mobile-agent-menu", css)
