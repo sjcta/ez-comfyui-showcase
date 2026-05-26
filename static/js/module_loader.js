@@ -7,7 +7,7 @@
   'use strict';
 
   var base = 'static/js';
-  var version = '1779822900';
+  var version = '1779823000';
   var normalizedPath = String(location.pathname || '').replace(/\/+$/, '');
   var isMobileAgentPath = normalizedPath === '/app' || location.hash === '#mobile-agent';
   var runtimeApiBase = (location.protocol === 'file:')
