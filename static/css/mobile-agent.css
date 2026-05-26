@@ -452,8 +452,16 @@
   padding: 10px;
   border-radius: 26px;
   color: #f1f3f4;
-  background: var(--mobile-surface);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34);
+  background:
+    radial-gradient(42% 52% at 90% 0%, rgba(139, 92, 246, 0.18), transparent 72%),
+    radial-gradient(34% 46% at 74% 12%, rgba(59, 130, 246, 0.1), transparent 76%),
+    rgba(23, 32, 43, 0.76);
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  -webkit-backdrop-filter: blur(18px) saturate(1.16);
+  backdrop-filter: blur(18px) saturate(1.16);
+  box-shadow:
+    0 22px 60px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -519,7 +527,8 @@
   min-height: 46px;
   border-radius: 999px;
   color: #f1f3f4;
-  background: var(--mobile-surface-soft);
+  background: rgba(34, 52, 73, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   font: inherit;
   text-align: left;
   transition:
@@ -551,7 +560,8 @@
   min-height: 54px;
   padding: 0 7px 0 0;
   border-radius: 999px;
-  background: var(--mobile-surface-soft);
+  background: rgba(34, 52, 73, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   transition:
     transform var(--mobile-motion-duration) ease,
     background var(--mobile-motion-duration) ease,
