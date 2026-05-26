@@ -340,13 +340,24 @@
     return String(last && last.text ? last.text : '继续这个创作上下文').trim().slice(0, 60);
   }
 
+  function persistableMessage(message) {
+    if (!message || typeof message !== 'object') return message;
+    var clean = Object.assign({}, message);
+    delete clean.result_fresh;
+    return clean;
+  }
+
+  function persistableMessages(messages) {
+    return (messages || []).slice(-40).map(persistableMessage);
+  }
+
   function currentThreadSnapshot() {
     return {
       id: state.activeThreadId || makeId('thread'),
       title: threadTitle(state.messages),
       preview: threadPreview(state.messages),
       updatedAt: Date.now(),
-      messages: state.messages.slice(-40),
+      messages: persistableMessages(state.messages),
       deletedAnswerRefs: state.deletedAnswerRefs.slice(-8),
       lastResult: state.lastResult || null,
       pendingMessageId: state.pendingMessageId || '',
@@ -412,7 +423,7 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         id: state.activeThreadId,
         activeThreadId: state.activeThreadId,
-        messages: state.messages.slice(-40),
+        messages: persistableMessages(state.messages),
         deletedAnswerRefs: state.deletedAnswerRefs.slice(-8),
         lastResult: state.lastResult || null,
         pendingMessageId: state.pendingMessageId || '',
@@ -1011,7 +1022,7 @@
     var fullSrc = fullMediaSrc(msg) || src;
     var prompt = resultPromptText(msg);
     var promptOpen = !!msg.prompt_open;
-    return '<div class="mobile-agent-result-card">' +
+    return '<div class="mobile-agent-result-card' + (msg.result_fresh ? ' is-fresh' : '') + '">' +
       (src ? '<button class="mobile-agent-result-image-btn" type="button" data-action="open-result-preview" data-message-id="' + escH(msg.id || '') + '" aria-label="放大查看生成结果"><img src="' + escH(src) + '" alt="生成结果"></button>' : '') +
       '<div class="mobile-agent-result-status">生成完成</div>' +
       '<div class="mobile-agent-result-actions">' +
@@ -1072,7 +1083,7 @@
     '</article>';
   }
 
-  function patchRenderedMessage(messageId) {
+  function patchRenderedMessage(messageId, options) {
     if (!messageId || !state.root || !state.root.querySelector) return false;
     var chat = state.root.querySelector('.mobile-agent-chat');
     if (!chat || !chat.querySelector) return false;
@@ -1081,11 +1092,11 @@
     var msg = state.messages.find(function (item) { return item && item.id === messageId; });
     if (!target || !msg) return false;
     target.outerHTML = renderMessage(msg);
-    scrollChatToLatest();
+    if (!options || options.scroll !== false) scrollChatToLatest();
     return true;
   }
 
-  function patchTaskMessageDom(messageId, msg) {
+  function patchTaskMessageDom(messageId, msg, options) {
     if (!messageId || !msg || msg.type !== 'task' || !state.root || !state.root.querySelector) return false;
     var safeId = String(messageId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     var target = state.root.querySelector('[data-message-id="' + safeId + '"]');
@@ -1106,25 +1117,30 @@
     if (title) title.textContent = msg.text || jobStatusLabel(msg.status) || '正在生成';
     if (bar) bar.setAttribute('aria-valuenow', String(pct));
     if (fill) fill.style.width = pct + '%';
-    scrollChatToLatest();
+    if (options && options.scroll) scrollChatToLatest();
     return true;
   }
 
-  function patchAssistantTextDom(messageId, msg) {
+  function patchAssistantTextDom(messageId, msg, options) {
     if (!messageId || !msg || (msg.type !== 'text' && msg.type !== 'error') || !state.root || !state.root.querySelector) return false;
     var safeId = String(messageId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     var target = state.root.querySelector('[data-message-id="' + safeId + '"]');
     var body = target && target.querySelector ? target.querySelector('.mobile-agent-markdown') : null;
     if (!target || !body) return false;
     body.innerHTML = renderMarkdown(msg.text || '');
-    scrollChatToLatest();
+    if (!options || options.scroll !== false) scrollChatToLatest();
     return true;
   }
 
-  function renderMessagePatch(messageId) {
+  function clearResultFreshFlag(messageId) {
+    var msg = findMessage(messageId);
+    if (msg && msg.result_fresh) msg.result_fresh = false;
+  }
+
+  function renderMessagePatch(messageId, options) {
     if (state.active && (state.mode === 'conversation' || state.mode === 'generating')) {
       var msg = findMessage(messageId);
-      if (patchTaskMessageDom(messageId, msg) || patchAssistantTextDom(messageId, msg) || patchRenderedMessage(messageId)) return;
+      if (patchTaskMessageDom(messageId, msg, options) || patchAssistantTextDom(messageId, msg, options) || patchRenderedMessage(messageId, options)) return;
     }
     renderActive();
   }
@@ -1748,13 +1764,15 @@
       updateMessage(doneMessageId, Object.assign({
         role: 'assistant',
         type: 'result',
-        text: '生成完成'
+        text: '生成完成',
+        result_fresh: true
       }, result));
       state.pendingJobId = '';
       state.pendingMessageId = '';
       saveConversation();
       state.mode = 'conversation';
-      renderMessagePatch(doneMessageId);
+      renderMessagePatch(doneMessageId, { scroll: false });
+      clearResultFreshFlag(doneMessageId);
       return;
     }
     if (job.status === 'error') {
@@ -1777,7 +1795,7 @@
       state.pendingMessageId = '';
       saveConversation();
       state.mode = 'conversation';
-      renderMessagePatch(errorMessageId);
+      renderMessagePatch(errorMessageId, { scroll: false });
       return;
     }
     var statusText = job.message || jobStatusLabel(job.status) || '正在生成';
@@ -1793,7 +1811,7 @@
       progress: job.progress || { pct: pct }
     });
     saveConversation();
-    renderMessagePatch(state.pendingMessageId);
+    renderMessagePatch(state.pendingMessageId, { scroll: false });
   }
 
   function syncSharedJobState(job) {

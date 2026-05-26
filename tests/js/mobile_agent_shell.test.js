@@ -899,6 +899,7 @@ async function run() {
     });
 
     assert(root.innerHTML.includes('/api/thumbs/user1/2026-05-25/cat-thumb.jpg'), 'completed job should render image result in the conversation');
+    assert(root.innerHTML.includes('mobile-agent-result-card is-fresh'), 'completed job should animate the task card into a fresh result card once');
     assert(root.innerHTML.includes('生成完成'), 'completed job should label the result as done');
     assert(root.innerHTML.includes('data-action="open-result-preview"'), 'completed image should be clickable for preview');
     assert(root.innerHTML.includes('download'), 'completed result should expose a download link');
