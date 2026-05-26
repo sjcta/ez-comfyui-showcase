@@ -442,6 +442,20 @@ async function run() {
     assert(!root.innerHTML.includes('mobile-agent-menu-thread-row'), 'avatar menu should not include recent conversation topics');
 
     root.dispatch('click', {
+      closest() {
+        return null;
+      },
+    });
+    assert(!root.innerHTML.includes('mobile-agent-menu is-open'), 'clicking outside the avatar menu should close it');
+
+    root.dispatch('click', {
+      closest(selector) {
+        if (selector !== '[data-action]') return null;
+        return { getAttribute(name) { return name === 'data-action' ? 'toggle-account-menu' : ''; } };
+      },
+    });
+
+    root.dispatch('click', {
       closest(selector) {
         if (selector !== '[data-action]') return null;
         return {

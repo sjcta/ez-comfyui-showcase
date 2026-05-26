@@ -2272,6 +2272,18 @@
     menu.setAttribute('aria-hidden', state.menuOpen ? 'false' : 'true');
   }
 
+  function closeAccountMenu() {
+    if (!state.menuOpen) return;
+    state.menuOpen = false;
+    var menu = state.root && state.root.querySelector ? state.root.querySelector('.mobile-agent-menu') : null;
+    if (!menu) {
+      renderActive();
+      return;
+    }
+    menu.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+  }
+
   function syncAfterAuthReady() {
     var afterAuth = function () {
       if (state.messages.length || state.lastResult || state.pendingJobId) {
@@ -2331,6 +2343,12 @@
   }
 
   function onClick(event) {
+    var clickTarget = event.target || null;
+    if (state.menuOpen && clickTarget && clickTarget.closest) {
+      var insideMenu = clickTarget.closest('.mobile-agent-menu');
+      var menuTrigger = clickTarget.closest('[data-action="toggle-account-menu"]');
+      if (!insideMenu && !menuTrigger) closeAccountMenu();
+    }
     var btn = event.target && event.target.closest ? event.target.closest('[data-action]') : null;
     if (!btn) return;
     var action = btn.getAttribute('data-action');
