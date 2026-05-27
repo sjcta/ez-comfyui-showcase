@@ -41,9 +41,24 @@ from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
 from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
-from modules.prompt_interrogator import build_image_interrogate_workflow, prepare_interrogate_image, run_image_interrogator
+from modules.llm_client import LLMVisionUnsupportedError, chat_completion, configure_llm_client, llm_provider_name
+from modules.prompt_interrogator import (
+    build_image_interrogate_workflow,
+    prepare_interrogate_image,
+    run_image_interrogator,
+    run_llm_expert_image_interrogator,
+    run_llm_image_interrogator,
+)
 from modules.prompt_labels import infer_generation_label
-from modules.prompt_optimizer import normalize_interrogated_chinese_prompt, run_prompt_language_switcher, run_prompt_optimizer, run_prompt_translator
+from modules.prompt_optimizer import (
+    normalize_interrogated_chinese_prompt,
+    run_llm_prompt_language_switcher,
+    run_llm_prompt_optimizer,
+    run_llm_prompt_translator,
+    run_prompt_language_switcher,
+    run_prompt_optimizer,
+    run_prompt_translator,
+)
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
@@ -698,6 +713,18 @@ def _save_nodes(nodes: list[dict]):
         json.dump([_normalize_node(n) for n in nodes], f, ensure_ascii=False, indent=2)
     _nodes_cache_ts = 0  # invalidate cache
 
+def _instance_api_url(node: dict, inst: dict) -> str:
+    """Return the ComfyUI API base URL for an instance."""
+    port = inst.get("port", "")
+    access = node.get("access") or {}
+    template = str(access.get("url") or "").strip()
+    if access.get("type") == "proxy" and template and not _is_prompt_aux_instance(inst):
+        try:
+            return template.format(port=port).rstrip("/")
+        except Exception:
+            pass
+    return f"http://{node['host']}:{port}"
+
 def _get_enabled_instances() -> list[dict]:
     """Return flat list of all enabled instances across all enabled nodes."""
     instances = []
@@ -715,7 +742,7 @@ def _get_enabled_instances() -> list[dict]:
             full["_node_host"] = node["host"]
             full["_node_connection"] = node.get("connection", "local")
             full["_node_ssh"] = _resolve_ssh_config(node.get("ssh_config", {}))
-            full["url"] = f"http://{node['host']}:{inst['port']}"
+            full["url"] = _instance_api_url(node, inst)
             instances.append(full)
     return instances
 
@@ -817,7 +844,7 @@ def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[di
             full["_node_host"] = normalized["host"]
             full["_node_connection"] = normalized.get("connection", "local")
             full["_node_ssh"] = _resolve_ssh_config(normalized.get("ssh_config", {}))
-            full["url"] = f"http://{normalized['host']}:{inst['port']}"
+            full["url"] = _instance_api_url(normalized, inst)
             instances.append(full)
     return instances
 
@@ -903,19 +930,36 @@ def _managed_instance_action(node: dict | None, instance: dict, action: str, rea
     return _run_instance_action(node, instance, action)
 
 
-# ── 任务队列：per-instance semaphores for parallel routing ──
+# ── 任务队列：single global generation dispatcher ──
 _job_queue: asyncio.Queue = asyncio.Queue()
 _inst_mgr: InstanceManager | None = None
 _job_runner: JobRunner | None = None
 _app_loop: asyncio.AbstractEventLoop | None = None
 _job_gpu_activity_watch: dict[str, dict] = {}
+_generation_dispatch_lock: asyncio.Lock | None = None
+_generation_dispatch_lock_loop: asyncio.AbstractEventLoop | None = None
+
+def _generation_queue_worker_count() -> int:
+    """Only one generation dispatcher is allowed so A/B never run concurrently."""
+    return 1
+
+def _start_queue_workers() -> list[asyncio.Task]:
+    return [asyncio.create_task(_queue_worker()) for _ in range(_generation_queue_worker_count())]
+
+def _get_generation_dispatch_lock() -> asyncio.Lock:
+    global _generation_dispatch_lock, _generation_dispatch_lock_loop
+    loop = asyncio.get_running_loop()
+    if _generation_dispatch_lock is None or _generation_dispatch_lock_loop is not loop:
+        _generation_dispatch_lock = asyncio.Lock()
+        _generation_dispatch_lock_loop = loop
+    return _generation_dispatch_lock
 
 async def _queue_worker():
     """Global generation dispatcher.
 
-    Main A/B generation is intentionally serialized: queued jobs do not bind
-    to a ComfyUI instance until they reach this worker, then the usual affinity
-    picker chooses the best warm/cold instance for that workflow.
+    All generation jobs are serialized globally. Per-instance semaphores remain
+    as a local safety net, but the dispatch lock prevents A/B from generating
+    at the same time.
     """
     while True:
         try:
@@ -923,20 +967,24 @@ async def _queue_worker():
             if job_id not in jobs:
                 _job_queue.task_done()
                 continue
-            if _job_runner:
-                task = asyncio.create_task(_run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance, preferred_node_id))
-            else:
-                task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, preferred_instance, preferred_node_id))
-            _job_tasks[job_id] = task
-            try:
-                await task
-            except asyncio.CancelledError:
-                if asyncio.current_task() and asyncio.current_task().cancelling():
-                    raise
-            except Exception as e:
-                print(f"[queue_worker] Job {job_id} failed: {e}")
-            finally:
-                _job_tasks.pop(job_id, None)
+            async with _get_generation_dispatch_lock():
+                if job_id not in jobs:
+                    _job_queue.task_done()
+                    continue
+                if _job_runner:
+                    task = asyncio.create_task(_run_job_v4(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, user_id, preferred_instance, preferred_node_id))
+                else:
+                    task = asyncio.create_task(_dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was, img_w, img_h, preferred_instance, preferred_node_id))
+                _job_tasks[job_id] = task
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    if asyncio.current_task() and asyncio.current_task().cancelling():
+                        raise
+                except Exception as e:
+                    print(f"[queue_worker] Job {job_id} failed: {e}")
+                finally:
+                    _job_tasks.pop(job_id, None)
         except Exception as e:
             print(f"[queue_worker] Error in dispatch loop: {e}")
             await asyncio.sleep(1)
@@ -1104,12 +1152,14 @@ def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
             if password:
                 find_cmd = ["sshpass", "-p", password, "ssh",
                             "-o", "StrictHostKeyChecking=no",
-                            f"{user}@{host}", "-p", port,
+                            "-p", port,
+                            f"{user}@{host}",
                             f'find "{wf_dir}" -name "*.json" -maxdepth 2']
             else:
                 find_cmd = ["ssh",
                             "-o", "StrictHostKeyChecking=no",
-                            f"{user}@{host}", "-p", port,
+                            "-p", port,
+                            f"{user}@{host}",
                             f'find "{wf_dir}" -name "*.json" -maxdepth 2']
 
             r = subprocess.run(find_cmd, capture_output=True, text=True, timeout=30)
@@ -1132,12 +1182,14 @@ def _sync_ssh_workflows(node: dict, wf_dirs: list[str], meta: dict) -> dict:
                     if password:
                         cat_cmd = ["sshpass", "-p", password, "ssh",
                                    "-o", "StrictHostKeyChecking=no",
-                                   f"{user}@{host}", "-p", port,
+                                   "-p", port,
+                                   f"{user}@{host}",
                                    f'cat "{remote_path}"']
                     else:
                         cat_cmd = ["ssh",
                                    "-o", "StrictHostKeyChecking=no",
-                                   f"{user}@{host}", "-p", port,
+                                   "-p", port,
+                                   f"{user}@{host}",
                                    f'cat "{remote_path}"']
 
                     r2 = subprocess.run(cat_cmd, capture_output=True, text=True, timeout=30)
@@ -1306,7 +1358,76 @@ def _json_loads_safe(value, default):
 def _normalize_system_settings(raw: dict | None) -> dict:
     raw = raw if isinstance(raw, dict) else {}
     image_settings = raw.get("image_protection") if isinstance(raw.get("image_protection"), dict) else {}
-    return {"image_protection": configure_image_protection(image_settings)}
+    llm_settings = raw.get("llm_api") if isinstance(raw.get("llm_api"), dict) else {}
+    llm_profiles = _normalize_llm_api_profiles(raw.get("llm_api_profiles"), llm_settings)
+    active_profile = str(raw.get("active_llm_api_profile") or "").strip()
+    active_profile_settings = _llm_profile_settings(llm_profiles, active_profile)
+    effective_llm_settings = active_profile_settings or llm_settings
+    return {
+        "image_protection": configure_image_protection(image_settings),
+        "llm_api": configure_llm_client(effective_llm_settings),
+        "llm_api_profiles": llm_profiles,
+        "active_llm_api_profile": active_profile if active_profile_settings else "",
+    }
+
+
+def _normalize_llm_api_profiles(value, fallback_llm: dict | None = None) -> list[dict]:
+    raw_profiles = value if isinstance(value, list) else []
+    profiles: list[dict] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(raw_profiles):
+        if not isinstance(item, dict):
+            continue
+        profile_id = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", str(item.get("id") or item.get("name") or f"llm-{idx + 1}")).strip("-")
+        if not profile_id or profile_id in seen:
+            continue
+        seen.add(profile_id)
+        caps = item.get("capabilities")
+        if not isinstance(caps, list):
+            caps = ["text"]
+        profiles.append(
+            {
+                "id": profile_id,
+                "name": str(item.get("name") or profile_id).strip() or profile_id,
+                "enabled": item.get("enabled", True) is not False,
+                "base_url": str(item.get("base_url") or "").strip().rstrip("/"),
+                "model": str(item.get("model") or "").strip(),
+                "api_key": str(item.get("api_key") or "").strip(),
+                "timeout": int(float(item.get("timeout") or 180)),
+                "capabilities": [str(cap).strip() for cap in caps if str(cap).strip()],
+                "notes": str(item.get("notes") or "").strip(),
+            }
+        )
+    if not profiles and isinstance(fallback_llm, dict) and (fallback_llm.get("base_url") or fallback_llm.get("model")):
+        profiles.append(
+            {
+                "id": "default",
+                "name": "默认 LLM API",
+                "enabled": fallback_llm.get("enabled", True) is not False,
+                "base_url": str(fallback_llm.get("base_url") or "").strip().rstrip("/"),
+                "model": str(fallback_llm.get("model") or "").strip(),
+                "api_key": str(fallback_llm.get("api_key") or "").strip(),
+                "timeout": int(float(fallback_llm.get("timeout") or 180)),
+                "capabilities": ["text", "vision"],
+                "notes": "",
+            }
+        )
+    return profiles
+
+
+def _llm_profile_settings(profiles: list[dict], profile_id: str) -> dict | None:
+    if not profile_id:
+        return None
+    for profile in profiles:
+        if profile.get("id") == profile_id:
+            return {
+                "enabled": profile.get("enabled", True),
+                "base_url": profile.get("base_url", ""),
+                "model": profile.get("model", ""),
+                "api_key": profile.get("api_key", ""),
+                "timeout": profile.get("timeout", 180),
+            }
+    return None
 
 
 def _load_system_settings() -> dict:
@@ -1331,6 +1452,16 @@ def _update_system_settings(patch: dict | None) -> dict:
         image_current = dict(current.get("image_protection") or {})
         image_current.update(patch["image_protection"])
         current["image_protection"] = image_current
+    if isinstance(patch.get("llm_api"), dict):
+        llm_current = dict(current.get("llm_api") or {})
+        llm_current.update(patch["llm_api"])
+        current["llm_api"] = llm_current
+        if "llm_api_profiles" not in patch and "active_llm_api_profile" not in patch:
+            current["active_llm_api_profile"] = ""
+    if isinstance(patch.get("llm_api_profiles"), list):
+        current["llm_api_profiles"] = patch["llm_api_profiles"]
+    if "active_llm_api_profile" in patch:
+        current["active_llm_api_profile"] = str(patch.get("active_llm_api_profile") or "").strip()
     updated = _normalize_system_settings(current)
     _save_system_settings(updated)
     return updated
@@ -1648,8 +1779,7 @@ def _recheck_safe_heuristic_nsfw_risk_rows(conn: sqlite3.Connection | None = Non
         """SELECT id, prompt, image_path, thumb_path
            FROM generations
            WHERE COALESCE(protection_status, '') = ?
-             AND COALESCE(protection_source, '') = 'heuristic'
-             AND COALESCE(deleted_at, '') = ''""",
+             AND COALESCE(protection_source, '') = 'heuristic'""",
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
     worker = ImageProtectionWorker(load_classifier=lambda: None)
@@ -1694,7 +1824,6 @@ def _recheck_safe_heuristic_video_rows(conn: sqlite3.Connection | None = None) -
            FROM generations
            WHERE COALESCE(protection_status, '') = ?
              AND COALESCE(protection_source, '') = 'heuristic'
-             AND COALESCE(deleted_at, '') = ''
              AND (
                COALESCE(media_type, '') = 'video'
                OR lower(COALESCE(image_path, '')) LIKE '%.mp4'
@@ -2851,8 +2980,8 @@ async def lifespan(app: FastAPI):
         protection_check_fn=_schedule_image_protection,
         input_dir=COMFYUI_INPUT,
     )
-    # Start the sequential job queue worker
-    _background_tasks.append(asyncio.create_task(_queue_worker()))
+    # Start a single generation dispatcher so A/B never generate at the same time.
+    _background_tasks.extend(_start_queue_workers())
     _inst_mgr.start_background_tasks()
     _background_tasks.append(asyncio.create_task(_stuck_job_watcher()))
     _background_tasks.append(asyncio.create_task(_gpu_stall_watcher()))
@@ -5308,7 +5437,15 @@ def _project_ffprobe_bin() -> str | None:
 def _make_thumbnail_with_pillow(src: str, thumb_path: str) -> bool:
     """Create a thumbnail using the project Python environment."""
     try:
-        from PIL import Image, ImageOps, UnidentifiedImageError
+        from PIL import Image, ImageOps
+        try:
+            from PIL import UnidentifiedImageError
+        except Exception:
+            UnidentifiedImageError = OSError
+    except Exception as e:
+        add_log("warn", "thumbnail", f"pillow unavailable: {e}", os.path.basename(src))
+        return False
+    try:
         with Image.open(src) as img:
             img = ImageOps.exif_transpose(img)
             img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
@@ -5556,8 +5693,35 @@ def _is_json_object_text(text: str) -> bool:
         return False
 
 
+def _consume_reverse_prompt_quality(result: dict, current_user: dict | None = None) -> dict:
+    """Keep reverse-prompt scoring internal; do not expose it to prompt-result JSON."""
+    if not isinstance(result, dict):
+        return result
+    quality = result.pop("reverse_prompt_quality", None)
+    expert = result.get("expert_interrogate")
+    if isinstance(expert, dict):
+        expert.pop("quality", None)
+    if isinstance(quality, dict):
+        score = quality.get("score")
+        target = quality.get("target_score")
+        passed = quality.get("passed")
+        issues = quality.get("issues") if isinstance(quality.get("issues"), list) else []
+        issue_codes = ",".join(str(item.get("code") or "") for item in issues if isinstance(item, dict) and item.get("code"))
+        level = "info" if passed else "warn"
+        add_log(
+            level,
+            "prompt_interrogate_quality",
+            f"Reverse prompt quality {score}/{target}",
+            details=f"user={_user_id(current_user)} issues={issue_codes}",
+        )
+    return result
+
+
 class PromptInterrogateRequest(BaseModel):
     image: str
+    mode: str = "image"
+    prompt_context: dict = Field(default_factory=dict)
+    expert: bool = False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -6537,23 +6701,14 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
         raise HTTPException(400, "Prompt is required")
     prompt_mode = "video_script" if str(req.mode or "").lower() in {"video", "video_script", "script"} else "image"
     action_label = "视频脚本优化" if prompt_mode == "video_script" else "提示词优化"
-    instances = _get_enabled_instances()
-    if not instances:
-        raise HTTPException(503, "No enabled ComfyUI instances available")
     try:
-        inst = _pick_ready_aux_instance(instances, "prompt_optimize", timeout=180)
-        result = run_prompt_optimizer(
+        result = run_llm_prompt_optimizer(
             prompt,
-            inst.get("url", COMFYUI_URL),
-            comfyui_post,
-            comfyui_get,
             timeout=300,
-            poll_interval=1,
             max_new_tokens=req.max_new_tokens,
             prompt_mode=prompt_mode,
             prompt_context=req.prompt_context if prompt_mode == "video_script" else {},
         )
-        _mark_aux_instance_active(inst)
     except TimeoutError as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(504, f"{action_label}超时: {e}") from e
@@ -6564,7 +6719,7 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
     except Exception as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"{action_label}失败: {e}") from e
-    result["instance"] = inst.get("name", "")
+    result["instance"] = "LLM"
     add_log("info", "prompt_optimize", f"{action_label} by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
     return result
 
@@ -6581,22 +6736,13 @@ def api_prompt_translate(req: PromptTranslateRequest, current_user: dict = Depen
     if cached:
         add_log("info", "prompt_translate", f"Prompt translation cache hit to {target}", details=f"user={_user_id(current_user)}")
         return cached
-    instances = _get_enabled_instances()
-    if not instances:
-        raise HTTPException(503, "No enabled ComfyUI instances available")
     try:
-        inst = _pick_ready_aux_instance(instances, "prompt_translate", timeout=180)
-        result = run_prompt_language_switcher(
+        result = run_llm_prompt_language_switcher(
             prompt,
             target,
-            inst.get("url", COMFYUI_URL),
-            comfyui_post,
-            comfyui_get,
             timeout=180,
-            poll_interval=1,
             max_new_tokens=req.max_new_tokens,
         )
-        _mark_aux_instance_active(inst)
     except TimeoutError as e:
         add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(504, f"提示词翻译超时: {e}") from e
@@ -6607,7 +6753,7 @@ def api_prompt_translate(req: PromptTranslateRequest, current_user: dict = Depen
     except Exception as e:
         add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"提示词翻译失败: {e}") from e
-    result["instance"] = inst.get("name", "")
+    result["instance"] = "LLM"
     result["cached"] = False
     if _is_json_object_text(result.get("translated_prompt", "")):
         result["format"] = "json"
@@ -6621,16 +6767,97 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     image = str(req.image or "").replace("\\", "/").lstrip("/")
     if not image:
         raise HTTPException(400, "Image is required")
-    if not _resolve_input_image_path(image):
+    resolved_image_path = _resolve_input_image_path(image)
+    if not resolved_image_path:
         raise HTTPException(404, "Image not found")
+    prepared_image = prepare_interrogate_image(image, COMFYUI_INPUT)
+    image_for_interrogate = prepared_image.get("filename") or image
+    prepared_image_path = _resolve_input_image_path(image_for_interrogate) or resolved_image_path
+    prompt_mode = "video_script" if str(req.mode or "").lower() in {"video", "video_script", "script"} else "image"
+    expert_mode = bool(req.expert) and prompt_mode == "image"
+
+    def _apply_video_script_interrogate(result: dict) -> dict:
+        if prompt_mode != "video_script":
+            return result
+        source_prompt = str(result.get("prompt_zh") or result.get("prompt") or result.get("promptgen") or "").strip()
+        if not source_prompt:
+            return result
+        try:
+            optimized = run_llm_prompt_optimizer(
+                source_prompt,
+                timeout=180,
+                max_new_tokens=768,
+                prompt_mode="video_script",
+                prompt_context=req.prompt_context or {},
+            )
+        except Exception as video_error:
+            add_log("warn", "prompt_interrogate", f"Video script optimization skipped: {video_error}", details=f"user={_user_id(current_user)}")
+            return result
+        script = str(optimized.get("optimized_prompt") or optimized.get("cleaned_prompt") or "").strip()
+        if not script:
+            return result
+        result["image_prompt"] = result.get("prompt") or source_prompt
+        if result.get("prompt_zh"):
+            result["image_prompt_zh"] = result.get("prompt_zh")
+        result["prompt"] = script
+        result["prompt_zh"] = script
+        result["prompt_mode"] = "video_script"
+        result["video_script_provider"] = optimized.get("provider", "")
+        if optimized.get("cleaned_prompt"):
+            result["video_script_source_prompt"] = optimized.get("cleaned_prompt")
+        return result
+
+    if expert_mode:
+        try:
+            result = run_llm_expert_image_interrogator(
+                prepared_image_path,
+                timeout=90,
+                max_new_tokens=1536,
+                single_pass=True,
+                include_quality=True,
+            )
+            result = _consume_reverse_prompt_quality(result, current_user)
+            result["image_preprocess"] = prepared_image
+            result["instance"] = "LLM"
+            result["source_image"] = image
+            add_log("info", "prompt_interrogate", f"Expert image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+            return result
+        except TimeoutError as e:
+            add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+            raise HTTPException(504, f"专家组图片反推超时: {e}") from e
+        except LLMVisionUnsupportedError as e:
+            add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+            raise HTTPException(503, f"专家组图片反推失败: {e}") from e
+        except Exception as e:
+            add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
+            raise HTTPException(500, f"专家组图片反推失败: {e}") from e
+
+    try:
+        result = run_llm_image_interrogator(
+            prepared_image_path,
+            timeout=60,
+            max_new_tokens=512,
+            compact=True,
+            include_quality=True,
+        )
+        result = _consume_reverse_prompt_quality(result, current_user)
+        result = _apply_video_script_interrogate(result)
+        result["image_preprocess"] = prepared_image
+        result["instance"] = "LLM"
+        result["source_image"] = image
+        add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+        return result
+    except LLMVisionUnsupportedError as llm_error:
+        add_log("warn", "prompt_interrogate", f"LLM vision unavailable, falling back to Prompt instance: {llm_error}", details=f"user={_user_id(current_user)}")
+    except Exception as llm_error:
+        add_log("warn", "prompt_interrogate", f"LLM image interrogation failed, falling back to Prompt instance: {llm_error}", details=f"user={_user_id(current_user)}")
+
     instances = _get_enabled_instances()
     if not instances:
         raise HTTPException(503, "No enabled ComfyUI instances available")
     try:
         inst = _pick_ready_aux_instance(instances, "prompt_interrogate", timeout=180)
         inst_url = inst.get("url", COMFYUI_URL)
-        prepared_image = prepare_interrogate_image(image, COMFYUI_INPUT)
-        image_for_interrogate = prepared_image.get("filename") or image
         workflow = build_image_interrogate_workflow(image_for_interrogate)
         ensure_workflow_images_available(workflow, COMFYUI_INPUT, inst_url)
         result = run_image_interrogator(
@@ -6643,16 +6870,13 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
         )
         _mark_aux_instance_active(inst)
         result["image_preprocess"] = prepared_image
+        result["source_image"] = image
         prompt_text = str(result.get("prompt") or "").strip()
         if prompt_text and not result.get("prompt_zh"):
             try:
-                translated = run_prompt_translator(
+                translated = run_llm_prompt_translator(
                     prompt_text,
-                    inst_url,
-                    comfyui_post,
-                    comfyui_get,
                     timeout=90,
-                    poll_interval=1,
                     max_new_tokens=192,
                 )
                 prompt_zh = normalize_interrogated_chinese_prompt(translated.get("prompt_zh", ""))
@@ -6662,25 +6886,29 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
                     result["translator_provider"] = translated.get("provider", "")
             except Exception as translate_error:
                 add_log("warn", "prompt_interrogate", f"Prompt Chinese translation skipped: {translate_error}", details=f"user={_user_id(current_user)}")
-        if prompt_text and not result.get("structured_prompt_json"):
+        if prompt_mode == "video_script":
+            result = _apply_video_script_interrogate(result)
+        elif prompt_text and not result.get("structured_prompt_json"):
             source_prompt = str(result.get("prompt_zh") or prompt_text).strip()
             if source_prompt:
                 try:
-                    structured = run_prompt_optimizer(
+                    structured = run_llm_prompt_optimizer(
                         source_prompt,
-                        inst_url,
-                        comfyui_post,
-                        comfyui_get,
                         timeout=180,
-                        poll_interval=1,
                         max_new_tokens=384,
                     )
                     if structured.get("structured_prompt_json"):
                         result["structured_prompt_json"] = structured.get("structured_prompt_json")
                     if structured.get("structured_prompt"):
                         result["structured_prompt"] = structured.get("structured_prompt")
+                    if structured.get("negative_prompt"):
+                        result["negative_prompt"] = structured.get("negative_prompt")
                     if structured.get("optimized_prompt"):
-                        result["structured_optimized_prompt"] = structured.get("optimized_prompt")
+                        optimized_prompt = str(structured.get("optimized_prompt") or "").strip()
+                        result["structured_optimized_prompt"] = optimized_prompt
+                        if optimized_prompt:
+                            result["prompt"] = optimized_prompt
+                            result["prompt_zh"] = optimized_prompt
                     if structured.get("provider"):
                         result["structured_provider"] = structured.get("provider")
                 except Exception as structure_error:
@@ -6897,15 +7125,10 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
 #  API: History
 # ══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/history")
-def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict | None = Depends(get_current_user_optional)):
-    """Query generation history from SQLite with pagination."""
-    conn = sqlite3.connect(GEN_DB)
-    conn.row_factory = sqlite3.Row
+def _history_where_params(scope: str, status: str, current_user: dict | None) -> tuple[str, list]:
     uid = _user_id(current_user or {})
     trash_mode = scope == "trash"
     if trash_mode and not current_user:
-        conn.close()
         raise HTTPException(401, "Not authenticated")
     if current_user and trash_mode and current_user.get("role") == "admin":
         conditions = []
@@ -6939,12 +7162,109 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
         conditions.append("COALESCE(protection_status, 'safe') != ?")
         params.append(IMAGE_PROTECTION_PENDING)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    return where_clause, params
+
+
+def _history_signature(rows: list[dict], total: int) -> str:
+    parts = [f"total:{int(total or 0)}"]
+    for row in rows:
+        parts.append(":".join([
+            str(row.get("id", "")),
+            str(row.get("image_path", "")),
+            str(row.get("thumb_path", "")),
+            "1" if row.get("is_public") else "0",
+            str(row.get("deleted_at", "") or ""),
+            str(row.get("protection_status", "") or ""),
+            str(row.get("protection_score", "") or ""),
+            str(row.get("protection_source", "") or ""),
+            str(row.get("protection_checked_at", "") or ""),
+            str(row.get("history_rowid", "") or ""),
+        ]))
+    return "|".join(parts)
+
+
+@app.get("/api/history/summary")
+def api_history_summary(limit: int = 80, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict | None = Depends(get_current_user_optional)):
+    """Lightweight history signature for polling; does not touch media files."""
+    safe_limit = max(1, min(int(limit or 80), 5000))
+    safe_offset = max(0, int(offset or 0))
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    where_clause, params = _history_where_params(scope, status, current_user)
+    rows = [
+        dict(r) for r in conn.execute(
+            "SELECT id, image_path, thumb_path, is_public, deleted_at, protection_status, "
+            "protection_score, protection_source, protection_checked_at, generations.rowid AS history_rowid "
+            "FROM generations" +
+            where_clause +
+            " ORDER BY datetime(created_at) DESC, history_rowid DESC LIMIT ? OFFSET ?",
+            params + [safe_limit, safe_offset],
+        ).fetchall()
+    ]
+    total = conn.execute(
+        "SELECT COUNT(*) FROM generations" + where_clause,
+        params,
+    ).fetchone()[0]
+    conn.close()
+    return {"ok": True, "total": total, "count": len(rows), "signature": _history_signature(rows, total)}
+
+
+@app.get("/api/workflows/previews")
+def api_workflow_previews(current_user: dict | None = Depends(get_current_user_optional)):
+    """Return the latest preview per workflow for the current user using lightweight DB rows."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    if current_user:
+        conditions = ["user_id = ?"]
+        params = [_user_id(current_user)]
+    else:
+        conditions = ["is_public = 1"]
+        params = []
+    conditions.extend([
+        "COALESCE(deleted_at, '') = ''",
+        "COALESCE(protection_status, 'safe') != ?",
+    ])
+    params.append(IMAGE_PROTECTION_PENDING)
+    where_clause = " WHERE " + " AND ".join(conditions)
+    rows = [
+        dict(r) for r in conn.execute(
+            "SELECT generations.*, generations.rowid AS history_rowid FROM generations" +
+            where_clause +
+            " ORDER BY datetime(created_at) DESC, history_rowid DESC",
+            params,
+        ).fetchall()
+    ]
+    conn.close()
+    counts: dict[str, int] = {}
+    latest: dict[str, dict] = {}
+    for row in rows:
+        workflow = row.get("workflow", "") or ""
+        if not workflow:
+            continue
+        counts[workflow] = counts.get(workflow, 0) + 1
+        if workflow not in latest and (row.get("thumb_path") or row.get("image_path")):
+            record = _gen_db_to_record(row)
+            record["workflow_count"] = counts[workflow]
+            latest[workflow] = record
+    for workflow, record in latest.items():
+        record["workflow_count"] = counts.get(workflow, 0)
+    return {"ok": True, "data": list(latest.values()), "counts": counts}
+
+
+@app.get("/api/history")
+def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict | None = Depends(get_current_user_optional)):
+    """Query generation history from SQLite with pagination."""
+    safe_limit = max(1, min(int(limit or 50), 5000))
+    safe_offset = max(0, int(offset or 0))
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    where_clause, params = _history_where_params(scope, status, current_user)
     rows = [
         dict(r) for r in conn.execute(
             "SELECT generations.*, generations.rowid AS history_rowid FROM generations" +
             where_clause +
             " ORDER BY datetime(created_at) DESC, history_rowid DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
+            params + [safe_limit, safe_offset],
         ).fetchall()
     ]
     thumb_updates = []
@@ -7353,6 +7673,11 @@ class SiteNotificationCreateRequest(BaseModel):
     content: str
 
 
+class SiteNotificationUpdateRequest(BaseModel):
+    title: str
+    content: str
+
+
 class SiteNotificationDismissRequest(BaseModel):
     notification_id: Optional[int] = None
 
@@ -7366,6 +7691,33 @@ def _site_notification_row(row: sqlite3.Row) -> dict:
         "created_by_username": row["created_by_username"] or "",
         "created_at": row["created_at"],
     }
+
+
+def _validate_site_notification_payload(title: str, content: str) -> tuple[str, str]:
+    title = (title or "").strip()
+    content = (content or "").strip()
+    if len(title) < 1:
+        raise HTTPException(400, "Notification title is required")
+    if len(content) < 1:
+        raise HTTPException(400, "Notification content is required")
+    if len(title) > 120:
+        raise HTTPException(400, "Notification title is too long")
+    if len(content) > 4000:
+        raise HTTPException(400, "Notification content is too long")
+    return title, content
+
+
+def _fetch_site_notification(conn: sqlite3.Connection, notification_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT n.id, n.title, n.content, n.created_by, n.created_at,
+               COALESCE(u.username, '') AS created_by_username
+          FROM site_notifications n
+          LEFT JOIN users u ON u.id = n.created_by
+         WHERE n.id=?
+        """,
+        (notification_id,),
+    ).fetchone()
 
 
 @app.post("/auth/register")
@@ -7553,6 +7905,36 @@ def api_system_settings_put(req: dict, current_user: dict = Depends(require_admi
     return {"ok": True, "data": _update_system_settings(req)}
 
 
+@app.post("/api/system-settings/llm/test")
+def api_llm_api_test(req: dict, current_user: dict = Depends(require_admin)):
+    raw = req.get("llm_api") if isinstance(req, dict) and isinstance(req.get("llm_api"), dict) else {}
+    cfg = configure_llm_client(raw)
+    try:
+        response = chat_completion(
+            [{"role": "user", "content": "Reply with pong only."}],
+            base_url=cfg.get("base_url"),
+            model=cfg.get("model"),
+            api_key=cfg.get("api_key"),
+            temperature=0,
+            max_tokens=16,
+            timeout=cfg.get("timeout"),
+        )
+    except Exception as e:
+        raise HTTPException(502, f"LLM API 测试失败: {e}") from e
+    content = ""
+    try:
+        content = str(response["choices"][0]["message"]["content"] or "").strip()
+    except Exception:
+        content = ""
+    return {
+        "ok": True,
+        "provider": llm_provider_name(str(cfg.get("model") or "")),
+        "base_url": cfg.get("base_url", ""),
+        "model": cfg.get("model", ""),
+        "reply": content,
+    }
+
+
 @app.get("/api/site-notifications")
 def api_site_notifications(current_user: dict | None = Depends(get_current_user_optional)):
     conn = sqlite3.connect(AUTH_DB)
@@ -7607,16 +7989,7 @@ def api_site_notifications_admin(current_user: dict = Depends(require_admin)):
 
 @app.post("/api/site-notifications")
 def api_site_notification_create(req: SiteNotificationCreateRequest, current_user: dict = Depends(require_admin)):
-    title = (req.title or "").strip()
-    content = (req.content or "").strip()
-    if len(title) < 1:
-        raise HTTPException(400, "Notification title is required")
-    if len(content) < 1:
-        raise HTTPException(400, "Notification content is required")
-    if len(title) > 120:
-        raise HTTPException(400, "Notification title is too long")
-    if len(content) > 4000:
-        raise HTTPException(400, "Notification content is too long")
+    title, content = _validate_site_notification_payload(req.title, req.content)
     conn = sqlite3.connect(AUTH_DB)
     conn.row_factory = sqlite3.Row
     cur = conn.execute(
@@ -7624,18 +7997,42 @@ def api_site_notification_create(req: SiteNotificationCreateRequest, current_use
         (title, content, current_user.get("sub", "")),
     )
     conn.commit()
-    row = conn.execute(
-        """
-        SELECT n.id, n.title, n.content, n.created_by, n.created_at,
-               COALESCE(u.username, '') AS created_by_username
-          FROM site_notifications n
-          LEFT JOIN users u ON u.id = n.created_by
-         WHERE n.id=?
-        """,
-        (cur.lastrowid,),
-    ).fetchone()
+    row = _fetch_site_notification(conn, int(cur.lastrowid))
     conn.close()
     return {"ok": True, "data": _site_notification_row(row)}
+
+
+@app.put("/api/site-notifications/{notification_id}")
+def api_site_notification_update(
+    notification_id: int,
+    req: SiteNotificationUpdateRequest,
+    current_user: dict = Depends(require_admin),
+):
+    title, content = _validate_site_notification_payload(req.title, req.content)
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.execute(
+        "UPDATE site_notifications SET title=?, content=? WHERE id=?",
+        (title, content, notification_id),
+    )
+    conn.commit()
+    if cur.rowcount == 0:
+        conn.close()
+        raise HTTPException(404, "Notification not found")
+    row = _fetch_site_notification(conn, notification_id)
+    conn.close()
+    return {"ok": True, "data": _site_notification_row(row)}
+
+
+@app.delete("/api/site-notifications/{notification_id}")
+def api_site_notification_delete(notification_id: int, current_user: dict = Depends(require_admin)):
+    conn = sqlite3.connect(AUTH_DB)
+    cur = conn.execute("DELETE FROM site_notifications WHERE id=?", (notification_id,))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        raise HTTPException(404, "Notification not found")
+    return {"ok": True, "id": notification_id}
 
 
 @app.post("/api/site-notifications/dismiss")
@@ -7690,7 +8087,7 @@ async def ws_endpoint(ws: WebSocket):
 def _check_node_http(node: dict) -> bool:
     """Check if any instance on the node is reachable via HTTP."""
     for inst in node.get("instances", []):
-        url = f"http://{node['host']}:{inst['port']}"
+        url = _instance_api_url(node, inst)
         if comfyui_up(base_url=url):
             return True
     return False
@@ -7707,12 +8104,13 @@ def _check_node_ssh(node: dict) -> bool:
         if ssh.get("auth") == "password" and ssh.get("password"):
             cmd = ["sshpass", "-p", ssh["password"], "ssh",
                    "-p", str(ssh.get("port", 22)),
+                   "-o", "ConnectTimeout=5",
                    f"{ssh.get('user', 'root')}@{node['host']}",
-                   "-o", "ConnectTimeout=5", "echo", "ok"]
+                   "echo", "ok"]
         else:
             cmd = ["ssh", "-p", str(ssh.get("port", 22)),
-                   f"{ssh.get('user', 'root')}@{node['host']}",
                    "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
+                   f"{ssh.get('user', 'root')}@{node['host']}",
                    "echo", "ok"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         return r.stdout.strip() == "ok"
@@ -7730,7 +8128,7 @@ def _check_node_systemd(node: dict) -> bool:
 
 def _get_instance_status(node: dict, instance: dict) -> dict:
     """Get status for a single instance."""
-    url = f"http://{node['host']}:{instance['port']}"
+    url = _instance_api_url(node, instance)
     http_up = comfyui_up(base_url=url)
     q_size = _get_instance_queue_size(url)
     conn = node.get("connection", "local")
@@ -7925,6 +8323,8 @@ def api_node_instance_start(nid: str, iid: str, current_user: dict = Depends(get
     inst = next((x for x in node.get("instances", []) if x["id"] == iid), None)
     if not inst:
         raise HTTPException(404, "Instance not found")
+    if comfyui_up(base_url=_instance_api_url(node, inst)):
+        return {"ok": True}
     if node.get("connection") == "remote-http":
         raise HTTPException(400, "Cannot start instance via remote-http")
     if _managed_instance_action(node, inst, "start", reason="node-api"):
@@ -8000,7 +8400,8 @@ def api_node_discover(nid: str, current_user: dict = Depends(get_current_user)):
 
     detected = []
     for port in sorted(ports):
-        url = f"http://{node['host']}:{port}"
+        probe_inst = {"port": port}
+        url = _instance_api_url(node, probe_inst)
         try:
             with urllib.request.urlopen(url + "/system_stats", timeout=3) as r:
                 is_comfyui = r.status == 200

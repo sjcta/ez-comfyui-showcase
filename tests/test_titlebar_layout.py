@@ -30,6 +30,15 @@ class TitlebarLayoutTest(unittest.TestCase):
         self.assertIn("API + '/api/version'", app_js)
         self.assertIn("initSiteVersionBadge();", app_js)
 
+    def test_tiny_mobile_auth_dropdown_hides_role_chip(self):
+        css = (ROOT / "static/css/style.css").read_text()
+        tiny_mobile = re.search(r"@media \(max-width: 480px\) \{(?P<body>.*?)\n\}", css, re.S)
+
+        self.assertIsNotNone(tiny_mobile)
+        body = tiny_mobile.group("body")
+        self.assertIn("#authDropdownTrigger .auth-role-chip", body)
+        self.assertRegex(css, r"@media \(max-width: 480px\) \{[^}]*#authDropdownTrigger \.auth-role-chip\s*\{[^}]*display:\s*none !important;", re.S)
+
 
 if __name__ == "__main__":
     unittest.main()

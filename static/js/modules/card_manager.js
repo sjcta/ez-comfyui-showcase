@@ -914,6 +914,42 @@
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
+    var current = document.querySelector('.gf-type-current');
+    if (current) current.textContent = val || '全部类型';
+  }
+
+  function _closeHistoryTypeMenus() {
+    document.querySelectorAll('.gf-type-segment.open').forEach(function(menu) {
+      menu.classList.remove('open');
+      var trigger = menu.querySelector('.gf-type-trigger');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function _toggleHistoryTypeMenu(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    var trigger = e && e.currentTarget ? e.currentTarget : null;
+    var wrap = trigger && trigger.closest ? trigger.closest('.gf-type-segment') : null;
+    if (!wrap) return;
+    var open = wrap.classList.contains('open');
+    _closeHistoryTypeMenus();
+    wrap.classList.toggle('open', !open);
+    trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+  }
+
+  function _ensureHistoryTypeMenuCloseBound() {
+    var root = document.documentElement;
+    if (!root || root.dataset.historyTypeMenuBound === '1') return;
+    root.dataset.historyTypeMenuBound = '1';
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.closest && e.target.closest('.gf-type-segment')) return;
+      if (window.CW && CW.closeHistoryTypeMenus) CW.closeHistoryTypeMenus();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && window.CW && CW.closeHistoryTypeMenus) {
+        CW.closeHistoryTypeMenus();
+      }
+    });
   }
 
   function _historyTypeOptions() {
@@ -950,20 +986,27 @@
   function _renderTypeFilterButtons() {
     var wrap = document.querySelector('.gf-type-segment');
     if (!wrap) return;
+    _ensureHistoryTypeMenuCloseBound();
     var options = _historyTypeOptions();
     if (_galleryFilters.type && options.indexOf(_galleryFilters.type) < 0) {
       _galleryFilters.type = '';
     }
-    var html = '<button class="gf-segment-btn" type="button" data-type-filter="" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">全部类型</button>';
+    var currentLabel = _galleryFilters.type || '全部类型';
+    var caret = window.CW && CW.icon ? CW.icon('chevron-right', 12) : '';
+    var html = '<button class="gf-type-trigger" type="button" aria-haspopup="menu" aria-expanded="false" onclick="CW.toggleHistoryTypeMenu(event)"><span class="gf-type-current">' + escH(currentLabel) + '</span><span class="gf-type-caret">' + caret + '</span></button>';
+    html += '<div class="gf-type-menu" role="menu">';
+    html += '<button class="gf-segment-btn" type="button" role="menuitemradio" data-type-filter="" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">全部类型</button>';
     options.forEach(function(t) {
-      html += '<button class="gf-segment-btn" type="button" data-type-filter="' + escA(t) + '" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">' + escH(t) + '</button>';
+      html += '<button class="gf-segment-btn" type="button" role="menuitemradio" data-type-filter="' + escA(t) + '" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">' + escH(t) + '</button>';
     });
+    html += '</div>';
     wrap.innerHTML = html;
   }
 
   function _setHistoryTypeFilter(value) {
     _galleryFilters.type = value || '';
     _syncTypeFilterButtons();
+    _closeHistoryTypeMenus();
     if (window.CW.cardManager) window.CW.cardManager.applyFilters();
   }
 
@@ -1228,6 +1271,8 @@
   window.CW.CardManager = CardManager;
   if (!window.CW.setHistoryOwnerFilter) window.CW.setHistoryOwnerFilter = _setHistoryOwnerFilter;
   if (!window.CW.setHistoryTypeFilter) window.CW.setHistoryTypeFilter = _setHistoryTypeFilter;
+  if (!window.CW.closeHistoryTypeMenus) window.CW.closeHistoryTypeMenus = _closeHistoryTypeMenus;
+  if (!window.CW.toggleHistoryTypeMenu) window.CW.toggleHistoryTypeMenu = _toggleHistoryTypeMenu;
   if (!window.CW.refreshHistoryTypeFilters) {
     window.CW.refreshHistoryTypeFilters = function() {
       _syncTypeFilterButtons();

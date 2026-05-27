@@ -34,6 +34,47 @@ class SystemSettingsUiTests(unittest.TestCase):
         self.assertIn(".system-settings-grid", css)
         self.assertIn(".system-settings-switch", css)
 
+    def test_system_settings_modal_has_llm_api_controls(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text("utf-8")
+        for token in (
+            "sysLlmApiEnabled",
+            "sysLlmApiBaseUrl",
+            "sysLlmApiModel",
+            "sysLlmApiKey",
+            "sysLlmApiTimeout",
+            "sysLlmApiProfile",
+            "applySystemLlmProfile",
+            "system-settings-profile-row",
+            "testLlmApiSettings",
+            "/api/system-settings/llm/test",
+            "LLM / 图片反推 API",
+        ):
+            self.assertIn(token, auth_js)
+
+    def test_system_settings_modal_uses_tabs_and_stable_llm_test_status(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text("utf-8")
+        css = (ROOT / "static/css/style.css").read_text("utf-8")
+
+        for token in (
+            "system-settings-tabs",
+            "data-system-settings-tab=\"llm\"",
+            "data-system-settings-tab=\"protection\"",
+            "data-system-settings-tab=\"patterns\"",
+            "data-system-settings-panel=\"llm\"",
+            "setSystemSettingsTab",
+            "system-settings-test-row",
+            "system-settings-test-status",
+            "system-settings-profile-hint",
+            "CW.icon('server')",
+        ):
+            self.assertIn(token, auth_js)
+
+        self.assertNotIn("CW.icon('activity')", auth_js)
+        self.assertIn(".system-settings-tabs", css)
+        self.assertIn(".system-settings-panel", css)
+        self.assertIn(".system-settings-profile-row", css)
+        self.assertIn(".system-settings-test-status", css)
+
 
 if __name__ == "__main__":
     unittest.main()

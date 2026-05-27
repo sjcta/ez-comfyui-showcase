@@ -66,6 +66,17 @@ class WorkflowManagerUiContractTests(unittest.TestCase):
         self.assertIn("hasDragged", ui_js)
         self.assertIn("if (Math.abs(walk) < threshold) return;", ui_js)
 
+    def test_workflow_picker_vertical_wheel_scrolls_horizontally(self):
+        ui_js = (ROOT / "static/js/modules/ui.js").read_text()
+
+        self.assertIn("function wheelDeltaPx(e)", ui_js)
+        self.assertIn("function canWheelHorizontally(delta)", ui_js)
+        self.assertIn('el.addEventListener("wheel"', ui_js)
+        self.assertIn("e.preventDefault();", ui_js)
+        self.assertIn("el.scrollLeft += dominant;", ui_js)
+        self.assertIn("{ passive: false }", ui_js)
+        self.assertIn("el.dataset.dragScrollBound", ui_js)
+
     def test_workflow_titles_use_custom_name_before_filename_fallback(self):
         workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
         node_editor_js = (ROOT / "static/js/modules/node-editor.js").read_text()

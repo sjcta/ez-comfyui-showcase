@@ -10,6 +10,31 @@ import time
 import uuid
 from typing import Any, Callable
 
+from modules.llm_client import DIRECT_FINAL_SYSTEM_PROMPT, chat_text, llm_provider_name
+
+
+HIGH_SUCCESS_PROMPT_SPEC_GUIDE = (
+    "High-success image prompt spec: treat the prompt as an executable image specification, "
+    "not a loose tag list. Organize the visual plan by 任务目标、保真要求、主体、动作姿态、场景、"
+    "构图镜头、光线色彩、材质细节、风格媒介、文字版式、负向限制. For image-to-image or "
+    "reference-based work, lock identity first: face proportions, hairstyle, body shape, clothing, "
+    "head direction, key colors, and signature details. Subject and pose must be actionable: "
+    "describe facial expression, gaze, hands, feet, contact points, occlusion, crop boundaries, "
+    "and spatial direction with clear references. Scene should name the concrete place, time, "
+    "weather, background objects, and how the subject fits into the environment. Composition and "
+    "camera should specify aspect/framing, shot scale, camera angle, focal feel, subject ratio, "
+    "foreground/midground/background, and for grid or contact-sheet prompts, each cell's image "
+    "content and layout role. Lighting and color should bind each object to exact color names, "
+    "approximate HEX values when useful, color temperature, key-light direction, shadow softness, "
+    "and contrast. Materials and details should name texture, weave, transparency, gloss, roughness, "
+    "grain, reflection, and surface condition for skin, fabric, metal, glass, paper, water, and props. "
+    "Style mixing should be layered: the realistic layer controls environment and photography, "
+    "while stylized layers control illustration, character treatment, typography, or special material "
+    "effects. Text/layout prompts must include only text that should appear, its placement, hierarchy, "
+    "and font mood; avoid extra unreadable text. The positive prompt is the main control surface, "
+    "especially for FLUX.2 and Z-Image Turbo; negative prompts should be pure short phrases/tags "
+    "such as watermark, extra fingers, wrong text, style drift, face, crossed legs, never command sentences."
+)
 
 IMAGE_PROMPT_OPTIMIZATION_GUIDE = (
     "Use a Nano Banana / GPT Image style prompt-improvement checklist internally, "
@@ -25,7 +50,12 @@ IMAGE_PROMPT_OPTIMIZATION_GUIDE = (
     "explicit real-world or cultural anchors, spatial relationships, and reference "
     "roles; avoid unnecessary camera-number jargon. Use positive framing instead of "
     "negative wording, avoid vague praise such as stunning/epic/masterpiece, avoid "
-    "tag soup, and do not invent major new concepts. The plain-text variant should be "
+    "tag soup, and do not invent major new concepts. For model-aware output, Qwen Image "
+    "can use concise negative tag phrases; FLUX.2 and Z-Image Turbo should treat the "
+    "positive prompt as the control surface because traditional negative prompts are not "
+    "reliable there. "
+    + HIGH_SUCCESS_PROMPT_SPEC_GUIDE
+    + " The plain-text variant should be "
     "one fluent generation prompt in the user's language, with no markdown, headings, "
     "bullets, or explanation."
 )
@@ -55,15 +85,22 @@ VIDEO_SCRIPT_OPTIMIZATION_GUIDE = (
 STRUCTURED_PROMPT_JSON_SCHEMA = (
     "Return only a valid JSON object with this exact top-level shape: "
     '{"keyword_prompt":"...",'
-    '"structured_prompt":{"subject":"...","action":"...","scene":"...",'
+    '"structured_prompt":{"intent":"...","identity_lock":"...","subject":"...","action":"...","pose_details":"...",'
+    '"hand_details":"...","foot_details":"...","joint_body_mechanics":"...",'
+    '"facial_expression_details":"...","occlusion_crop_details":"...","exposed_body_details":"...",'
+    '"intimate_body_details":"...","sexual_act_details":"...","genital_details":"...",'
+    '"fluid_contact_details":"...","nsfw_content_details":"...","content_safety_labels":[],'
+    '"scene":"...",'
     '"composition":"...","lighting":"...","style":"...","color_palette":"...",'
-    '"materials_textures":[],"important_details":[],"visible_text":[],"constraints":[],'
+    '"materials_textures":[],"important_details":[],"visible_text":[],"text_layout":"...","constraints":[],'
     '"negative_prompt":[]}}. '
     "The keyword_prompt is the compact plain prompt. The structured_prompt is the JSON prompt "
     "that can be copied directly to an image model. Do not include metadata keys such as "
-    "version, language, or intent. Do not repeat the full keyword_prompt inside structured_prompt "
+    "version or language. Do not repeat the full keyword_prompt inside structured_prompt "
     "when subject/action/scene/composition fields already describe the image. Omit fields that are "
-    "unknown, empty strings, or empty arrays. Keep the user's language unless the user explicitly asks otherwise."
+    "unknown, empty strings, or empty arrays. negative_prompt must contain only comma/tag-style "
+    "phrases such as blurry, watermark, face, crossed legs; never include imperative wording such "
+    "as no, avoid, do not, 不要, 避免, 禁止. Keep the user's language unless the user explicitly asks otherwise."
 )
 
 DEFAULT_OPTIMIZER_INSTRUCTION = (
@@ -153,6 +190,8 @@ def _video_script_timing_context_text(context: dict[str, Any] | None) -> str:
     frames = _context_number(context, "frame_count", "frames", "length", "frames_number")
     if duration <= 0 and frames > 0 and fps > 0:
         duration = frames / fps
+    if frames <= 0 and duration > 0 and fps > 0:
+        frames = round(duration * fps)
     fragments: list[str] = []
     if duration > 0:
         fragments.append(f"{_format_context_number(duration)} seconds")
@@ -162,10 +201,18 @@ def _video_script_timing_context_text(context: dict[str, Any] | None) -> str:
         fragments.append(f"{_format_context_number(frames)} frames")
     if not fragments:
         return ""
+    ranges: list[str] = []
+    if duration > 0:
+        ranges.append(f"0-{_format_context_number(duration)} seconds")
+    if frames > 0:
+        ranges.append(f"frame 1-{_format_context_number(frames)}")
+    range_text = f" Suggested usable timeline range: {' / '.join(ranges)}." if ranges else ""
     return (
         "Current workflow timing: "
         + ", ".join(fragments)
-        + ". Keep timeline segments within this duration or frame range, and do not output it as a standalone duration parameter. "
+        + ". Arrange the action as a beginning-to-end timeline that fits the full clip."
+        + range_text
+        + " Keep timeline segments within this duration or frame range, and do not output it as a standalone duration parameter. "
     )
 
 
@@ -443,6 +490,12 @@ def _coerce_text_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
+def _coerce_text_value(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return "，".join(_coerce_text_list(value))
+    return str(value or "").strip()
+
+
 def _detect_prompt_language(*values: str) -> str:
     text = " ".join(str(value or "") for value in values)
     return "zh" if CHINESE_RE.search(text) else "en"
@@ -457,16 +510,45 @@ def _normalize_structured_prompt(value: Any, cleaned_prompt: str, optimized_prom
         "language": str(source.get("language") or _detect_prompt_language(cleaned, optimized)).strip() or "en",
         "intent": str(source.get("intent") or cleaned).strip(),
         "prompt": str(source.get("prompt") or optimized).strip(),
-        "subject": str(source.get("subject") or cleaned).strip(),
-        "action": str(source.get("action") or "").strip(),
-        "scene": str(source.get("scene") or source.get("context") or source.get("setting") or "").strip(),
-        "composition": str(source.get("composition") or source.get("framing") or "").strip(),
-        "lighting": str(source.get("lighting") or source.get("atmosphere") or "").strip(),
-        "style": str(source.get("style") or "").strip(),
-        "color_palette": str(source.get("color_palette") or source.get("colors") or "").strip(),
+        "subject": _coerce_text_value(source.get("subject") or cleaned),
+        "subject_attributes": _coerce_text_value(source.get("subject_attributes") or source.get("character_details") or source.get("appearance") or ""),
+        "action": _coerce_text_value(source.get("action") or ""),
+        "pose_details": _coerce_text_value(source.get("pose_details") or source.get("pose") or source.get("body_pose") or ""),
+        "hand_details": _coerce_text_value(source.get("hand_details") or source.get("hands") or source.get("hand_pose") or ""),
+        "foot_details": _coerce_text_value(source.get("foot_details") or source.get("feet_details") or source.get("feet") or source.get("foot_pose") or ""),
+        "joint_body_mechanics": _coerce_text_value(source.get("joint_body_mechanics") or source.get("joint_details") or source.get("body_mechanics") or source.get("weight_distribution") or ""),
+        "facial_expression_details": _coerce_text_value(source.get("facial_expression_details") or source.get("face_details") or source.get("expression_details") or source.get("facial_expression") or ""),
+        "occlusion_crop_details": _coerce_text_value(source.get("occlusion_crop_details") or source.get("occlusion_details") or source.get("crop_details") or source.get("visibility_details") or ""),
+        "exposed_body_details": _coerce_text_value(source.get("exposed_body_details") or source.get("body_exposure") or source.get("skin_exposure") or source.get("nudity_details") or ""),
+        "intimate_body_details": _coerce_text_value(source.get("intimate_body_details") or source.get("private_body_details") or source.get("genital_details") or source.get("intimate_parts") or ""),
+        "sexual_act_details": _coerce_text_value(source.get("sexual_act_details") or source.get("sex_act_details") or source.get("sexual_action_details") or source.get("explicit_action_details") or ""),
+        "genital_details": _coerce_text_value(source.get("genital_details") or source.get("visible_genitals") or source.get("genitals") or source.get("sex_organ_details") or ""),
+        "fluid_contact_details": _coerce_text_value(source.get("fluid_contact_details") or source.get("fluid_details") or source.get("sexual_fluid_details") or source.get("body_fluid_details") or ""),
+        "nsfw_content_details": _coerce_text_value(
+            source.get("nsfw_content_details")
+            or source.get("nsfw_details")
+            or source.get("adult_content_details")
+            or source.get("explicit_content_details")
+            or source.get("sexual_content_details")
+            or ""
+        ),
+        "content_safety_labels": _coerce_text_list(source.get("content_safety_labels") or source.get("safety_labels") or source.get("nsfw_labels")),
+        "scene": _coerce_text_value(source.get("scene") or source.get("context") or source.get("setting") or ""),
+        "foreground": _coerce_text_value(source.get("foreground") or ""),
+        "midground": _coerce_text_value(source.get("midground") or ""),
+        "background": _coerce_text_value(source.get("background") or ""),
+        "composition": _coerce_text_value(source.get("composition") or source.get("framing") or ""),
+        "camera_lens": _coerce_text_value(source.get("camera_lens") or source.get("camera") or source.get("lens") or source.get("viewpoint") or ""),
+        "lighting": _coerce_text_value(source.get("lighting") or source.get("atmosphere") or ""),
+        "style": _coerce_text_value(source.get("style") or ""),
+        "color_palette": _coerce_text_value(source.get("color_palette") or source.get("colors") or ""),
+        "mood_atmosphere": _coerce_text_value(source.get("mood_atmosphere") or source.get("mood") or source.get("atmosphere") or ""),
         "materials_textures": _coerce_text_list(source.get("materials_textures") or source.get("textures")),
+        "clothing_accessories": _coerce_text_list(source.get("clothing_accessories") or source.get("clothing") or source.get("accessories")),
+        "environment_objects": _coerce_text_list(source.get("environment_objects") or source.get("objects") or source.get("props")),
         "important_details": _coerce_text_list(source.get("important_details") or source.get("details")),
         "visible_text": _coerce_text_list(source.get("visible_text") or source.get("text")),
+        "quality_notes": _coerce_text_list(source.get("quality_notes") or source.get("rendering_details") or source.get("technical_details")),
         "constraints": _coerce_text_list(source.get("constraints")),
         "negative_prompt": _coerce_text_list(source.get("negative_prompt") or source.get("avoid")),
     }
@@ -495,7 +577,10 @@ def _prune_empty_prompt_value(value: Any) -> Any:
             cleaned_items.append(pruned)
         return cleaned_items
     if isinstance(value, str):
-        return value.strip()
+        cleaned = value.strip()
+        if _is_generic_absence_fragment(cleaned):
+            return ""
+        return cleaned
     return value
 
 
@@ -513,15 +598,37 @@ def _structured_prompt_for_image_model(structured: dict[str, Any]) -> dict[str, 
         ]
     visual_keys = (
         "subject",
+        "subject_attributes",
         "action",
+        "pose_details",
+        "hand_details",
+        "foot_details",
+        "joint_body_mechanics",
+        "facial_expression_details",
+        "occlusion_crop_details",
+        "exposed_body_details",
+        "intimate_body_details",
+        "sexual_act_details",
+        "genital_details",
+        "fluid_contact_details",
+        "nsfw_content_details",
+        "content_safety_labels",
         "scene",
+        "foreground",
+        "midground",
+        "background",
         "composition",
+        "camera_lens",
         "lighting",
         "style",
         "color_palette",
+        "mood_atmosphere",
         "materials_textures",
+        "clothing_accessories",
+        "environment_objects",
         "important_details",
         "visible_text",
+        "quality_notes",
         "constraints",
         "negative_prompt",
     )
@@ -559,18 +666,104 @@ def _add_prompt_fragment(fragments: list[str], keys: list[str], fragment: str) -
     keys.append(key)
 
 
-def _field_to_prompt_fragments(value: Any) -> list[str]:
+def _field_to_prompt_fragments(value: Any, *, split: bool = True) -> list[str]:
     if isinstance(value, list):
         raw_items = [str(item) for item in value]
     else:
         raw_items = [str(value or "")]
     fragments: list[str] = []
     for item in raw_items:
+        if not split:
+            part = item.strip()
+            if part and not _is_generic_absence_fragment(part):
+                fragments.append(part)
+            continue
         for part in re.split(r"[，,；;、\n]+", item):
             part = part.strip()
-            if part:
+            if part and not _is_generic_absence_fragment(part):
                 fragments.append(part)
     return fragments
+
+
+GENERIC_ABSENCE_KEYS = {
+    "无",
+    "暂无",
+    "没有",
+    "不可见",
+    "看不见",
+    "未可见",
+    "未显示",
+    "不显示",
+    "画面外",
+    "被裁切",
+    "不清晰",
+    "细节不清晰",
+    "不可见画面外",
+    "不可见不可见",
+    "无无",
+    "none",
+    "na",
+    "n/a",
+    "notvisible",
+    "notshown",
+    "outofframe",
+    "croppedout",
+}
+
+
+def _is_generic_absence_fragment(text: str) -> bool:
+    normalized = _prompt_fragment_key(str(text or "").replace("/", "").replace("|", ""))
+    return normalized in GENERIC_ABSENCE_KEYS
+
+
+NEGATIVE_PROMPT_FRAGMENT_RE = re.compile(
+    r"^(?:不要|避免|禁止|不能|不可|别|勿|无|不出现|不得|no\b|avoid\b|without\b|do\s+not\b|don't\b|never\b)",
+    re.IGNORECASE,
+)
+
+NEGATIVE_PROMPT_DIRECTIVE_RE = re.compile(
+    r"^\s*(?:"
+    r"不要|避免|禁止|不能|不可|别|勿|请勿|不得|不出现|"
+    r"no\b|avoid\b|without\b|do\s+not\b|don't\b|never\b"
+    r")\s*(?:"
+    r"出现|生成|新增|添加|加入|写成|误写成|误判成|描述成|描述为|写|露出|改变|"
+    r"appear(?:ing)?|add(?:ing)?|include|generate|show|describe(?:\s+as)?|depict(?:\s+as)?|change"
+    r")?\s*",
+    re.IGNORECASE,
+)
+
+
+def _is_negative_prompt_fragment(text: str) -> bool:
+    return bool(NEGATIVE_PROMPT_FRAGMENT_RE.search(str(text or "").strip()))
+
+
+def normalize_negative_prompt_fragment(text: str) -> str:
+    """Convert imperative negative instructions into image-model negative tags."""
+    cleaned = str(text or "").strip(" \t\r\n，,。.;；:：、")
+    if not cleaned:
+        return ""
+    previous = None
+    while previous != cleaned:
+        previous = cleaned
+        cleaned = NEGATIVE_PROMPT_DIRECTIVE_RE.sub("", cleaned).strip(" \t\r\n，,。.;；:：、")
+    cleaned = re.sub(r"^(?:as|成|为)\s*", "", cleaned, flags=re.IGNORECASE).strip(" \t\r\n，,。.;；:：、")
+    return cleaned
+
+
+def _negative_prompt_items_from_structured(structured: dict[str, Any]) -> list[str]:
+    items: list[str] = []
+    keys: list[str] = []
+    compact = _structured_prompt_for_image_model(structured)
+    for value in _coerce_text_list(compact.get("negative_prompt")):
+        _add_prompt_fragment(items, keys, normalize_negative_prompt_fragment(value))
+    for value in _coerce_text_list(compact.get("constraints")):
+        if _is_negative_prompt_fragment(value):
+            _add_prompt_fragment(items, keys, normalize_negative_prompt_fragment(value))
+    return items
+
+
+def _negative_prompt_from_structured(structured: dict[str, Any]) -> str:
+    return "，".join(_negative_prompt_items_from_structured(structured)).strip()
 
 
 def _plain_prompt_from_structured(structured: dict[str, Any]) -> str:
@@ -578,21 +771,60 @@ def _plain_prompt_from_structured(structured: dict[str, Any]) -> str:
     compact = _structured_prompt_for_image_model(structured)
     order = (
         "subject",
+        "subject_attributes",
         "action",
+        "pose_details",
+        "hand_details",
+        "foot_details",
+        "joint_body_mechanics",
+        "facial_expression_details",
+        "occlusion_crop_details",
+        "exposed_body_details",
+        "intimate_body_details",
+        "sexual_act_details",
+        "genital_details",
+        "fluid_contact_details",
+        "nsfw_content_details",
+        "content_safety_labels",
         "scene",
+        "foreground",
+        "midground",
+        "background",
         "composition",
+        "camera_lens",
         "lighting",
         "style",
         "color_palette",
+        "mood_atmosphere",
         "materials_textures",
+        "clothing_accessories",
+        "environment_objects",
         "important_details",
         "visible_text",
+        "quality_notes",
         "constraints",
     )
     fragments: list[str] = []
     keys: list[str] = []
+    keep_whole_keys = {
+        "pose_details",
+        "hand_details",
+        "foot_details",
+        "joint_body_mechanics",
+        "facial_expression_details",
+        "occlusion_crop_details",
+        "exposed_body_details",
+        "intimate_body_details",
+        "sexual_act_details",
+        "genital_details",
+        "fluid_contact_details",
+        "nsfw_content_details",
+    }
     for key in order:
-        for fragment in _field_to_prompt_fragments(compact.get(key)):
+        raw_value = compact.get(key)
+        if key == "constraints":
+            raw_value = [item for item in _coerce_text_list(raw_value) if not _is_negative_prompt_fragment(item)]
+        for fragment in _field_to_prompt_fragments(raw_value, split=key not in keep_whole_keys):
             _add_prompt_fragment(fragments, keys, fragment)
     return "，".join(fragments).strip()
 
@@ -620,13 +852,14 @@ def parse_prompt_optimizer_output(text: str, cleaned_prompt: str) -> dict[str, A
         ).strip()
         structured = _normalize_structured_prompt(structured_source, cleaned_prompt, optimized)
         structured_plain = _plain_prompt_from_structured(structured)
-        if structured_plain and _prompt_richness_score(structured_plain) >= _prompt_richness_score(optimized) + 3:
+        if structured_plain and _prompt_richness_score(structured_plain) > _prompt_richness_score(optimized):
             optimized = structured_plain
     else:
         optimized = normalized
         structured = _normalize_structured_prompt({}, cleaned_prompt, optimized)
     return {
         "optimized_prompt": optimized,
+        "negative_prompt": _negative_prompt_from_structured(structured),
         "structured_prompt": structured,
         "structured_prompt_json": json.dumps(_structured_prompt_for_image_model(structured), ensure_ascii=False, indent=2),
     }
@@ -951,6 +1184,240 @@ def normalize_interrogated_chinese_prompt(text: str) -> str:
         if fragments:
             lines.append("，".join(fragments))
     return "\n".join(lines).strip()
+
+
+def _llm_user_text(
+    text: str,
+    *,
+    chat_fn: Callable[..., str] = chat_text,
+    model: str | None = None,
+    temperature: float = 0.15,
+    max_tokens: int = 384,
+    timeout: float | None = None,
+) -> str:
+    return chat_fn(
+        [
+            {"role": "system", "content": DIRECT_FINAL_SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
+
+
+def run_llm_prompt_optimizer(
+    prompt: str,
+    *,
+    chat_fn: Callable[..., str] = chat_text,
+    timeout: float = 120.0,
+    max_new_tokens: int = 384,
+    prompt_mode: str = "image",
+    prompt_context: dict[str, Any] | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Optimize image/video prompts with the resident local LLM instead of ComfyUI."""
+    cleaned = clean_user_prompt(prompt)
+    mode = "video_script" if str(prompt_mode or "").lower() in {"video", "video_script", "script"} else "image"
+    tokens = max(96, min(int(max_new_tokens or 384), 4096))
+    if mode == "video_script":
+        llm_prompt = QWEN_VIDEO_SCRIPT_OPTIMIZER_TEMPLATE.format(
+            prompt=cleaned,
+            optimization_guide=VIDEO_SCRIPT_OPTIMIZATION_GUIDE,
+            timing_context=_video_script_timing_context_text(prompt_context),
+        )
+    else:
+        llm_prompt = QWEN_OPTIMIZER_TEMPLATE.format(
+            prompt=cleaned,
+            reference_context=_known_reference_context(cleaned),
+            optimization_guide=IMAGE_PROMPT_OPTIMIZATION_GUIDE,
+            json_schema=STRUCTURED_PROMPT_JSON_SCHEMA,
+        )
+    raw_text = _llm_user_text(
+        llm_prompt,
+        chat_fn=chat_fn,
+        model=model,
+        temperature=0.15 if mode == "video_script" else 0.2,
+        max_tokens=tokens,
+        timeout=timeout,
+    )
+    parsed = (
+        parse_video_script_optimizer_output(raw_text, cleaned)
+        if mode == "video_script"
+        else parse_prompt_optimizer_output(raw_text, cleaned)
+    )
+    if not parsed.get("optimized_prompt"):
+        raise RuntimeError("LLM prompt optimization completed without text output")
+    return {
+        "ok": True,
+        "provider": llm_provider_name(model),
+        "prompt_id": "",
+        "original_prompt": str(prompt or ""),
+        "cleaned_prompt": cleaned,
+        "prompt_mode": mode,
+        **parsed,
+    }
+
+
+def run_llm_prompt_translator(
+    prompt: str,
+    *,
+    chat_fn: Callable[..., str] = chat_text,
+    timeout: float = 90.0,
+    max_new_tokens: int = 192,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Translate an image prompt into Chinese with the resident local LLM."""
+    text = str(prompt or "").strip()
+    if not text:
+        return {"ok": False, "provider": llm_provider_name(model), "prompt_zh": ""}
+    raw_text = _llm_user_text(
+        QWEN_TRANSLATE_TEMPLATE.format(prompt=text),
+        chat_fn=chat_fn,
+        model=model,
+        temperature=0.15,
+        max_tokens=max(96, min(int(max_new_tokens or 192), 4096)),
+        timeout=timeout,
+    )
+    translated = normalize_translated_prompt(raw_text)
+    if translated:
+        return {
+            "ok": True,
+            "provider": llm_provider_name(model),
+            "prompt_id": "",
+            "original_prompt": text,
+            "prompt_zh": translated,
+        }
+    raise RuntimeError("LLM prompt translation completed without text output")
+
+
+def _submit_llm_language_switch(
+    prompt: str,
+    target: str,
+    *,
+    chat_fn: Callable[..., str] = chat_text,
+    timeout: float = 90.0,
+    max_new_tokens: int | None = None,
+    model: str | None = None,
+) -> str:
+    return _llm_user_text(
+        QWEN_LANGUAGE_SWITCH_TEMPLATE.format(
+            prompt=prompt,
+            target_language_name="English" if target == "en" else "Chinese",
+        ),
+        chat_fn=chat_fn,
+        model=model,
+        temperature=0.15,
+        max_tokens=max(96, min(int(max_new_tokens or 256), 4096)),
+        timeout=timeout,
+    )
+
+
+def _run_llm_json_prompt_language_switcher(
+    source_json: dict[str, Any],
+    original_text: str,
+    target: str,
+    *,
+    chat_fn: Callable[..., str] = chat_text,
+    timeout: float = 90.0,
+    max_new_tokens: int | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    leaves = _collect_json_string_leaves(source_json)
+    translated_json = copy.deepcopy(source_json)
+    translated_by_id: dict[str, str] = {}
+    if leaves:
+        payload = _json_language_switch_payload(leaves)
+        target_name = "English" if target == "en" else "Chinese"
+        raw_text = _llm_user_text(
+            "Translate every items[].text value into "
+            f"{target_name}. Return only a valid JSON object with the same shape "
+            '{"items":[{"id":"0","text":"..."}]}. Preserve every id. Do not add '
+            f"explanations or markdown.\n\n{payload}",
+            chat_fn=chat_fn,
+            model=model,
+            temperature=0.15,
+            max_tokens=max(256, min(int(max_new_tokens or 1024), 4096)),
+            timeout=timeout,
+        )
+        translated_by_id = _extract_translated_leaf_map(raw_text)
+
+    for idx, (path, source_text) in enumerate(leaves):
+        translated = translated_by_id.get(str(idx), "").strip()
+        if not translated:
+            raw_text = _submit_llm_language_switch(
+                source_text,
+                target,
+                chat_fn=chat_fn,
+                timeout=timeout,
+                max_new_tokens=max_new_tokens,
+                model=model,
+            )
+            translated = normalize_language_switch_prompt(raw_text, target, source_prompt=source_text)
+        if translated:
+            _set_json_path_value(translated_json, path, translated)
+
+    translated_prompt = json.dumps(translated_json, ensure_ascii=False, indent=2)
+    return {
+        "ok": True,
+        "provider": llm_provider_name(model),
+        "prompt_id": "",
+        "original_prompt": original_text,
+        "target_language": target,
+        "translated_prompt": translated_prompt,
+        "prompt_en": translated_prompt if target == "en" else "",
+        "prompt_zh": translated_prompt if target == "zh" else "",
+        "format": "json",
+    }
+
+
+def run_llm_prompt_language_switcher(
+    prompt: str,
+    target_language: str,
+    *,
+    chat_fn: Callable[..., str] = chat_text,
+    timeout: float = 90.0,
+    max_new_tokens: int = 256,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Translate a prompt between Chinese and English with the resident local LLM."""
+    text = str(prompt or "").strip()
+    target = "en" if str(target_language or "").lower().startswith("en") else "zh"
+    if not text:
+        return {"ok": False, "provider": llm_provider_name(model), "translated_prompt": "", "target_language": target}
+    source_json = _extract_json_object(text)
+    if isinstance(source_json, dict):
+        return _run_llm_json_prompt_language_switcher(
+            source_json,
+            text,
+            target,
+            chat_fn=chat_fn,
+            timeout=timeout,
+            max_new_tokens=max_new_tokens,
+            model=model,
+        )
+    raw_text = _submit_llm_language_switch(
+        text,
+        target,
+        chat_fn=chat_fn,
+        timeout=timeout,
+        max_new_tokens=max_new_tokens,
+        model=model,
+    )
+    translated = normalize_language_switch_prompt(raw_text, target, source_prompt=text)
+    if translated:
+        return {
+            "ok": True,
+            "provider": llm_provider_name(model),
+            "prompt_id": "",
+            "original_prompt": text,
+            "target_language": target,
+            "translated_prompt": translated,
+            "prompt_en": translated if target == "en" else "",
+            "prompt_zh": translated if target == "zh" else "",
+        }
+    raise RuntimeError("LLM prompt language switch completed without text output")
 
 
 def run_qwen_prompt_optimizer(

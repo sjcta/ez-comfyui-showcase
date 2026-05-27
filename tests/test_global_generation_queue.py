@@ -14,6 +14,7 @@ class _BlockingRunner:
         self.first_started = asyncio.Event()
         self.first_release = asyncio.Event()
         self.second_started = asyncio.Event()
+        self.second_release = asyncio.Event()
 
     async def run(self, job_id, *_args, **_kwargs):
         self.started.append(job_id)
@@ -22,10 +23,11 @@ class _BlockingRunner:
             await self.first_release.wait()
         if job_id == "job-two":
             self.second_started.set()
+            await self.second_release.wait()
 
 
 class GlobalGenerationQueueTest(unittest.TestCase):
-    def test_queue_worker_waits_for_current_job_before_starting_next(self):
+    def test_queue_workers_serialize_generation_jobs_globally(self):
         async def run_case():
             old_queue = app._job_queue
             old_runner = app._job_runner
@@ -36,26 +38,30 @@ class GlobalGenerationQueueTest(unittest.TestCase):
             app.jobs["job-two"] = {"id": "job-two", "status": "queued"}
             runner = _BlockingRunner()
             app._job_runner = runner
-            worker = asyncio.create_task(app._queue_worker())
+            workers = [asyncio.create_task(app._queue_worker()) for _ in range(2)]
             try:
                 app._job_queue.put_nowait(_queue_item("job-one", "t2i_flux2_klein.json"))
                 app._job_queue.put_nowait(_queue_item("job-two", "i2i_flux2_klein.json"))
 
                 await asyncio.wait_for(runner.first_started.wait(), timeout=1)
                 await asyncio.sleep(0.05)
-
                 self.assertEqual(runner.started, ["job-one"])
-                self.assertFalse(runner.second_started.is_set())
 
                 runner.first_release.set()
                 await asyncio.wait_for(runner.second_started.wait(), timeout=1)
                 self.assertEqual(runner.started, ["job-one", "job-two"])
+                runner.second_release.set()
+                await asyncio.wait_for(app._job_queue.join(), timeout=1)
             finally:
-                worker.cancel()
-                try:
-                    await worker
-                except asyncio.CancelledError:
-                    pass
+                runner.first_release.set()
+                runner.second_release.set()
+                for worker in workers:
+                    worker.cancel()
+                for worker in workers:
+                    try:
+                        await worker
+                    except asyncio.CancelledError:
+                        pass
                 for task in list(app._job_tasks.values()):
                     if not task.done():
                         task.cancel()

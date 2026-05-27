@@ -3,10 +3,12 @@ import unittest
 
 import app
 from modules.prompt_optimizer import (
+    HIGH_SUCCESS_PROMPT_SPEC_GUIDE,
     IMAGE_PROMPT_OPTIMIZATION_GUIDE,
     STRUCTURED_PROMPT_JSON_SCHEMA,
     VIDEO_SCRIPT_OPTIMIZATION_GUIDE,
     _normalize_optimized_text,
+    _video_script_timing_context_text,
     build_qwen_prompt_optimizer_workflow,
     build_qwen_prompt_language_switch_workflow,
     build_qwen_prompt_translator_workflow,
@@ -18,6 +20,7 @@ from modules.prompt_optimizer import (
     normalize_translated_prompt,
     parse_prompt_optimizer_output,
     parse_video_script_optimizer_output,
+    run_llm_prompt_optimizer,
     run_prompt_language_switcher,
 )
 
@@ -49,8 +52,15 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertIn("切成片的西瓜", workflow["1"]["inputs"]["text"])
         self.assertIn("Nano Banana / GPT Image", workflow["1"]["inputs"]["text"])
         self.assertIn("Scene / Subject / Important Details / Use Case / Constraints", workflow["1"]["inputs"]["text"])
+        self.assertIn("High-success image prompt spec", workflow["1"]["inputs"]["text"])
+        self.assertIn("任务目标、保真要求、主体、动作姿态、场景、构图镜头、光线色彩、材质细节、风格媒介、文字版式、负向限制", workflow["1"]["inputs"]["text"])
+        self.assertIn("The positive prompt is the main control surface", workflow["1"]["inputs"]["text"])
+        self.assertIn("negative prompts should be pure short phrases/tags", workflow["1"]["inputs"]["text"])
         self.assertIn("structured_prompt", workflow["1"]["inputs"]["text"])
         self.assertIn("valid JSON object", workflow["1"]["inputs"]["text"])
+        self.assertIn('"intent":"..."', workflow["1"]["inputs"]["text"])
+        self.assertIn('"identity_lock":"..."', workflow["1"]["inputs"]["text"])
+        self.assertIn('"text_layout":"..."', workflow["1"]["inputs"]["text"])
         self.assertIn(STRUCTURED_PROMPT_JSON_SCHEMA, workflow["1"]["inputs"]["text"])
         self.assertEqual(workflow["2"]["class_type"], "ShowText|pysssss")
         self.assertEqual(workflow["2"]["inputs"]["text"], ["1", 0])
@@ -59,6 +69,7 @@ class PromptOptimizerTests(unittest.TestCase):
         workflow = build_superprompt_workflow("切成片的西瓜", max_new_tokens=96)
 
         self.assertIn(IMAGE_PROMPT_OPTIMIZATION_GUIDE, workflow["2"]["inputs"]["instruction_prompt"])
+        self.assertIn(HIGH_SUCCESS_PROMPT_SPEC_GUIDE, workflow["2"]["inputs"]["instruction_prompt"])
 
     def test_build_qwen_workflow_preserves_known_cultural_reference(self):
         workflow = build_qwen_prompt_optimizer_workflow("黑猫警长")
@@ -104,6 +115,16 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertIn("Current workflow timing: 10 seconds", text)
         self.assertIn("24 fps", text)
         self.assertIn("Keep timeline segments within this duration", text)
+        self.assertIn("Arrange the action as a beginning-to-end timeline", text)
+
+    def test_video_script_timing_context_derives_seconds_and_frame_range(self):
+        text = _video_script_timing_context_text({"frame_count": 121, "fps": 24})
+
+        self.assertIn("5.04 seconds", text)
+        self.assertIn("24 fps", text)
+        self.assertIn("121 frames", text)
+        self.assertIn("0-5.04 seconds", text)
+        self.assertIn("frame 1-121", text)
 
     def test_parse_video_script_optimizer_output_skips_image_json_variant(self):
         parsed = parse_video_script_optimizer_output(
@@ -238,6 +259,26 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertNotIn("negative_prompt", structured_json)
         self.assertEqual(structured_json["important_details"], ["白色瓷盘"])
 
+    def test_parse_prompt_optimizer_output_normalizes_array_color_palette(self):
+        text = json.dumps(
+            {
+                "keyword_prompt": "红色机甲少女",
+                "structured_prompt": {
+                    "subject": "红色机甲少女",
+                    "scene": "棚拍背景",
+                    "color_palette": ["红色", "黑色", "绿色"],
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = parse_prompt_optimizer_output(text, "红色机甲少女")
+
+        self.assertEqual(parsed["structured_prompt"]["color_palette"], "红色，黑色，绿色")
+        self.assertIn("黑色", parsed["optimized_prompt"])
+        self.assertIn("绿色", parsed["optimized_prompt"])
+        self.assertNotIn("[", parsed["optimized_prompt"])
+
     def test_structured_prompt_json_removes_prompt_duplicate_from_details(self):
         text = """{
           "keyword_prompt": "极简抽象海报，几何形状构成的人脸，黄灰粉渐变色调",
@@ -296,6 +337,187 @@ class PromptOptimizerTests(unittest.TestCase):
             "年轻女子，十七八岁，棕色长发，白皙肤色，佩戴精致项链，身穿白色露肩连衣裙",
         )
         self.assertEqual(structured_json["action"], "坐在床前，面对大窗户，直视镜头，神情宁静")
+
+    def test_structured_prompt_json_preserves_pose_and_exposed_body_details(self):
+        text = """{
+          "keyword_prompt": "女性泳装人像，海边站姿",
+          "structured_prompt": {
+            "subject": "成年女性海边人像",
+            "action": "单腿承重站立，一只手扶住帽檐",
+            "pose_details": "肩膀打开，腰部轻微扭转，髋部偏向画面右侧，膝盖微弯",
+            "exposed_body_details": "肩颈、锁骨、手臂、腹部和大腿大面积可见，穿着比基尼泳装但未见完全裸露",
+            "clothing_accessories": ["比基尼上衣", "高腰泳装下装"]
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertEqual(structured_json["pose_details"], "肩膀打开，腰部轻微扭转，髋部偏向画面右侧，膝盖微弯")
+        self.assertEqual(
+            structured_json["exposed_body_details"],
+            "肩颈、锁骨、手臂、腹部和大腿大面积可见，穿着比基尼泳装但未见完全裸露",
+        )
+        self.assertIn("腰部轻微扭转", parsed["optimized_prompt"])
+        self.assertIn("腹部和大腿大面积可见", parsed["optimized_prompt"])
+
+    def test_structured_prompt_json_preserves_nsfw_content_details(self):
+        text = """{
+          "keyword_prompt": "成人女性正面站立，棚拍背景，局部裸露",
+          "structured_prompt": {
+            "subject": "成人女性",
+            "pose_details": "正面站立，双臂自然下垂",
+            "exposed_body_details": "胸部、腹部和大腿可见，衣物覆盖范围有限",
+            "nsfw_content_details": "成人裸露内容，乳头和外阴区域可见，未出现性行为"
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertEqual(
+            structured_json["nsfw_content_details"],
+            "成人裸露内容，乳头和外阴区域可见，未出现性行为",
+        )
+        self.assertIn("乳头和外阴区域可见", parsed["optimized_prompt"])
+
+    def test_structured_prompt_json_preserves_limb_face_intimate_details_and_labels(self):
+        text = """{
+          "keyword_prompt": "成人女性裸露站姿，正面棚拍",
+          "structured_prompt": {
+            "subject": "成人女性",
+            "facial_expression_details": "嘴唇微张，眉毛放松，眼睛直视镜头",
+            "pose_details": "正面站立，脊柱直立，肩膀水平，髋部轻微左倾",
+            "hand_details": "左手垂在左大腿外侧，右手手指弯曲贴近髋部",
+            "foot_details": "双脚可见，左脚承重，右脚脚尖略向外",
+            "joint_body_mechanics": "肘关节轻微弯曲，膝关节自然伸直，重心落在左腿",
+            "exposed_body_details": "胸部、腹部、臀部和大腿完全裸露",
+            "intimate_body_details": "乳头、外阴轮廓和臀沟可见，无遮挡",
+            "nsfw_content_details": "NSFW，adult_nudity，成人全裸内容，乳头和外阴轮廓可见，未出现性行为",
+            "content_safety_labels": ["NSFW", "adult_nudity"]
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertEqual(structured_json["hand_details"], "左手垂在左大腿外侧，右手手指弯曲贴近髋部")
+        self.assertEqual(structured_json["foot_details"], "双脚可见，左脚承重，右脚脚尖略向外")
+        self.assertEqual(structured_json["joint_body_mechanics"], "肘关节轻微弯曲，膝关节自然伸直，重心落在左腿")
+        self.assertEqual(structured_json["facial_expression_details"], "嘴唇微张，眉毛放松，眼睛直视镜头")
+        self.assertEqual(structured_json["intimate_body_details"], "乳头、外阴轮廓和臀沟可见，无遮挡")
+        self.assertEqual(structured_json["content_safety_labels"], ["NSFW", "adult_nudity"])
+        self.assertIn("右手手指弯曲贴近髋部", parsed["optimized_prompt"])
+        self.assertIn("乳头、外阴轮廓和臀沟可见", parsed["optimized_prompt"])
+        self.assertIn("NSFW", parsed["optimized_prompt"])
+
+    def test_structured_prompt_json_preserves_occlusion_and_crop_details(self):
+        text = """{
+          "keyword_prompt": "粉色衣物人物，近距离低角度抬腿构图，室内门口",
+          "structured_prompt": {
+            "subject": "年龄不可确认的人物，粉色短袖上衣和短裙或短裤疑似",
+            "pose_details": "一条腿高抬贴近镜头，身体侧向后方，躯干局部可见",
+            "foot_details": "双脚均在画面外不可见",
+            "joint_body_mechanics": "抬起腿的髋关节大幅屈曲，膝部靠近镜头形成近大远小透视",
+            "facial_expression_details": "脸部上半部分被裁切，表情不可准确判断",
+            "occlusion_crop_details": "头顶、眼睛和双脚被画幅裁切；胯部和内侧大腿被抬起的大腿及粉色衣物遮挡，隐私部位不可见",
+            "exposed_body_details": "腹部、腰侧和大腿大面积皮肤可见，但无可见性器官",
+            "camera_lens": "手机近距离低角度仰拍，前景大腿占据画面右侧大部分区域"
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertEqual(
+            structured_json["occlusion_crop_details"],
+            "头顶、眼睛和双脚被画幅裁切；胯部和内侧大腿被抬起的大腿及粉色衣物遮挡，隐私部位不可见",
+        )
+        self.assertIn("双脚均在画面外不可见", parsed["optimized_prompt"])
+        self.assertIn("隐私部位不可见", parsed["optimized_prompt"])
+        self.assertIn("手机近距离低角度仰拍", parsed["optimized_prompt"])
+
+    def test_plain_prompt_drops_generic_absence_fragments_but_keeps_specific_crop(self):
+        text = """{
+          "keyword_prompt": "粉色衣物人物，低角度抬腿构图",
+          "structured_prompt": {
+            "subject": "粉色衣物人物",
+            "hand_details": "不可见/画面外",
+            "foot_details": "不可见",
+            "facial_expression_details": "不可见/不可见",
+            "occlusion_crop_details": "头顶、眼睛和双脚被画幅裁切；胯部被抬起的大腿遮挡",
+            "camera_lens": "低角度近距离仰拍"
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertIn("头顶、眼睛和双脚被画幅裁切", parsed["optimized_prompt"])
+        self.assertIn("低角度近距离仰拍", parsed["optimized_prompt"])
+        self.assertNotIn("不可见/画面外", parsed["optimized_prompt"])
+        self.assertNotIn("不可见/不可见", parsed["optimized_prompt"])
+        self.assertNotIn("hand_details", structured_json)
+        self.assertNotIn("foot_details", structured_json)
+        self.assertNotIn("facial_expression_details", structured_json)
+        self.assertEqual(structured_json["occlusion_crop_details"], "头顶、眼睛和双脚被画幅裁切；胯部被抬起的大腿遮挡")
+
+    def test_structured_prompt_json_preserves_explicit_adult_sexual_details(self):
+        text = """{
+          "keyword_prompt": "成人女性，明确成人裸露，性器官可见，手部与性器官接触",
+          "structured_prompt": {
+            "subject": "成人女性",
+            "hand_details": "右手位于两腿之间，手指接触外阴区域",
+            "genital_details": "外阴和阴唇可见，局部发红",
+            "sexual_act_details": "手指插入阴道内，属于明确成人性行为细节",
+            "fluid_contact_details": "外阴和手指附近可见白色液体附着",
+            "intimate_body_details": "外阴、阴唇和阴道入口可见，无遮挡",
+            "nsfw_content_details": "NSFW，adult_nudity，explicit_sexual_content，成人裸露，性器官可见，手指插入阴道，可见白色液体",
+            "content_safety_labels": ["NSFW", "adult_nudity", "explicit_sexual_content", "visible_genitals", "sexual_fluid"]
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+        structured_json = json.loads(parsed["structured_prompt_json"])
+
+        self.assertEqual(structured_json["genital_details"], "外阴和阴唇可见，局部发红")
+        self.assertEqual(structured_json["sexual_act_details"], "手指插入阴道内，属于明确成人性行为细节")
+        self.assertEqual(structured_json["fluid_contact_details"], "外阴和手指附近可见白色液体附着")
+        self.assertEqual(
+            structured_json["content_safety_labels"],
+            ["NSFW", "adult_nudity", "explicit_sexual_content", "visible_genitals", "sexual_fluid"],
+        )
+        self.assertIn("手指插入阴道内", parsed["optimized_prompt"])
+        self.assertIn("白色液体", parsed["optimized_prompt"])
+        self.assertIn("explicit_sexual_content", parsed["optimized_prompt"])
+
+    def test_plain_prompt_splits_positive_and_negative_constraints(self):
+        text = """{
+          "keyword_prompt": "东亚女性，粉色丝绸套装，抬腿构图",
+          "structured_prompt": {
+            "subject": "东亚女性",
+            "pose_details": "一条腿高抬靠近镜头，身体后仰，躯干被局部裁切",
+            "hand_details": "右手扶在抬起的大腿旁",
+            "exposed_body_details": "大腿和腹部皮肤大面积可见",
+            "scene": "室内门口，右侧有蓝色房间",
+            "constraints": ["不要裁成头像特写", "避免新增道具", "保持原有蓝色门框"],
+            "negative_prompt": ["不要多余人物", "不要改变粉色衣服"]
+          }
+        }"""
+
+        parsed = parse_prompt_optimizer_output(text, "")
+
+        self.assertIn("一条腿高抬靠近镜头", parsed["optimized_prompt"])
+        self.assertIn("右手扶在抬起的大腿旁", parsed["optimized_prompt"])
+        self.assertNotIn("不要裁成头像特写", parsed["optimized_prompt"])
+        self.assertNotIn("避免新增道具", parsed["optimized_prompt"])
+        self.assertIn("头像特写", parsed["negative_prompt"])
+        self.assertIn("道具", parsed["negative_prompt"])
+        self.assertIn("多余人物", parsed["negative_prompt"])
+        self.assertIn("粉色衣服", parsed["negative_prompt"])
+        self.assertNotIn("不要", parsed["negative_prompt"])
+        self.assertNotIn("避免", parsed["negative_prompt"])
+        self.assertNotIn("保持原有蓝色门框", parsed["negative_prompt"])
 
     def test_plain_prompt_uses_richer_structured_fields_when_keyword_is_sparse(self):
         text = """{
@@ -468,19 +690,16 @@ class PromptOptimizerTests(unittest.TestCase):
 
     def test_api_prompt_optimize_returns_structured_result(self):
         calls = []
-        old_runner = app.run_prompt_optimizer
+        old_runner = getattr(app, "run_llm_prompt_optimizer", None)
         old_instances = app._get_enabled_instances
-        old_picker = app._pick_ready_aux_instance
         try:
-            app._get_enabled_instances = lambda: [{"name": "A", "url": "http://comfy-a"}]
-            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._get_enabled_instances = lambda: self.fail("prompt optimize should use the shared LLM, not ComfyUI instances")
 
-            def fake_runner(prompt, base_url, post, get, **kwargs):
-                calls.append((prompt, base_url))
+            def fake_runner(prompt, **kwargs):
+                calls.append((prompt, kwargs.get("prompt_mode")))
                 return {
                     "ok": True,
-                    "provider": "comfyui-superprompt",
-                    "prompt_id": "p1",
+                    "provider": "llm-gemma-4-e2b",
                     "original_prompt": prompt,
                     "cleaned_prompt": "切成片的西瓜",
                     "optimized_prompt": "fresh sliced watermelon, natural lighting",
@@ -488,50 +707,49 @@ class PromptOptimizerTests(unittest.TestCase):
                     "structured_prompt_json": "{\"subject\":\"watermelon\"}",
                 }
 
-            app.run_prompt_optimizer = fake_runner
+            app.run_llm_prompt_optimizer = fake_runner
             result = app.api_prompt_optimize(
                 app.PromptOptimizeRequest(prompt="请帮我生成一张切成片的西瓜"),
                 current_user={"sub": "u1", "role": "user"},
             )
         finally:
-            app.run_prompt_optimizer = old_runner
+            if old_runner is None:
+                delattr(app, "run_llm_prompt_optimizer")
+            else:
+                app.run_llm_prompt_optimizer = old_runner
             app._get_enabled_instances = old_instances
-            app._pick_ready_aux_instance = old_picker
 
-        self.assertEqual(calls, [("请帮我生成一张切成片的西瓜", "http://comfy-a")])
+        self.assertEqual(calls, [("请帮我生成一张切成片的西瓜", "image")])
         self.assertEqual(result["cleaned_prompt"], "切成片的西瓜")
         self.assertEqual(result["optimized_prompt"], "fresh sliced watermelon, natural lighting")
         self.assertEqual(result["structured_prompt"]["subject"], "watermelon")
         self.assertIn("subject", result["structured_prompt_json"])
+        self.assertEqual(result["instance"], "LLM")
 
     def test_api_prompt_optimize_passes_video_script_mode(self):
         calls = []
-        old_runner = app.run_prompt_optimizer
+        old_runner = getattr(app, "run_llm_prompt_optimizer", None)
         old_instances = app._get_enabled_instances
-        old_picker = app._pick_ready_aux_instance
         try:
-            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
-            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._get_enabled_instances = lambda: self.fail("video script optimize should use the shared LLM, not ComfyUI instances")
 
-            def fake_runner(prompt, base_url, post, get, **kwargs):
+            def fake_runner(prompt, **kwargs):
                 calls.append((
                     prompt,
-                    base_url,
                     kwargs.get("prompt_mode"),
                     kwargs.get("max_new_tokens"),
                     kwargs.get("prompt_context"),
                 ))
                 return {
                     "ok": True,
-                    "provider": "comfyui-qwen3-vl-4b-4bit",
-                    "prompt_id": "p-video",
+                    "provider": "llm-gemma-4-e2b",
                     "original_prompt": prompt,
                     "cleaned_prompt": "雨夜黑猫",
                     "optimized_prompt": "10秒雨夜霓虹街道，一只黑猫从画面左侧穿过，镜头低机位跟随。",
                     "prompt_mode": "video_script",
                 }
 
-            app.run_prompt_optimizer = fake_runner
+            app.run_llm_prompt_optimizer = fake_runner
             result = app.api_prompt_optimize(
                 app.PromptOptimizeRequest(
                     prompt="雨夜黑猫",
@@ -542,68 +760,82 @@ class PromptOptimizerTests(unittest.TestCase):
                 current_user={"sub": "u1", "role": "user"},
             )
         finally:
-            app.run_prompt_optimizer = old_runner
+            if old_runner is None:
+                delattr(app, "run_llm_prompt_optimizer")
+            else:
+                app.run_llm_prompt_optimizer = old_runner
             app._get_enabled_instances = old_instances
-            app._pick_ready_aux_instance = old_picker
 
-        self.assertEqual(calls, [("雨夜黑猫", "http://prompt", "video_script", 768, {"duration_seconds": 10, "fps": 24})])
+        self.assertEqual(calls, [("雨夜黑猫", "video_script", 768, {"duration_seconds": 10, "fps": 24})])
         self.assertEqual(result["prompt_mode"], "video_script")
         self.assertIn("黑猫", result["optimized_prompt"])
 
+    def test_llm_prompt_optimizer_requests_direct_final_answer(self):
+        calls = []
+
+        def fake_chat(messages, **kwargs):
+            calls.append({"messages": messages, **kwargs})
+            return '{"keyword_prompt":"白色杯子，木桌，自然窗光","structured_prompt":{"subject":"白色杯子","scene":"木桌","lighting":"自然窗光"}}'
+
+        result = run_llm_prompt_optimizer("一只白色杯子放在木桌上，窗边自然光", chat_fn=fake_chat)
+
+        self.assertEqual(calls[0]["messages"][0]["role"], "system")
+        self.assertIn("Do not reason", calls[0]["messages"][0]["content"])
+        self.assertEqual(calls[0]["messages"][1]["role"], "user")
+        self.assertIn("白色杯子", result["optimized_prompt"])
+
     def test_api_prompt_translate_auto_targets_english_for_chinese_prompt(self):
         calls = []
-        old_runner = app.run_prompt_language_switcher
+        old_runner = getattr(app, "run_llm_prompt_language_switcher", None)
         old_instances = app._get_enabled_instances
-        old_picker = app._pick_ready_aux_instance
         try:
-            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
-            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._get_enabled_instances = lambda: self.fail("prompt translate should use the shared LLM, not ComfyUI instances")
 
-            def fake_runner(prompt, target_language, base_url, post, get, **kwargs):
-                calls.append((prompt, target_language, base_url))
+            def fake_runner(prompt, target_language, **kwargs):
+                calls.append((prompt, target_language))
                 return {
                     "ok": True,
-                    "provider": "qwen",
+                    "provider": "llm-gemma-4-e2b",
                     "target_language": target_language,
                     "translated_prompt": "sliced watermelon, white ceramic plate",
                     "prompt_en": "sliced watermelon, white ceramic plate",
                 }
 
-            app.run_prompt_language_switcher = fake_runner
+            app.run_llm_prompt_language_switcher = fake_runner
             result = app.api_prompt_translate(
                 app.PromptTranslateRequest(prompt="切成片的西瓜"),
                 current_user={"sub": "u1", "role": "user"},
             )
         finally:
-            app.run_prompt_language_switcher = old_runner
+            if old_runner is None:
+                delattr(app, "run_llm_prompt_language_switcher")
+            else:
+                app.run_llm_prompt_language_switcher = old_runner
             app._get_enabled_instances = old_instances
-            app._pick_ready_aux_instance = old_picker
 
-        self.assertEqual(calls, [("切成片的西瓜", "en", "http://prompt")])
+        self.assertEqual(calls, [("切成片的西瓜", "en")])
         self.assertEqual(result["translated_prompt"], "sliced watermelon, white ceramic plate")
         self.assertEqual(result["target_language"], "en")
 
     def test_api_prompt_translate_reuses_cached_pair_and_reverse(self):
         calls = []
-        old_runner = app.run_prompt_language_switcher
+        old_runner = getattr(app, "run_llm_prompt_language_switcher", None)
         old_instances = app._get_enabled_instances
-        old_picker = app._pick_ready_aux_instance
         app._PROMPT_TRANSLATE_CACHE.clear()
         try:
-            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
-            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._get_enabled_instances = lambda: self.fail("prompt translate cache should not require ComfyUI instances")
 
-            def fake_runner(prompt, target_language, base_url, post, get, **kwargs):
-                calls.append((prompt, target_language, base_url))
+            def fake_runner(prompt, target_language, **kwargs):
+                calls.append((prompt, target_language))
                 return {
                     "ok": True,
-                    "provider": "qwen",
+                    "provider": "llm-gemma-4-e2b",
                     "target_language": target_language,
                     "translated_prompt": "sliced watermelon, white ceramic plate",
                     "prompt_en": "sliced watermelon, white ceramic plate",
                 }
 
-            app.run_prompt_language_switcher = fake_runner
+            app.run_llm_prompt_language_switcher = fake_runner
             first = app.api_prompt_translate(
                 app.PromptTranslateRequest(prompt="切成片的西瓜"),
                 current_user={"sub": "u1", "role": "user"},
@@ -617,12 +849,14 @@ class PromptOptimizerTests(unittest.TestCase):
                 current_user={"sub": "u1", "role": "user"},
             )
         finally:
-            app.run_prompt_language_switcher = old_runner
+            if old_runner is None:
+                delattr(app, "run_llm_prompt_language_switcher")
+            else:
+                app.run_llm_prompt_language_switcher = old_runner
             app._get_enabled_instances = old_instances
-            app._pick_ready_aux_instance = old_picker
             app._PROMPT_TRANSLATE_CACHE.clear()
 
-        self.assertEqual(calls, [("切成片的西瓜", "en", "http://prompt")])
+        self.assertEqual(calls, [("切成片的西瓜", "en")])
         self.assertFalse(first["cached"])
         self.assertTrue(second["cached"])
         self.assertEqual(second["translated_prompt"], "sliced watermelon, white ceramic plate")
@@ -632,19 +866,17 @@ class PromptOptimizerTests(unittest.TestCase):
 
     def test_api_prompt_translate_preserves_json_prompt_format(self):
         calls = []
-        old_runner = app.run_prompt_language_switcher
+        old_runner = getattr(app, "run_llm_prompt_language_switcher", None)
         old_instances = app._get_enabled_instances
-        old_picker = app._pick_ready_aux_instance
         app._PROMPT_TRANSLATE_CACHE.clear()
         try:
-            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
-            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._get_enabled_instances = lambda: self.fail("prompt translate JSON should not require ComfyUI instances")
 
-            def fake_runner(prompt, target_language, base_url, post, get, **kwargs):
-                calls.append((prompt, target_language, base_url))
+            def fake_runner(prompt, target_language, **kwargs):
+                calls.append((prompt, target_language))
                 return {
                     "ok": True,
-                    "provider": "qwen",
+                    "provider": "llm-gemma-4-e2b",
                     "target_language": target_language,
                     "translated_prompt": json.dumps(
                         {
@@ -657,18 +889,20 @@ class PromptOptimizerTests(unittest.TestCase):
                     "prompt_en": "",
                 }
 
-            app.run_prompt_language_switcher = fake_runner
+            app.run_llm_prompt_language_switcher = fake_runner
             result = app.api_prompt_translate(
                 app.PromptTranslateRequest(prompt='{"subject":"切成片的西瓜"}'),
                 current_user={"sub": "u1", "role": "user"},
             )
         finally:
-            app.run_prompt_language_switcher = old_runner
+            if old_runner is None:
+                delattr(app, "run_llm_prompt_language_switcher")
+            else:
+                app.run_llm_prompt_language_switcher = old_runner
             app._get_enabled_instances = old_instances
-            app._pick_ready_aux_instance = old_picker
             app._PROMPT_TRANSLATE_CACHE.clear()
 
-        self.assertEqual(calls, [('{"subject":"切成片的西瓜"}', "en", "http://prompt")])
+        self.assertEqual(calls, [('{"subject":"切成片的西瓜"}', "en")])
         self.assertEqual(result["format"], "json")
         parsed = json.loads(result["translated_prompt"])
         self.assertEqual(parsed["subject"], "sliced watermelon")
@@ -683,10 +917,17 @@ class PromptOptimizerTests(unittest.TestCase):
         old_build = app.build_image_interrogate_workflow
         old_ensure = app.ensure_workflow_images_available
         old_interrogator = app.run_image_interrogator
-        old_translator = app.run_prompt_translator
-        old_optimizer = app.run_prompt_optimizer
+        old_translator = getattr(app, "run_llm_prompt_translator", None)
+        old_optimizer = getattr(app, "run_llm_prompt_optimizer", None)
+        old_llm_interrogator = getattr(app, "run_llm_image_interrogator", None)
+        old_llm_vision_error = getattr(app, "LLMVisionUnsupportedError", None)
         old_mark = app._mark_aux_instance_active
         try:
+            class FakeVisionUnsupported(Exception):
+                pass
+
+            app.LLMVisionUnsupportedError = FakeVisionUnsupported
+            app.run_llm_image_interrogator = lambda *args, **kwargs: (_ for _ in ()).throw(FakeVisionUnsupported("mmproj missing"))
             app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
             app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
             app._resolve_input_image_path = lambda image: "/tmp/input.png"
@@ -698,21 +939,21 @@ class PromptOptimizerTests(unittest.TestCase):
                 "provider": "comfyui-wd14-florence",
                 "prompt": "A futuristic sports car on a winding mountain road.",
             }
-            app.run_prompt_translator = lambda *args, **kwargs: {
-                "provider": "qwen",
+            app.run_llm_prompt_translator = lambda *args, **kwargs: {
+                "provider": "llm-gemma-4-e2b",
                 "prompt_zh": "一辆未来主义超跑在蜿蜒山路上。",
             }
 
-            def fake_optimizer(prompt, base_url, post, get, **kwargs):
-                optimize_calls.append((prompt, base_url))
+            def fake_optimizer(prompt, **kwargs):
+                optimize_calls.append(prompt)
                 return {
-                    "provider": "qwen-json",
+                    "provider": "llm-gemma-4-e2b",
                     "optimized_prompt": "未来主义超跑，蜿蜒山路",
                     "structured_prompt": {"subject": "未来主义超跑"},
                     "structured_prompt_json": "{\"subject\":\"未来主义超跑\"}",
                 }
 
-            app.run_prompt_optimizer = fake_optimizer
+            app.run_llm_prompt_optimizer = fake_optimizer
             app._mark_aux_instance_active = lambda inst: None
             result = app.api_prompt_interrogate(
                 app.PromptInterrogateRequest(image="sample.png"),
@@ -726,15 +967,184 @@ class PromptOptimizerTests(unittest.TestCase):
             app.build_image_interrogate_workflow = old_build
             app.ensure_workflow_images_available = old_ensure
             app.run_image_interrogator = old_interrogator
-            app.run_prompt_translator = old_translator
-            app.run_prompt_optimizer = old_optimizer
+            if old_translator is None:
+                delattr(app, "run_llm_prompt_translator")
+            else:
+                app.run_llm_prompt_translator = old_translator
+            if old_optimizer is None:
+                delattr(app, "run_llm_prompt_optimizer")
+            else:
+                app.run_llm_prompt_optimizer = old_optimizer
+            if old_llm_interrogator is None:
+                delattr(app, "run_llm_image_interrogator")
+            else:
+                app.run_llm_image_interrogator = old_llm_interrogator
+            if old_llm_vision_error is None:
+                delattr(app, "LLMVisionUnsupportedError")
+            else:
+                app.LLMVisionUnsupportedError = old_llm_vision_error
             app._mark_aux_instance_active = old_mark
 
-        self.assertEqual(optimize_calls, [("一辆未来主义超跑在蜿蜒山路上。", "http://prompt")])
-        self.assertEqual(result["prompt_zh"], "一辆未来主义超跑在蜿蜒山路上。")
+        self.assertEqual(optimize_calls, ["一辆未来主义超跑在蜿蜒山路上。"])
+        self.assertEqual(result["prompt"], "未来主义超跑，蜿蜒山路")
+        self.assertEqual(result["prompt_zh"], "未来主义超跑，蜿蜒山路")
+        self.assertEqual(result["structured_optimized_prompt"], "未来主义超跑，蜿蜒山路")
         self.assertEqual(result["structured_prompt"]["subject"], "未来主义超跑")
         self.assertIn("subject", result["structured_prompt_json"])
-        self.assertEqual(result["structured_provider"], "qwen-json")
+        self.assertEqual(result["structured_provider"], "llm-gemma-4-e2b")
+
+    def test_api_prompt_interrogate_uses_llm_vision_without_comfyui_when_available(self):
+        old_instances = app._get_enabled_instances
+        old_resolve = app._resolve_input_image_path
+        old_prepare = app.prepare_interrogate_image
+        old_llm_interrogator = getattr(app, "run_llm_image_interrogator", None)
+        try:
+            app._get_enabled_instances = lambda: self.fail("LLM vision interrogation should not require ComfyUI instances")
+            app._resolve_input_image_path = lambda image: "/tmp/input.png"
+            app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
+
+            def fake_llm_interrogator(image_path, **kwargs):
+                self.assertEqual(image_path, "/tmp/input.png")
+                self.assertEqual(kwargs.get("max_new_tokens"), 512)
+                self.assertTrue(kwargs.get("compact"))
+                self.assertTrue(kwargs.get("include_quality"))
+                return {
+                    "ok": True,
+                    "provider": "llm-gemma-4-e2b-vision",
+                    "prompt": "红色机甲少女，棚拍背景",
+                    "prompt_zh": "红色机甲少女，棚拍背景",
+                    "prompt_en": "red mecha girl, studio background",
+                    "structured_prompt": {"subject": "红色机甲少女"},
+                    "structured_prompt_json": "{\"subject\":\"红色机甲少女\"}",
+                    "reverse_prompt_quality": {"score": 96, "target_score": 95, "passed": True, "issues": []},
+                }
+
+            app.run_llm_image_interrogator = fake_llm_interrogator
+            result = app.api_prompt_interrogate(
+                app.PromptInterrogateRequest(image="sample.png"),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app._get_enabled_instances = old_instances
+            app._resolve_input_image_path = old_resolve
+            app.prepare_interrogate_image = old_prepare
+            if old_llm_interrogator is None:
+                delattr(app, "run_llm_image_interrogator")
+            else:
+                app.run_llm_image_interrogator = old_llm_interrogator
+
+        self.assertEqual(result["provider"], "llm-gemma-4-e2b-vision")
+        self.assertEqual(result["instance"], "LLM")
+        self.assertEqual(result["image_preprocess"]["filename"], "optimized.png")
+        self.assertNotIn("reverse_prompt_quality", result)
+
+    def test_api_prompt_interrogate_expert_mode_uses_expert_runner(self):
+        old_instances = app._get_enabled_instances
+        old_resolve = app._resolve_input_image_path
+        old_prepare = app.prepare_interrogate_image
+        old_expert = getattr(app, "run_llm_expert_image_interrogator", None)
+        try:
+            app._get_enabled_instances = lambda: self.fail("expert interrogation should use LLM experts, not ComfyUI instances")
+            app._resolve_input_image_path = lambda image: "/tmp/input.png"
+            app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
+
+            def fake_expert(image_path, **kwargs):
+                self.assertEqual(image_path, "/tmp/input.png")
+                self.assertEqual(kwargs.get("max_new_tokens"), 1536)
+                self.assertTrue(kwargs.get("single_pass"))
+                self.assertTrue(kwargs.get("include_quality"))
+                return {
+                    "ok": True,
+                    "provider": "llm-gemma-4-e2b-vision-expert",
+                    "prompt": "专家合并提示词",
+                    "prompt_zh": "专家合并提示词",
+                    "structured_prompt_json": "{\"subject\":\"专家合并提示词\"}",
+                    "expert_interrogate": {
+                        "enabled": True,
+                        "quality": {"score": 80, "target_score": 95, "passed": False},
+                        "experts": [{"id": "composition", "label": "构图镜头专家", "summary": "低角度"}],
+                    },
+                    "reverse_prompt_quality": {"score": 80, "target_score": 95, "passed": False, "issues": []},
+                }
+
+            app.run_llm_expert_image_interrogator = fake_expert
+            result = app.api_prompt_interrogate(
+                app.PromptInterrogateRequest(image="sample.png", expert=True),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app._get_enabled_instances = old_instances
+            app._resolve_input_image_path = old_resolve
+            app.prepare_interrogate_image = old_prepare
+            if old_expert is None:
+                delattr(app, "run_llm_expert_image_interrogator")
+            else:
+                app.run_llm_expert_image_interrogator = old_expert
+
+        self.assertEqual(result["provider"], "llm-gemma-4-e2b-vision-expert")
+        self.assertEqual(result["instance"], "LLM")
+        self.assertEqual(result["source_image"], "sample.png")
+        self.assertTrue(result["expert_interrogate"]["enabled"])
+        self.assertNotIn("reverse_prompt_quality", result)
+        self.assertNotIn("quality", result["expert_interrogate"])
+
+    def test_api_prompt_interrogate_can_return_timed_video_script(self):
+        optimize_calls = []
+        old_instances = app._get_enabled_instances
+        old_resolve = app._resolve_input_image_path
+        old_prepare = app.prepare_interrogate_image
+        old_llm_interrogator = getattr(app, "run_llm_image_interrogator", None)
+        old_optimizer = getattr(app, "run_llm_prompt_optimizer", None)
+        try:
+            app._get_enabled_instances = lambda: self.fail("LLM video-script interrogation should not require ComfyUI instances")
+            app._resolve_input_image_path = lambda image: "/tmp/input.png"
+            app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
+            app.run_llm_image_interrogator = lambda *args, **kwargs: {
+                "ok": True,
+                "provider": "llm-gemma-4-e2b-vision",
+                "prompt": "红色机甲少女，棚拍背景，轻微转头",
+                "prompt_zh": "红色机甲少女，棚拍背景，轻微转头",
+            }
+
+            def fake_optimizer(prompt, **kwargs):
+                optimize_calls.append((prompt, kwargs.get("prompt_mode"), kwargs.get("prompt_context")))
+                return {
+                    "ok": True,
+                    "provider": "llm-gemma-4-e2b",
+                    "optimized_prompt": "0-2秒：红色机甲少女看向镜头；2-5秒：轻微转头，棚拍光影稳定。",
+                    "prompt_mode": "video_script",
+                }
+
+            app.run_llm_prompt_optimizer = fake_optimizer
+            result = app.api_prompt_interrogate(
+                app.PromptInterrogateRequest(
+                    image="sample.png",
+                    mode="video_script",
+                    prompt_context={"frame_count": 121, "fps": 24, "duration_seconds": 5.04},
+                ),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app._get_enabled_instances = old_instances
+            app._resolve_input_image_path = old_resolve
+            app.prepare_interrogate_image = old_prepare
+            if old_llm_interrogator is None:
+                delattr(app, "run_llm_image_interrogator")
+            else:
+                app.run_llm_image_interrogator = old_llm_interrogator
+            if old_optimizer is None:
+                delattr(app, "run_llm_prompt_optimizer")
+            else:
+                app.run_llm_prompt_optimizer = old_optimizer
+
+        self.assertEqual(optimize_calls, [(
+            "红色机甲少女，棚拍背景，轻微转头",
+            "video_script",
+            {"frame_count": 121, "fps": 24, "duration_seconds": 5.04},
+        )])
+        self.assertEqual(result["prompt"], "0-2秒：红色机甲少女看向镜头；2-5秒：轻微转头，棚拍光影稳定。")
+        self.assertEqual(result["prompt_mode"], "video_script")
+        self.assertEqual(result["video_script_provider"], "llm-gemma-4-e2b")
 
     def test_prompt_aux_instances_are_split_from_generation_pool(self):
         instances = [

@@ -82,6 +82,25 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertRegex(css, r"\.lb-compare\s*\{[^}]*bottom:\s*calc\(max\(24px,\s*env\(safe-area-inset-bottom\)\)\s*\+\s*72px\)", re.S)
         self.assertRegex(css, r"\.lb-compare\.is-active\s*\{[^}]*color:\s*#f59e0b", re.S)
 
+    def test_lightbox_exposes_permission_gated_delete_action_on_left_axis(self):
+        js = pathlib.Path("static/js/modules/history.js").read_text()
+        css = pathlib.Path("static/css/style.css").read_text()
+        html = pathlib.Path("static/index.html").read_text()
+
+        self.assertIn('id="lbDeleteBtn"', html)
+        self.assertIn('class="lb-action-btn lb-delete"', html)
+        self.assertIn('href="#icon-trash-2"', html)
+        self.assertIn("deleteCurrentLightboxItem", html)
+        self.assertIn("var deleteBtn = $('#lbDeleteBtn')", js)
+        self.assertIn("actionState.canDelete", js)
+        self.assertIn("deleteBtn.dataset.historyId", js)
+        self.assertIn("function deleteCurrentLightboxItem", js)
+        self.assertIn("await delHist(id)", js)
+        self.assertIn("window.CW.deleteCurrentLightboxItem = deleteCurrentLightboxItem", js)
+        self.assertRegex(css, r"\.lb-delete\s*\{[^}]*left:\s*max\(24px,\s*env\(safe-area-inset-left\)\)", re.S)
+        self.assertRegex(css, r"\.lb-delete\s*\{[^}]*top:\s*16px", re.S)
+        self.assertIn(".lb-delete {\n    left: max(16px, env(safe-area-inset-left));\n  }", css)
+
 
 if __name__ == "__main__":
     unittest.main()

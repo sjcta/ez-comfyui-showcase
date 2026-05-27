@@ -130,6 +130,13 @@
   }
 
   async function _loadWorkflowPreviewItems() {
+    try {
+      const r = await authFetch(`${API}/api/workflows/previews`);
+      const d = await r.json();
+      if (d && d.ok && Array.isArray(d.data)) return d.data;
+    } catch (e) {
+      console.warn('load workflow previews failed, using loaded history:', e && e.message ? e.message : e);
+    }
     return historyItems.slice();
   }
 
@@ -924,7 +931,7 @@ async function loadWorkflows() {
       const latestPreviews = _latestWorkflowPreviewItems(previewItems);
       for (const h of previewItems) {
         const wf = h.workflow || '';
-        wfCounts[wf] = (wfCounts[wf] || 0) + 1;
+        wfCounts[wf] = Math.max(wfCounts[wf] || 0, Number(h.workflow_count || 0) || 1);
       }
       // Build wfTagMap BEFORE card loop (first tag = primary category)
       const PRIORITY_TAGS = ['文生图', '图生图', '文生视频', '图生视频', '放大'];

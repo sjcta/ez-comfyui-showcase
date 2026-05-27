@@ -16,6 +16,12 @@
   var _galleryBatchItems = {};
   var _loadHistoryPromise = null;
   var _historyDataSignature = '';
+  var _historyTotal = 0;
+  var _historyNextOffset = 0;
+  var _historyLoadedAll = false;
+  var _historyLoadingMore = false;
+  var _historyScope = '';
+  var _atomicDeleteRenderBlockUntil = 0;
   var lbIdx = -1;
   var lbItems = [];
   var _galleryFilters = { owner: 'all', type: '', style: '' };
@@ -28,7 +34,31 @@
     originalSrc: '',
     showingOriginal: false,
   };
-  var HISTORY_FETCH_LIMIT = 300;
+  var HISTORY_PAGE_SIZE = 80;
+
+  function _currentHistoryScope() {
+    var user = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
+    return user && user.role === 'admin' ? 'all' : 'gallery';
+  }
+
+  function _historySignature(items, total) {
+    var parts = ['total:' + String(Number(total || 0) || 0)];
+    (items || []).forEach(function(item) {
+      parts.push([
+        item && item.id || '',
+        item && item.filename || '',
+        item && item.thumb || '',
+        item && item.is_public ? '1' : '0',
+        item && item.deleted_at || '',
+        item && item.protection_status || '',
+        item && item.protection_score || '',
+        item && item.protection_source || '',
+        item && item.protection_checked_at || '',
+        item && item.sort_index || '',
+      ].join(':'));
+    });
+    return parts.join('|');
+  }
 
   function _lightboxImageUrl(filename) {
     return `${API}/api/images/${filename}`;
@@ -152,14 +182,15 @@
     loader.src = src;
   }
 
-  function _syncLightboxActions(item) {
-    _lbCurrentItem = item || null;
-    var favBtn = $('#lbFavoriteBtn');
-    var shareBtn = $('#lbShareBtn');
-    var actionState = _historyActionState(item);
-    var isFav = !!(actionState && actionState.isFavorited);
-    if (favBtn) {
-      favBtn.style.display = actionState.canFavorite ? '' : 'none';
+	  function _syncLightboxActions(item) {
+	    _lbCurrentItem = item || null;
+	    var favBtn = $('#lbFavoriteBtn');
+	    var shareBtn = $('#lbShareBtn');
+	    var deleteBtn = $('#lbDeleteBtn');
+	    var actionState = _historyActionState(item);
+	    var isFav = !!(actionState && actionState.isFavorited);
+	    if (favBtn) {
+	      favBtn.style.display = actionState.canFavorite ? '' : 'none';
       favBtn.classList.toggle('is-active', isFav);
       favBtn.disabled = !actionState.canFavorite;
       favBtn.classList.toggle('is-disabled', !actionState.canFavorite);
@@ -169,10 +200,18 @@
       shareBtn.style.display = actionState.canShare ? '' : 'none';
       shareBtn.classList.toggle('is-shared', !!(item && item.is_public));
       shareBtn.disabled = !actionState.canShare;
-      shareBtn.classList.toggle('is-disabled', !actionState.canShare);
-      shareBtn.title = item && item.is_public ? '取消分享' : '快速分享';
-    }
-  }
+	      shareBtn.classList.toggle('is-disabled', !actionState.canShare);
+	      shareBtn.title = item && item.is_public ? '取消分享' : '快速分享';
+	    }
+	    if (deleteBtn) {
+	      var canDelete = !!(item && item.id && actionState.canDelete);
+	      deleteBtn.style.display = canDelete ? '' : 'none';
+	      deleteBtn.disabled = !canDelete;
+	      deleteBtn.classList.toggle('is-disabled', !canDelete);
+	      deleteBtn.dataset.historyId = canDelete ? String(item.id) : '';
+	      deleteBtn.title = canDelete ? '删除' : '';
+	    }
+	  }
 
   function _historyFavoriteKey(item) {
     if (!item) return '';
@@ -215,10 +254,12 @@ function _attachSentinel() {
     if (_sentinelObs) _sentinelObs.disconnect();
     _sentinelObs = new IntersectionObserver(
       (entries) => {
-        var activeItems = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+        var activeItems = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
         if (entries[0].isIntersecting && _histVisibleCount < activeItems.length) {
           _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), activeItems.length);
           _appendNewHistoryCards();
+        } else if (entries[0].isIntersecting && !_historyLoadedAll) {
+          _loadMoreHistory();
         }
       },
       { root: null, rootMargin: '300px', threshold: 0 },
@@ -699,6 +740,194 @@ function _clearHistoryDeleteFocus() {
     });
   }
 
+  function _isScrollableHistoryRoot(el) {
+    if (!el) return false;
+    var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    var overflowY = style ? style.overflowY : '';
+    return el.scrollHeight > el.clientHeight + 1 && /auto|scroll|overlay/.test(overflowY || '');
+  }
+
+  function _historyScrollRoot() {
+    var candidates = [
+      document.querySelector('.col-center'),
+      document.querySelector('.workspace'),
+      document.scrollingElement || document.documentElement
+    ];
+    for (var i = 0; i < candidates.length; i += 1) {
+      var el = candidates[i];
+      if (el && el.scrollTop > 0) return el;
+    }
+    for (var j = 0; j < candidates.length; j += 1) {
+      var scrollEl = candidates[j];
+      if (_isScrollableHistoryRoot(scrollEl)) return scrollEl;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function _captureHistoryScroll() {
+    var root = _historyScrollRoot();
+    return {
+      root: root,
+      top: root ? root.scrollTop : 0,
+      left: root ? root.scrollLeft : 0
+    };
+  }
+
+  function _restoreHistoryScroll(snapshot) {
+    if (!snapshot || !snapshot.root) return;
+    var root = snapshot.root;
+    var top = snapshot.top || 0;
+    var left = snapshot.left || 0;
+    var apply = function() {
+      root.scrollTop = Math.min(top, Math.max(0, root.scrollHeight - root.clientHeight));
+      root.scrollLeft = left;
+    };
+    apply();
+    requestAnimationFrame(function() {
+      apply();
+      requestAnimationFrame(apply);
+    });
+  }
+
+  var _historyBackTopBound = false;
+  var _historyBackTopRaf = 0;
+
+  function _historyBackTopButton() {
+    return document.getElementById('historyBackTop');
+  }
+
+  function _scheduleHistoryBackTopSync() {
+    if (_historyBackTopRaf) return;
+    _historyBackTopRaf = requestAnimationFrame(function() {
+      _historyBackTopRaf = 0;
+      _syncHistoryBackTopButton();
+    });
+  }
+
+  function _syncHistoryBackTopButton() {
+    var btn = _historyBackTopButton();
+    if (!btn) return;
+    var root = _historyScrollRoot();
+    var threshold = root ? (root.clientHeight || window.innerHeight || 0) : 0;
+    var top = root ? (root.scrollTop || 0) : 0;
+    var visible = top > Math.max(1, threshold);
+    btn.classList.toggle('is-visible', visible);
+    btn.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  function _historyBackTopRoots() {
+    return [
+      document.querySelector('.col-center'),
+      document.querySelector('.workspace'),
+      window
+    ].filter(function(root, index, arr) {
+      return !!root && arr.indexOf(root) === index;
+    });
+  }
+
+  function _bindHistoryBackTopButton() {
+    if (_historyBackTopBound) return;
+    var btn = _historyBackTopButton();
+    if (!btn) return;
+    _historyBackTopBound = true;
+    btn.addEventListener('click', function() {
+      scrollHistoryToTop();
+    });
+    _historyBackTopRoots().forEach(function(root) {
+      root.addEventListener('scroll', _scheduleHistoryBackTopSync, { passive: true });
+    });
+    window.addEventListener('resize', _scheduleHistoryBackTopSync, { passive: true });
+    _scheduleHistoryBackTopSync();
+  }
+
+  function scrollHistoryToTop() {
+    var root = _historyScrollRoot();
+    if (!root) return;
+    if (root.scrollTo) {
+      try {
+        root.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+      } catch (e) {
+        root.scrollTop = 0;
+        root.scrollLeft = 0;
+      }
+    } else {
+      root.scrollTop = 0;
+      root.scrollLeft = 0;
+    }
+    setTimeout(_scheduleHistoryBackTopSync, 260);
+  }
+
+  function _blockGalleryRenderForAtomicDelete(ms) {
+    _atomicDeleteRenderBlockUntil = Math.max(_atomicDeleteRenderBlockUntil, Date.now() + (ms || 1200));
+  }
+
+  function _historyEntryKeysForItems(items) {
+    var keys = new Set();
+    (items || []).forEach(function(item) {
+      var key = _batchKey(item);
+      keys.add(key ? 'batch:' + key : _galleryEntryKey(item));
+    });
+    return keys;
+  }
+
+  function _cssAttrEscape(value) {
+    value = String(value == null ? '' : value);
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function _removeDeletedHistoryCardsFromDom(entryKeys) {
+    var gallery = $('#gallery');
+    if (!gallery || !entryKeys || !entryKeys.size) return 0;
+    var removed = 0;
+    Array.prototype.slice.call(gallery.querySelectorAll('.gi[data-hist-id]')).forEach(function(card) {
+      var key = card.getAttribute('data-hist-id') || '';
+      if (!entryKeys.has(key)) return;
+      card.remove();
+      removed += 1;
+    });
+    return removed;
+  }
+
+  function _syncHistoryCountText(filteredArr) {
+    var histCountEl = $('#histCount');
+    if (!histCountEl) return;
+    var filtered = filteredArr || (_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
+    var totalText = (!_hasActiveGalleryFilters() && _historyTotal > historyItems.length)
+      ? String(historyItems.length) + ' / ' + String(_historyTotal)
+      : String(filtered.length) + ' / ' + String(historyItems.length);
+    histCountEl.textContent = totalText;
+  }
+
+  function _syncVisibleHistoryCardIndices() {
+    var gallery = $('#gallery');
+    if (!gallery) return;
+    var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+    var displayArr = _groupHistoryForGallery(filteredArr);
+    lbItems = displayArr;
+    if (window.__APP__) window.__APP__._lbItems = displayArr;
+    _syncHistoryCountText(filteredArr);
+    displayArr.forEach(function(entry, idx) {
+      var cover = _batchCover(entry);
+      var entryKey = _galleryEntryKey(entry);
+      var histKey = _histKey(cover);
+      var card = gallery.querySelector('.gi[data-hist-id="' + _cssAttrEscape(entryKey) + '"]');
+      if (!card) return;
+      card.setAttribute('data-hist-idx', String(idx));
+      card.setAttribute('onclick', "CW.fillFormFromHistory(" + idx + ", '" + escA(histKey) + "')");
+      var image = card.querySelector('.gi-img');
+      if (image && !(entry && entry.__isBatch)) {
+        image.setAttribute('onclick', 'event.stopPropagation();CW.openLB(' + idx + ', this)');
+      }
+      var reuse = card.querySelector('.gi-reuse');
+      if (reuse) {
+        reuse.setAttribute('onclick', "event.stopPropagation();CW.fillFormFromHistory(" + idx + ", '" + escA(histKey) + "')");
+      }
+    });
+    _lastRenderedHistCount = gallery.querySelectorAll('.gi[data-hist-id]').length;
+    _lastGalleryHash = _galleryHash(jobs, historyItems);
+  }
+
 function _currentUserId() {
     var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
       ? window.CW.auth.getCurrentUser()
@@ -796,6 +1025,42 @@ function _syncTypeFilterButtons() {
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
+    var current = document.querySelector('.gf-type-current');
+    if (current) current.textContent = val || '全部类型';
+  }
+
+  function _closeHistoryTypeMenus() {
+    document.querySelectorAll('.gf-type-segment.open').forEach(function(menu) {
+      menu.classList.remove('open');
+      var trigger = menu.querySelector('.gf-type-trigger');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function _toggleHistoryTypeMenu(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    var trigger = e && e.currentTarget ? e.currentTarget : null;
+    var wrap = trigger && trigger.closest ? trigger.closest('.gf-type-segment') : null;
+    if (!wrap) return;
+    var open = wrap.classList.contains('open');
+    _closeHistoryTypeMenus();
+    wrap.classList.toggle('open', !open);
+    trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+  }
+
+  function _ensureHistoryTypeMenuCloseBound() {
+    var root = document.documentElement;
+    if (!root || root.dataset.historyTypeMenuBound === '1') return;
+    root.dataset.historyTypeMenuBound = '1';
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.closest && e.target.closest('.gf-type-segment')) return;
+      if (window.CW && CW.closeHistoryTypeMenus) CW.closeHistoryTypeMenus();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && window.CW && CW.closeHistoryTypeMenus) {
+        CW.closeHistoryTypeMenus();
+      }
+    });
   }
 
 function _historyTypeOptions() {
@@ -832,20 +1097,27 @@ function _sortTypeOptions(items) {
 function _renderTypeFilterButtons() {
     var wrap = document.querySelector('.gf-type-segment');
     if (!wrap) return;
+    _ensureHistoryTypeMenuCloseBound();
     var options = _historyTypeOptions();
     if (_galleryFilters.type && options.indexOf(_galleryFilters.type) < 0) {
       _galleryFilters.type = '';
     }
-    var html = '<button class="gf-segment-btn" type="button" data-type-filter="" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">全部类型</button>';
+    var currentLabel = _galleryFilters.type || '全部类型';
+    var caret = window.CW && CW.icon ? CW.icon('chevron-right', 12) : '';
+    var html = '<button class="gf-type-trigger" type="button" aria-haspopup="menu" aria-expanded="false" onclick="CW.toggleHistoryTypeMenu(event)"><span class="gf-type-current">' + escH(currentLabel) + '</span><span class="gf-type-caret">' + caret + '</span></button>';
+    html += '<div class="gf-type-menu" role="menu">';
+    html += '<button class="gf-segment-btn" type="button" role="menuitemradio" data-type-filter="" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">全部类型</button>';
     options.forEach(function(t) {
-      html += '<button class="gf-segment-btn" type="button" data-type-filter="' + escA(t) + '" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">' + escH(t) + '</button>';
+      html += '<button class="gf-segment-btn" type="button" role="menuitemradio" data-type-filter="' + escA(t) + '" onclick="CW.setHistoryTypeFilter(this.dataset.typeFilter)">' + escH(t) + '</button>';
     });
+    html += '</div>';
     wrap.innerHTML = html;
   }
 
 function setHistoryTypeFilter(value) {
     _galleryFilters.type = value || '';
     _syncTypeFilterButtons();
+    _closeHistoryTypeMenus();
     applyFilters();
   }
 
@@ -1162,7 +1434,12 @@ function _renderGalleryImpl() {
     const filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     const displayArr = _groupHistoryForGallery(filteredArr);
     var histCountEl = $('#histCount');
-    if (histCountEl) histCountEl.textContent = String(filteredArr.length) + ' / ' + String(historyItems.length);
+    if (histCountEl) {
+      var totalText = (!_hasActiveGalleryFilters() && _historyTotal > historyItems.length)
+        ? String(historyItems.length) + ' / ' + String(_historyTotal)
+        : String(filteredArr.length) + ' / ' + String(historyItems.length);
+      histCountEl.textContent = totalText;
+    }
     lbItems = displayArr;
     if (window.__APP__) window.__APP__._lbItems = displayArr;
     _histVisibleCount = Math.min(Math.max(_histVisibleCount, _batchSize()), displayArr.length);
@@ -1171,7 +1448,7 @@ function _renderGalleryImpl() {
       html += _renderHistCard(visibleItems[i], i);
     }
 
-    if (displayArr.length > _histVisibleCount) {
+    if (displayArr.length > _histVisibleCount || !_historyLoadedAll) {
       html += `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
     }
 
@@ -1195,7 +1472,7 @@ function _galleryHash(jobsObj, histArr) {
     var histSig = (histArr || []).slice(0, Math.max(_histVisibleCount || 0, 24)).map(function(item) {
       return String(item && item.id || '');
     }).join('|');
-    return s + '::' + histArr.length + '::' + histSig + '::pin:' + _pinnedHistoryIds.join(',');
+    return s + '::' + histArr.length + '::total:' + _historyTotal + '::loaded:' + (_historyLoadedAll ? '1' : '0') + '::' + histSig + '::pin:' + _pinnedHistoryIds.join(',');
   }
 function _appendNewHistoryCards() {
     const gallery = $('#gallery');
@@ -1205,6 +1482,7 @@ function _appendNewHistoryCards() {
     const filteredArr2 = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
     const newCount = Math.min(_histVisibleCount, filteredArr2.length);
     if (newCount <= prevCount) {
+      if (!_historyLoadedAll) _loadMoreHistory();
       if (sentinel) _attachSentinel();
       return;
     }
@@ -1220,19 +1498,21 @@ function _appendNewHistoryCards() {
 
     _lastRenderedHistCount = newCount;
 
-    if (newCount >= filteredArr2.length && sentinel) {
+    if (newCount >= filteredArr2.length && sentinel && _historyLoadedAll) {
       sentinel.remove();
       if (_sentinelObs) _sentinelObs.disconnect();
       return;
     }
 
     // Re-check: if sentinel is still visible after appending, load more immediately
-    if (sentinel && _histVisibleCount < filteredArr2.length) {
+    if (sentinel && (_histVisibleCount < filteredArr2.length || !_historyLoadedAll)) {
       requestAnimationFrame(() => {
         const rect = sentinel.getBoundingClientRect();
-        if (rect.top < window.innerHeight + 200) {
+        if (rect.top < window.innerHeight + 200 && _histVisibleCount < filteredArr2.length) {
           _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), filteredArr2.length);
           _appendNewHistoryCards();
+        } else if (rect.top < window.innerHeight + 200 && !_historyLoadedAll) {
+          _loadMoreHistory();
         } else {
           _attachSentinel();
         }
@@ -2010,10 +2290,10 @@ function openBatchLB(batchId, sourceEl) {
     }
   }
 
-  function toggleLBShare() {
-    if (!_historyActionState(_lbCurrentItem).canShare) return;
-    if (!_lbCurrentItem || !_lbCurrentItem.id) {
-      if (window.CW && CW.toast) CW.toast('当前图片暂不支持快速分享', 'info');
+	  function toggleLBShare() {
+	    if (!_historyActionState(_lbCurrentItem).canShare) return;
+	    if (!_lbCurrentItem || !_lbCurrentItem.id) {
+	      if (window.CW && CW.toast) CW.toast('当前图片暂不支持快速分享', 'info');
       return;
     }
     var auth = window.CW && CW.auth;
@@ -2026,18 +2306,33 @@ function openBatchLB(batchId, sourceEl) {
     auth.toggleShare(currentId, next).then(function(result) {
       if (!_lbCurrentItem || _lbCurrentItem.id !== currentId) return;
       _lbCurrentItem = Object.assign({}, _lbCurrentItem, { is_public: !!(result && result.is_public) });
-      _syncLightboxActions(_lbCurrentItem);
-    }).catch(function() {});
-  }
+	      _syncLightboxActions(_lbCurrentItem);
+	    }).catch(function() {});
+	  }
+
+	  async function deleteCurrentLightboxItem(e) {
+	    if (e && e.preventDefault) e.preventDefault();
+	    if (e && e.stopPropagation) e.stopPropagation();
+	    var btn = $('#lbDeleteBtn');
+	    var id = btn && btn.dataset ? String(btn.dataset.historyId || '') : '';
+	    if (!id || !(_historyActionState(_lbCurrentItem).canDelete)) return;
+	    await delHist(id);
+	    var stillExists = historyItems.some(function(item) {
+	      return String(item && item.id || '') === id;
+	    });
+	    if (!stillExists) closeLB();
+	  }
 
 async function delHist(id) {
     _clearHistoryDeleteFocus();
+    var scrollSnapshot = _captureHistoryScroll();
     id = String(id || '');
     var item = historyItems.find(function(h) { return String(h && h.id || '') === id; });
     var batchKey = _batchKey(item);
     var items = batchKey
       ? historyItems.filter(function(h) { return _batchKey(h) === batchKey; })
       : (item ? [item] : []);
+    var deletedEntryKeys = _historyEntryKeysForItems(items);
     var deleteIds = items
       .filter(function(h) { return _canDeleteHistoryItem(h); })
       .map(function(h) { return String(h && h.id || ''); })
@@ -2048,6 +2343,7 @@ async function delHist(id) {
     }
     var isBatchDelete = deleteIds.length > 1;
     if (!confirm(isBatchDelete ? `确认将这个批次的 ${deleteIds.length} 张图片移入回收站？` : '确认将这张图片移入回收站？')) return;
+    _blockGalleryRenderForAtomicDelete(1800);
     // Mark card as deleting immediately
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
     if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
@@ -2066,8 +2362,15 @@ async function delHist(id) {
         if (deleted.has(String(historyItems[idx] && historyItems[idx].id || ''))) historyItems.splice(idx, 1);
       }
       _pinnedHistoryIds = _pinnedHistoryIds.filter(function(pinId) { return !deleted.has(String(pinId)); });
-      _filteredHistory = _filterHistory(historyItems);
-      renderGallery();
+      _historyTotal = Math.max(0, _historyTotal - deleted.size);
+      _historyNextOffset = Math.max(0, _historyNextOffset - deleted.size);
+      _historyLoadedAll = _historyNextOffset >= _historyTotal;
+      _historyDataSignature = _historySignature(historyItems, _historyTotal);
+      _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+      _removeDeletedHistoryCardsFromDom(deletedEntryKeys);
+      _syncVisibleHistoryCardIndices();
+      _blockGalleryRenderForAtomicDelete(1800);
+      _restoreHistoryScroll(scrollSnapshot);
       if (window.CW && typeof CW.loadWorkflows === 'function') {
         Promise.resolve(CW.loadWorkflows()).catch(function(err) {
           console.warn('refresh workflow previews after delete failed:', err && err.message ? err.message : err);
@@ -2081,26 +2384,88 @@ async function delHist(id) {
     }
   }
 
+async function _fetchHistoryPage(offset, limit) {
+    var authHeaders = window.CW.auth.getAuthHeaders();
+    var scope = _currentHistoryScope();
+    var url = `${API}/api/history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit || HISTORY_PAGE_SIZE)}&offset=${encodeURIComponent(offset || 0)}`;
+    const r = await fetch(url, { headers: Object.assign({}, authHeaders) });
+    const d = await _historyJsonOrThrow(r, '加载历史');
+    return {
+      scope: scope,
+      total: Number(d.total || 0) || 0,
+      items: _sortHistoryItems(d.data || []),
+    };
+  }
+
+  async function _reloadHistoryWindow(renderAfter) {
+    var limit = Math.max(_historyNextOffset || 0, _lastRenderedHistCount || 0, HISTORY_PAGE_SIZE);
+    var page = await _fetchHistoryPage(0, limit);
+    var nextItems = page.items;
+    _historyScope = page.scope;
+    _historyTotal = page.total;
+    _historyNextOffset = nextItems.length;
+    _historyLoadedAll = _historyNextOffset >= _historyTotal;
+    _historyDataSignature = _historySignature(nextItems, _historyTotal);
+    var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
+    _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) { return !serverIds.has(String(id)); });
+    historyItems.length = 0;
+    Array.prototype.push.apply(historyItems, _applyPinnedHistoryOrder(nextItems));
+    _populateFilterOptions();
+    _syncOwnerFilterButtons();
+    _syncTypeFilterButtons();
+    _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+    var visibleLen = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
+    _histVisibleCount = Math.min(Math.max(_histVisibleCount || 0, _batchSize()), visibleLen);
+    _lastGalleryHash = '';
+    if (renderAfter) renderGallery();
+    return true;
+  }
+
+  async function _loadMoreHistory() {
+    if (_historyLoadingMore || _historyLoadedAll) return;
+    _historyLoadingMore = true;
+    try {
+      var page = await _fetchHistoryPage(_historyNextOffset, HISTORY_PAGE_SIZE);
+      if (page.scope !== _historyScope) return;
+      var seen = new Set(historyItems.map(function(item) { return String(item && item.id || ''); }));
+      page.items.forEach(function(item) {
+        var id = String(item && item.id || '');
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        historyItems.push(item);
+      });
+      historyItems.splice(0, historyItems.length, ..._applyPinnedHistoryOrder(_sortHistoryItems(historyItems)));
+      _historyTotal = page.total;
+      _historyNextOffset += page.items.length;
+      _historyLoadedAll = _historyNextOffset >= _historyTotal || page.items.length === 0;
+      _historyDataSignature = _historySignature(historyItems, _historyTotal);
+      _populateFilterOptions();
+      _syncOwnerFilterButtons();
+      _syncTypeFilterButtons();
+      _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+      var visibleLen = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
+      _histVisibleCount = Math.min(Math.max(_histVisibleCount + _batchSize(), _batchSize()), visibleLen);
+      _lastGalleryHash = '';
+      renderGallery();
+    } catch (e) {
+      console.error('loadMoreHistory:', e);
+    } finally {
+      _historyLoadingMore = false;
+    }
+  }
+
 async function loadHistory() {
     if (_loadHistoryPromise) return _loadHistoryPromise;
     _loadHistoryPromise = (async function() {
     try {
       var prevVisibleCount = _histVisibleCount || _lastRenderedHistCount || 0;
-      var authHeaders = window.CW.auth.getAuthHeaders();
-      const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
-      const scope = user && user.role === 'admin' ? 'all' : 'gallery';
-      const r = await fetch(`${API}/api/history?scope=${scope}&limit=${HISTORY_FETCH_LIMIT}`, { headers: Object.assign({}, authHeaders) });
-      const d = await _historyJsonOrThrow(r, '加载历史');
-      var nextItems = _sortHistoryItems(d.data || []);
-      _historyDataSignature = nextItems.map(function(item) {
-        return [
-          item && item.id || '',
-          item && item.filename || '',
-          item && item.thumb || '',
-          item && item.is_public ? '1' : '0',
-          item && item.deleted_at || '',
-        ].join(':');
-      }).join('|');
+      var page = await _fetchHistoryPage(0, HISTORY_PAGE_SIZE);
+      var nextItems = page.items;
+      _historyScope = page.scope;
+      _historyTotal = page.total;
+      _historyNextOffset = nextItems.length;
+      _historyLoadedAll = _historyNextOffset >= _historyTotal;
+      _historyDataSignature = _historySignature(nextItems, _historyTotal);
       var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
       _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) {
         if (serverIds.has(String(id))) return false;
@@ -2163,10 +2528,13 @@ function clearFilters() {
   }
 
 function renderGallery() {
+    if (_atomicDeleteRenderBlockUntil && Date.now() < _atomicDeleteRenderBlockUntil) return;
     if (_renderTimer) return;
     _renderTimer = requestAnimationFrame(function() {
       _renderTimer = null;
+      if (_atomicDeleteRenderBlockUntil && Date.now() < _atomicDeleteRenderBlockUntil) return;
       _renderGalleryImpl();
+      _scheduleHistoryBackTopSync();
     });
   }
 
@@ -2175,6 +2543,8 @@ function renderGallery() {
   window.CW.clearFilters = clearFilters;
   window.CW.setHistoryOwnerFilter = setHistoryOwnerFilter;
   window.CW.setHistoryTypeFilter = setHistoryTypeFilter;
+  window.CW.closeHistoryTypeMenus = _closeHistoryTypeMenus;
+  window.CW.toggleHistoryTypeMenu = _toggleHistoryTypeMenu;
   window.CW.refreshHistoryTypeFilters = function() {
     _syncTypeFilterButtons();
     applyFilters();
@@ -2189,33 +2559,21 @@ function renderGallery() {
   window.CW.toggleLBFavorite = toggleLBFavorite;
   window.CW.showLBOriginalImage = showLBOriginalImage;
   window.CW.restoreLBGeneratedImage = restoreLBGeneratedImage;
-  window.CW.toggleLBCompareImage = toggleLBCompareImage;
-  window.CW.toggleLBShare = toggleLBShare;
-  window.CW.loadHistory = loadHistory;
+	  window.CW.toggleLBCompareImage = toggleLBCompareImage;
+	  window.CW.toggleLBShare = toggleLBShare;
+	  window.CW.deleteCurrentLightboxItem = deleteCurrentLightboxItem;
+	  window.CW.loadHistory = loadHistory;
+  window.CW.scrollHistoryToTop = scrollHistoryToTop;
   // Data-only refresh (no gallery re-render)
   async function loadHistoryNoRender() {
     try {
       var authHeaders = window.CW.auth.getAuthHeaders();
-      const user = window.CW.auth.getCurrentUser && window.CW.auth.getCurrentUser();
-      const scope = user && user.role === 'admin' ? 'all' : 'gallery';
-      const r = await fetch(`${API}/api/history?scope=${scope}&limit=${HISTORY_FETCH_LIMIT}`, { headers: Object.assign({}, authHeaders) });
-      const d = await _historyJsonOrThrow(r, '加载历史');
-      var nextItems = _sortHistoryItems(d.data || []);
-      var nextSignature = nextItems.map(function(item) {
-        return [
-          item && item.id || '',
-          item && item.filename || '',
-          item && item.thumb || '',
-          item && item.is_public ? '1' : '0',
-          item && item.deleted_at || '',
-        ].join(':');
-      }).join('|');
-      if (nextSignature === _historyDataSignature) return false;
-      _historyDataSignature = nextSignature;
-      var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
-      _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) { return !serverIds.has(String(id)); });
-      historyItems.length = 0;
-      Array.prototype.push.apply(historyItems, _applyPinnedHistoryOrder(nextItems));
+      var scope = _currentHistoryScope();
+      var summaryLimit = Math.max(_historyNextOffset || 0, HISTORY_PAGE_SIZE);
+      const summaryResp = await fetch(`${API}/api/history/summary?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(summaryLimit)}`, { headers: Object.assign({}, authHeaders) });
+      const summary = await _historyJsonOrThrow(summaryResp, '检查历史');
+      if (summary.signature === _historyDataSignature && Number(summary.total || 0) === _historyTotal) return false;
+      await _reloadHistoryWindow(false);
       return true;
     } catch (e) { console.error("loadHistoryNoRender:", e); }
     return false;
@@ -2230,6 +2588,7 @@ function renderGallery() {
   window.CW._patchJobCard = _patchJobCard;
   window.CW._onJobDone = _onJobDone;
   window.CW._onJobError = _onJobError;
+  _bindHistoryBackTopButton();
 
   // 如果页面已登录但历史还没进来，兜底再拉一次
   setTimeout(function() {

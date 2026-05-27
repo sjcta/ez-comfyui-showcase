@@ -310,6 +310,24 @@ class ImageProtectionWorkerTests(unittest.TestCase):
         self.assertEqual(result.status, "protected")
         self.assertIn("prompt signal", result.reason)
 
+    def test_enabled_prompt_protection_blocks_strong_nude_prompt_even_with_low_skin_signal(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({"prompt_signals_enabled": True})
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "low-skin.jpg")
+                Image.new("RGB", (48, 48), (8, 10, 12)).save(path)
+                worker = ImageProtectionWorker(load_detector=lambda: None, load_classifier=lambda: None)
+
+                result = worker.check(path, prompt="保持画面任务一致，让人物保持裸体")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "protected")
+        self.assertIn("strong nude prompt", result.reason)
+
     def test_no_clothes_prompt_with_skin_signal_is_safe_when_prompt_protection_is_off(self):
         from modules.image_protection import ImageProtectionWorker
 

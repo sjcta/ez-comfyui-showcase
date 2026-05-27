@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import os
 import sqlite3
 import tempfile
@@ -68,6 +69,56 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["data"][0]["username"], "alice")
 
+    def test_history_summary_returns_lightweight_signature(self):
+        for idx in range(3):
+            app._insert_generation(
+                {
+                    "id": f"hist-{idx}",
+                    "workflow": "t2i-test.json",
+                    "filename": f"hist-{idx}.png",
+                    "prompt": "hello",
+                    "time": f"2026-05-18 12:00:0{idx}",
+                },
+                elapsed=3,
+                user_id="u1",
+            )
+
+        result = app.api_history_summary(limit=2, scope="mine", current_user={"sub": "u1", "role": "user"})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["count"], 2)
+        self.assertIn("total:3", result["signature"])
+        self.assertFalse([entry for entry in app._log_buffer if entry.get("phase") == "thumbnail"])
+
+    def test_workflow_previews_use_current_user_latest_item(self):
+        rows = [
+            ("u1-old", "wf-a.json", "u1", "u1-old.png", "2026-05-18 12:00:00"),
+            ("u2-newer", "wf-a.json", "u2", "u2-newer.png", "2026-05-18 12:05:00"),
+            ("u1-newest", "wf-a.json", "u1", "u1-newest.png", "2026-05-18 12:02:00"),
+            ("u1-wfb", "wf-b.json", "u1", "u1-wfb.png", "2026-05-18 12:03:00"),
+        ]
+        for item_id, workflow, uid, filename, created_at in rows:
+            app._insert_generation(
+                {
+                    "id": item_id,
+                    "workflow": workflow,
+                    "filename": filename,
+                    "prompt": item_id,
+                    "time": created_at,
+                },
+                elapsed=3,
+                user_id=uid,
+            )
+
+        result = app.api_workflow_previews(current_user={"sub": "u1", "role": "user"})
+
+        by_workflow = {item["workflow"]: item for item in result["data"]}
+        self.assertEqual(by_workflow["wf-a.json"]["id"], "u1-newest")
+        self.assertEqual(by_workflow["wf-a.json"]["workflow_count"], 2)
+        self.assertEqual(by_workflow["wf-b.json"]["id"], "u1-wfb")
+        self.assertNotIn("u2-newer", [item["id"] for item in result["data"]])
+
     def test_invalid_output_file_does_not_pollute_user_logs_with_thumbnail_warnings(self):
         image_path = os.path.join(app.OUTPUT_DIR, "hist-1.png")
         with open(image_path, "wb") as f:
@@ -89,6 +140,29 @@ class HistoryApiTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["data"][0]["thumb"], "")
         self.assertFalse([entry for entry in app._log_buffer if entry.get("phase") == "thumbnail"])
+
+    def test_missing_pillow_does_not_abort_thumbnail_generation(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "PIL" or name.startswith("PIL."):
+                raise ModuleNotFoundError("No module named 'PIL'")
+            return original_import(name, *args, **kwargs)
+
+        try:
+            builtins.__import__ = fake_import
+            result = app._make_thumbnail_with_pillow(
+                os.path.join(app.OUTPUT_DIR, "missing.png"),
+                os.path.join(app.OUTPUT_DIR, "missing_thumb.jpg"),
+            )
+        finally:
+            builtins.__import__ = original_import
+
+        self.assertFalse(result)
+        self.assertTrue([
+            entry for entry in app._log_buffer
+            if entry.get("phase") == "thumbnail" and "pillow unavailable" in entry.get("msg", "")
+        ])
 
     def test_history_orders_same_second_by_newer_insert_first(self):
         for item_id in ("job_1000_0001", "job_1002_0001", "job_1001_0001"):
@@ -479,6 +553,50 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(result["data"][0]["protection_status"], "safe")
         self.assertEqual(result["data"][0]["protection_source"], "heuristic")
         self.assertIn("skin_ratio", result["data"][0]["protection_reason"])
+
+    def test_deleted_safe_heuristic_strong_nude_rows_are_rechecked_when_prompt_protection_is_on(self):
+        old_settings = app.get_image_protection_settings()
+        app.configure_image_protection({"prompt_signals_enabled": True})
+        try:
+            rel_path = "u1/2026-05-25/deleted-nude-risk.png"
+            abs_path = os.path.join(app.OUTPUT_DIR, rel_path)
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            Image.new("RGB", (48, 48), (8, 10, 12)).save(abs_path)
+            app._insert_generation(
+                {
+                    "id": "hist-deleted-nude-safe",
+                    "workflow": "t2i-test.json",
+                    "filename": rel_path,
+                    "prompt": "保持画面任务一致，让人物保持裸体",
+                    "time": "2026-05-25 22:18:15",
+                    "protection_status": "safe",
+                    "protection_score": 0.95,
+                    "protection_source": "heuristic",
+                    "protection_reason": "local heuristic skin_ratio=0.046",
+                    "protection_checked_at": "2026-05-25 22:18:16",
+                },
+                elapsed=3,
+                user_id="u1",
+            )
+            conn = sqlite3.connect(app.GEN_DB)
+            conn.execute(
+                "UPDATE generations SET deleted_at='2026-05-25 22:38:28' WHERE id='hist-deleted-nude-safe'"
+            )
+            conn.commit()
+            conn.close()
+
+            app._recheck_safe_heuristic_nsfw_risk_rows()
+
+            conn = sqlite3.connect(app.GEN_DB)
+            row = conn.execute(
+                "SELECT protection_status, protection_reason FROM generations WHERE id='hist-deleted-nude-safe'"
+            ).fetchone()
+            conn.close()
+        finally:
+            app.configure_image_protection(old_settings)
+
+        self.assertEqual(row[0], "protected")
+        self.assertEqual(row[1], "strong nude prompt")
 
     def test_delete_moves_record_to_trash_without_removing_files(self):
         image_path = os.path.join(app.OUTPUT_DIR, "hist-1.png")

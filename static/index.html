@@ -13,7 +13,7 @@ if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1779704500"></script>
+<script src="static/js/module_loader.js?v=1779868919"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -309,7 +309,7 @@ if (location.protocol === 'file:') {
     </div>
     
 </div><div class="gen-footer" style="display:none">
-      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-play"/></svg> 出图</button>
+      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-play"/></svg> 开始生成</button>
     </div>
   </div>
 
@@ -342,11 +342,15 @@ if (location.protocol === 'file:') {
   <div class="col-right" id="colRight"></div>
 
 </div>
+<button class="history-back-top" id="historyBackTop" type="button" title="返回顶部" aria-label="返回顶部" aria-hidden="true" onclick="if(window.CW&&CW.scrollHistoryToTop)CW.scrollHistoryToTop()"><svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-arrow-up"/></svg></button>
 
-<!-- ═══ Lightbox ═══ -->
-<div class="lightbox" id="lightbox">
-  <button class="lb-close" onclick="CW.closeLB()" title="关闭"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-  <div class="lb-actions" id="lbActions">
+	<!-- ═══ Lightbox ═══ -->
+	<div class="lightbox" id="lightbox">
+	  <button class="lb-close" onclick="CW.closeLB()" title="关闭"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+	  <button class="lb-action-btn lb-delete" id="lbDeleteBtn" type="button" title="删除" aria-label="删除" style="display:none" onclick="if(window.CW&&CW.deleteCurrentLightboxItem) CW.deleteCurrentLightboxItem(event)">
+	    <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg>
+	  </button>
+	  <div class="lb-actions" id="lbActions">
     <button class="lb-action-btn lb-fav" id="lbFavoriteBtn" type="button" title="收藏" onclick="if(window.CW&&CW.toggleLBFavorite) CW.toggleLBFavorite()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 20.2-.7-.63C6.2 14.96 3 12.03 3 8.43 3 5.5 5.24 3.2 8.1 3.2c1.62 0 3.18.78 4.1 2 0 0 .02.03.04.05.92-1.27 2.5-2.05 4.16-2.05C19.26 3.2 21.5 5.5 21.5 8.43c0 3.6-3.2 6.53-8.3 11.14l-.7.63Z"/></svg>
     </button>

@@ -273,6 +273,7 @@ function _normalizeFieldMeta(fields, workflowName) {
         node_id: f.node_id,
         class_type: f.class_type,
         field: f.field,
+        node_title: f.node_title,
         zone: f.zone,
         visible: f.visible !== false,
         type: f.type,
@@ -377,31 +378,69 @@ function _currentFieldValueForMeta(f) {
     return f ? f.value : null;
   }
 
+function _timingKindForField(f) {
+    if (!f) return '';
+    var label = String(f.label || '');
+    var field = String(f.field || '');
+    var key = _fieldKeyForMeta(f);
+    var cls = String(f.class_type || '');
+    var title = String(f.node_title || '');
+    var haystack = (label + ' ' + field + ' ' + key + ' ' + cls + ' ' + title).toLowerCase();
+    if (/帧率|fps|frame[_ -]?rate|framerate|\bframes?\s*per\s*second\b/.test(haystack)) {
+      return 'fps';
+    }
+    if (/帧数|总帧|number\s+of\s+frames|frames[_ -]?number|frame[_ -]?count|num[_ -]?frames/.test(haystack)) {
+      return 'frame_count';
+    }
+    if (/长度.*秒|时长|秒|duration|seconds|duration_sec|\bsec(?:onds?)?\b/.test(haystack)) {
+      return 'duration_seconds';
+    }
+    if (/^(?:length|frames_number)$/.test(field) && /video|ltxv|latent/i.test(cls + ' ' + title)) {
+      return 'frame_count';
+    }
+    if (/\blength\b/.test(haystack) && /video|ltx|sulphur/i.test(String(A.currentWF || '') + ' ' + cls + ' ' + title)) {
+      return 'frame_count';
+    }
+    return '';
+  }
+
 function _videoScriptTimingContext() {
     var context = {};
     var fields = A._wfFieldMeta || [];
     for (var i = 0; i < fields.length; i++) {
       var f = fields[i] || {};
-      var label = String(f.label || '');
-      var field = String(f.field || '');
-      var key = _fieldKeyForMeta(f);
-      var haystack = (label + ' ' + field + ' ' + key).toLowerCase();
+      var kind = _timingKindForField(f);
+      if (!kind) continue;
       var raw = _currentFieldValueForMeta(f);
       var value = parseFloat(raw);
       if (!isFinite(value) || value <= 0) continue;
-      if (/帧率|fps|frame[_ -]?rate|framerate/.test(haystack)) {
+      if (kind === 'fps') {
         context.fps = value;
-      } else if (/长度.*秒|秒|duration|seconds|duration_sec/.test(haystack)) {
+      } else if (kind === 'duration_seconds') {
         context.duration_seconds = value;
-      } else if (/帧数|总帧|frames[_ -]?number|frame[_ -]?count|num[_ -]?frames/.test(haystack)) {
+      } else if (kind === 'frame_count') {
         context.frame_count = value;
       }
     }
     if (!context.duration_seconds && context.frame_count && context.fps) {
       context.duration_seconds = Math.round((context.frame_count / context.fps) * 100) / 100;
     }
+    if (!context.frame_count && context.duration_seconds && context.fps) {
+      context.frame_count = Math.max(1, Math.round(context.duration_seconds * context.fps));
+    }
     if (A.currentWF) context.workflow = A.currentWF;
     return context;
+  }
+
+function _promptInterrogatePayload(refVal, options) {
+    var copy = _promptOptimizeCopy();
+    options = options || {};
+    return {
+      image: refVal,
+      mode: options.expert ? 'image' : copy.mode,
+      expert: !!options.expert,
+      prompt_context: (!options.expert && copy.mode === 'video_script') ? _videoScriptTimingContext() : {}
+    };
   }
 
 function _promptTextValue(value) {
@@ -925,7 +964,7 @@ async function doGenerate() {
       console.error(e);
       alert('出图失败: ' + (e.message || '提示词字段读取失败'));
       btn.disabled = false;
-      btn.innerHTML = CW.icon('play') + ' 出图';
+      btn.innerHTML = CW.icon('play') + ' 开始生成';
       return;
     }
 
@@ -992,7 +1031,7 @@ async function doGenerate() {
       alert('出图失败: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.innerHTML = CW.icon('play') + ' 出图';
+      btn.innerHTML = CW.icon('play') + ' 开始生成';
     }
   }
 
@@ -1103,7 +1142,7 @@ async function translatePromptLanguage() {
 var _promptInterrogateRunning = false;
 
   function _setPromptInterrogateLoading(isLoading, label) {
-    var buttons = [$('#interrogatePromptBtn'), $('#promptInterrogateRunBtn')];
+    var buttons = [$('#interrogatePromptBtn'), $('#promptInterrogateRunBtn'), $('#promptInterrogateExpertRunBtn')];
     for (var i = 0; i < buttons.length; i++) {
       var btn = buttons[i];
       if (!btn) continue;
@@ -1113,30 +1152,36 @@ var _promptInterrogateRunning = false;
         btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' ' + (label || '反推中');
       } else if (btn.id === 'interrogatePromptBtn') {
         btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span>';
+      } else if (btn.id === 'promptInterrogateExpertRunBtn') {
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('zap') : '') + ' 专家反推';
       } else {
-        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 标准反推';
       }
     }
   }
 
-  function _startPromptInterrogateTask(refVal) {
+  function _startPromptInterrogateTask(refVal, options) {
     if (!refVal) return;
+    options = options || {};
     if (_promptInterrogateRunning) {
       if (window.CW && CW.toast) CW.toast('图片反推正在后台运行', 'info');
       return;
     }
     _promptInterrogateRunning = true;
-    _setPromptInterrogateLoading(true, '后台反推中');
+    _setPromptInterrogateLoading(true, options.expert ? '专家反推中' : '标准反推中');
     if (window.CW && CW.closePromptInterrogateModal) CW.closePromptInterrogateModal();
     if (window.CW && typeof CW.showPromptInterrogatePendingToast === 'function') {
       CW.showPromptInterrogatePendingToast();
     } else if (window.CW && CW.toast) {
       CW.toast('后台努力反推中，请稍后……', 'info');
     }
-    _runPromptInterrogate(refVal).then(function(result) {
+    _runPromptInterrogate(refVal, options).then(function(result) {
       var prompt = result && result.prompt ? result.prompt : '';
       if (window.CW && typeof CW.showPromptResultToast === 'function') {
-        CW.showPromptResultToast(prompt, result && result.data ? result.data : {});
+        var meta = result && result.data ? result.data : {};
+        meta._source_image = refVal;
+        if (!meta.source_image) meta.source_image = refVal;
+        CW.showPromptResultToast(prompt, meta);
       } else if (window.CW && CW.toast) {
         CW.toast('反推完成', 'done');
       }
@@ -1157,16 +1202,16 @@ async function interrogatePromptFromImage() {
     openPromptInterrogateModal(refVal);
   }
 
-  async function _runPromptInterrogate(refVal) {
+  async function _runPromptInterrogate(refVal, options) {
     var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
     var response = await fetcher(API + '/api/prompt/interrogate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: refVal })
+      body: JSON.stringify(_promptInterrogatePayload(refVal, options || {}))
     });
     var data = await response.json().catch(function() { return {}; });
     if (!response.ok) throw new Error(data.detail || data.message || '图片反推失败');
-    var prompt = String(data.prompt || data.promptgen || data.wd14_tags || '').trim();
+    var prompt = String(data.structured_optimized_prompt || data.prompt || data.promptgen || data.wd14_tags || '').trim();
     if (!prompt) throw new Error('反推结果为空');
     return { prompt: prompt, data: data };
   }
@@ -1189,7 +1234,8 @@ async function interrogatePromptFromImage() {
             '<input type="file" id="promptInterrogateFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" class="hidden">' +
           '</div>' +
           '<div class="prompt-interrogate-actions">' +
-            '<button class="prompt-tool-btn" type="button" id="promptInterrogateRunBtn" disabled>' + (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推</button>' +
+            '<button class="prompt-tool-btn" type="button" id="promptInterrogateRunBtn" disabled>' + (window.CW && CW.icon ? CW.icon('image') : '') + ' 标准反推</button>' +
+            '<button class="prompt-tool-btn prompt-interrogate-expert-btn" type="button" id="promptInterrogateExpertRunBtn" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' 专家反推</button>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -1218,8 +1264,9 @@ async function interrogatePromptFromImage() {
     var fileInput = $('#promptInterrogateFile');
     var preview = $('#promptInterrogatePreview');
     var runBtn = $('#promptInterrogateRunBtn');
+    var expertRunBtn = $('#promptInterrogateExpertRunBtn');
     var uploadedName = String(initialImage || '').trim();
-    if (!zone || !fileInput || !runBtn) return;
+    if (!zone || !fileInput || !runBtn || !expertRunBtn) return;
 
     if (uploadedName) {
       if (preview) {
@@ -1230,13 +1277,17 @@ async function interrogatePromptFromImage() {
       var ph = zone.querySelector('.img-upload-placeholder');
       if (ph) ph.style.display = 'none';
       runBtn.disabled = false;
+      expertRunBtn.disabled = false;
     }
 
     async function useFile(file) {
       if (!file) return;
       runBtn.disabled = true;
+      expertRunBtn.disabled = true;
       runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 上传中';
+      expertRunBtn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 上传中';
       runBtn.classList.add('is-loading');
+      expertRunBtn.classList.add('is-loading');
       try {
         var d = await _uploadRefImage(file);
         uploadedName = d.filename;
@@ -1248,13 +1299,18 @@ async function interrogatePromptFromImage() {
         var ph = zone.querySelector('.img-upload-placeholder');
         if (ph) ph.style.display = 'none';
         runBtn.disabled = false;
-        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+        expertRunBtn.disabled = false;
+        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 标准反推';
+        expertRunBtn.innerHTML = (window.CW && CW.icon ? CW.icon('zap') : '') + ' 专家反推';
       } catch (e) {
         if (window.CW && CW.toast) CW.toast(e.message || '图片上传失败', 'error');
         runBtn.disabled = true;
-        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 开始反推';
+        expertRunBtn.disabled = true;
+        runBtn.innerHTML = (window.CW && CW.icon ? CW.icon('image') : '') + ' 标准反推';
+        expertRunBtn.innerHTML = (window.CW && CW.icon ? CW.icon('zap') : '') + ' 专家反推';
       } finally {
         runBtn.classList.remove('is-loading');
+        expertRunBtn.classList.remove('is-loading');
         fileInput.value = '';
       }
     }
@@ -1280,7 +1336,11 @@ async function interrogatePromptFromImage() {
     });
     runBtn.addEventListener('click', async function() {
       if (!uploadedName) return;
-      _startPromptInterrogateTask(uploadedName);
+      _startPromptInterrogateTask(uploadedName, { expert: false });
+    });
+    expertRunBtn.addEventListener('click', async function() {
+      if (!uploadedName) return;
+      _startPromptInterrogateTask(uploadedName, { expert: true });
     });
   }
 

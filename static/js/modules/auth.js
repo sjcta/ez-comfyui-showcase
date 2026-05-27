@@ -19,10 +19,12 @@
   var _accountActiveTab = 'profile';
   var _usersCache = [];
   var _notificationRecords = [];
+  var _notificationEditingId = null;
   var _siteNotificationItems = [];
   var _siteNotificationIndex = 0;
   var _siteNotificationLatestId = 0;
   var _siteNotificationCheckStarted = false;
+  var _systemLlmProfiles = [];
   var _historyCache = [];
   var _expandedHistoryPrompts = {};
   var _historyFavorites = {};
@@ -413,6 +415,13 @@
     return Math.max(0, Math.min(1, value));
   }
 
+  function _sysPositiveNumber(id, fallback) {
+    var el = $('#' + id);
+    var value = el ? Number(el.value) : NaN;
+    if (!Number.isFinite(value)) value = fallback;
+    return Math.max(1, value);
+  }
+
   function _sysText(id) {
     var el = $('#' + id);
     return el ? el.value : '';
@@ -435,6 +444,14 @@
       '</label>';
   }
 
+  function _settingsText(id, label, hint, value, type) {
+    return '<label class="system-settings-field">' +
+      '<span>' + label + '</span>' +
+      '<input class="auth-input" id="' + id + '" type="' + (type || 'text') + '" value="' + escA(value || '') + '">' +
+      '<small>' + hint + '</small>' +
+      '</label>';
+  }
+
   function _settingsTextarea(id, label, value) {
     return '<label class="system-settings-field system-settings-textarea">' +
       '<span>' + label + '</span>' +
@@ -442,12 +459,90 @@
       '</label>';
   }
 
+  function setSystemSettingsTab(tab) {
+    var active = tab || 'llm';
+    $$('#systemSettingsBody [data-system-settings-tab]').forEach(function(btn) {
+      var selected = btn.getAttribute('data-system-settings-tab') === active;
+      btn.classList.toggle('active', selected);
+      btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    $$('#systemSettingsBody [data-system-settings-panel]').forEach(function(panel) {
+      panel.classList.toggle('active', panel.getAttribute('data-system-settings-panel') === active);
+    });
+  }
+
+  function _llmProfileById(id) {
+    id = String(id || '').trim();
+    for (var i = 0; i < _systemLlmProfiles.length; i++) {
+      if (String(_systemLlmProfiles[i].id || '') === id) return _systemLlmProfiles[i];
+    }
+    return null;
+  }
+
+  function _renderLlmProfilePicker(activeId) {
+    if (!_systemLlmProfiles.length) return '';
+    var options = _systemLlmProfiles.map(function(profile) {
+      var id = String(profile.id || '').trim();
+      var caps = Array.isArray(profile.capabilities) ? profile.capabilities.join('/') : '';
+      var label = String(profile.name || id || 'LLM API').trim() + (caps ? ' · ' + caps : '');
+      return '<option value="' + escA(id) + '"' + (id === activeId ? ' selected' : '') + '>' + escH(label) + '</option>';
+    }).join('');
+    return '<div class="system-settings-profile-row">' +
+      '<label class="system-settings-profile-label" for="sysLlmApiProfile">快速切换</label>' +
+      '<select class="auth-input" id="sysLlmApiProfile" onchange="CW.auth.applySystemLlmProfile(this.value)">' + options + '</select>' +
+      '<span class="system-settings-profile-hint">视觉反推建议使用带 vision/mmproj 的接口；Mac 本地 Q4 适合文本处理。</span>' +
+    '</div>';
+  }
+
+  function applySystemLlmProfile(id) {
+    var profile = _llmProfileById(id);
+    if (!profile) return;
+    var enabled = $('#sysLlmApiEnabled');
+    if (enabled) enabled.checked = profile.enabled !== false;
+    var base = $('#sysLlmApiBaseUrl');
+    var model = $('#sysLlmApiModel');
+    var key = $('#sysLlmApiKey');
+    var timeout = $('#sysLlmApiTimeout');
+    if (base) base.value = String(profile.base_url || '');
+    if (model) model.value = String(profile.model || '');
+    if (key) key.value = String(profile.api_key || '');
+    if (timeout) timeout.value = String(profile.timeout || 180);
+    var resultEl = $('#systemSettingsLlmTestResult');
+    if (resultEl) resultEl.textContent = '已切换到 ' + (profile.name || profile.id || 'LLM API') + '，保存后生效。';
+  }
+
   function _renderSystemSettings(data) {
     var body = $('#systemSettingsBody');
     if (!body) return;
     var cfg = (data && data.image_protection) || {};
     var patterns = cfg.prompt_patterns || {};
+    var llm = (data && data.llm_api) || {};
+    _systemLlmProfiles = Array.isArray(data && data.llm_api_profiles) ? data.llm_api_profiles.slice() : [];
+    var activeProfileId = String((data && data.active_llm_api_profile) || '').trim();
     body.innerHTML =
+      '<div class="system-settings-tabs" role="tablist" aria-label="系统设置分类">' +
+        '<button class="system-settings-tab active" type="button" role="tab" aria-selected="true" data-system-settings-tab="llm" onclick="CW.auth.setSystemSettingsTab(\'llm\')">LLM API</button>' +
+        '<button class="system-settings-tab" type="button" role="tab" aria-selected="false" data-system-settings-tab="protection" onclick="CW.auth.setSystemSettingsTab(\'protection\')">图片保护</button>' +
+        '<button class="system-settings-tab" type="button" role="tab" aria-selected="false" data-system-settings-tab="patterns" onclick="CW.auth.setSystemSettingsTab(\'patterns\')">提示词规则</button>' +
+      '</div>' +
+      '<div class="system-settings-panel active" data-system-settings-panel="llm">' +
+      '<div class="system-settings-section">' +
+        '<div class="account-panel-head"><strong>LLM / 图片反推 API</strong><span>配置提示词优化、翻译和图片反推使用的 OpenAI-compatible 接口。</span></div>' +
+        _renderLlmProfilePicker(activeProfileId) +
+        '<div class="system-settings-grid">' +
+          _settingsSwitch('sysLlmApiEnabled', '启用 LLM API', '关闭后图片反推会直接回退到 Prompt 辅助实例。', llm.enabled !== false) +
+          _settingsText('sysLlmApiBaseUrl', 'Base URL', '例如 http://10.10.10.75:8080，不要带 /v1。', llm.base_url || 'http://10.10.10.75:8080') +
+          _settingsText('sysLlmApiModel', '模型 ID', '例如 HauhauCS/...:Q5_K_P 或服务端模型名。', llm.model || 'HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q5_K_P') +
+          _settingsText('sysLlmApiKey', 'API Key', '可选；本地 llama-server 通常留空。', llm.api_key || '', 'password') +
+          _settingsText('sysLlmApiTimeout', '超时秒数', '图片反推建议 180-300 秒。', String(llm.timeout || 180), 'number') +
+        '</div>' +
+        '<div class="system-settings-test-row">' +
+          '<button class="prompt-tool-btn system-settings-test-btn" type="button" id="systemSettingsLlmTest" onclick="CW.auth.testLlmApiSettings()">' + (window.CW && CW.icon ? CW.icon('server') : '') + ' 测试 LLM 接口</button>' +
+        '</div>' +
+        '<div class="system-settings-test-status prompt-result-meta" id="systemSettingsLlmTestResult" aria-live="polite"></div>' +
+      '</div>' +
+      '</div>' +
+      '<div class="system-settings-panel" data-system-settings-panel="protection">' +
       '<div class="system-settings-section">' +
         '<div class="account-panel-head"><strong>图片保护</strong><span>控制出图后的视觉审查、阈值和提示词兜底规则。</span></div>' +
         '<div class="system-settings-grid">' +
@@ -467,6 +562,8 @@
           _settingsNumber('sysNsfwRiskSkinThreshold', '软提示词肤色阈值', '提示词保护开启时，软词命中所需肤色占比。', cfg.nsfw_risk_skin_threshold) +
         '</div>' +
       '</div>' +
+      '</div>' +
+      '<div class="system-settings-panel" data-system-settings-panel="patterns">' +
       '<div class="system-settings-section">' +
         '<div class="account-panel-head"><strong>提示词管理</strong><span>按正则片段管理；提示词保护关闭时，不会单独保护，但仍可用于弱视觉二次确认。</span></div>' +
         '<div class="system-settings-patterns">' +
@@ -475,9 +572,11 @@
           _settingsTextarea('sysPromptPatternStrongNude', '裸体强信号词', patterns.strong_nude) +
           _settingsTextarea('sysPromptPatternObsceneGesture', '不雅手势词', patterns.obscene_gesture) +
         '</div>' +
+      '</div>' +
       '</div>';
     var saveBtn = $('#systemSettingsSave');
     if (saveBtn) saveBtn.onclick = saveSystemSettings;
+    setSystemSettingsTab('llm');
   }
 
   function showSystemSettings() {
@@ -515,7 +614,28 @@
   }
 
   function saveSystemSettings() {
+    var activeProfileId = _sysText('sysLlmApiProfile').trim();
+    var profiles = _systemLlmProfiles.map(function(profile) {
+      var copy = Object.assign({}, profile || {});
+      if (String(copy.id || '') === activeProfileId) {
+        copy.enabled = _sysBool('sysLlmApiEnabled');
+        copy.base_url = _sysText('sysLlmApiBaseUrl').trim();
+        copy.model = _sysText('sysLlmApiModel').trim();
+        copy.api_key = _sysText('sysLlmApiKey').trim();
+        copy.timeout = _sysPositiveNumber('sysLlmApiTimeout', 180);
+      }
+      return copy;
+    });
     var payload = {
+      llm_api: {
+        enabled: _sysBool('sysLlmApiEnabled'),
+        base_url: _sysText('sysLlmApiBaseUrl').trim(),
+        model: _sysText('sysLlmApiModel').trim(),
+        api_key: _sysText('sysLlmApiKey').trim(),
+        timeout: _sysPositiveNumber('sysLlmApiTimeout', 180),
+      },
+      llm_api_profiles: profiles,
+      active_llm_api_profile: activeProfileId,
       image_protection: {
         enabled: _sysBool('sysImageProtectionEnabled'),
         detector_enabled: _sysBool('sysDetectorEnabled'),
@@ -554,6 +674,44 @@
     });
   }
 
+  function testLlmApiSettings() {
+    var resultEl = $('#systemSettingsLlmTestResult');
+    var btn = $('#systemSettingsLlmTest');
+    var payload = {
+      llm_api: {
+        enabled: _sysBool('sysLlmApiEnabled'),
+        base_url: _sysText('sysLlmApiBaseUrl').trim(),
+        model: _sysText('sysLlmApiModel').trim(),
+        api_key: _sysText('sysLlmApiKey').trim(),
+        timeout: _sysPositiveNumber('sysLlmApiTimeout', 180),
+      }
+    };
+    if (resultEl) resultEl.textContent = '测试中...';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 测试中';
+    }
+    apiFetch(API + '/api/system-settings/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '测试失败'); });
+      return r.json();
+    }).then(function(d) {
+      if (resultEl) resultEl.textContent = '连接成功 · ' + (d.provider || d.model || 'LLM');
+      CW.toast('LLM 接口连接成功', 'done');
+    }).catch(function(e) {
+      if (resultEl) resultEl.textContent = e.message || '测试失败';
+      CW.toast(e.message || '测试失败', 'error');
+    }).finally(function() {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = (window.CW && CW.icon ? CW.icon('server') : '') + ' 测试 LLM 接口';
+      }
+    });
+  }
+
   function _getLocalNotificationMutedUntil() {
     try {
       return parseInt(localStorage.getItem(_siteNotificationMuteStorageKey()) || '0', 10) || 0;
@@ -570,9 +728,14 @@
 
   function _renderNotificationRecordRows() {
     var rows = (_notificationRecords || []).map(function(n) {
+      var id = escA(String(n.id || ''));
       return '<div class="notice-record-row">' +
         '<div class="notice-record-main"><strong>' + escH(n.title || '-') + '</strong><span>' + escH(n.created_at || '-') + (n.created_by_username ? ' · ' + escH(n.created_by_username) : '') + '</span></div>' +
         '<p>' + escH(n.content || '') + '</p>' +
+        '<div class="notice-record-actions">' +
+          '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.editSiteNotification(\'' + id + '\')">' + (window.CW && CW.icon ? CW.icon('pencil') : '') + ' 编辑</button>' +
+          '<button class="wf-mgr-btn account-action-btn btn-delete" type="button" onclick="CW.auth.deleteSiteNotification(\'' + id + '\')">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' 删除</button>' +
+        '</div>' +
       '</div>';
     }).join('');
     return rows || '<div class="account-empty">暂无发送记录</div>';
@@ -581,6 +744,7 @@
   function _renderNotificationsAdmin() {
     var body = $('#accountBody');
     if (!body) return;
+    var isEditing = _notificationEditingId !== null && _notificationEditingId !== undefined;
     body.innerHTML =
       '<div class="account-section notice-admin-section">' +
         '<div class="account-panel-head">' +
@@ -588,10 +752,12 @@
           '<span>发送后会保存记录，并在普通用户打开界面时弹出展示。</span>' +
         '</div>' +
         '<div class="notice-compose-card">' +
+          '<input type="hidden" id="siteNoticeEditingId" value="' + (isEditing ? escA(String(_notificationEditingId)) : '') + '">' +
           '<input class="auth-input" id="siteNoticeTitle" maxlength="120" placeholder="通知标题">' +
           '<textarea class="auth-input" id="siteNoticeContent" rows="5" maxlength="4000" placeholder="通知内容"></textarea>' +
           '<div class="notice-compose-actions">' +
-            '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.sendSiteNotification()">发送通知</button>' +
+            (isEditing ? '<button class="wf-mgr-btn account-action-btn" type="button" onclick="CW.auth.cancelEditSiteNotification()">取消编辑</button>' : '') +
+            '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.sendSiteNotification()">' + (isEditing ? '保存修改' : '发送通知') + '</button>' +
           '</div>' +
         '</div>' +
         '<div class="account-list-card notice-record-card">' +
@@ -599,6 +765,15 @@
           '<div id="siteNoticeRecords">' + _renderNotificationRecordRows() + '</div>' +
         '</div>' +
       '</div>';
+    if (isEditing) {
+      var editing = (_notificationRecords || []).find(function(n) { return String(n.id) === String(_notificationEditingId); });
+      if (editing) {
+        var titleEl = $('#siteNoticeTitle');
+        var contentEl = $('#siteNoticeContent');
+        if (titleEl) titleEl.value = editing.title || '';
+        if (contentEl) contentEl.value = editing.content || '';
+      }
+    }
   }
 
   function _loadNotificationsAdmin() {
@@ -615,6 +790,31 @@
     });
   }
 
+  function _replaceNotificationRecord(record) {
+    var replaced = false;
+    _notificationRecords = (_notificationRecords || []).map(function(item) {
+      if (String(item.id) !== String(record.id)) return item;
+      replaced = true;
+      return record;
+    });
+    if (!replaced) _notificationRecords.unshift(record);
+  }
+
+  function editSiteNotification(id) {
+    if (!_currentUser || _currentUser.role !== 'admin') return;
+    var record = (_notificationRecords || []).find(function(n) { return String(n.id) === String(id); });
+    if (!record) return CW.toast('通知记录不存在', 'error');
+    _notificationEditingId = String(record.id);
+    _renderNotificationsAdmin();
+    var titleEl = $('#siteNoticeTitle');
+    if (titleEl && titleEl.focus) titleEl.focus();
+  }
+
+  function cancelEditSiteNotification() {
+    _notificationEditingId = null;
+    _renderNotificationsAdmin();
+  }
+
   function sendSiteNotification() {
     if (!_currentUser || _currentUser.role !== 'admin') return;
     var titleEl = $('#siteNoticeTitle');
@@ -622,22 +822,50 @@
     var title = titleEl ? titleEl.value.trim() : '';
     var content = contentEl ? contentEl.value.trim() : '';
     if (!title || !content) return CW.toast('请填写标题和内容', 'warn');
-    apiFetch(API + '/api/site-notifications', {
-      method: 'POST',
+    var editingIdEl = $('#siteNoticeEditingId');
+    var rawId = editingIdEl ? editingIdEl.value.trim() : '';
+    var id = rawId ? encodeURIComponent(rawId) : '';
+    apiFetch(API + (id ? '/api/site-notifications/' + id : '/api/site-notifications'), {
+      method: id ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: title, content: content })
     }).then(function(r) {
-      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '发送失败'); });
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || (id ? '保存失败' : '发送失败')); });
       return r.json();
     }).then(function(d) {
       if (titleEl) titleEl.value = '';
       if (contentEl) contentEl.value = '';
-      if (d && d.data) _notificationRecords.unshift(d.data);
+      if (d && d.data) {
+        if (id) _replaceNotificationRecord(d.data);
+        else _notificationRecords.unshift(d.data);
+      }
+      _notificationEditingId = null;
       _renderNotificationsAdmin();
-      CW.toast('网站通知已发送', 'done');
+      CW.toast(id ? '网站通知已保存' : '网站通知已发送', 'done');
     }).catch(function(e) {
-      CW.toast(e.message || '发送失败', 'error');
+      CW.toast(e.message || (id ? '保存失败' : '发送失败'), 'error');
     });
+  }
+
+  function deleteSiteNotification(rawId) {
+    if (!_currentUser || _currentUser.role !== 'admin') return;
+    if (!rawId) return;
+    if (!confirm('确定删除这条网站通知吗？删除后普通用户将不再看到它。')) return;
+    var id = encodeURIComponent(rawId);
+    apiFetch(API + '/api/site-notifications/' + id, { method: 'DELETE' })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '删除失败'); });
+        return r.json();
+      })
+      .then(function() {
+        _notificationRecords = (_notificationRecords || []).filter(function(n) { return String(n.id) !== String(rawId); });
+        if (String(_notificationEditingId) === String(rawId)) _notificationEditingId = null;
+        _renderNotificationsAdmin();
+        CW.toast('网站通知已删除', 'done');
+      })
+      .catch(function(e) {
+        CW.toast(e.message || '删除失败', 'error');
+      });
   }
 
   function _closeSiteNotification() {
@@ -1662,7 +1890,13 @@
     showSystemSettings: showSystemSettings,
     closeSystemSettings: closeSystemSettings,
     saveSystemSettings: saveSystemSettings,
+    setSystemSettingsTab: setSystemSettingsTab,
+    testLlmApiSettings: testLlmApiSettings,
+    applySystemLlmProfile: applySystemLlmProfile,
     sendSiteNotification: sendSiteNotification,
+    editSiteNotification: editSiteNotification,
+    cancelEditSiteNotification: cancelEditSiteNotification,
+    deleteSiteNotification: deleteSiteNotification,
     closeSiteNotification: _closeSiteNotification,
     nextSiteNotification: nextSiteNotification,
     muteSiteNotifications: muteSiteNotifications,

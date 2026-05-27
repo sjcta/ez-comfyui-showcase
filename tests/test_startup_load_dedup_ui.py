@@ -35,19 +35,21 @@ class StartupLoadDedupUiTests(unittest.TestCase):
 
         self.assertLess(load_workflows_pos, load_logged_modules_pos)
 
-    def test_workflow_preview_uses_loaded_history_without_extra_fetch(self):
+    def test_workflow_preview_uses_lightweight_preview_endpoint_with_history_fallback(self):
         workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
         preview_start = workflows_js.index("async function _loadWorkflowPreviewItems()")
         preview_end = workflows_js.index("function _workflowManagerThumbUrl", preview_start)
         preview_block = workflows_js[preview_start:preview_end]
 
+        self.assertIn("/api/workflows/previews", preview_block)
         self.assertIn("return historyItems.slice();", preview_block)
         self.assertNotIn("/api/history?scope=mine&limit=300", preview_block)
 
     def test_main_history_initial_fetch_is_bounded(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
 
-        self.assertIn("var HISTORY_FETCH_LIMIT = 300;", history_js)
+        self.assertIn("var HISTORY_PAGE_SIZE = 80;", history_js)
+        self.assertIn("/api/history/summary", history_js)
 
 
 if __name__ == "__main__":

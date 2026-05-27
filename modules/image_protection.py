@@ -391,10 +391,10 @@ class ImageProtectionWorker:
         if prompt_protection_enabled():
             if gesture_hit:
                 return ImageProtectionResult("protected", 0.76, "obscene gesture prompt", "heuristic")
+            if strong_nude_hit:
+                return ImageProtectionResult("protected", 0.78, "strong nude prompt", "heuristic")
             if prompt_hit and skin_ratio >= _setting_threshold("strong_prompt_skin_threshold", _STRONG_PROMPT_SKIN_THRESHOLD):
                 return ImageProtectionResult("protected", max(0.76, skin_ratio), f"prompt signal with skin_ratio={skin_ratio:.3f}", "heuristic")
-            if strong_nude_hit and skin_ratio >= _setting_threshold("strong_nude_skin_threshold", _STRONG_NUDE_SKIN_THRESHOLD):
-                return ImageProtectionResult("protected", max(0.76, skin_ratio), f"strong nude prompt with skin_ratio={skin_ratio:.3f}", "heuristic")
             if prompt_fallback and nsfw_risk_hit and skin_ratio >= _setting_threshold("nsfw_risk_skin_threshold", _NSFW_RISK_SKIN_THRESHOLD):
                 return ImageProtectionResult("protected", max(0.76, skin_ratio), f"nsfw-risk prompt with skin_ratio={skin_ratio:.3f}", "heuristic")
         visual_signal, visual_reason = _visual_intimate_signal(image_path, skin_ratio) if visual_fallback else (False, "")

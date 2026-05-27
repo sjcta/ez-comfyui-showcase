@@ -27,6 +27,21 @@ class SiteNotificationsUiTests(unittest.TestCase):
         ):
             self.assertIn(token, auth_js)
 
+    def test_notification_admin_supports_edit_and_delete(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text("utf-8")
+
+        for token in (
+            "editSiteNotification(",
+            "cancelEditSiteNotification",
+            "deleteSiteNotification(",
+            "siteNoticeEditingId",
+            "保存修改",
+            "/api/site-notifications/' + id",
+            "method: 'PUT'",
+            "method: 'DELETE'",
+        ):
+            self.assertIn(token, auth_js)
+
     def test_site_notification_styles_are_present(self):
         css = (ROOT / "static/css/style.css").read_text("utf-8")
 
