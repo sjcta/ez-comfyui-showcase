@@ -534,7 +534,7 @@
           _settingsText('sysLlmApiBaseUrl', 'Base URL', '例如 http://10.10.10.75:8080，不要带 /v1。', llm.base_url || 'http://10.10.10.75:8080') +
           _settingsText('sysLlmApiModel', '模型 ID', '例如 HauhauCS/...:Q5_K_P 或服务端模型名。', llm.model || 'HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q5_K_P') +
           _settingsText('sysLlmApiKey', 'API Key', '可选；本地 llama-server 通常留空。', llm.api_key || '', 'password') +
-          _settingsText('sysLlmApiTimeout', '超时秒数', '图片反推建议 180-300 秒。', String(llm.timeout || 180), 'number') +
+          _settingsText('sysLlmApiTimeout', '超时秒数', '开发阶段先保证识别成功率，建议 180 秒起；稳定后再按实测耗时收紧到 30-60 秒。', String(llm.timeout || 180), 'number') +
         '</div>' +
         '<div class="system-settings-test-row">' +
           '<button class="prompt-tool-btn system-settings-test-btn" type="button" id="systemSettingsLlmTest" onclick="CW.auth.testLlmApiSettings()">' + (window.CW && CW.icon ? CW.icon('server') : '') + ' 测试 LLM 接口</button>' +

@@ -6775,6 +6775,12 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     prepared_image_path = _resolve_input_image_path(image_for_interrogate) or resolved_image_path
     prompt_mode = "video_script" if str(req.mode or "").lower() in {"video", "video_script", "script"} else "image"
     expert_mode = bool(req.expert) and prompt_mode == "image"
+    started_at = time.monotonic()
+
+    def _attach_interrogate_timing(result: dict) -> dict:
+        if isinstance(result, dict):
+            result["interrogate_elapsed_seconds"] = round(max(0.0, time.monotonic() - started_at), 3)
+        return result
 
     def _apply_video_script_interrogate(result: dict) -> dict:
         if prompt_mode != "video_script":
@@ -6811,16 +6817,17 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
         try:
             result = run_llm_expert_image_interrogator(
                 prepared_image_path,
-                timeout=90,
+                timeout=None,
                 max_new_tokens=1536,
-                single_pass=True,
+                single_pass=False,
                 include_quality=True,
             )
             result = _consume_reverse_prompt_quality(result, current_user)
+            result = _attach_interrogate_timing(result)
             result["image_preprocess"] = prepared_image
             result["instance"] = "LLM"
             result["source_image"] = image
-            add_log("info", "prompt_interrogate", f"Expert image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+            add_log("info", "prompt_interrogate", f"Expert image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)} elapsed={result.get('interrogate_elapsed_seconds')}")
             return result
         except TimeoutError as e:
             add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
@@ -6835,17 +6842,18 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     try:
         result = run_llm_image_interrogator(
             prepared_image_path,
-            timeout=60,
+            timeout=None,
             max_new_tokens=512,
             compact=True,
             include_quality=True,
         )
         result = _consume_reverse_prompt_quality(result, current_user)
         result = _apply_video_script_interrogate(result)
+        result = _attach_interrogate_timing(result)
         result["image_preprocess"] = prepared_image
         result["instance"] = "LLM"
         result["source_image"] = image
-        add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+        add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)} elapsed={result.get('interrogate_elapsed_seconds')}")
         return result
     except LLMVisionUnsupportedError as llm_error:
         add_log("warn", "prompt_interrogate", f"LLM vision unavailable, falling back to Prompt instance: {llm_error}", details=f"user={_user_id(current_user)}")
@@ -6923,8 +6931,9 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     except Exception as e:
         add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"图片反推失败: {e}") from e
+    result = _attach_interrogate_timing(result)
     result["instance"] = inst.get("name", "")
-    add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)}")
+    add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)} elapsed={result.get('interrogate_elapsed_seconds')}")
     return result
 
 

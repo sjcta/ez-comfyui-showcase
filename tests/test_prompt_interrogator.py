@@ -10,6 +10,7 @@ from modules.prompt_interrogator import (
     BEDROOM_SEATED_POSE_STANDARD,
     FAST_IMAGE_INTERROGATE_TEMPLATE,
     EXPERT_IMAGE_INTERROGATE_TEMPLATE,
+    EXPERT_IMAGE_REVIEW_TEMPLATE,
     FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE,
     RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE,
     IMAGE_INTERROGATE_EXPERTS,
@@ -36,6 +37,39 @@ class PromptInterrogatorTests(unittest.TestCase):
         def fake_chat(messages, **kwargs):
             text = messages[1]["content"][0]["text"]
             calls.append(text)
+            if "全局概览调度器" in text:
+                return json.dumps(
+                    {
+                        "has_person": True,
+                        "image_type": "人像",
+                        "visible_elements": ["人物", "粉色衣物", "近距离低角度构图"],
+                        "recommended_experts": [spec["id"] for spec in IMAGE_INTERROGATE_EXPERTS],
+                        "reason": "图中有人物主体，需要完整人物专家组",
+                    },
+                    ensure_ascii=False,
+                )
+            if "评审专家" in text:
+                return json.dumps(
+                    {
+                        "summary": "各专家结论足够细腻且基本属实",
+                        "retry_expert_ids": [],
+                        "reviews": [
+                            {
+                                "id": spec["id"],
+                                "label": spec["label"],
+                                "passed": True,
+                                "detail_score": 0.86,
+                                "factual_score": 0.88,
+                                "boundary_score": 0.9,
+                                "missing": [],
+                                "unsupported": [],
+                                "retry_instruction": "",
+                            }
+                            for spec in IMAGE_INTERROGATE_EXPERTS
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
             if "最终合并器" in text:
                 self.assertIn("构图镜头专家", text)
                 self.assertIn("摄影参数专家", text)
@@ -81,8 +115,13 @@ class PromptInterrogatorTests(unittest.TestCase):
             Image.new("RGB", (32, 32), (245, 210, 220)).save(image_path)
             result = run_llm_expert_image_interrogator(str(image_path), chat_fn=fake_chat, include_quality=True)
 
-        self.assertEqual(len(calls), len(IMAGE_INTERROGATE_EXPERTS) + 1)
+        self.assertEqual(len(calls), len(IMAGE_INTERROGATE_EXPERTS) + 3)
         self.assertEqual(len(result["expert_interrogate"]["experts"]), len(IMAGE_INTERROGATE_EXPERTS))
+        self.assertEqual(result["expert_interrogate"]["mode"], "staged")
+        self.assertIn("review", result["expert_interrogate"])
+        self.assertEqual(result["expert_interrogate"]["review_retry_count"], 0)
+        self.assertEqual(len(result["expert_interrogate"]["review"]["reviews"]), len(IMAGE_INTERROGATE_EXPERTS))
+        self.assertEqual(result["expert_interrogate"]["expected_expert_count"], len(IMAGE_INTERROGATE_EXPERTS))
         self.assertIn("手机近距离低角度仰拍", result["prompt"])
         self.assertIn("reverse_prompt_quality", result)
         self.assertEqual(result["reverse_prompt_quality"]["target_score"], REPLICATION_TARGET_SCORE)
@@ -95,6 +134,78 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn('"负面提示词": {', result["structured_prompt_json"])
         self.assertNotIn("双脚", result["structured_prompt_json"])
         self.assertIn("胯部被抬起的大腿和衣物遮挡", result["structured_prompt_json"])
+
+    def test_run_llm_expert_image_interrogator_retries_failed_reviewed_expert_once(self):
+        calls = []
+
+        def fake_chat(messages, **kwargs):
+            text = messages[1]["content"][0]["text"]
+            calls.append(text)
+            if "全局概览调度器" in text:
+                return '{"has_person":false,"image_type":"产品","visible_elements":["产品"],"recommended_experts":["composition"],"reason":"只测构图专家"}'
+            if "评审专家" in text and "模糊构图" in text:
+                return """{
+                  "summary": "构图专家不够细且有平视误判",
+                  "retry_expert_ids": ["composition"],
+                  "reviews": [{
+                    "id": "composition",
+                    "label": "构图镜头专家",
+                    "passed": false,
+                    "detail_score": 0.42,
+                    "factual_score": 0.4,
+                    "boundary_score": 0.8,
+                    "missing": ["缺少画面边界和镜头距离"],
+                    "unsupported": ["平视"],
+                    "retry_instruction": "必须写清近距离低角度和主体占比，删除平视"
+                  }]
+                }"""
+            if "评审专家" in text:
+                return """{
+                  "summary": "重写后通过",
+                  "retry_expert_ids": [],
+                  "reviews": [{
+                    "id": "composition",
+                    "label": "构图镜头专家",
+                    "passed": true,
+                    "detail_score": 0.9,
+                    "factual_score": 0.88,
+                    "boundary_score": 0.92,
+                    "missing": [],
+                    "unsupported": [],
+                    "retry_instruction": ""
+                  }]
+                }"""
+            if "最终合并器" in text:
+                self.assertIn("近距离低角度构图", text)
+                self.assertNotIn("模糊构图", text)
+                return """{
+                  "keyword_prompt": "近距离低角度构图，主体占据画面大部分",
+                  "english_prompt": "close low-angle composition, subject fills most of the frame",
+                  "structured_prompt": {
+                    "画面描述": {"构图镜头": {"镜头": "近距离低角度构图，主体占据画面大部分"}},
+                    "负面提示词": {"构图镜头": ["平视"]}
+                  }
+                }"""
+            if "复审专家已打回" in text:
+                self.assertIn("必须写清近距离低角度", text)
+                return '{"id":"composition","label":"构图镜头专家","summary":"近距离低角度构图","fields":{"镜头":"近距离低角度构图，主体占据画面大部分"},"observations":["主体占据画面大部分"],"uncertain":[],"negative_constraints":["平视"],"confidence":0.91}'
+            if "专家代号: composition" in text:
+                return '{"id":"composition","label":"构图镜头专家","summary":"模糊构图","fields":{"镜头":"平视"},"observations":["构图"],"uncertain":[],"negative_constraints":[],"confidence":0.4}'
+            return "{}"
+
+        with tempfile.TemporaryDirectory() as td:
+            image_path = Path(td) / "sample.png"
+            from PIL import Image
+
+            Image.new("RGB", (32, 32), (245, 210, 220)).save(image_path)
+            result = run_llm_expert_image_interrogator(str(image_path), chat_fn=fake_chat)
+
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(result["expert_interrogate"]["review_retry_count"], 1)
+        self.assertEqual(result["expert_interrogate"]["review_retry_expert_ids"], ["composition"])
+        self.assertEqual(result["expert_interrogate"]["final_review"]["summary"], "重写后通过")
+        self.assertTrue(result["expert_interrogate"]["experts"][0]["review_retry"]["from_review"])
+        self.assertIn("近距离低角度构图", result["prompt"])
 
     def test_build_image_interrogate_workflow_replaces_image_filename(self):
         workflow = build_image_interrogate_workflow("u1/2026-05-20/ref.png")
@@ -128,10 +239,10 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("exposed_body_details", workflow["5"]["inputs"]["text"])
         self.assertIn("nsfw_content_details", workflow["5"]["inputs"]["text"])
         self.assertIn("手部必须写清每只手", workflow["5"]["inputs"]["text"])
-        self.assertIn("脚部必须写清可见脚", workflow["5"]["inputs"]["text"])
+        self.assertIn("脚部只有进入画面时才写", workflow["5"]["inputs"]["text"])
         self.assertIn("关节和肢体受力", workflow["5"]["inputs"]["text"])
         self.assertIn("脸部细节和表情", workflow["5"]["inputs"]["text"])
-        self.assertIn("不可见就是“画面边缘裁切到某处/被某物遮挡”", workflow["5"]["inputs"]["text"])
+        self.assertIn("不可见内容直接省略", workflow["5"]["inputs"]["text"])
         self.assertIn("不要把不可见脚写成“脚部细节不清晰”", workflow["5"]["inputs"]["text"])
         self.assertIn("不要把字段填成笼统的“不可见/无/不清晰”", workflow["5"]["inputs"]["text"])
         self.assertIn("近距离透视和前景肢体占比", workflow["5"]["inputs"]["text"])
@@ -159,7 +270,7 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("前/后/左/右/向前”不是绝对方向", workflow["5"]["inputs"]["text"])
         self.assertIn("先画面外围再中心", workflow["5"]["inputs"]["text"])
         self.assertIn("左上角、右上角、左下角、右下角", workflow["5"]["inputs"]["text"])
-        self.assertIn("手臂向座椅靠背伸展至画面外", workflow["5"]["inputs"]["text"])
+        self.assertIn("手臂向座椅靠背方向延伸到画面边缘", workflow["5"]["inputs"]["text"])
         self.assertIn("不要删除没有参照物的动作信息", workflow["5"]["inputs"]["text"])
         self.assertIn("车内有方向盘不等于手搭方向盘", workflow["5"]["inputs"]["text"])
         self.assertIn("不明确时写“车厢前排区域”", workflow["5"]["inputs"]["text"])
@@ -177,10 +288,74 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertTrue(workflow["5"]["inputs"]["keep_model_loaded"])
         self.assertEqual(workflow["6"]["class_type"], "ShowText|pysssss")
 
+    def test_staged_expert_interrogator_uses_global_overview_to_limit_experts(self):
+        calls = []
+        selected = ["composition", "photography_parameters", "color_light", "mood_style", "materials_texture"]
+
+        def fake_chat(messages, **kwargs):
+            text = messages[1]["content"][0]["text"]
+            calls.append(text)
+            if "全局概览调度器" in text:
+                return json.dumps(
+                    {
+                        "has_person": False,
+                        "image_type": "产品",
+                        "visible_elements": ["白色陶瓷杯", "木质桌面", "窗边自然光"],
+                        "recommended_experts": selected,
+                        "reason": "无人物主体，只需要物体复刻专家",
+                    },
+                    ensure_ascii=False,
+                )
+            if "最终合并器" in text:
+                return """{
+                  "keyword_prompt": "白色陶瓷杯放在木质桌面，窗边自然光，浅景深",
+                  "structured_prompt": {
+                    "画面描述": {
+                      "构图镜头": {"构图": "桌面静物中近景"},
+                      "材质纹理": {"材质": "白色陶瓷光滑高光，木桌细密纹理"}
+                    },
+                    "负面提示词": {"质量错误": ["水印"]}
+                  }
+                }"""
+            expert_id = ""
+            for item in selected:
+                if f"专家代号: {item}" in text:
+                    expert_id = item
+                    break
+            return json.dumps(
+                {
+                    "id": expert_id,
+                    "label": expert_id,
+                    "summary": "可见事实",
+                    "fields": {"观察": "可见事实"},
+                    "observations": ["可见事实"],
+                    "uncertain": [],
+                    "negative_constraints": [],
+                    "confidence": 0.8,
+                },
+                ensure_ascii=False,
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            image_path = Path(td) / "product.png"
+            from PIL import Image
+
+            Image.new("RGB", (640, 640), (235, 230, 220)).save(image_path)
+            result = run_llm_expert_image_interrogator(str(image_path), chat_fn=fake_chat)
+
+        self.assertEqual(result["expert_interrogate"]["expected_expert_count"], len(selected))
+        self.assertEqual(result["expert_interrogate"]["selected_experts"], selected)
+        self.assertFalse(any("专家代号: body_pose" in call for call in calls))
+        self.assertFalse(any("专家代号: expression_language" in call for call in calls))
+        self.assertIn("白色陶瓷杯", result["prompt"])
+
     def test_expert_prompts_require_face_makeup_and_photography_parameters(self):
         expert_ids = {spec["id"] for spec in IMAGE_INTERROGATE_EXPERTS}
 
         self.assertIn("photography_parameters", expert_ids)
+        self.assertIn("评审专家", EXPERT_IMAGE_REVIEW_TEMPLATE)
+        self.assertIn("retry_expert_ids", EXPERT_IMAGE_REVIEW_TEMPLATE)
+        self.assertIn("detail_score", EXPERT_IMAGE_REVIEW_TEMPLATE)
         self.assertIn("标准反推定位：快速、准确、可用", FAST_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("专家反推定位：1:1 复刻精度", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("可执行的复刻参数", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
@@ -404,7 +579,7 @@ class PromptInterrogatorTests(unittest.TestCase):
 
     def test_positive_prompt_cleaner_keeps_action_while_removing_ambiguous_alternatives(self):
         cleaned = _clean_positive_prompt_text(
-            "双腿并拢或轻微分开，膝盖弯曲，穿着黑色过膝袜，短裙或短裤疑似，参考大光圈或中大光圈，手臂向前伸展，手臂向座椅靠背伸展至画面外"
+            "双腿并拢或轻微分开，膝盖弯曲，穿着黑色过膝袜，短裙或短裤疑似，参考大光圈或中大光圈，手臂向前伸展，手臂向座椅靠背方向延伸到画面边缘"
         )
 
         self.assertNotIn("双腿并拢或轻微分开", cleaned)
@@ -413,7 +588,7 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("膝盖弯曲", cleaned)
         self.assertIn("穿着黑色过膝袜", cleaned)
         self.assertIn("参考大光圈或中大光圈", cleaned)
-        self.assertIn("手臂向座椅靠背伸展至画面外", cleaned)
+        self.assertIn("手臂向座椅靠背方向延伸到画面边缘", cleaned)
 
     def test_single_pass_expert_result_falls_back_to_json_when_model_omits_structured_prompt(self):
         def fake_chat(messages, **kwargs):

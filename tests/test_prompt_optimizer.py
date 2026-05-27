@@ -1051,7 +1051,7 @@ class PromptOptimizerTests(unittest.TestCase):
             def fake_expert(image_path, **kwargs):
                 self.assertEqual(image_path, "/tmp/input.png")
                 self.assertEqual(kwargs.get("max_new_tokens"), 1536)
-                self.assertTrue(kwargs.get("single_pass"))
+                self.assertFalse(kwargs.get("single_pass"))
                 self.assertTrue(kwargs.get("include_quality"))
                 return {
                     "ok": True,

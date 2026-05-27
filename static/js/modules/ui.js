@@ -197,6 +197,9 @@ function showPromptResultToast(prompt, meta) {
   t.className = 'toast toast-done toast-prompt-result prompt-result-toast is-persistent is-collapsed';
   if (t.setAttribute) t.setAttribute('data-toast-scope', 'prompt-interrogate');
   var provider = meta && meta.provider ? String(meta.provider) : '';
+  var elapsed = meta && typeof meta.interrogate_elapsed_seconds === 'number' ? meta.interrogate_elapsed_seconds : null;
+  var metaLine = provider || '图片反推提示词';
+  if (elapsed !== null && isFinite(elapsed)) metaLine += ' · 耗时 ' + elapsed.toFixed(elapsed >= 10 ? 1 : 2) + 's';
   var promptEn = String((meta && (meta.prompt_en || meta.english_prompt)) || (_hasChinese(text) ? '' : text) || '').trim();
   var promptZh = _cleanPromptResultChinese(String((meta && (meta.prompt_zh || meta.zh_prompt || meta.chinese_prompt || meta.translated_prompt)) || (_hasChinese(text) ? text : '') || '').trim());
   var negativePrompt = String((meta && (meta.negative_prompt || meta.negativePrompt)) || '').trim();
@@ -264,6 +267,14 @@ function showPromptResultToast(prompt, meta) {
     var html = '<span class="prompt-result-expert-title">专家组反推</span>';
     if (merged) {
       html += '<span class="prompt-result-expert-merged"><strong>合并结果</strong><span>' + escH(merged) + '</span></span>';
+    }
+    if (data.review) {
+      var reviewSummary = String(data.review.summary || '').trim();
+      var retryCount = Number(data.review_retry_count || 0);
+      html += '<span class="prompt-result-expert-review"><strong>评审专家</strong><span>'
+        + escH(reviewSummary || '已完成专家维度复审')
+        + (retryCount ? escH('，打回重写 ' + retryCount + ' 个专家') : '')
+        + '</span></span>';
     }
     html += '<span class="prompt-result-expert-list">';
     for (var ei = 0; ei < experts.length; ei++) {
@@ -376,7 +387,7 @@ function showPromptResultToast(prompt, meta) {
     + '<span class="toast-content">'
     +   '<span class="toast-title">反推完成</span>'
     +   '<span class="prompt-result-panel">'
-    +     '<span class="prompt-result-meta">' + escH(provider || '图片反推提示词') + '</span>'
+    +     '<span class="prompt-result-meta">' + escH(metaLine) + '</span>'
     +     '<span class="prompt-result-body" data-lang="' + escA(currentLang) + '" data-format="' + escA(currentFormat) + '">' + escH(currentText) + '</span>'
     +     '<span class="prompt-result-negative' + (negativePrompt ? '' : ' hidden') + '"><strong>负面提示词</strong><span>' + escH(negativePrompt) + '</span></span>'
     +     '<span class="prompt-result-expert-panel' + (expertData ? '' : ' hidden') + '">' + renderExpertPanel(expertData, meta || {}) + '</span>'

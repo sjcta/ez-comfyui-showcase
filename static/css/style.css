@@ -4562,6 +4562,7 @@ select { cursor: pointer; }
   font-weight: 800;
 }
 .prompt-result-expert-merged,
+.prompt-result-expert-review,
 .prompt-result-expert-item {
   display: flex;
   flex-direction: column;
@@ -4570,9 +4571,16 @@ select { cursor: pointer; }
   line-height: 1.45;
 }
 .prompt-result-expert-merged strong,
+.prompt-result-expert-review strong,
 .prompt-result-expert-item strong {
   color: rgba(219,234,254,.96);
   font-size: 11px;
+}
+.prompt-result-expert-review {
+  padding: 8px 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(147,197,253,.18);
+  background: rgba(59,130,246,.08);
 }
 .prompt-result-expert-list {
   display: grid;

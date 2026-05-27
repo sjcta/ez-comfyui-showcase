@@ -29,7 +29,7 @@ INTERROGATE_MAX_IMAGE_PIXELS = 1_600_000
 CAR_FRONT_SEAT_POSE_STANDARD = (
     "车内前排人物姿态标准样例：亚洲女性外貌倾向，偏白皙暖调肤色，黑色长直发和齐刘海，"
     "白色贴身短袖衬衫，深红色百褶短裙，黑色过膝丝袜；人物跪坐在车厢前排座椅上，"
-    "面部朝向镜头，躯干转向座椅靠背方向；一侧手臂向座椅靠背方向伸展至画面外，"
+    "面部朝向镜头，躯干转向座椅靠背方向；一侧手臂向座椅靠背方向延伸到画面边缘，"
     "另一只手搭在前景座椅靠背顶部；膝盖和小腿支撑在座椅坐垫区域，黑色过膝丝袜覆盖腿部；"
     "画面右侧可见方向盘和车门区域，但不能写手搭方向盘；车窗外是明亮绿色草地/植被。"
 )
@@ -45,7 +45,7 @@ BEDROOM_SEATED_POSE_STANDARD = (
 QWEN_IMAGE_INTERROGATE_TEMPLATE = (
     "你是图片反推提示词助手，按 GPT Image / Nano Banana 类图像模型更容易执行的结构化描述方式工作。"
     "你的目标不是写一句概括或标签列表，而是先完整观察画面，再生成适合文生图/图生图复刻画面的高密度提示词。"
-    "核心原则：描述场景，不要只堆关键词；每个结论都必须来自可见内容或高度可信的视觉线索。"
+    "核心原则：描述场景，不要只堆关键词；每个结论都必须来自图中清晰可见的像素事实。"
     "必须只输出一个有效 JSON 对象，不要 markdown，不要解释，不要省略必填键。"
     "JSON 必须包含以下四个顶层键：keyword_prompt, english_prompt, structured_prompt, structured_prompt_en。"
     "格式示例："
@@ -76,23 +76,23 @@ QWEN_IMAGE_INTERROGATE_TEMPLATE = (
     "二者都要覆盖主体身份/年龄感、可见人种或外貌倾向、肤色、面部表情、发型发色、身体可见范围、动作姿态、手部位置、服装版型、服装材质纹理、"
     "前景、中景、背景、构图、镜头角度、拍摄距离、光线方向、颜色、氛围和风格；"
     "必须按空间扫描顺序补足细节：先画面外围再中心，先上方再下方，先画面左侧再右侧，分别描述左上角、右上角、左下角、右下角、前景、中景、背景出现的可见物体、边界和遮挡关系；"
-    "两个 structured 对象只保留图中能确定或高度可信的视觉信息，省略未知、空字符串和空数组；"
+    "两个 structured 对象只保留图中清晰可见的视觉信息，省略未知、空字符串和空数组；"
     "人物 subject_attributes 必须写清可见外貌特征、肤色和年龄感；人种/族裔只作为可见外貌倾向用于复刻，不能断言真实身份，看不准就省略；"
     "人物动作和姿势必须拆解到 pose_details：写清站/坐/躺/蹲/跪、身体朝向、头颈角度、肩膀、腰胯、手臂、手指、腿部、脚部的位置和受力关系；"
     "坐姿不能只写“坐在xxx”，必须分类为正坐、侧坐、半跪坐、跪坐、蹲坐、盘腿坐、跨坐、倚坐、斜坐等可见姿态，并写清臀部/大腿/膝盖/脚掌的支撑点；"
     f"{CAR_FRONT_SEAT_POSE_STANDARD}"
     "车内座椅姿态若人物膝盖/小腿支撑在座椅坐垫上，必须优先写成“人物跪坐在车厢前排座椅上，面部朝向镜头，躯干转向座椅靠背方向”这类可复刻结构，不要退化成“坐姿”；"
     "手部必须写清每只手的位置、手指弯曲/张开/握持/遮挡、是否接触身体或物体，放入 hand_details；"
-    "脚部必须写清可见脚、脚尖方向、足跟/脚掌是否着地、双脚间距、承重脚和被遮挡脚，放入 foot_details；"
-    "腿部和不完整展示区域必须写清可见起止边界，例如“画面裁切到大腿中段/膝上/小腿下方”，不要把画面外部位当成关键词补进正向提示词；"
+    "脚部只有进入画面时才写脚尖方向、足跟/脚掌是否着地、双脚间距和承重关系，放入 foot_details；"
+    "腿部和不完整展示区域必须写清可见起止边界，例如“画面裁切到大腿中段/膝上/小腿下方”，不要把未进入画面的身体部位当成关键词补进正向提示词；"
     "裁切边界必须按实际画面结束位置写；如果只看到头部到大腿/膝上/膝盖区域，绝不能写“全身、脚踝、脚部可见”；"
-    "如果脚、脸、手、身体局部在画面外、被裁切、被衣物或其他肢体遮挡，必须明确写入 occlusion_crop_details，写法以裁切线和遮挡物为主；"
-    "不可见就是“画面边缘裁切到某处/被某物遮挡”，不要把不可见脚写成“脚部细节不清晰”，不要把被遮挡隐私部位写成可见；"
+    "occlusion_crop_details 只写可见裁切线和可见遮挡物，例如“画面底部裁切在膝部区域”“衣物边缘覆盖大腿内侧”，不要列出画外身体部位名称；"
+    "不可见内容直接省略，不要把不可见脚写成“脚部细节不清晰”，不要把被遮挡隐私部位写成可见；"
     "不要把字段填成笼统的“不可见/无/不清晰”；如果没有具体遮挡对象和裁切位置，就省略该字段；"
     "关节和肢体受力必须写入 joint_body_mechanics：肩、肘、腕、腰胯、膝、踝的弯曲角度、受力、重心和身体轴线；"
     "脸部细节和表情必须写入 facial_expression_details：眼神方向、眉眼状态、嘴唇开合、牙齿/舌头是否可见、面部肌肉紧张或放松；"
     "如图中存在暴露皮肤、裸露身体、内衣泳装、透视/低领/露肩/露背/高开衩等情况，必须写入 exposed_body_details，"
-    "明确可见身体部位、暴露程度、衣物覆盖关系，并区分“泳装/内衣/局部裸露/完全裸露”；看不清时省略具体类型或写入 uncertain，不要进入正向提示词；"
+    "明确可见身体部位、暴露程度、衣物覆盖关系，并区分“泳装/内衣/局部裸露/完全裸露”；看不清时省略具体类型，不要进入正向提示词；"
     "如果图中存在明确成人/NSFW/裸露/性化可见内容，必须额外写入 nsfw_content_details，"
     "当确认是成年裸露内容时，content_safety_labels 至少包含 NSFW 和 adult_nudity；"
     "成年裸露中可见隐私部位时必须写入 intimate_body_details，具体描述可见乳头、乳晕、外阴/阴茎/睾丸、臀沟、肛门等部位、遮挡关系和可见程度；"
@@ -103,14 +103,14 @@ QWEN_IMAGE_INTERROGATE_TEMPLATE = (
     "用实事求是、具体、可复刻的语言描述可见的 NSFW 类型、可见解剖部位、衣物遮挡关系、是否存在性行为或互动；"
     "nsfw_content_details 只写可见事实，不写氛围、吸引力或审美评价，禁止用“尺度较大、性感、诱人、青春可爱”等主观词替代具体可见事实；"
     "不要加入不可见的性行为、液体、道具或接触；"
-    "如果主体年龄不明确或疑似未成年，只描述非性化可见事实和年龄不确定性，不要写性化 NSFW 细节；"
+    "如果主体年龄不明确，只描述非性化可见事实和年龄不确定性，不写性化 NSFW 细节；"
     "important_details 需要尽量列出 14 到 30 条可见细节，覆盖人物/主体局部、五官、发丝走向、手臂手指、服饰配件、"
     "服装领口/袖型/长度/贴合度、暴露皮肤边界、道具、背景物体、材质纹理、光影、画面边缘小物件、可读文字；"
     "foreground、midground、background 要分别描述画面不同空间层次，不要只描述主体；"
     "画面区域描述必须从大范围到细节逐层收窄：外圈环境/车窗/墙面/地面/座椅/道具，再到人物整体，再到头发、脸部、手臂、手指、腰胯、腿部、服装边缘和材质；"
     "方向和相对位置必须以画面坐标描述：画面左/右/上/下、前景/中景/背景、人物左/右侧、镜头近端/远端；"
     "“前/后/左/右/向前”不是绝对方向，必须注明参照系：相对画面、相对镜头、相对人物身体、相对座椅靠背/方向盘/车窗等物体；"
-    "不要删除没有参照物的动作信息，而是补充参照物和端点：把“手臂向前伸展/身体朝前”细化为“手臂向画面左侧伸展”“手臂向座椅靠背伸展至画面外”“面部朝镜头，躯干朝座椅靠背”；"
+    "不要删除没有参照物的动作信息，而是补充参照物和端点：把“手臂向前伸展/身体朝前”细化为“手臂向画面左侧伸展”“手臂向座椅靠背方向延伸到画面边缘”“面部朝镜头，躯干朝座椅靠背”；"
     "物体关系必须写清是否真实接触、遮挡或仅相邻；不能因为场景常识自动补全动作，例如车内有方向盘不等于手搭方向盘。"
     "车内场景必须按可见部件命名：车厢前排、驾驶舱内部、驾驶座、副驾驶座、后排座椅只能在座位和方向盘关系明确时使用；不明确时写“车厢前排区域”。"
     "窗外绿色背景只能写草地/植被/路边绿地等可见事实；只有看到农作物行列、田埂或农田结构时，才可写田野/农田。"
@@ -127,7 +127,7 @@ QWEN_IMAGE_INTERROGATE_TEMPLATE = (
     "quality_notes 写可复刻的画质信息，例如柔焦、皮肤高光、低对比、背景虚化、细节锐度、AI 生成感或照片感；"
     "constraints 写复刻时应避免的错误，例如不要裁成头像特写、不要新增道具、不要改变背景颜色、不要省略衣物纹理；"
     "不要加入图中没有的人物、翅膀、文字、品牌或物体；不要重复整段 keyword_prompt；"
-    "如果某个细节看不清，直接省略或写入 expert_observations.uncertain，不要把“疑似/可能/隐约”写进最终正向提示词。"
+    "如果某个细节看不清，直接省略，不要把“疑似/可能/隐约”写进最终正向提示词。"
 )
 
 FAST_IMAGE_INTERROGATE_TEMPLATE = (
@@ -152,7 +152,7 @@ FAST_IMAGE_INTERROGATE_TEMPLATE = (
     f"{CAR_FRONT_SEAT_POSE_STANDARD}"
     "车内座椅上膝盖/小腿支撑时，动作姿态应写“人物跪坐在车厢前排座椅上，面部朝向镜头，躯干转向座椅靠背方向”这类完整姿态句。"
     "如果存在成人裸露、性器官、性意味接触或液体，必须在 裸露与NSFW 中实事求是写可见事实和 NSFW/adult_nudity 标签；"
-    "如果年龄不明确或疑似未成年，只描述非性化可见事实和年龄不确定，不写性化细节。"
+    "如果年龄不明确，只描述非性化可见事实和年龄不确定，不写性化细节。"
     "腿部和不完整展示区域必须写清可见起止边界，例如画面裁切在大腿/膝盖/小腿哪个区域。"
     "裁切边界必须按实际画面结束位置写；只看到头部到大腿/膝上/膝盖区域时，绝不能写“全身、脚踝、脚部可见”。"
     "没看到的身体部位不要提及名称；只描述可见的画幅边界、可见衣物、可见肢体和可见遮挡物。"
@@ -161,7 +161,7 @@ FAST_IMAGE_INTERROGATE_TEMPLATE = (
     "前/后/左/右/向前必须带参照物；不要删除动作信息，应把无参照的“手臂向前伸展”补写成向画面左侧、向镜头、向座椅靠背、向人物身体前方等可见方向。"
     "必须确认手、脚、身体和物体是否真实接触，不得因为场景物件存在就补写动作，例如车内有方向盘不等于手搭方向盘。"
     "车内位置和窗外场景不得过度确定：座位关系不明确写“车厢前排区域”，绿色窗外只写草地/植被，不要自动写田野/农田。"
-    "负面提示词不要写命令句；如需防止模型补全画外内容，写“画面外肢体、未显示身体细节”等纯短语。"
+    "负面提示词不要写命令句；如需防止模型补全不可见内容，写“多余肢体补全、额外身体细节”等纯短语。"
     "正向提示词和画面描述只能写看见了什么，禁止写“无明显、没有明显、未见、无可见、局部暴露、部分暴露、尺度较大、性感、诱人”等含糊判断；"
     "缺失/否定/不可确认内容放入负面提示词或直接省略；可见裸露必须写具体部位和衣物遮挡边界。"
     "负面提示词只写规避短语，不要和画面描述重复。"
@@ -212,7 +212,7 @@ IMAGE_INTERROGATE_EXPERTS: tuple[dict[str, str], ...] = (
         "fields 必须拆成整体姿态、支撑点、身体朝向、手臂端点、腿部边界、接触遮挡六类，不要只给一个笼统 pose summary。"
         "必须写清人物身体朝向、左右肢体方向、腿部可见起止边界、画面裁切到哪个身体区域，以及手脚是否真实接触身体或物体。"
         "方向词必须有参照系：画面坐标、镜头方向、人物身体坐标或物体坐标；不要删除无参照动作，要把“手臂向前伸展/身体朝前”补充为带画面方向、物体端点和裁切边界的描述。"
-        "例如可写“面部朝镜头，躯干朝座椅靠背，手臂向座椅靠背伸展至画面外”。"
+        "例如可写“面部朝镜头，躯干朝座椅靠背，手臂向座椅靠背方向延伸到画面边缘”。"
         "如果是坐姿，必须进一步判定正坐、侧坐、半跪坐、跪坐、蹲坐、盘腿坐、跨坐、倚坐或斜坐，并写清臀部/大腿/膝盖/脚掌分别由什么支撑。"
         "如果是海边/地面上的蹲姿，双脚或鞋底落地承重、膝盖屈曲靠近身体时，写“人物下蹲/蹲姿，鞋底踩在地面承重”；"
         "禁止写“半蹲坐姿 (Half-crouching Sit)”“双膝和小腿接触于岩石表面”“膝盖支撑在岩石上”，除非膝盖或小腿真实压在地面并清晰可见。"
@@ -223,7 +223,7 @@ IMAGE_INTERROGATE_EXPERTS: tuple[dict[str, str], ...] = (
         "车内座椅姿态要区分正坐、侧坐、跪坐、半跪坐；膝盖/小腿/脚掌支撑在座垫上时应写跪坐或半跪坐，不要泛写坐姿。"
         "类似车内前排座椅画面应优先输出“人物跪坐在车厢前排座椅上，面部朝向镜头，躯干转向座椅靠背方向”这种整体姿态结构。"
         "若画面显示人物面部朝镜头但躯干朝座椅靠背，应明确写“面部朝向镜头”和“躯干转向座椅靠背方向”两个独立事实。"
-        "若一侧手臂越过座椅靠背并延伸到画面外，应写“手臂向座椅靠背方向伸展至画面外”，不要误写成手搭方向盘。"
+        "若一侧手臂越过座椅靠背并到达画面边缘，应写“手臂向座椅靠背方向延伸到画面边缘”，不要误写成手搭方向盘。"
         "禁止写“双腿并拢或轻微分开”这类二选一模糊句；必须选择可见状态，或把遮挡导致无法判定写入 uncertain。"
         "如果只看到大腿或膝上区域，不能写脚踝、脚掌、全身姿态。"
         "不可见部位不要作为正向关键词补写；只写可见裁切线、遮挡物和可见肢体。"
@@ -243,7 +243,7 @@ IMAGE_INTERROGATE_EXPERTS: tuple[dict[str, str], ...] = (
         "id": "sexual_boundary",
         "label": "性内容边界专家",
         "instruction": "只分析可见裸露、隐私部位、性器官、性行为、性意味接触、液体/分泌物、衣物遮挡关系和年龄不确定性。"
-        "只写可见事实；如果年龄不明确或疑似未成年，只描述非性化可见事实和年龄不确定，不写性化细节。"
+        "只写可见事实；如果年龄不明确，只描述非性化可见事实和年龄不确定，不写性化细节。"
         "若确认成人裸露或明确性内容，必须给出 NSFW/adult_nudity/explicit_sexual_content 等标签。",
     },
     {
@@ -255,7 +255,7 @@ IMAGE_INTERROGATE_EXPERTS: tuple[dict[str, str], ...] = (
         "当长度和材质都可见时使用复合词，例如黑色过膝丝袜、黑色大腿丝袜、黑色连裤丝袜；"
         "不能把黑色过膝袜直接等同于黑色丝袜，也不能把半透明丝袜写成普通黑色棉袜或裸腿；"
         "写清款式、长度、腰头/袜口/肩带/罩杯/钢圈/蕾丝/缝线/花边/蝴蝶结/透明度/光泽/贴合度/褶皱/遮挡边界。"
-        "衣物类型必须来自可见结构；看不到肩带不要写吊带，看不到完整裙摆/裤脚时写疑似；"
+        "衣物类型必须来自可见结构；看不到肩带不要写吊带，看不到完整裙摆/裤脚时省略具体款式；"
         "不要把丝袜误写成裸腿，不要把内衣误写成普通上衣，不要把短裤/短裙/内裤强行互相替换。",
     },
     {
@@ -264,6 +264,21 @@ IMAGE_INTERROGATE_EXPERTS: tuple[dict[str, str], ...] = (
         "instruction": "只分析皮肤质感、布料材质、褶皱、缝线、反光、透光、粗糙度、光泽度、织法、纹理密度、颗粒度、锐度、"
         "墙面、地面、门框、背景物件等可复刻材质纹理。必须写清材质细节颗粒度，例如“缎面细密高光、透明丝袜细网纹、皮肤低颗粒平滑质感、墙面哑光细颗粒”。",
     },
+)
+
+EXPERT_ID_LIST_TEXT = ",".join(spec["id"] for spec in IMAGE_INTERROGATE_EXPERTS)
+
+GLOBAL_EXPERT_OVERVIEW_TEMPLATE = (
+    "你是图片反推专家组的全局概览调度器。先粗看整张图，只决定需要哪些专家，不输出最终提示词。"
+    "必须统一使用中文，只输出有效 JSON，不要 markdown。"
+    "输出格式："
+    '{"has_person":true,"image_type":"人像/物体/场景/产品/建筑/其他",'
+    '"visible_elements":["主体","环境","关键物件"],'
+    '"recommended_experts":["composition"],"reason":"一句话说明"}。'
+    f"recommended_experts 只能从这些 id 中选择：{EXPERT_ID_LIST_TEXT}。"
+    "如果图中有人物，必须选择全部人物相关专家：composition,photography_parameters,color_light,mood_style,body_pose,expression_language,sexual_boundary,clothing_makeup,materials_texture。"
+    "如果没有人物，按主体选择构图、摄影、颜色、氛围、材质、服饰/产品外观等必要专家，不要选择人物姿态和表情专家。"
+    "visible_elements 只列可见大类，不要猜画外内容。"
 )
 
 EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
@@ -276,9 +291,25 @@ EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
     "JSON 格式: "
     '{"id":"{expert_id}","label":"{expert_label}","summary":"一句话结论",'
     '"fields":{{"相关字段":"高密度事实描述"}},"observations":["可见事实1","可见事实2"],'
-    '"uncertain":["无法确认或疑似项"],"negative_constraints":["误判短语"],"confidence":0.0}。'
-    "只写图中可见或高度可信的视觉线索；不要补全画外内容；不要写泛化空值如“无/不可见/不清晰”，"
-    "除非说明具体对象和原因，例如“左脚被画幅裁切”。"
+    '"uncertain":["内部备注，不进入正向提示词"],"negative_constraints":["误判短语"],"confidence":0.0}。'
+    "只写图中可见像素事实；禁止写高度可信、推断、疑似、可能、看起来像、应当是、无法确认、不可见、画面外、被裁切的身体部位名称。"
+    "看不到的内容不要写进 summary、fields 或 observations；如果必须记录风险，只能写入 uncertain，且最终合并不会作为正向提示词。"
+    "不要补全未进入画面的内容，不要写泛化空值如“无/不可见/不清晰”，不要因为场景常识绑定人物动作。"
+)
+
+EXPERT_IMAGE_REVIEW_TEMPLATE = (
+    "你是图片反推专家组的评审专家。你的任务是复核各领域专家是否足够细腻、是否只写了图中可验证事实、"
+    "是否存在跨领域越权、空泛描述、画外补全、方向/裁切/服装/NSFW 误判。"
+    "必须结合原图复核，不要只看文字自洽。必须统一使用中文，只输出有效 JSON，不要 markdown。"
+    "评分标准：detail_score 判断颗粒度，factual_score 判断图像事实一致性，boundary_score 判断是否在专家职责范围内。"
+    "低于 0.72 或存在 unsupported 事实时 passed=false，并给 retry_instruction。"
+    "输出格式："
+    '{"summary":"整体评审结论","retry_expert_ids":["composition"],'
+    '"reviews":[{"id":"composition","label":"构图镜头专家","passed":true,'
+    '"detail_score":0.0,"factual_score":0.0,"boundary_score":0.0,'
+    '"missing":["缺少的维度"],"unsupported":["不属实或越界内容"],'
+    '"retry_instruction":"打回重写时必须补足/修正的要求"}]}。'
+    "专家初稿 JSON: {expert_observations}"
 )
 
 EXPERT_IMAGE_MERGE_TEMPLATE = (
@@ -313,12 +344,12 @@ EXPERT_IMAGE_MERGE_TEMPLATE = (
     f"{BEDROOM_SEATED_POSE_STANDARD}"
     "禁止把“坐姿”合并成普通坐姿；禁止用“双腿并拢或轻微分开”等二选一模糊句；遮挡导致无法判定时写具体遮挡原因或放入 uncertain；"
     "车内座椅姿态合并时，若膝盖/小腿支撑在座椅坐垫上，应写“人物跪坐在车厢前排座椅上，面部朝向镜头，躯干转向座椅靠背方向”这类完整姿态句；"
-    "如果专家观察出现“面部朝向镜头、躯干转向座椅靠背、手臂伸向座椅靠背至画面外”，合并时必须保留这些参照物，不得简化为“坐姿挺拔/手臂向前伸展”；"
+    "如果专家观察出现“面部朝向镜头、躯干转向座椅靠背、手臂伸向座椅靠背并到达画面边缘”，合并时必须保留这些参照物，不得简化为“坐姿挺拔/手臂向前伸展”；"
     "画幅比例必须根据原图宽高判断：竖版手机图写 9:16/2:3/竖幅，横图写横幅，正方形图才写 1:1；不得把竖图误写成 1:1 正方形；"
     "裁切边界必须保留实际可见范围，只看到头部到大腿/膝上/膝盖时，不能写全身、脚踝或脚部可见；如果鞋子和双脚位置进入画面，必须写头部到鞋子/近全身/全身入镜，不能写上半身至大腿区域；"
     "视角必须依据镜头高度、地平线和透视判断；人物蹲低不等于低角度仰视，若镜头略高于蹲姿人物或接近平视，应写轻微俯视/近似平视，不得写略微仰视；"
     "方向和相对位置必须用画面坐标表达：画面左/右/上/下、前景/中景/背景、人物左/右侧、镜头近端/远端；"
-    "方向词必须附带参照系；不要剔除无参照的“手臂向前伸展/身体朝前”，要合并成“面部朝镜头，躯干朝座椅靠背，手臂向座椅靠背伸展至画面外”这类结构；"
+    "方向词必须附带参照系；不要剔除无参照的“手臂向前伸展/身体朝前”，要合并成“面部朝镜头，躯干朝座椅靠背，手臂向座椅靠背方向延伸到画面边缘”这类结构；"
     "物体关系必须核验是否真实接触或遮挡，不得按场景常识补写动作，例如车内方向盘不能自动合并为手搭方向盘；"
     "车内位置和窗外景观不能过度确定：座位关系不明确写车厢前排区域，绿色窗外只写草地/植被/路边绿地，不能自动合并为田野/农田；"
     "表情合并必须依据五官事实；嘴唇闭合且嘴角不明显时写平静闭唇，不能写嘴角微扬或浅笑；"
@@ -383,7 +414,7 @@ FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
     "手部端点必须按画面坐标和可见接触点写，例如“画面右侧手臂弯曲抬起，手靠近画面右侧太阳穴/发丝”；"
     "不要强行写人物左手/右手或“头部左上方发梢”，除非左右身份和接触点清晰可见。"
     "车内座椅上膝盖/小腿支撑时，整体姿态必须写“人物跪坐在车厢前排座椅上，面部朝向镜头，躯干转向座椅靠背方向”这类结构化句子。"
-    "类似该标准图时，身体朝向写“面部朝向镜头，躯干转向座椅靠背方向”，手臂端点写“手臂向座椅靠背方向伸展至画面外”。"
+    "类似该标准图时，身体朝向写“面部朝向镜头，躯干转向座椅靠背方向”，手臂端点写“手臂向座椅靠背方向延伸到画面边缘”。"
     "画幅比例必须根据原图宽高判断：竖版手机图写 9:16/2:3/竖幅，横图写横幅，正方形图才写 1:1；不得把竖图误写成 1:1 正方形。"
     "裁切边界必须精确；只看到头部到大腿/膝上/膝盖时，不能写包含脚踝、脚部或全身；如果鞋子和双脚位置进入画面，必须写头部到鞋子/近全身/全身入镜，不能写上半身至大腿区域。"
     "视角必须依据镜头高度、地平线和透视判断；人物蹲低不等于低角度仰视，若镜头略高于蹲姿人物或接近平视，应写轻微俯视/近似平视，不得写略微仰视。"
@@ -410,10 +441,10 @@ FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
     "如果存在成人裸露、性器官、性意味接触或液体，性内容边界必须写可见事实和 NSFW/adult_nudity 标签；"
     "普通短裤、露出大腿皮肤、黑色过膝丝袜、日常休闲服装不等于 NSFW/adult_nudity；只有可见成人裸露、性器官、性意味接触或性液体时才写 NSFW/adult_nudity/explicit_sexual_content 标签；"
     "低领吊带、乳沟、贴身胸部轮廓、短裤和长筒袜可写 suggestive_clothing/cleavage_visible，但不能写 adult_nudity，除非乳头或裸露乳房清晰可见；"
-    "如果年龄不明确或疑似未成年，只描述非性化可见事实和年龄不确定，不写性化细节。"
+    "如果年龄不明确，只描述非性化可见事实和年龄不确定，不写性化细节。"
     "没看到的身体部位不要提及名称；只描述可见的画幅边界、可见衣物、可见肢体和可见遮挡物。"
     "例如不要写“双脚不可见/隐私部位不可见”，应写“画面边缘裁切在腿部区域”或“衣物与大腿形成遮挡边界”。"
-    "负面提示词不要写命令句；如需防止模型补全画外内容，写“画面外肢体、未显示身体细节”等纯短语。"
+    "负面提示词不要写命令句；如需防止模型补全不可见内容，写“多余肢体补全、额外身体细节”等纯短语。"
     "负面提示词必须是 structured_prompt 下与 画面描述 同级的对象，绝不能嵌入 structured_prompt.画面描述 内部。"
     "正向提示词和画面描述只能写看见了什么，禁止写“无明显、没有明显、未见、无可见、局部暴露、部分暴露、尺度较大、性感、诱人”等含糊判断；"
     "缺失/否定/不可确认内容放入 expert_observations.uncertain、negative_constraints 或负面提示词；可见裸露必须写具体部位和衣物遮挡边界。"
@@ -431,6 +462,7 @@ RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
     "aspect_ratio, visible_body_range, support_points, hand_endpoints, foot_or_shoe_contact, "
     "clothing_materials, visible_text_confidence, nsfw_visible_evidence, foreground_background_regions。"
     "expert_observations 必须是对象，9 个键固定为 composition,photography_parameters,color_light,mood_style,body_pose,expression_language,sexual_boundary,clothing_makeup,materials_texture；"
+    "9 个专家键必须全部出现；某个维度只能写很少内容时也保留该键并写可见事实，不能只输出 3-4 个专家。"
     "每个专家值用对象表达，如 {\"姿势\":\"...\",\"手部\":\"...\"}，每个专家最多 100 字，最多 4 个字段。"
     "keyword_prompt 是 180 个汉字内的正向复刻短段；negative_prompt 是纯短语数组。"
     "只写可见事实；看不见、不确定、常识补全、二选一和猜测词不得进入 keyword_prompt 或专家字段。"
@@ -448,7 +480,10 @@ RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
     "负面提示词只能是纯短语/标签，不能出现不要、避免、禁止、no、avoid、do not。"
     "示例结构："
     '{"visual_evidence":{"aspect_ratio":"9:16","visible_body_range":"头部到膝部","support_points":["坐在床面"],"hand_endpoints":["画面左侧手靠近镜头"],"foot_or_shoe_contact":"画面裁切到膝部","clothing_materials":["白色蕾丝吊带"],"visible_text_confidence":0,"nsfw_visible_evidence":"低领和乳沟可见","foreground_background_regions":["前景手部","背景床铺"]},'
-    '"expert_observations":{"body_pose":{"姿势":"..."},"composition":{"构图":"..."},"clothing_makeup":{"服装":"..."}},"keyword_prompt":"...","negative_prompt":["水印"]}。'
+    '"expert_observations":{"composition":{"构图":"..."},"photography_parameters":{"参考参数":"..."},"color_light":{"颜色光影":"..."},'
+    '"mood_style":{"氛围":"..."},"body_pose":{"姿势":"..."},"expression_language":{"表情五官":"..."},'
+    '"sexual_boundary":{"可见事实":"..."},"clothing_makeup":{"服装":"..."},"materials_texture":{"材质":"..."}},'
+    '"keyword_prompt":"...","negative_prompt":["水印"]}。'
 )
 
 LEGACY_RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
@@ -1527,6 +1562,110 @@ def _build_expert_merge_prompt(expert_results: list[dict[str, Any]]) -> str:
     )
 
 
+def _compact_expert_results_for_review(expert_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact_results: list[dict[str, Any]] = []
+    for item in expert_results:
+        fields = item.get("fields") if isinstance(item.get("fields"), dict) else {}
+        compact_results.append(
+            {
+                "id": item.get("id"),
+                "label": item.get("label"),
+                "summary": _clip_expert_text(item.get("summary"), 220),
+                "fields": {str(key): _clip_expert_text(value, 260) for key, value in fields.items()},
+                "observations": [_clip_expert_text(value, 160) for value in (item.get("observations") or [])[:5]],
+                "uncertain": [_clip_expert_text(value, 120) for value in (item.get("uncertain") or [])[:3]],
+                "negative_constraints": [_clip_expert_text(value, 120) for value in (item.get("negative_constraints") or [])[:3]],
+                "confidence": item.get("confidence"),
+            }
+        )
+    return compact_results
+
+
+def _build_expert_review_prompt(expert_results: list[dict[str, Any]]) -> str:
+    return EXPERT_IMAGE_REVIEW_TEMPLATE.replace(
+        "{expert_observations}",
+        json.dumps(_compact_expert_results_for_review(expert_results), ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _expert_review_from_text(raw_text: str, expert_results: list[dict[str, Any]]) -> dict[str, Any]:
+    parsed = _extract_json_object(raw_text) or {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    known_labels = {str(item.get("id") or ""): str(item.get("label") or "") for item in expert_results if isinstance(item, dict)}
+    reviews: list[dict[str, Any]] = []
+    for item in parsed.get("reviews") or []:
+        if not isinstance(item, dict):
+            continue
+        expert_id = str(item.get("id") or "").strip()
+        if not expert_id:
+            continue
+        def score(key: str) -> float:
+            try:
+                return max(0.0, min(float(item.get(key, 0.0)), 1.0))
+            except Exception:
+                return 0.0
+        detail_score = score("detail_score")
+        factual_score = score("factual_score")
+        boundary_score = score("boundary_score")
+        unsupported = [str(value).strip() for value in (item.get("unsupported") or []) if str(value).strip()]
+        missing = [str(value).strip() for value in (item.get("missing") or []) if str(value).strip()]
+        passed = bool(item.get("passed"))
+        if detail_score < 0.72 or factual_score < 0.72 or boundary_score < 0.72 or unsupported:
+            passed = False
+        reviews.append(
+            {
+                "id": expert_id,
+                "label": str(item.get("label") or known_labels.get(expert_id) or expert_id).strip(),
+                "passed": passed,
+                "detail_score": detail_score,
+                "factual_score": factual_score,
+                "boundary_score": boundary_score,
+                "missing": missing,
+                "unsupported": unsupported,
+                "retry_instruction": _clip_expert_text(item.get("retry_instruction"), 260),
+            }
+        )
+    retry_ids = []
+    for expert_id in parsed.get("retry_expert_ids") or []:
+        expert_id = str(expert_id or "").strip()
+        if expert_id and expert_id not in retry_ids:
+            retry_ids.append(expert_id)
+    for review in reviews:
+        if not review.get("passed") and review["id"] not in retry_ids:
+            retry_ids.append(review["id"])
+    return {
+        "summary": _clip_expert_text(parsed.get("summary"), 360),
+        "retry_expert_ids": retry_ids,
+        "reviews": reviews,
+        "raw": raw_text,
+    }
+
+
+def _expert_retry_instruction(review_report: dict[str, Any], expert_id: str) -> str:
+    for review in review_report.get("reviews") or []:
+        if str(review.get("id") or "") == expert_id:
+            parts = []
+            if review.get("missing"):
+                parts.append("缺少：" + "；".join(review.get("missing") or []))
+            if review.get("unsupported"):
+                parts.append("不属实/越界：" + "；".join(review.get("unsupported") or []))
+            if review.get("retry_instruction"):
+                parts.append("重写要求：" + str(review.get("retry_instruction")))
+            return "；".join(parts)
+    return ""
+
+
+def _review_failed_expert_ids(review_report: dict[str, Any], selected_specs: list[dict[str, str]]) -> list[str]:
+    selected_ids = {spec["id"] for spec in selected_specs}
+    failed: list[str] = []
+    for expert_id in review_report.get("retry_expert_ids") or []:
+        expert_id = str(expert_id or "").strip()
+        if expert_id in selected_ids and expert_id not in failed:
+            failed.append(expert_id)
+    return failed
+
+
 def _expert_spec_by_id() -> dict[str, dict[str, str]]:
     return {spec["id"]: spec for spec in IMAGE_INTERROGATE_EXPERTS}
 
@@ -1562,6 +1701,35 @@ def _select_experts_from_global_overview(overview: dict[str, Any] | None) -> lis
         has_person = bool(re.search(r"人物|人像|女性|男性|girl|woman|man|person|face|body", text, flags=re.IGNORECASE))
     selected = PERSON_EXPERT_IDS if has_person else OBJECT_SCENE_EXPERT_IDS
     return [expert_id for expert_id in selected if expert_id in _expert_spec_by_id()]
+
+
+def _global_expert_overview_from_text(raw_text: str) -> dict[str, Any]:
+    parsed = _extract_json_object(raw_text) or {}
+    if not isinstance(parsed, dict):
+        return {}
+    spec_by_id = _expert_spec_by_id()
+    raw_selected = parsed.get("recommended_experts")
+    selected: list[str] = []
+    if isinstance(raw_selected, list):
+        for item in raw_selected:
+            expert_id = str(item or "").strip()
+            if expert_id in spec_by_id and expert_id not in selected:
+                selected.append(expert_id)
+    if not selected:
+        selected = _select_experts_from_global_overview(parsed)
+    if not selected:
+        selected = [spec["id"] for spec in IMAGE_INTERROGATE_EXPERTS]
+    if parsed.get("has_person") is True:
+        selected = [expert_id for expert_id in PERSON_EXPERT_IDS if expert_id in spec_by_id]
+    parsed["recommended_experts"] = selected
+    return parsed
+
+
+def _expert_specs_for_overview(overview: dict[str, Any]) -> list[dict[str, str]]:
+    spec_by_id = _expert_spec_by_id()
+    selected_ids = overview.get("recommended_experts") if isinstance(overview, dict) else []
+    selected = [spec_by_id[expert_id] for expert_id in selected_ids if expert_id in spec_by_id]
+    return selected or list(IMAGE_INTERROGATE_EXPERTS)
 
 
 def _complete_expert_results(expert_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2091,9 +2259,44 @@ def run_llm_expert_image_interrogator(
             require_visual_evidence=True,
         ) if include_quality else result
 
+    overview_timeout = None
+    expert_timeout = None
+    review_timeout = None
+    merge_timeout = None
+    if timeout is not None:
+        total_timeout = max(30.0, float(timeout or 720.0))
+        overview_timeout = max(20.0, total_timeout * 0.12)
+    raw_overview = chat_fn(
+        [
+            {
+                "role": "system",
+                "content": DIRECT_FINAL_SYSTEM_PROMPT
+                + " Return only the requested valid JSON object. Do not output markdown.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": GLOBAL_EXPERT_OVERVIEW_TEMPLATE + metadata_context},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ],
+        model=model,
+        temperature=0.05,
+        max_tokens=512,
+        timeout=overview_timeout,
+        response_format={"type": "json_object"},
+    )
+    expert_overview = _global_expert_overview_from_text(raw_overview)
+    selected_specs = _expert_specs_for_overview(expert_overview)
+    if timeout is not None:
+        remaining_timeout = max(30.0, float(timeout or 720.0) - float(overview_timeout or 0.0))
+        expert_timeout = max(30.0, remaining_timeout / max(1, len(selected_specs) + 3))
+        review_timeout = max(30.0, expert_timeout)
+        merge_timeout = max(45.0, expert_timeout)
+
     expert_results: list[dict[str, Any]] = []
-    expert_timeout = max(60.0, float(timeout or 720.0) / max(1, len(IMAGE_INTERROGATE_EXPERTS) + 1))
-    for spec in IMAGE_INTERROGATE_EXPERTS:
+    for spec in selected_specs:
         prompt = (
             EXPERT_IMAGE_INTERROGATE_TEMPLATE
             .replace("{expert_id}", spec["id"])
@@ -2119,11 +2322,118 @@ def run_llm_expert_image_interrogator(
             ],
             model=model,
             temperature=0.1,
-            max_tokens=1200,
+            max_tokens=640,
             timeout=expert_timeout,
             response_format={"type": "json_object"},
         )
         expert_results.append(_expert_observation_from_text(raw_expert, spec))
+
+    raw_review = chat_fn(
+        [
+            {
+                "role": "system",
+                "content": DIRECT_FINAL_SYSTEM_PROMPT
+                + " Return only the requested valid JSON object. Do not output markdown.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _build_expert_review_prompt(expert_results) + metadata_context},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ],
+        model=model,
+        temperature=0.05,
+        max_tokens=1400,
+        timeout=review_timeout,
+        response_format={"type": "json_object"},
+    )
+    review_report = _expert_review_from_text(raw_review, expert_results)
+    failed_expert_ids = _review_failed_expert_ids(review_report, selected_specs)
+    retried_expert_ids: list[str] = []
+    if failed_expert_ids:
+        spec_by_id = {spec["id"]: spec for spec in selected_specs}
+        result_by_id = {str(item.get("id") or ""): item for item in expert_results}
+        for expert_id in failed_expert_ids:
+            spec = spec_by_id.get(expert_id)
+            if not spec:
+                continue
+            retry_instruction = _expert_retry_instruction(review_report, expert_id)
+            base_prompt = (
+                EXPERT_IMAGE_INTERROGATE_TEMPLATE
+                .replace("{expert_id}", spec["id"])
+                .replace("{expert_label}", spec["label"])
+                .replace("{expert_instruction}", spec["instruction"])
+                .replace("{{", "{")
+                .replace("}}", "}")
+            )
+            retry_prompt = (
+                base_prompt
+                + "复审专家已打回本专家初稿。必须按复审意见重写，只输出本专家职责范围内的新 JSON。"
+                + "复审意见："
+                + retry_instruction
+                + "。上一版初稿："
+                + json.dumps(_compact_expert_results_for_review([result_by_id.get(expert_id, {})]), ensure_ascii=False, separators=(",", ":"))
+            )
+            raw_retry = chat_fn(
+                [
+                    {
+                        "role": "system",
+                        "content": DIRECT_FINAL_SYSTEM_PROMPT
+                        + " Return only the requested valid JSON object. Do not output markdown.",
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": retry_prompt + metadata_context},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    },
+                ],
+                model=model,
+                temperature=0.08,
+                max_tokens=760,
+                timeout=expert_timeout,
+                response_format={"type": "json_object"},
+            )
+            revised = _expert_observation_from_text(raw_retry, spec)
+            revised["review_retry"] = {
+                "from_review": True,
+                "instruction": retry_instruction,
+            }
+            for idx, item in enumerate(expert_results):
+                if str(item.get("id") or "") == expert_id:
+                    expert_results[idx] = revised
+                    break
+            else:
+                expert_results.append(revised)
+            retried_expert_ids.append(expert_id)
+
+    final_review_report = None
+    if retried_expert_ids:
+        raw_final_review = chat_fn(
+            [
+                {
+                    "role": "system",
+                    "content": DIRECT_FINAL_SYSTEM_PROMPT
+                    + " Return only the requested valid JSON object. Do not output markdown.",
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _build_expert_review_prompt(expert_results) + metadata_context},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            model=model,
+            temperature=0.05,
+            max_tokens=1400,
+            timeout=review_timeout,
+            response_format={"type": "json_object"},
+        )
+        final_review_report = _expert_review_from_text(raw_final_review, expert_results)
 
     merge_prompt = _build_expert_merge_prompt(expert_results)
     raw_merge = chat_fn(
@@ -2144,7 +2454,7 @@ def run_llm_expert_image_interrogator(
         model=model,
         temperature=0.1,
         max_tokens=max(1024, min(int(max_new_tokens or 3072), 4096)),
-        timeout=max(120.0, expert_timeout),
+        timeout=merge_timeout,
         response_format={"type": "json_object"},
     )
     structured = _parse_structured_interrogate_text(raw_merge)
@@ -2164,7 +2474,15 @@ def run_llm_expert_image_interrogator(
         "expert_interrogate": {
             "enabled": True,
             "provider": provider,
+            "mode": "staged",
+            "global_overview": expert_overview,
+            "selected_experts": [spec["id"] for spec in selected_specs],
+            "expected_expert_count": len(selected_specs),
             "experts": expert_results,
+            "review": review_report,
+            "review_retry_count": len(retried_expert_ids),
+            "review_retry_expert_ids": retried_expert_ids,
+            "final_review": final_review_report,
             "merged_raw": raw_merge,
         },
     }
