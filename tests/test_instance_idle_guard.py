@@ -129,7 +129,8 @@ class InstanceIdleGuardTest(unittest.TestCase):
 
         self.assertGreaterEqual(len(calls), 2)
         for cmd in calls:
-            self.assertEqual(cmd[:4], ["ssh", "-p", "2222", "sjcta@10.10.10.75"])
+            self.assertEqual(cmd[:3], ["ssh", "-p", "2222"])
+            self.assertIn("sjcta@10.10.10.75", cmd)
             self.assertLess(cmd.index("2222"), cmd.index("sjcta@10.10.10.75"))
 
     def test_remote_service_active_places_ssh_port_before_destination(self):

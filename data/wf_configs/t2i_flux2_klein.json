@@ -51,10 +51,10 @@
       "max": 32
     },
     {
-      "key": "22::cfg",
+      "key": "26::guidance",
       "zone": "advanced",
       "visible": true,
-      "label": "CFG",
+      "label": "Flux 引导",
       "order": 2,
       "type": "number",
       "step": 0.1,

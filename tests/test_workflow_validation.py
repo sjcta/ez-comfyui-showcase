@@ -14,7 +14,15 @@ class WorkflowValidationTest(unittest.TestCase):
             return json.load(f)
 
     def test_detects_ui_export_links_and_placeholders(self):
-        workflow = self._load_workflow("data/workflows/i2i-FireRed-Edit-1.1.json")
+        workflow = {
+            "1": {
+                "class_type": "PreviewImage",
+                "inputs": {
+                    "images": [99, "images"],
+                    "optional": [None, {"name": "optional"}],
+                },
+            },
+        }
 
         issues = validate_api_prompt(workflow)
         message = describe_api_prompt_issues(issues)

@@ -91,8 +91,9 @@ class PollManagerResumeTest(unittest.TestCase):
         source = (ROOT / "static/js/modules/history.js").read_text("utf-8")
 
         self.assertIn("var _historyDataSignature = '';", source)
-        self.assertIn("if (nextSignature === _historyDataSignature) return false;", source)
-        self.assertIn("_historyDataSignature = nextSignature;", source)
+        self.assertIn("const summaryResp = await fetch(`${API}/api/history/summary", source)
+        self.assertIn("if (summary.signature === _historyDataSignature && Number(summary.total || 0) === _historyTotal) return false;", source)
+        self.assertIn("await _reloadHistoryWindow(false);", source)
 
 
 if __name__ == "__main__":
