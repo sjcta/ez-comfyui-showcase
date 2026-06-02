@@ -64,10 +64,19 @@ class StatusUiContractTests(unittest.TestCase):
 
     def test_service_button_keeps_state_text_compact(self):
         status_js = (ROOT / "static/js/modules/status.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
 
         self.assertIn("const pendingInst = (target && (target.queue_pending || 0) > 0)", status_js)
         self.assertIn("|| runningInst || pendingInst", status_js)
-        self.assertIn("comfyState.textContent = stateText", status_js)
+        self.assertIn("function _setComfyStateText", status_js)
+        self.assertIn("_setComfyStateText(comfyState, stateText, stateHtml)", status_js)
+        self.assertIn("function _sortInstancesForDisplay", status_js)
+        self.assertIn("function _instanceSummaryText", status_js)
+        self.assertIn("return { text: name + ': off', cls: 'off' }", status_js)
+        self.assertIn("String(rawName).toUpperCase() === 'PROMPT' ? 'P' : rawName", status_js)
+        self.assertIn(".svc-state .svc-inst.running { color: var(--svc-run-color, var(--green)); }", css)
+        self.assertIn(".svc-state .svc-inst.off,", css)
+        self.assertIn(".svc-state .svc-inst.idle { color: var(--dim); font-weight: 600; }", css)
         self.assertIn("GPU ${util}%", status_js)
         self.assertIn("util >= 70", status_js)
         self.assertIn("util >= 95", status_js)
@@ -87,7 +96,7 @@ class StatusUiContractTests(unittest.TestCase):
         self.assertIn("function _mergeRunningSummaries", status_js)
         self.assertIn("_rememberRunningSummaries(runningSummaries, anyRunning || localRunning)", status_js)
         self.assertIn("var runningSummaries = _mergeRunningSummaries(_lastRunningSummaries, _activeJobStatesByInstance())", status_js)
-        self.assertIn("comfyState.textContent = _runningStateText(runningSummaries, activePct)", status_js)
+        self.assertIn("_setComfyStateText(comfyState, _runningStateText(runningSummaries, activePct))", status_js)
         self.assertIn("if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();", poll_js)
 
     def test_service_button_labels_untracked_remote_running_without_zero_percent(self):

@@ -1459,7 +1459,7 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 .job-status-text { font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.job-status-text.queued     { background: var(--accent); color: #000; font-size: 14px; padding: 4px 12px; border-radius: 6px; font-weight: 700; }
+.job-status-text.queued     { background: var(--accent); color: #000; font-size: 14px; padding: 4px 12px; border-radius: 6px; font-weight: 700; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; text-align: center; }
 .job-status-text.preparing  { color: var(--yellow); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; text-align: center; }
 .job-status-text.starting_comfyui { color: var(--yellow); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; text-align: center; }
 .job-status-text.submitting { color: var(--yellow); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; text-align: center; }
@@ -2522,11 +2522,17 @@ select { cursor: pointer; }
   font-size: 10px;
   letter-spacing: .2px;
   justify-self: end;
-  max-width: 84px;
+  max-width: 126px;
   overflow: hidden;
   text-overflow: ellipsis;
   text-transform: none;
 }
+.svc-state .svc-inst { color: var(--dim); }
+.svc-state .svc-inst.running { color: var(--svc-run-color, var(--green)); }
+.svc-state .svc-inst.pending { color: var(--yellow); }
+.svc-state .svc-inst.off,
+.svc-state .svc-inst.idle { color: var(--dim); font-weight: 600; }
+.svc-state .svc-inst-sep { color: rgba(148,163,184,.45); font-weight: 500; }
 @keyframes svcRunPulse {
   0%, 56% {
     border-color: var(--svc-run-border);

@@ -187,6 +187,62 @@ class StatusGpuMessageTests(unittest.TestCase):
         self.assertEqual(inst_b["current_workflow"], "i2i-Qwen-Edit-v2511")
         self.assertEqual(inst_b["current_prompt"], "portrait edit prompt")
 
+    def test_status_instances_are_returned_in_stable_display_order(self):
+        instances = [
+            {"name": "Prompt", "url": "http://prompt", "_node_id": "n1", "roles": ["prompt_aux"]},
+            {"name": "B", "url": "http://b", "_node_id": "n1"},
+            {"name": "A", "url": "http://a", "_node_id": "n1"},
+        ]
+
+        with mock.patch("app._get_enabled_instances_for_user", return_value=instances), \
+             mock.patch("app._gpu_stats_for_status_node", return_value={}), \
+             mock.patch("app.comfyui_up", return_value=True), \
+             mock.patch("app.comfyui_get", return_value={"queue_running": [], "queue_pending": []}):
+            status = app.api_status(current_user={"sub": "admin", "role": "admin"})
+            comfy_status = app.api_comfyui_status(current_user={"sub": "admin", "role": "admin"})
+
+        self.assertEqual([item["name"] for item in status["instances"]], ["A", "B", "Prompt"])
+        self.assertEqual([item["name"] for item in comfy_status["instances"]], ["A", "B", "Prompt"])
+
+    def test_status_does_not_show_local_pending_job_as_down_instance_queue(self):
+        instances = [
+            {"name": "A", "url": "http://a", "_node_id": "n1"},
+        ]
+        original_jobs = dict(app.jobs)
+        app.jobs.clear()
+        app.jobs["job-a"] = {
+            "id": "job-a",
+            "instance": "A",
+            "status": "queued",
+            "workflow": "SeedVR2_upscale_4k.json",
+            "prompt_preview": "4K 放大",
+            "last_update": 100.0,
+        }
+
+        try:
+            with mock.patch("app._get_enabled_instances_for_user", return_value=instances), \
+                 mock.patch("app._gpu_stats_for_status_node", return_value={}), \
+                 mock.patch("app.comfyui_up", return_value=False), \
+                 mock.patch("app.comfyui_get", side_effect=RuntimeError("down")):
+                status = app.api_status(current_user={"sub": "admin", "role": "admin"})
+                comfy_status = app.api_comfyui_status(current_user={"sub": "admin", "role": "admin"})
+        finally:
+            app.jobs.clear()
+            app.jobs.update(original_jobs)
+
+        inst_a = next(item for item in status["instances"] if item["name"] == "A")
+        self.assertFalse(inst_a["up"])
+        self.assertEqual(inst_a["queue_running"], 0)
+        self.assertEqual(inst_a["queue_pending"], 0)
+        self.assertFalse(inst_a["progress_known"])
+        self.assertEqual(inst_a["current_workflow"], "")
+
+        comfy_a = next(item for item in comfy_status["instances"] if item["name"] == "A")
+        self.assertFalse(comfy_a["up"])
+        self.assertEqual(comfy_a["queue_pending"], 0)
+        self.assertEqual(comfy_a["pending_workflows"], [])
+        self.assertEqual(comfy_a["current_workflow"], "")
+
     def test_status_finalizes_running_job_when_instance_is_down(self):
         instances = [
             {"name": "B", "url": "http://b", "_node_id": "n1"},

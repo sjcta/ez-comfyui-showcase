@@ -43,6 +43,7 @@ class JobCardLayoutContractTests(unittest.TestCase):
 
         base_block = _css_block(css, ".job-status-text")
         error_block = _css_block(css, ".job-status-text.error")
+        queued_block = _css_block(css, ".job-status-text.queued")
         preparing_block = _css_block(css, ".job-status-text.preparing")
         submitting_block = _css_block(css, ".job-status-text.submitting")
 
@@ -50,6 +51,9 @@ class JobCardLayoutContractTests(unittest.TestCase):
         self.assertIn("white-space: normal", error_block)
         self.assertIn("overflow-wrap: anywhere", error_block)
         self.assertIn("text-overflow: clip", error_block)
+        self.assertIn("white-space: normal", queued_block)
+        self.assertIn("overflow-wrap: anywhere", queued_block)
+        self.assertIn("text-overflow: clip", queued_block)
         self.assertIn("white-space: normal", preparing_block)
         self.assertIn("overflow-wrap: anywhere", preparing_block)
         self.assertIn("text-overflow: clip", preparing_block)

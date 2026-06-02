@@ -385,6 +385,38 @@ def _current_job_for_instance(instance_name: str) -> dict | None:
     )
 
 
+def _status_jobs_for_instance(instance_name: str, instance_up: bool) -> list[dict]:
+    out = []
+    for job in jobs.values():
+        if not _job_is_active_for_instance(job, instance_name):
+            continue
+        if instance_up or job.get("prompt_id"):
+            out.append(job)
+    return out
+
+
+def _current_status_job_for_instance(instance_name: str, instance_up: bool) -> dict | None:
+    active_jobs = _status_jobs_for_instance(instance_name, instance_up)
+    if not active_jobs:
+        return None
+    status_rank = {
+        "downloading": 6,
+        "generating": 5,
+        "submitting": 4,
+        "preparing": 3,
+        "starting_comfyui": 2,
+        "queued": 1,
+        "dispatching": 0,
+    }
+    return max(
+        active_jobs,
+        key=lambda job: (
+            status_rank.get(job.get("status"), 0),
+            _job_last_activity_ts(job),
+        ),
+    )
+
+
 def _job_progress_pct(job: dict | None) -> int:
     if not job:
         return 0
@@ -894,6 +926,42 @@ def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[di
             full["url"] = _instance_api_url(normalized, inst)
             instances.append(full)
     return instances
+
+
+def _instance_display_rank(inst: dict) -> tuple:
+    name = str(inst.get("name") or inst.get("id") or "").strip()
+    upper = name.upper()
+    if _is_prompt_aux_instance(inst) or upper == "PROMPT":
+        return (3, name.lower())
+    if upper == "A":
+        return (0, 0)
+    if upper == "B":
+        return (0, 1)
+    if len(upper) == 1 and "A" <= upper <= "Z":
+        return (0, ord(upper) - ord("A"))
+    match = re.search(r"\d+", name)
+    if match:
+        return (1, int(match.group(0)), name.lower())
+    return (2, name.lower())
+
+
+def _sort_instances_for_status(instances: list[dict]) -> list[dict]:
+    node_order: dict[str, int] = {}
+    original_order: dict[int, int] = {}
+    for idx, inst in enumerate(instances or []):
+        node_key = str(inst.get("_node_id") or inst.get("node_id") or inst.get("_node_name") or inst.get("node_name") or "default")
+        if node_key not in node_order:
+            node_order[node_key] = len(node_order)
+        original_order[id(inst)] = idx
+    return sorted(
+        list(instances or []),
+        key=lambda inst: (
+            node_order.get(str(inst.get("_node_id") or inst.get("node_id") or inst.get("_node_name") or inst.get("node_name") or "default"), 0),
+            _instance_display_rank(inst),
+            original_order.get(id(inst), 0),
+        ),
+    )
+
 
 def _get_node_by_id(nid: str) -> Optional[dict]:
     for node in _load_nodes():
@@ -6291,7 +6359,7 @@ def api_status(
     current_user: dict | None = Depends(get_current_user_optional),
 ):
     instances = []
-    visible_instances = _get_enabled_instances_for_user(current_user)
+    visible_instances = _sort_instances_for_status(_get_enabled_instances_for_user(current_user))
     node_gpu = _gpu_stats_for_status_node(visible_instances, target_node_id, target_instance)
     for inst in visible_instances:
         node_id = inst.get("_node_id", "")
@@ -6301,14 +6369,14 @@ def api_status(
         _finalize_interrupted_instance_jobs(name, is_active, remote_queue=remote_queue)
         grp = _instance_group.get(name, "")
         is_prompt_aux = _is_prompt_aux_instance(inst)
-        inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
+        inst_jobs = _status_jobs_for_instance(name, is_active)
         local_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
         local_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
         untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
         q_run = max(local_run, remote_queue["running"])
         q_pend = max(local_pend, remote_queue["pending"])
         q_size = max(remote_queue["total"], q_run + q_pend)
-        current_job = _current_job_for_instance(name)
+        current_job = _current_status_job_for_instance(name, is_active)
         remote_untracked_running = bool(untracked_remote_ids) and not current_job
         current_workflow = ""
         current_label = ""
@@ -6443,7 +6511,7 @@ def api_gpu_kill(req: dict, current_user: dict = Depends(require_admin)):
 @app.get("/api/comfyui/status")
 def api_comfyui_status(current_user: dict | None = Depends(get_current_user_optional)):
     result = []
-    visible_instances = _get_enabled_instances_for_user(current_user)
+    visible_instances = _sort_instances_for_status(_get_enabled_instances_for_user(current_user))
     node_gpu = _gpu_stats_for_status_node(visible_instances)
     for inst in visible_instances:
         name = inst["name"]
@@ -6452,7 +6520,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
         is_active = comfyui_up(base_url=inst["url"])
         remote_queue = _get_instance_queue_counts(inst["url"])
         _finalize_interrupted_instance_jobs(name, is_active, remote_queue=remote_queue)
-        inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
+        inst_jobs = _status_jobs_for_instance(name, is_active)
         local_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
         local_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
         queue_running = max(local_running, remote_queue["running"])
@@ -6460,7 +6528,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
         queue_total = max(remote_queue["total"], queue_running + queue_pending)
         grp = _instance_group.get(name, "")
         is_prompt_aux = _is_prompt_aux_instance(inst)
-        current_job = _current_job_for_instance(name)
+        current_job = _current_status_job_for_instance(name, is_active)
         untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
         remote_untracked_running = bool(untracked_remote_ids) and not current_job
         current_label = ""
@@ -6471,8 +6539,8 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             current_workflow = workflow_name
             prompt_preview = current_job.get("prompt_preview", "")
             current_label = prompt_preview[:60] if prompt_preview else workflow_name
-        for j in jobs.values():
-            if j.get("instance") == name and j.get("status") in ("queued", "preparing", "starting_comfyui"):
+        for j in inst_jobs:
+            if j.get("status") in ("queued", "preparing", "starting_comfyui"):
                 wf = (j.get("workflow") or "").replace(".json", "")
                 if wf:
                     pending_workflows.append(wf)

@@ -31,6 +31,55 @@
     return selected;
   }
 
+  function _instanceDisplayRank(inst) {
+    inst = inst || {};
+    var name = String(inst.name || inst.id || '').trim();
+    var upper = name.toUpperCase();
+    if (inst.prompt_aux || inst.role === 'prompt_aux' || upper === 'PROMPT') return [3, name.toLowerCase()];
+    if (upper === 'A') return [0, 0];
+    if (upper === 'B') return [0, 1];
+    if (/^[A-Z]$/.test(upper)) return [0, upper.charCodeAt(0) - 65];
+    var match = name.match(/\d+/);
+    if (match) return [1, Number(match[0]), name.toLowerCase()];
+    return [2, name.toLowerCase()];
+  }
+
+  function _compareRank(a, b) {
+    var len = Math.max(a.length, b.length);
+    for (var i = 0; i < len; i++) {
+      var av = a[i] == null ? '' : a[i];
+      var bv = b[i] == null ? '' : b[i];
+      if (av < bv) return -1;
+      if (av > bv) return 1;
+    }
+    return 0;
+  }
+
+  function _statusNodeKey(inst) {
+    inst = inst || {};
+    return inst.node_id || inst.node_name || 'default';
+  }
+
+  function _sortInstancesForDisplay(instances) {
+    var nodeOrder = {};
+    var nextNode = 0;
+    return (instances || []).map(function(inst, idx) {
+      var nodeKey = _statusNodeKey(inst);
+      if (nodeOrder[nodeKey] == null) nodeOrder[nodeKey] = nextNode++;
+      return { inst: inst, idx: idx, nodeRank: nodeOrder[nodeKey], rank: _instanceDisplayRank(inst) };
+    }).sort(function(a, b) {
+      if (a.nodeRank !== b.nodeRank) return a.nodeRank - b.nodeRank;
+      var byRank = _compareRank(a.rank, b.rank);
+      return byRank || (a.idx - b.idx);
+    }).map(function(item) {
+      return item.inst;
+    });
+  }
+
+  function _displayStatusInstances(instances) {
+    return _sortInstancesForDisplay(instances || []);
+  }
+
   function _isTerminalJobStatus(status) {
     return status === 'done' || status === 'error' || status === 'history';
   }
@@ -180,6 +229,56 @@
     return '运行中 ' + _clampPct(fallbackPct) + '%';
   }
 
+  function _instanceStateMeta(inst, activeByKey) {
+    inst = inst || {};
+    var rawName = inst.name || inst.node_name || '实例';
+    var name = String(rawName).toUpperCase() === 'PROMPT' ? 'P' : rawName;
+    var nodeId = inst.node_id || '';
+    var key = (inst.name || '') + '|' + nodeId;
+    var localActive = activeByKey && (activeByKey[key] || activeByKey[(inst.name || '') + '|']);
+    var unknownRemote = !!inst.remote_untracked_running && inst.progress_known === false;
+    if (!inst.up && !localActive) return { text: name + ': off', cls: 'off' };
+    if (unknownRemote) return { text: name + ': 未追踪任务中', cls: 'running unknown' };
+    if ((inst.queue_running || 0) > 0 || localActive) {
+      var pct = _clampPct(inst.progress || 0);
+      if (localActive) pct = Math.max(pct, _clampPct(localActive.pct));
+      return { text: name + ': ' + pct + '%', cls: 'running' };
+    }
+    if ((inst.queue_pending || 0) > 0) return { text: name + ': pending', cls: 'pending' };
+    return { text: name + ': idle', cls: 'idle' };
+  }
+
+  function _instanceSummaryItems(instances) {
+    var display = _displayStatusInstances(instances);
+    var activeStates = _activeJobStatesByInstance();
+    var activeByKey = {};
+    for (var i = 0; i < activeStates.length; i++) {
+      var state = activeStates[i] || {};
+      activeByKey[(state.instance || '') + '|' + (state.node_id || '')] = state;
+    }
+    return display.map(function(inst) {
+      return _instanceStateMeta(inst, activeByKey);
+    });
+  }
+
+  function _instanceSummaryText(instances) {
+    return _instanceSummaryItems(instances).map(function(item) {
+      return item.text;
+    }).join(' | ');
+  }
+
+  function _instanceSummaryHtml(items) {
+    return (items || []).map(function(item) {
+      return '<span class="svc-inst ' + escA(item.cls || 'idle') + '">' + escH(item.text || '') + '</span>';
+    }).join('<span class="svc-inst-sep"> | </span>');
+  }
+
+  function _setComfyStateText(el, text, html) {
+    if (!el) return;
+    el.textContent = text || '';
+    el.innerHTML = html || escH(text || '');
+  }
+
   function _safeVramMessage(gpu) {
     var msg = String((gpu && gpu.message) || '').trim();
     if (!msg) return 'VRAM 未上报';
@@ -205,7 +304,7 @@
       comfyBtn.classList.remove('pending', 'off');
       comfyBtn.classList.add('on', 'running');
     }
-    if (comfyState) comfyState.textContent = _runningStateText(runningSummaries, activePct);
+    if (comfyState) _setComfyStateText(comfyState, _runningStateText(runningSummaries, activePct));
   }
 
 async function pollStatus() {
@@ -224,7 +323,7 @@ async function pollStatus() {
   }
 
 function updateServices(d) {
-    const insts = d.instances || [];
+    const insts = _sortInstancesForDisplay(d.instances || []);
     const target = _getCurrentTarget(insts);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');
@@ -252,12 +351,17 @@ function updateServices(d) {
     if (comfyBtn) comfyBtn.title = displayTarget ? ((displayTarget.node_name || '') + (displayTarget.name ? ' ' + displayTarget.name : '')).trim() : 'ComfyUI';
     if (comfyState) {
       var stateText = '';
-      if (anyRunning || localRunning) stateText = _runningStateText(runningSummaries, runningPct);
+      var stateHtml = '';
+      var summaryItems = _instanceSummaryItems(insts);
+      var summaryText = summaryItems.map(function(item) { return item.text; }).join(' | ');
+      if (summaryText) stateText = summaryText;
+      else if (anyRunning || localRunning) stateText = _runningStateText(runningSummaries, runningPct);
       else if (!displayTarget) stateText = '无可用实例';
       else if (!displayTarget.up) stateText = '已关闭';
       else if ((displayTarget.queue_pending || 0) > 0) stateText = '排队中';
       else stateText = '待机';
-      comfyState.textContent = stateText;
+      if (summaryItems.length) stateHtml = _instanceSummaryHtml(summaryItems);
+      _setComfyStateText(comfyState, stateText, stateHtml);
     }
   }
 
@@ -343,8 +447,9 @@ async function _refreshInstCards() {
       var d = await r.json();
       var grouped = {};
       var order = [];
-      for (var gi = 0; gi < (d.instances || []).length; gi++) {
-        var item = d.instances[gi];
+      var sortedInstances = _sortInstancesForDisplay(d.instances || []);
+      for (var gi = 0; gi < sortedInstances.length; gi++) {
+        var item = sortedInstances[gi];
         var nodeKey = item.node_id || item.node_name || 'default';
         if (!grouped[nodeKey]) {
           grouped[nodeKey] = { name: item.node_name || item.node_id || '默认设备', items: [] };
