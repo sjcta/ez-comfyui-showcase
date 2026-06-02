@@ -1228,6 +1228,7 @@ def run_llm_prompt_optimizer(
     model: str | None = None,
 ) -> dict[str, Any]:
     """Optimize image/video prompts with the resident local LLM instead of ComfyUI."""
+    prompt = _bounded_user_prompt(prompt)
     cleaned = clean_user_prompt(prompt)
     mode = "video_script" if str(prompt_mode or "").lower() in {"video", "video_script", "script"} else "image"
     tokens = max(96, min(int(max_new_tokens or 384), 4096))

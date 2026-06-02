@@ -1,5 +1,11 @@
 # 更新日志
 
+## v4.6.2
+
+v4.6.2 补齐 prompt 长度限制在 LLM prompt optimizer 入口的遗漏。
+
+- `run_llm_prompt_optimizer()` 现在会在清洗 prompt 前先执行 10000 字符上限校验，封闭 S-9 的剩余绕过路径。
+
 ## v4.6.1
 
 v4.6.1 聚焦 v4.6.0 安全审查后的高风险修复。
