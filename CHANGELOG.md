@@ -1,5 +1,13 @@
 # 更新日志
 
+## v4.6.7
+
+v4.6.7 弃用早期出图前 LLM 容器让路策略，保留提示词优化/图片反推使用的共享 LLM API。
+
+- 生成、重试和恢复排队不再检查旧 `qwen36-vllm` Docker 容器状态，也不再根据该状态停启 LLM 容器。
+- `vllm_running()` / `start_vllm()` / `stop_vllm()` 默认变为 legacy no-op，仅在显式设置 `EZ_ENABLE_LEGACY_VLLM_MANAGEMENT=1` 时保留兼容行为。
+- `/api/vllm/{action}` 默认返回弃用状态，避免手动误触旧容器启停策略影响 Qwen3.6 提示词优化服务。
+
 ## v4.6.6
 
 v4.6.6 补齐安全审查中遗漏的 workflow 上传入口限额。

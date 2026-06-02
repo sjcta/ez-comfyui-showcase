@@ -856,7 +856,7 @@ class JobRunner:
 
         prompt_preview = infer_generation_label(wf, fields)[:200]
 
-        new_vllm_was = self._vllm_running()
+        new_vllm_was = False
 
         self._jobs[new_id] = {
             "id": new_id,

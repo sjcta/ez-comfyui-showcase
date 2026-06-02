@@ -700,7 +700,7 @@ async def _restart_gpu_stalled_job(job_id: str, job: dict, instance: dict, now: 
             path,
             job.get("fields") or {},
             _job_seed_value(job),
-            vllm_running(),
+            False,
             int(job.get("width") or 0),
             int(job.get("height") or 0),
             str(job.get("user_id") or ""),
@@ -2849,6 +2849,7 @@ COMFYUI_INPUT = os.environ.get("COMFYUI_INPUT") or "/home/sjcta/software/ComfyUI
 if not os.path.isdir(COMFYUI_INPUT):
     COMFYUI_INPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "input")
 VLLM_CONTAINER = "qwen36-vllm"
+LEGACY_VLLM_MANAGEMENT_ENV = "EZ_ENABLE_LEGACY_VLLM_MANAGEMENT"
 
 # ── State ───────────────────────────────────────────────────────────────
 jobs: dict[str, dict] = {}
@@ -3758,7 +3759,13 @@ def stop_comfyui():
             pass
 
 
+def _legacy_vllm_management_enabled() -> bool:
+    return str(os.environ.get(LEGACY_VLLM_MANAGEMENT_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def vllm_running() -> bool:
+    if not _legacy_vllm_management_enabled():
+        return False
     try:
         out = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Running}}", VLLM_CONTAINER],
@@ -3770,12 +3777,18 @@ def vllm_running() -> bool:
 
 
 def stop_vllm():
+    if not _legacy_vllm_management_enabled():
+        return False
     subprocess.run(["docker", "stop", VLLM_CONTAINER], capture_output=True, timeout=60)
+    return True
 
 
 def start_vllm():
+    if not _legacy_vllm_management_enabled():
+        return False
     subprocess.Popen(["docker", "start", VLLM_CONTAINER],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
 
 
 def comfyui_post(path: str, data: dict, base_url: str = None) -> dict:
@@ -5675,7 +5688,7 @@ def _kick_queued_generation_jobs(reason: str = "") -> list[str]:
             path,
             job.get("fields") or {},
             _job_seed_value(job),
-            vllm_running(),
+            False,
             int(job.get("width") or 0),
             int(job.get("height") or 0),
             str(job.get("user_id") or ""),
@@ -6513,6 +6526,8 @@ def api_comfyui_instance(instance: str, action: str, current_user: dict = Depend
 
 @app.post("/api/vllm/{action}")
 def api_vllm(action: str, current_user: dict = Depends(require_admin)):
+    if not _legacy_vllm_management_enabled():
+        raise HTTPException(410, "Legacy vLLM container management is disabled")
     if action == "start":
         start_vllm()
         return {"ok": True, "msg": "已启动"}
@@ -7508,7 +7523,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     job_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     random_seed_requested = req.seed is None
     seed = req.seed if req.seed is not None else random.randint(0, 2**63)
-    vllm_was = vllm_running()
+    vllm_was = False
 
     try:
         with open(path) as f:
@@ -7657,7 +7672,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     del jobs[job_id]
 
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
-    vllm_was = vllm_running()
+    vllm_was = False
 
     prompt_preview = infer_generation_label(wf, fields, _workflow_primary_type(wf))[:200]
 
