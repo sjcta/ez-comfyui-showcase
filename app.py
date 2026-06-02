@@ -5632,7 +5632,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 # ══════════════════════════════════════════════════════════════════════════
 
 def save_jobs():
-    active = {k: v for k, v in jobs.items() if v.get("status") not in ("done",)}
+    active = {k: v for k, v in jobs.items() if v.get("status") not in ("done", "cancelled")}
     try:
         os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
         tmp_file = f"{JOBS_FILE}.tmp"
@@ -5665,7 +5665,7 @@ def load_jobs():
             continue
         job_id = str(item.get("id") or "")
         status = str(item.get("status") or "")
-        if not job_id or status in ("done",):
+        if not job_id or status in ("done", "cancelled"):
             continue
         job = dict(item)
         job["id"] = job_id
@@ -7736,9 +7736,12 @@ async def api_cancel_job(job_id: str, current_user: dict = Depends(get_current_u
     job["message"] = "任务已取消"
     job["last_update"] = time.time()
     job["sem_acquired"] = False
+    removed_job = dict(job)
+    jobs.pop(job_id, None)
     save_jobs()
     _kick_queued_generation_jobs("取消后")
-    await broadcast({"type": "job_update", "job": job})
+    removed_job["deleted"] = True
+    await broadcast({"type": "job_update", "job": removed_job})
     return {"ok": True}
 
 
@@ -7749,8 +7752,8 @@ def api_dismiss_job(job_id: str, current_user: dict = Depends(get_current_user))
     job = jobs[job_id]
     if not _can_access_job(job, current_user):
         raise HTTPException(403, "只能删除自己的任务")
-    if job.get("status") not in ("error", "cancelled", "retrying"):
-        raise HTTPException(400, "只能丢弃失败、已取消或重试中的任务")
+    if job.get("status") not in ("error", "retrying"):
+        raise HTTPException(400, "只能丢弃失败或重试中的任务")
     del jobs[job_id]
     save_jobs()
     return {"ok": True}

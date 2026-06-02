@@ -529,7 +529,7 @@
         }
         jobs[j.id] = j;
       }
-      // Remove stale jobs no longer on server; failed/cancelled cards stay until dismissed.
+      // Remove stale jobs no longer on server; failed/retrying cards stay until dismissed.
       const serverIds = new Set(arr.map((j) => j.id));
       for (const id of Object.keys(jobs)) {
         if (!serverIds.has(id) && !_isDismissibleJob(jobs[id]) && !_isProtectedLocalSubmit(jobs[id])) {
@@ -550,11 +550,17 @@
 
   function _isDismissibleJob(job) {
     const status = String((job && job.status) || '');
-    return status === 'error' || status === 'cancelled' || status === 'retrying';
+    return status === 'error' || status === 'retrying';
   }
 
   function onJobUpdate(job) {
     const prev = jobs[job.id];
+    if (job.deleted || job.status === 'cancelled') {
+      delete jobs[job.id];
+      if (window.CW.renderGallery) window.CW.renderGallery();
+      if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
+      return;
+    }
     // Toast on status change
     if (prev && prev.status !== job.status) {
       var shortId = job.id.slice(-6);
@@ -580,7 +586,7 @@
       }
       return;
     }
-    // ── Failed/cancelled/retrying cards stay visible until the user deletes them ──
+    // ── Failed/retrying cards stay visible until the user deletes them ──
     if (_isDismissibleJob(job) && (!prev || prev.status !== job.status)) {
       window.CW._onJobError(job);
       return;
@@ -756,15 +762,14 @@
   async function cancelJob(jobId) {
     var j = jobs[jobId];
     if (!j) return;
-    if (j.status === 'error' || j.status === 'cancelled' || j.status === 'retrying') {
+    if (j.status === 'error' || j.status === 'retrying') {
       return dismissJob(jobId);
     }
     var label = '终止本次出图？';
     if (!confirm(label)) return;
     try {
       await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
-      jobs[jobId].status = 'cancelled';
-      jobs[jobId].message = '任务已取消';
+      delete jobs[jobId];
       window.CW.renderGallery();
     } catch (e) {
       console.error('cancelJob:', e);
@@ -774,7 +779,7 @@
   async function dismissJob(jobId) {
     var j = jobs[jobId];
     if (!j) return;
-    if (!confirm('删除这条失败/取消记录？')) return;
+    if (!confirm('删除这条失败记录？')) return;
     try {
       const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/dismiss`, { method: 'DELETE' });
       if (!r.ok) {

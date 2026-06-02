@@ -177,7 +177,7 @@
     if (status === 'queued') return 0;
     if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 1;
     if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;
-    if (status === 'error' || status === 'cancelled' || status === 'retrying') return 3;
+    if (status === 'error' || status === 'retrying') return 3;
     return 4;
   }
 
@@ -200,11 +200,11 @@
   }
 
   function _isDismissibleJobStatus(status) {
-    return status === 'error' || status === 'cancelled' || status === 'retrying';
+    return status === 'error' || status === 'retrying';
   }
 
   function _isActiveJobStatus(status) {
-    return status !== 'done' && !_isDismissibleJobStatus(status);
+    return status !== 'done' && status !== 'cancelled' && !_isDismissibleJobStatus(status);
   }
 
   function _sortJobCards(items) {
@@ -735,7 +735,7 @@
    * Handle job error: mark card as error, trigger auto-cleanup
    */
   CardManager.prototype.onJobError = function (job) {
-    // 保留 error 卡片（60s 后由 _autoCleanup 清理）
+    // 保留 error/retrying 卡片，等待用户手动删除。
     this.forceRender();
   };
 
@@ -1158,7 +1158,7 @@
   }
 
   /**
-   * 自动清理 — done 保留 5s，error/cancelled/retrying 等待用户手动删除。
+   * 自动清理 — done 保留 5s，error/retrying 等待用户手动删除。
    */
   function _scheduleCleanup() {
     var self = this;

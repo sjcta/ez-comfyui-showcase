@@ -1347,7 +1347,7 @@ function setHistoryTypeFilter(value) {
     if (status === 'queued') return 0;
     if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 1;
     if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;
-    if (status === 'error' || status === 'cancelled' || status === 'retrying') return 3;
+    if (status === 'error' || status === 'retrying') return 3;
     return 4;
   }
 
@@ -1370,11 +1370,11 @@ function setHistoryTypeFilter(value) {
   }
 
   function _isDismissibleJobStatus(status) {
-    return status === 'error' || status === 'cancelled' || status === 'retrying';
+    return status === 'error' || status === 'retrying';
   }
 
   function _isActiveJobStatus(status) {
-    return status !== 'done' && !_isDismissibleJobStatus(status);
+    return status !== 'done' && status !== 'cancelled' && !_isDismissibleJobStatus(status);
   }
 
   function _sortJobCards(items) {

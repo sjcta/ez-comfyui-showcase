@@ -76,7 +76,7 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
             self.assertIn("data-video-mask-bound", source)
             self.assertIn("--gi-info-height", source)
 
-    def test_failed_cancelled_jobs_remain_until_dismissed(self):
+    def test_failed_jobs_remain_until_dismissed_but_cancelled_do_not(self):
         poll_manager = (ROOT / "static/js/modules/poll_manager.js").read_text()
         history = (ROOT / "static/js/modules/history.js").read_text()
         card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()
@@ -84,8 +84,12 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
 
         self.assertIn("status !== 'done' && status !== 'error' && status !== 'cancelled' && status !== 'retrying'", poll_manager)
         self.assertIn("return status === 'done' || status === 'history';", poll_manager)
-        self.assertIn("status === 'error' || status === 'cancelled' || status === 'retrying'", card_manager)
-        self.assertIn("status === 'error' || status === 'cancelled' || status === 'retrying'", history)
+        self.assertIn("status === 'error' || status === 'retrying'", card_manager)
+        self.assertIn("status === 'error' || status === 'retrying'", history)
+        self.assertIn("status !== 'done' && status !== 'cancelled' && !_isDismissibleJobStatus(status)", card_manager)
+        self.assertIn("status !== 'done' && status !== 'cancelled' && !_isDismissibleJobStatus(status)", history)
+        self.assertIn("job.deleted || job.status === 'cancelled'", app_js)
+        self.assertIn("job.deleted || job.status === 'cancelled'", poll_manager)
         self.assertIn("CW.dismissJob", card_manager)
         self.assertIn("CW.dismissJob", history)
         self.assertIn("const retainedJobs = _sortJobCards", history)

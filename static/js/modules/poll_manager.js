@@ -237,6 +237,12 @@
       return;
     }
     var prev = jobs[job.id];
+    if (job.deleted || job.status === 'cancelled') {
+      delete jobs[job.id];
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
+      return;
+    }
 
     if (!prev && _isTerminalJob(job)) {
       this._seenTerminalJobs[job.id] = true;
@@ -362,7 +368,7 @@
             // onJobUpdate handles loadHistory for done/error itself
             if (sj.status === 'done' && sj.image) {
               doneOrErrorProcessed = true;
-            } else if (sj.status === 'error' || sj.status === 'cancelled' || sj.status === 'retrying') {
+            } else if (sj.status === 'error' || sj.status === 'retrying') {
               doneOrErrorProcessed = true;
             } else {
               needRerender = true;

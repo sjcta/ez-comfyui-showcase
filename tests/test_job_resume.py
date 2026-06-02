@@ -58,7 +58,7 @@ class JobResumeTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(app.JOBS_FILE))
         self.assertEqual(app.jobs["job-running"]["prompt_id"], "prompt-123")
 
-    def test_save_and_load_jobs_preserves_error_and_cancelled_cards(self):
+    def test_save_and_load_jobs_preserves_error_but_drops_cancelled_cards(self):
         app.jobs["job-error"] = {
             "id": "job-error",
             "status": "error",
@@ -85,7 +85,7 @@ class JobResumeTest(unittest.TestCase):
         app.load_jobs()
 
         self.assertIn("job-error", app.jobs)
-        self.assertIn("job-cancelled", app.jobs)
+        self.assertNotIn("job-cancelled", app.jobs)
         self.assertNotIn("job-done", app.jobs)
 
     def test_error_prompt_job_is_not_scheduled_for_resume(self):
@@ -250,7 +250,7 @@ class JobResumeTest(unittest.TestCase):
         self.assertEqual(adopted, [])
         self.assertNotIn("job_recovered_0772082_1374", app.jobs)
 
-    def test_cancel_job_deletes_remote_prompt_and_marks_cancelled(self):
+    def test_cancel_job_deletes_remote_prompt_and_removes_card(self):
         prompt_id = "prompt-cancel-me"
         app.jobs["job-cancel"] = {
             "id": "job-cancel",
@@ -264,14 +264,12 @@ class JobResumeTest(unittest.TestCase):
             with mock.patch("app.comfyui_post", return_value={}) as comfyui_post:
                 asyncio.run(app.api_cancel_job("job-cancel", current_user={"sub": "u1", "role": "user"}))
 
-        self.assertIn("job-cancel", app.jobs)
-        self.assertEqual(app.jobs["job-cancel"]["status"], "cancelled")
-        self.assertEqual(app.jobs["job-cancel"]["message"], "任务已取消")
+        self.assertNotIn("job-cancel", app.jobs)
         self.assertTrue(app._remote_prompt_was_cancelled("B", prompt_id))
         comfyui_post.assert_any_call("/queue", {"delete": [prompt_id]}, base_url="http://b")
         comfyui_post.assert_any_call("/interrupt", {}, base_url="http://b")
 
-    def test_dismiss_job_removes_failed_or_cancelled_record(self):
+    def test_dismiss_job_removes_failed_or_retrying_record(self):
         app.jobs["job-error"] = {
             "id": "job-error",
             "status": "error",
@@ -284,9 +282,17 @@ class JobResumeTest(unittest.TestCase):
             "workflow": "x.json",
             "user_id": "u1",
         }
+        app.jobs["job-retrying"] = {
+            "id": "job-retrying",
+            "status": "retrying",
+            "workflow": "x.json",
+            "user_id": "u1",
+        }
 
         self.assertEqual(app.api_dismiss_job("job-error", current_user={"sub": "u1", "role": "user"}), {"ok": True})
         self.assertNotIn("job-error", app.jobs)
+        self.assertEqual(app.api_dismiss_job("job-retrying", current_user={"sub": "u1", "role": "user"}), {"ok": True})
+        self.assertNotIn("job-retrying", app.jobs)
         with self.assertRaises(app.HTTPException) as ctx:
             app.api_dismiss_job("job-active", current_user={"sub": "u1", "role": "user"})
         self.assertEqual(ctx.exception.status_code, 400)
