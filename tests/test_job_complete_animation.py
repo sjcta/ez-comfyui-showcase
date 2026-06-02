@@ -6,19 +6,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class JobCompleteAnimationContractTests(unittest.TestCase):
-    def test_completion_uses_blur_fade_transition_in_both_render_paths(self):
+    def test_completion_uses_blur_fade_transition_in_history_renderer(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
         card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
 
-        for source in (history_js, card_manager_js):
-            self.assertIn("job-card-complete-blurfade", source)
-            self.assertIn("job-card-complete-transition", source)
-            self.assertIn("job-card-complete-old", source)
-            self.assertIn("job-card-complete-new", source)
-            self.assertNotIn("job-card-complete-flip", source)
-            self.assertNotIn("job-card-flip-scene", source)
-            self.assertNotIn("flip-complete", source)
-            self.assertNotIn("job-complete-wash", source)
+        self.assertIn("job-card-complete-blurfade", history_js)
+        self.assertIn("job-card-complete-transition", history_js)
+        self.assertIn("job-card-complete-old", history_js)
+        self.assertIn("job-card-complete-new", history_js)
+        self.assertNotIn("job-card-complete-flip", history_js)
+        self.assertNotIn("job-card-flip-scene", history_js)
+        self.assertNotIn("flip-complete", history_js)
+        self.assertNotIn("job-complete-wash", history_js)
+        self.assertIn("window.CW._onJobDone(job)", card_manager_js)
+        self.assertNotIn("job-card-complete-transition", card_manager_js)
 
     def test_completion_css_defines_blur_fade_without_flip_wash(self):
         css = (ROOT / "static/css/style.css").read_text()

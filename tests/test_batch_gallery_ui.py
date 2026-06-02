@@ -8,15 +8,13 @@ ROOT = Path(__file__).resolve().parents[1]
 class BatchGalleryUiContractTests(unittest.TestCase):
     def test_batch_badge_lives_above_info_with_reuse_action(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
-        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
 
-        for src in (history_js, card_manager_js):
-            self.assertIn("gi-info-actions", src)
-            self.assertIn("batchBadge", src)
-            self.assertIn("gi-reuse", src)
-            self.assertNotIn("${batchBadge}\n      ${canDelete", src)
-            self.assertNotIn("batchBadge +\n\t      (canDelete", src)
+        self.assertIn("gi-info-actions", history_js)
+        self.assertIn("batchBadge", history_js)
+        self.assertIn("gi-reuse", history_js)
+        self.assertNotIn("${batchBadge}\n      ${canDelete", history_js)
+        self.assertNotIn("batchBadge +\n\t      (canDelete", history_js)
 
         self.assertIn(".gi-info-actions", css)
         self.assertIn(".gi:not(.job-card) .gi-info-actions .gi-reuse", css)
@@ -27,15 +25,13 @@ class BatchGalleryUiContractTests(unittest.TestCase):
 
     def test_batch_stack_uses_real_extra_thumbnails_not_empty_frames(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
-        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
 
-        for src in (history_js, card_manager_js):
-            self.assertIn("function _batchStackImages", src)
-            self.assertTrue(
-                "gi-batch-layer-${idx + 1}" in src
-                or "gi-batch-layer-' + (idx + 1)" in src
-            )
+        self.assertIn("function _batchStackImages", history_js)
+        self.assertTrue(
+            "gi-batch-layer-${idx + 1}" in history_js
+            or "gi-batch-layer-' + (idx + 1)" in history_js
+        )
 
         self.assertIn(".gi-batch-layer", css)
         self.assertIn(".gi-batch-layer-1", css)
@@ -45,7 +41,6 @@ class BatchGalleryUiContractTests(unittest.TestCase):
 
     def test_batch_card_delete_targets_whole_batch(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
-        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
 
         self.assertIn("function _batchCanDelete", history_js)
         self.assertIn("function _batchDeleteTargetId", history_js)
@@ -53,11 +48,10 @@ class BatchGalleryUiContractTests(unittest.TestCase):
         self.assertIn("确认将这个批次的 ${deleteIds.length} 张图片移入回收站", history_js)
         self.assertIn("已将 ${deleteIds.length} 张图片移入回收站", history_js)
 
-        for src in (history_js, card_manager_js):
-            self.assertIn("删除本批次", src)
-            self.assertIn("CW.delHist", src)
-            self.assertIn("_batchCanDelete(entry, h)", src)
-            self.assertIn("_batchDeleteTargetId(entry, h)", src)
+        self.assertIn("删除本批次", history_js)
+        self.assertIn("CW.delHist", history_js)
+        self.assertIn("_batchCanDelete(entry, h)", history_js)
+        self.assertIn("_batchDeleteTargetId(entry, h)", history_js)
 
 
 if __name__ == "__main__":

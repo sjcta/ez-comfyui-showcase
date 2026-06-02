@@ -69,6 +69,33 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         boot_app_pos = loader_js.index("window.CW._bootApp")
         self.assertLess(init_poll_pos, boot_app_pos)
 
+    def test_card_manager_is_thin_history_adapter(self):
+        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
+        loader_js = (ROOT / "static/js/module_loader.js").read_text()
+
+        self.assertIn("CardManager thin adapter", card_manager_js)
+        self.assertIn("window.CW._patchJobCard(job)", card_manager_js)
+        self.assertIn("window.CW._onJobDone(job)", card_manager_js)
+        self.assertIn("window.CW._onJobError(job)", card_manager_js)
+        self.assertIn("window.CW.forceGalleryRerender()", card_manager_js)
+
+        for legacy in (
+            "function _renderHistCard",
+            "function _renderJobCard",
+            "function _patchGalleryHTML",
+            "function _groupHistoryForGallery",
+            "function _isJobVisibleToCurrentUser",
+            "function _neutralJobStatusMessage",
+            "function _videoPreviewHtml",
+            "IntersectionObserver",
+            "ResizeObserver",
+        ):
+            self.assertNotIn(legacy, card_manager_js)
+
+        history_pos = loader_js.index("base + '/modules/history.js")
+        card_manager_pos = loader_js.index("base + '/modules/card_manager.js")
+        self.assertLess(history_pos, card_manager_pos)
+
     def test_app_init_is_idempotent(self):
         app_js = (ROOT / "static/js/app.js").read_text()
 

@@ -1,5 +1,14 @@
 # 更新日志
 
+## v4.6.15
+
+v4.6.15 继续处理历史画廊/任务卡片 C-1 去重问题，将 `card_manager.js` 收缩为薄适配器。
+
+- `history.js` 成为画廊卡片 HTML、稳定 DOM patch、视频预览遮罩、批次卡片、失败卡片保留和任务排序的唯一实现来源。
+- `card_manager.js` 不再携带第二套 `_renderJobCard` / `_renderHistCard` / `_patchGalleryHTML` 等重复 renderer，仅保留 PollManager 需要的 `CardManager` 运行时接口，并委托到 `history.js` 导出的函数。
+- 将零进度生成任务的 `progress-unknown` 活动条逻辑迁回 `history.js`，避免移除 CardManager 重复实现后丢失可见活动反馈。
+- 更新前端合同测试，防止 `card_manager.js` 再次出现历史渲染、视频预览、懒加载和状态文案重复实现。
+
 ## v4.6.14
 
 v4.6.14 开始处理历史画廊/任务卡片 C-1 去重问题，先退役 `app.js` 中的遗留任务数据源。

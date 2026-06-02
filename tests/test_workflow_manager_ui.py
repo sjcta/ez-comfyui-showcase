@@ -22,7 +22,8 @@ class WorkflowManagerUiContractTests(unittest.TestCase):
         self.assertIn("function refreshWorkflowPreviewFromJob", workflows_js)
         self.assertIn("window.CW.refreshWorkflowPreviewFromJob = refreshWorkflowPreviewFromJob", workflows_js)
         self.assertIn("CW.refreshWorkflowPreviewFromJob(job)", history_js)
-        self.assertIn("CW.refreshWorkflowPreviewFromJob(job)", card_manager_js)
+        self.assertIn("window.CW._onJobDone(job)", card_manager_js)
+        self.assertNotIn("CW.refreshWorkflowPreviewFromJob(job)", card_manager_js)
         self.assertNotIn("window.CW.refreshWorkflowPreviewFromJob = _refreshWorkflowPreviewFromJob", history_js)
         self.assertIn("refresh workflow previews after delete failed", history_js)
 

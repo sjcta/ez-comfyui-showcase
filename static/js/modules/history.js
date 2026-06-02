@@ -464,6 +464,17 @@ function _attachSentinel() {
     return status === 'generating' || status === 'downloading' || status === 'checking';
   }
 
+  function _jobProgressPct(j) {
+    var pct = Number(j && j.progress ? j.progress.pct : 0);
+    if (!isFinite(pct)) pct = 0;
+    return Math.max(0, Math.min(100, pct));
+  }
+
+  function _jobProgressClass(j) {
+    var status = j && j.status;
+    return _jobProgressPct(j) <= 0 && (status === 'generating' || status === 'submitting') ? ' progress-unknown' : '';
+  }
+
   function _jobTimerHtml(j) {
     if (!_jobShowsTimer(j)) return '';
     var ts = _jobTimerTs(j);
@@ -552,7 +563,7 @@ function _attachSentinel() {
         ${tagHtml || instBadge ? `<div class="gi-tags-row">${tagHtml}${instBadge}</div>` : ''}
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
-        ${j.status === 'generating' || j.status === 'submitting' ? `<div class="gi-progress-top"><div class="gi-progress-fill" style="width:${j.progress?.pct || 0}%"></div></div>` : ''}
+        ${j.status === 'generating' || j.status === 'submitting' ? `<div class="gi-progress-top${_jobProgressClass(j)}"><div class="gi-progress-fill" style="width:${_jobProgressPct(j)}%"></div></div>` : ''}
         ${wfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
         <div class="gi-prompt" title="${escA(j.prompt_preview || label)}">${escH(j.prompt_preview || label)}</div>
         ${j.status !== 'generating' && j.status !== 'submitting' ? `<div class="gi-meta">
@@ -587,11 +598,14 @@ function _attachSentinel() {
       if (bar) bar.style.display = 'none';
     } else {
       const bar = card.querySelector('.gi-progress-top');
-      if (bar) bar.style.display = '';
+      if (bar) {
+        bar.style.display = '';
+        bar.classList.toggle('progress-unknown', _jobProgressPct(job) <= 0 && (job.status === 'generating' || job.status === 'submitting'));
+      }
     }
     // Progress bar
     const bar = card.querySelector('.gi-progress-fill');
-    if (bar) bar.style.width = (job.progress?.pct || 0) + '%';
+    if (bar) bar.style.width = _jobProgressPct(job) + '%';
     // Timer
     const timerEl = card.querySelector('.gi-timer');
     if (_jobShowsTimer(job)) {

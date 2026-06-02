@@ -44,9 +44,9 @@ class HistoryStickyUiTests(unittest.TestCase):
         self.assertIn("flex-direction: column;", css)
         self.assertIn("function _toggleHistoryTypeMenu(e)", history_js)
         self.assertIn("window.CW.toggleHistoryTypeMenu = _toggleHistoryTypeMenu", history_js)
-        self.assertIn("function _toggleHistoryTypeMenu(e)", card_manager_js)
         self.assertIn("onclick=\"CW.toggleHistoryTypeMenu(event)\"", history_js)
-        self.assertIn("onclick=\"CW.toggleHistoryTypeMenu(event)\"", card_manager_js)
+        self.assertNotIn("function _toggleHistoryTypeMenu(e)", card_manager_js)
+        self.assertNotIn("onclick=\"CW.toggleHistoryTypeMenu(event)\"", card_manager_js)
 
     def test_mobile_workspace_bands_fill_viewport_width(self):
         css = (ROOT / "static/css/style.css").read_text()

@@ -8,16 +8,14 @@ ROOT = Path(__file__).resolve().parents[1]
 class VideoPreviewUiContractTests(unittest.TestCase):
     def test_video_cards_render_video_frame_when_thumbnail_is_missing(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
-        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
 
-        for src in (history_js, card_manager_js):
-            self.assertIn("function _videoPreviewHtml", src)
-            self.assertIn("gi-video-preview", src)
-            self.assertIn("gi-video-thumb", src)
-            self.assertIn("_isVideoItem(item)) return _videoPreviewHtml", src)
-            self.assertIn("#t=0.1", src)
-            self.assertIn("preload=\"metadata\"", src)
+        self.assertIn("function _videoPreviewHtml", history_js)
+        self.assertIn("gi-video-preview", history_js)
+        self.assertIn("gi-video-thumb", history_js)
+        self.assertIn("_isVideoItem(item)) return _videoPreviewHtml", history_js)
+        self.assertIn("#t=0.1", history_js)
+        self.assertIn("preload=\"metadata\"", history_js)
 
         self.assertIn(".gi-video-preview", css)
         self.assertIn(".gi-video-thumb", css)
@@ -32,13 +30,13 @@ class VideoPreviewUiContractTests(unittest.TestCase):
         self.assertIn("bottom: var(--gi-info-height, 78px);", css)
         self.assertIn("transition: none;", css)
         self.assertNotIn("transition: bottom .22s ease;", css)
-        for src in (
-            (ROOT / "static/js/modules/history.js").read_text(),
-            (ROOT / "static/js/modules/card_manager.js").read_text(),
-        ):
-            self.assertIn("function _setVideoPreviewMaskHeight", src)
-            self.assertIn("ResizeObserver", src)
-            self.assertIn("--gi-info-height", src)
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
+        self.assertIn("function _setVideoPreviewMaskHeight", history_js)
+        self.assertIn("ResizeObserver", history_js)
+        self.assertIn("--gi-info-height", history_js)
+        self.assertNotIn("function _setVideoPreviewMaskHeight", card_manager_js)
+        self.assertNotIn("ResizeObserver", card_manager_js)
 
     def test_video_cards_do_not_render_redundant_bottom_video_badge(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
@@ -49,16 +47,14 @@ class VideoPreviewUiContractTests(unittest.TestCase):
 
     def test_video_tag_renders_in_card_text_action_row(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
-        card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
         sprite = (ROOT / "static/icons/sprite.svg").read_text()
 
-        for src in (history_js, card_manager_js):
-            self.assertIn("function _infoVideoTagHtml", src)
-            self.assertIn("gi-video-chip", src)
-            self.assertIn("icon(\"video\", 16)", src.replace("'", "\""))
-            self.assertIn("aria-label=\"视频\"", src)
-            self.assertNotIn("<span>视频</span>", src)
+        self.assertIn("function _infoVideoTagHtml", history_js)
+        self.assertIn("gi-video-chip", history_js)
+        self.assertIn("icon(\"video\", 16)", history_js.replace("'", "\""))
+        self.assertIn("aria-label=\"视频\"", history_js)
+        self.assertNotIn("<span>视频</span>", history_js)
 
         self.assertIn('id="icon-video"', sprite)
         self.assertIn('<symbol id="icon-video" viewBox="0 0 24 24" fill="currentColor" stroke="none">', sprite)

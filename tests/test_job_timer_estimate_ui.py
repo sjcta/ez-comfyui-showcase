@@ -14,12 +14,11 @@ class JobTimerEstimateUiTest(unittest.TestCase):
         self.assertIn("String(s == null ? '' : s).replace", source)
 
     def test_timer_renders_estimated_duration_label(self):
-        for rel in ("static/js/modules/history.js", "static/js/modules/card_manager.js"):
-            source = (ROOT / rel).read_text()
-            self.assertIn("formatJobElapsedWithEstimate", source)
-            self.assertIn("estimated_duration_label", source)
-            self.assertIn("generating_at", source)
-            self.assertIn("data-estimate-label", source)
+        source = (ROOT / "static/js/modules/history.js").read_text()
+        self.assertIn("formatJobElapsedWithEstimate", source)
+        self.assertIn("estimated_duration_label", source)
+        self.assertIn("generating_at", source)
+        self.assertIn("data-estimate-label", source)
 
     def test_poll_timer_preserves_estimated_duration_label(self):
         source = (ROOT / "static/js/modules/poll_manager.js").read_text()
@@ -27,34 +26,33 @@ class JobTimerEstimateUiTest(unittest.TestCase):
         self.assertIn("estimateLabel", source)
 
     def test_queued_jobs_do_not_render_running_timer(self):
-        for rel in ("static/js/modules/history.js", "static/js/modules/card_manager.js"):
-            source = (ROOT / rel).read_text()
-            match = re.search(r"function _jobShowsTimer\(j\) \{(?P<body>.*?)\n  \}", source, re.S)
-            self.assertIsNotNone(match, rel)
-            body = match.group("body")
-            self.assertNotIn("status === 'queued'", body, rel)
-            self.assertNotIn('status === "queued"', body, rel)
-            self.assertNotIn("status === 'preparing'", body, rel)
-            self.assertNotIn("status === 'starting_comfyui'", body, rel)
-            self.assertNotIn("status === 'submitting'", body, rel)
-            self.assertIn("status === 'generating'", body, rel)
+        source = (ROOT / "static/js/modules/history.js").read_text()
+        match = re.search(r"function _jobShowsTimer\(j\) \{(?P<body>.*?)\n  \}", source, re.S)
+        self.assertIsNotNone(match)
+        body = match.group("body")
+        self.assertNotIn("status === 'queued'", body)
+        self.assertNotIn('status === "queued"', body)
+        self.assertNotIn("status === 'preparing'", body)
+        self.assertNotIn("status === 'starting_comfyui'", body)
+        self.assertNotIn("status === 'submitting'", body)
+        self.assertIn("status === 'generating'", body)
 
     def test_timer_uses_generation_start_only(self):
-        for rel in ("static/js/modules/history.js", "static/js/modules/card_manager.js"):
-            source = (ROOT / rel).read_text()
-            match = re.search(r"function _jobTimerTs\(j\) \{(?P<body>.*?)\n  \}", source, re.S)
-            self.assertIsNotNone(match, rel)
-            body = match.group("body")
-            self.assertIn("generating_at", body, rel)
-            self.assertNotIn("submitted_at", body, rel)
-            self.assertNotIn("created_at_ts", body, rel)
+        source = (ROOT / "static/js/modules/history.js").read_text()
+        match = re.search(r"function _jobTimerTs\(j\) \{(?P<body>.*?)\n  \}", source, re.S)
+        self.assertIsNotNone(match)
+        body = match.group("body")
+        self.assertIn("generating_at", body)
+        self.assertNotIn("submitted_at", body)
+        self.assertNotIn("created_at_ts", body)
 
     def test_patch_inserts_timer_when_generation_start_arrives_late(self):
-        for rel in ("static/js/modules/history.js", "static/js/modules/card_manager.js"):
-            source = (ROOT / rel).read_text()
-            self.assertRegex(source, r"if \(!(?:liveTimerEl|timerEl)\)", rel)
-            self.assertIn("imgBox.insertBefore(timerRowNew", source, rel)
-            self.assertIn("card.querySelector('.gi-timer')", source, rel)
+        source = (ROOT / "static/js/modules/history.js").read_text()
+        card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()
+        self.assertRegex(source, r"if \(!(?:liveTimerEl|timerEl)\)")
+        self.assertIn("imgBox.insertBefore(timerRowNew", source)
+        self.assertIn("card.querySelector('.gi-timer')", source)
+        self.assertIn("window.CW._patchJobCard(job)", card_manager)
 
     def test_poll_timer_skips_queued_cards(self):
         source = (ROOT / "static/js/modules/poll_manager.js").read_text()

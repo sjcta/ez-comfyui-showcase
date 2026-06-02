@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SensitivePreviewKeywordTests(unittest.TestCase):
     def test_backend_protection_status_is_primary_preview_blur_source(self):
-        for rel_path in ("static/js/modules/history.js", "static/js/modules/card_manager.js", "static/js/modules/workflows.js"):
+        for rel_path in ("static/js/modules/history.js", "static/js/modules/workflows.js"):
             source = (ROOT / rel_path).read_text()
 
             self.assertRegex(source, r"function _isSensitive(?:Workflow)?Preview")
@@ -16,7 +16,7 @@ class SensitivePreviewKeywordTests(unittest.TestCase):
             self.assertIn("pending", source)
 
     def test_bare_exposed_word_does_not_trigger_preview_blur(self):
-        for rel_path in ("static/js/modules/history.js", "static/js/modules/card_manager.js", "static/js/modules/workflows.js"):
+        for rel_path in ("static/js/modules/history.js", "static/js/modules/workflows.js"):
             source = (ROOT / rel_path).read_text()
 
             self.assertNotIn("裸露", source)
@@ -31,13 +31,12 @@ class SensitivePreviewKeywordTests(unittest.TestCase):
         self.assertIn(".gi.job-card.completing .gi-img.gi-sensitive img", css)
 
     def test_checking_job_uses_pending_image_as_blurred_protected_preview(self):
-        for rel_path in ("static/js/modules/history.js", "static/js/modules/card_manager.js"):
-            source = (ROOT / rel_path).read_text()
+        source = (ROOT / "static/js/modules/history.js").read_text()
 
-            self.assertIn("pending_image", source)
-            self.assertIn("pending_thumb", source)
-            self.assertIn("j.status === 'checking'", source)
-            self.assertIn("checkingSensitiveCls", source)
+        self.assertIn("pending_image", source)
+        self.assertIn("pending_thumb", source)
+        self.assertIn("j.status === 'checking'", source)
+        self.assertIn("checkingSensitiveCls", source)
 
     def test_legacy_generate_task_schedules_protection_before_done(self):
         app_py = (ROOT / "app.py").read_text()

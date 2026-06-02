@@ -63,13 +63,15 @@ class JobCardLayoutContractTests(unittest.TestCase):
 
     def test_zero_progress_generating_card_keeps_visible_activity_bar(self):
         css = (ROOT / "static/css/style.css").read_text()
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
         card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()
 
         unknown_block = _css_block(css, ".gi-progress-top.progress-unknown .gi-progress-fill")
         self.assertIn("min-width: 34%", unknown_block)
         self.assertIn("animation: gi-progress-unknown", unknown_block)
-        self.assertIn("_jobProgressClass(j)", card_manager)
-        self.assertIn("classList.toggle('progress-unknown'", card_manager)
+        self.assertIn("_jobProgressClass(j)", history_js)
+        self.assertIn("classList.toggle('progress-unknown'", history_js)
+        self.assertNotIn("_jobProgressClass(j)", card_manager)
 
 
 if __name__ == "__main__":

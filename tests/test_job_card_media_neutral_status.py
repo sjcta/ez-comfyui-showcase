@@ -9,7 +9,6 @@ STATUS_SOURCE_FILES = [
     ROOT / "app.py",
     ROOT / "modules" / "job_runner.py",
     ROOT / "modules" / "config.py",
-    ROOT / "static" / "js" / "modules" / "card_manager.js",
     ROOT / "static" / "js" / "modules" / "history.js",
     ROOT / "static" / "js" / "modules" / "poll_manager.js",
     ROOT / "static" / "js" / "modules" / "ui.js",
@@ -50,14 +49,16 @@ class JobCardMediaNeutralStatusTests(unittest.TestCase):
             self.assertIn(phrase, combined)
 
     def test_job_card_renderers_normalize_legacy_status_messages(self):
-        for source in [
-            ROOT / "static" / "js" / "modules" / "card_manager.js",
-            ROOT / "static" / "js" / "modules" / "history.js",
-        ]:
-            text = source.read_text(encoding="utf-8")
+        text = (ROOT / "static" / "js" / "modules" / "history.js").read_text(encoding="utf-8")
 
-            self.assertIn("function _neutralJobStatusMessage", text)
-            self.assertIn("_neutralJobStatusMessage(j.message || j.status)", text)
+        self.assertIn("function _neutralJobStatusMessage", text)
+        self.assertIn("_neutralJobStatusMessage(j.message || j.status)", text)
+
+    def test_card_manager_does_not_duplicate_status_normalizer(self):
+        text = (ROOT / "static" / "js" / "modules" / "card_manager.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("function _neutralJobStatusMessage", text)
+        self.assertIn("window.CW._patchJobCard(job)", text)
 
 
 if __name__ == "__main__":
