@@ -3098,7 +3098,7 @@ select { cursor: pointer; }
 /* ═══ 响应式 ═══ */
 
 @media (max-width: 900px) {
-  .statusbar { display: grid; grid-template-columns: 50vw minmax(0, 1fr); align-items: center; gap: 4px 8px; padding: 5px 10px; }
+  .statusbar { display: grid; grid-template-columns: minmax(118px, 45vw) minmax(154px, 1fr); align-items: center; gap: 4px 8px; padding: 5px 10px; }
   .workspace { flex-direction: column; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
   .col-left {
     width: 100% !important;
@@ -3121,17 +3121,18 @@ select { cursor: pointer; }
   .wf-grid .wf-card { min-width: 132px; max-width: 150px; scroll-snap-align: none; flex-shrink: 0; }
   .col-divider { display: none; }
   .resize-handle { display: none; }
-  .sb-vram { display: grid; width: 50vw; grid-template-columns: 31px minmax(72px, 1fr); grid-template-areas: "label track" "text text"; align-items: center; max-width: none; min-width: 0; gap: 3px 5px; }
+  .sb-vram { display: grid; width: 100%; grid-template-columns: 31px minmax(72px, 1fr); grid-template-areas: "label track" "text text"; align-items: center; max-width: none; min-width: 0; gap: 3px 5px; }
   .sb-vram-label { grid-area: label; width: 31px; }
   .sb-vram-track { grid-area: track; flex: 0 0 auto; width: 100%; }
   .sb-vram-text { grid-area: text; white-space: nowrap; overflow: visible; min-width: 0; font-size: 10px; line-height: 1.2; overflow-wrap: normal; }
   .sb-gpu { display: none; }
   .sb-spacer { display: none; }
-  .sb-services { grid-column: 2; justify-self: end; align-self: center; }
-  .svc-btn { padding: 3px 6px; font-size: 10px; gap: 4px; }
-  .svc-btn.running { min-width: 0; max-width: 148px; grid-template-columns: auto max-content minmax(0, max-content); padding: 4px 8px; gap: 6px; }
-  .svc-state { display: inline; max-width: 42px; overflow: hidden; text-overflow: clip; }
-  .svc-btn.running .svc-state { max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+  .sb-services { grid-column: 2; justify-self: end; align-self: center; width: auto; max-width: 100%; min-width: 0; }
+  .svc-btn { width: fit-content; max-width: 100%; min-width: 0; padding: 3px 6px; font-size: 10px; gap: 4px; }
+  .svc-label { display: none; }
+  .svc-btn.running { min-width: 0; width: fit-content; max-width: 100%; grid-template-columns: auto minmax(0, max-content); padding: 4px 7px; gap: 6px; }
+  .svc-state { display: block; min-width: 0; max-width: none; overflow: visible; text-overflow: clip; white-space: normal; line-height: 1.2; letter-spacing: 0; }
+  .svc-btn.running .svc-state { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
   .gen-form { display: none; }
   .gen-form.mobile-open { display: flex; }
   .col-left-scroll {

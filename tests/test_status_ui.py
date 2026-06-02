@@ -32,13 +32,18 @@ class StatusUiContractTests(unittest.TestCase):
     def test_mobile_statusbar_keeps_service_button_beside_vram(self):
         css = (ROOT / "static/css/style.css").read_text()
 
-        self.assertIn(".statusbar { display: grid; grid-template-columns: 50vw minmax(0, 1fr); align-items: center;", css)
-        self.assertIn(".sb-vram { display: grid; width: 50vw;", css)
+        self.assertIn(".statusbar { display: grid; grid-template-columns: minmax(118px, 45vw) minmax(154px, 1fr); align-items: center;", css)
+        self.assertIn(".sb-vram { display: grid; width: 100%;", css)
         self.assertIn("grid-template-columns: 31px minmax(72px, 1fr);", css)
         self.assertIn("grid-template-areas: \"label track\" \"text text\";", css)
         self.assertIn(".sb-vram-label { grid-area: label; width: 31px;", css)
         self.assertIn(".sb-vram-text { grid-area: text; white-space: nowrap; overflow: visible;", css)
-        self.assertIn(".sb-services { grid-column: 2; justify-self: end; align-self: center;", css)
+        self.assertIn(".sb-services { grid-column: 2; justify-self: end; align-self: center; width: auto; max-width: 100%; min-width: 0;", css)
+        self.assertIn(".svc-label { display: none; }", css)
+        self.assertIn(".svc-btn { width: fit-content; max-width: 100%; min-width: 0;", css)
+        self.assertIn(".svc-btn.running { min-width: 0; width: fit-content; max-width: 100%;", css)
+        self.assertIn(".svc-state { display: block; min-width: 0; max-width: none; overflow: visible;", css)
+        self.assertIn(".svc-btn.running .svc-state { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }", css)
 
     def test_mobile_toast_starts_below_statusbar(self):
         css = (ROOT / "static/css/style.css").read_text()
