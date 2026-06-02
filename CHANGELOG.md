@@ -1,5 +1,12 @@
 # 更新日志
 
+## v4.6.6
+
+v4.6.6 补齐安全审查中遗漏的 workflow 上传入口限额。
+
+- `/api/workflows/meta/thumbnail` 改为分块读取并使用图片上传大小上限，避免缩略图上传无上限进入内存。
+- `/api/workflows/{name}/upload-version` 保留 1MB workflow 版本上限，但改为统一分块读取路径，和其他上传端点保持一致。
+
 ## v4.6.5
 
 v4.6.5 先处理出图链路 review 中会直接影响稳定性的部分。

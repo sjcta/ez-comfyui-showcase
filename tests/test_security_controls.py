@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from fastapi import HTTPException
 
@@ -46,6 +47,56 @@ class SecurityControlTests(unittest.TestCase):
             self.assertEqual(ctx.exception.status_code, 413)
 
         asyncio.run(run())
+
+    def test_workflow_thumbnail_upload_rejects_files_over_limit(self):
+        test_case = self
+
+        class FakeUpload:
+            filename = "thumb.jpg"
+
+            def __init__(self):
+                self._chunks = [b"abc", b"def"]
+
+            async def read(self, size):
+                test_case.assertEqual(size, app._UPLOAD_READ_CHUNK_BYTES)
+                return self._chunks.pop(0) if self._chunks else b""
+
+        async def run():
+            with self.assertRaises(HTTPException) as ctx:
+                await app.api_upload_wf_thumbnail(
+                    filename="sample.json",
+                    file=FakeUpload(),
+                    current_user={"id": "u1", "role": "admin"},
+                )
+            self.assertEqual(ctx.exception.status_code, 413)
+
+        with mock.patch.object(app, "_UPLOAD_IMAGE_MAX_BYTES", 5):
+            asyncio.run(run())
+
+    def test_workflow_version_upload_rejects_files_over_limit_in_chunks(self):
+        test_case = self
+
+        class FakeUpload:
+            filename = "workflow.json"
+
+            def __init__(self):
+                self._chunks = [b'{"a":', b'"b"}']
+
+            async def read(self, size):
+                test_case.assertEqual(size, app._UPLOAD_READ_CHUNK_BYTES)
+                return self._chunks.pop(0) if self._chunks else b""
+
+        async def run():
+            with self.assertRaises(HTTPException) as ctx:
+                await app.api_upload_workflow_version(
+                    name="sample.json",
+                    file=FakeUpload(),
+                    current_user={"id": "admin", "role": "admin"},
+                )
+            self.assertEqual(ctx.exception.status_code, 413)
+
+        with mock.patch.object(app, "MAX_WORKFLOW_SIZE", 5):
+            asyncio.run(run())
 
 
 if __name__ == "__main__":

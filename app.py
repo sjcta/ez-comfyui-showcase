@@ -7175,7 +7175,7 @@ async def api_upload_wf_thumbnail(filename: str = Form(...), file: UploadFile = 
     ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
         raise HTTPException(400, f"Unsupported image format: {ext}")
-    content = await file.read()
+    content = await _read_upload_limited(file, _UPLOAD_IMAGE_MAX_BYTES, "Thumbnail")
     if not content:
         raise HTTPException(400, "Empty file")
     meta = _load_wf_meta()
@@ -9239,9 +9239,7 @@ def api_workflow_version_download(name: str, version: str = "v1"):
 
 @app.post("/api/workflows/{name}/upload-version")
 async def api_upload_workflow_version(name: str, file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
-    content = await file.read(MAX_WORKFLOW_SIZE + 1)
-    if len(content) > MAX_WORKFLOW_SIZE:
-        raise HTTPException(413, "File too large")
+    content = await _read_upload_limited(file, MAX_WORKFLOW_SIZE, "Workflow")
     try:
         json.loads(content)
     except json.JSONDecodeError as e:
