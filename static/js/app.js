@@ -529,10 +529,10 @@
         }
         jobs[j.id] = j;
       }
-      // Remove stale jobs no longer on server (keep error jobs even if server cleaned them up)
+      // Remove stale jobs no longer on server; failed/cancelled cards stay until dismissed.
       const serverIds = new Set(arr.map((j) => j.id));
       for (const id of Object.keys(jobs)) {
-        if (!serverIds.has(id) && jobs[id]?.status !== 'error' && !_isProtectedLocalSubmit(jobs[id])) {
+        if (!serverIds.has(id) && !_isDismissibleJob(jobs[id]) && !_isProtectedLocalSubmit(jobs[id])) {
           delete jobs[id];
           changed = true;
         }
@@ -546,6 +546,11 @@
     const ts = Number(job._local_submitted_at || 0);
     if (!ts || Date.now() - ts > 15000) return false;
     return ['queued', 'dispatching', 'preparing', 'starting_comfyui', 'submitting'].includes(String(job.status || ''));
+  }
+
+  function _isDismissibleJob(job) {
+    const status = String((job && job.status) || '');
+    return status === 'error' || status === 'cancelled' || status === 'retrying';
   }
 
   function onJobUpdate(job) {
@@ -575,8 +580,8 @@
       }
       return;
     }
-    // ── Error: remove from active + re-render ──
-    if (job.status === 'error' && (!prev || prev.status !== 'error')) {
+    // ── Failed/cancelled/retrying cards stay visible until the user deletes them ──
+    if (_isDismissibleJob(job) && (!prev || prev.status !== job.status)) {
       window.CW._onJobError(job);
       return;
     }
@@ -615,7 +620,7 @@
   // ── Polling fallback: sync active jobs via /api/jobs every 3s ──
   let _pollTimer = null;
   function _hasActiveJobs() {
-    return Object.values(jobs).some(j => j.status !== 'done' && j.status !== 'error');
+    return Object.values(jobs).some(j => j.status !== 'done' && !_isDismissibleJob(j));
   }
 
   // Track timer for downloading state (rebroadcast download message)
@@ -661,9 +666,9 @@
           onJobUpdate(sj);
         } else if (prev.status !== sj.status) {
           onJobUpdate(sj);
-          // onJobUpdate handles loadHistory for done/error itself
+          // onJobUpdate handles loadHistory for done and rerender for retained failures itself
           if (sj.status === 'done' && sj.image) { alreadyRefreshed = true; }
-          else if (sj.status === 'error') { alreadyRefreshed = true; }
+          else if (_isDismissibleJob(sj)) { alreadyRefreshed = true; }
           else needRerender = true;
         } else if (sj.status === 'generating' && sj.progress && prev.progress?.pct !== sj.progress.pct) {
           jobs[id] = sj;
@@ -674,6 +679,7 @@
       for (const id of Object.keys(jobs)) {
         if (!serverJobs[id]) {
           if (_isProtectedLocalSubmit(jobs[id])) continue;
+          if (_isDismissibleJob(jobs[id])) continue;
           delete jobs[id];
           historyRefresh = true;
         }
@@ -750,14 +756,35 @@
   async function cancelJob(jobId) {
     var j = jobs[jobId];
     if (!j) return;
-    var label = j.status === 'generating' ? '终止本次出图？' : '删除这张卡片？';
+    if (j.status === 'error' || j.status === 'cancelled' || j.status === 'retrying') {
+      return dismissJob(jobId);
+    }
+    var label = '终止本次出图？';
     if (!confirm(label)) return;
     try {
       await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
-      delete jobs[jobId];
+      jobs[jobId].status = 'cancelled';
+      jobs[jobId].message = '任务已取消';
       window.CW.renderGallery();
     } catch (e) {
       console.error('cancelJob:', e);
+    }
+  }
+
+  async function dismissJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    if (!confirm('删除这条失败/取消记录？')) return;
+    try {
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/dismiss`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || r.status);
+      }
+      delete jobs[jobId];
+      window.CW.renderGallery();
+    } catch (e) {
+      console.error('dismissJob:', e);
     }
   }
 
@@ -1051,6 +1078,7 @@ function init() {
   console.log('[BOOT] before Object.assign');
   Object.assign(window.CW, {
     cancelJob,
+    dismissJob,
     retryJob,
     rndSeed,
     wfUploadOverlay,

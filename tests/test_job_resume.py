@@ -58,6 +58,51 @@ class JobResumeTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(app.JOBS_FILE))
         self.assertEqual(app.jobs["job-running"]["prompt_id"], "prompt-123")
 
+    def test_save_and_load_jobs_preserves_error_and_cancelled_cards(self):
+        app.jobs["job-error"] = {
+            "id": "job-error",
+            "status": "error",
+            "workflow": "x.json",
+            "message": "失败",
+            "user_id": "u1",
+        }
+        app.jobs["job-cancelled"] = {
+            "id": "job-cancelled",
+            "status": "cancelled",
+            "workflow": "x.json",
+            "message": "任务已取消",
+            "user_id": "u1",
+        }
+        app.jobs["job-done"] = {
+            "id": "job-done",
+            "status": "done",
+            "workflow": "x.json",
+            "user_id": "u1",
+        }
+
+        app.save_jobs()
+        app.jobs.clear()
+        app.load_jobs()
+
+        self.assertIn("job-error", app.jobs)
+        self.assertIn("job-cancelled", app.jobs)
+        self.assertNotIn("job-done", app.jobs)
+
+    def test_error_prompt_job_is_not_scheduled_for_resume(self):
+        app.jobs["job-error"] = {
+            "id": "job-error",
+            "status": "error",
+            "workflow": "x.json",
+            "instance": "B",
+            "prompt_id": "prompt-failed",
+        }
+
+        with mock.patch("app.asyncio.create_task") as create_task, \
+                mock.patch("app._kick_queued_generation_jobs", return_value=[]):
+            app._resume_persisted_generation_jobs()
+
+        create_task.assert_not_called()
+
     def test_loaded_prompt_id_prevents_remote_prompt_cleanup(self):
         app.jobs["job-running"] = {
             "id": "job-running",
@@ -219,10 +264,59 @@ class JobResumeTest(unittest.TestCase):
             with mock.patch("app.comfyui_post", return_value={}) as comfyui_post:
                 asyncio.run(app.api_cancel_job("job-cancel", current_user={"sub": "u1", "role": "user"}))
 
-        self.assertNotIn("job-cancel", app.jobs)
+        self.assertIn("job-cancel", app.jobs)
+        self.assertEqual(app.jobs["job-cancel"]["status"], "cancelled")
+        self.assertEqual(app.jobs["job-cancel"]["message"], "任务已取消")
         self.assertTrue(app._remote_prompt_was_cancelled("B", prompt_id))
         comfyui_post.assert_any_call("/queue", {"delete": [prompt_id]}, base_url="http://b")
         comfyui_post.assert_any_call("/interrupt", {}, base_url="http://b")
+
+    def test_dismiss_job_removes_failed_or_cancelled_record(self):
+        app.jobs["job-error"] = {
+            "id": "job-error",
+            "status": "error",
+            "workflow": "x.json",
+            "user_id": "u1",
+        }
+        app.jobs["job-active"] = {
+            "id": "job-active",
+            "status": "generating",
+            "workflow": "x.json",
+            "user_id": "u1",
+        }
+
+        self.assertEqual(app.api_dismiss_job("job-error", current_user={"sub": "u1", "role": "user"}), {"ok": True})
+        self.assertNotIn("job-error", app.jobs)
+        with self.assertRaises(app.HTTPException) as ctx:
+            app.api_dismiss_job("job-active", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_retry_marks_old_job_retrying_until_new_job_finishes(self):
+        workflow_path = os.path.join(self._tmp.name, "retry.json")
+        with open(workflow_path, "w", encoding="utf-8") as fh:
+            json.dump({"1": {"class_type": "SaveImage", "inputs": {}}}, fh)
+        app.jobs["job-error"] = {
+            "id": "job-error",
+            "status": "error",
+            "workflow": "retry.json",
+            "fields": {},
+            "user_id": "u1",
+        }
+        old_queue = app._job_queue
+        app._job_queue = asyncio.Queue()
+
+        try:
+            with mock.patch("app._load_wf_meta", return_value={}), \
+                    mock.patch("app._can_view_workflow", return_value=True), \
+                    mock.patch("app._resolve_workflow", return_value=workflow_path):
+                result = app.api_retry_job("job-error", bg=mock.Mock(), current_user={"sub": "u1", "role": "user"})
+        finally:
+            app._job_queue = old_queue
+
+        new_id = result["job_id"]
+        self.assertEqual(app.jobs["job-error"]["status"], "retrying")
+        self.assertEqual(app.jobs["job-error"]["retried_by"], new_id)
+        self.assertEqual(app.jobs[new_id]["retry_of"], "job-error")
 
     def test_queue_prompt_client_id_extracts_comfyui_metadata(self):
         self.assertEqual(

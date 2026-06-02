@@ -111,7 +111,7 @@
   function _jobNeedsHistoryRefresh(job) {
     if (!job) return false;
     var status = job.status || '';
-    return status !== 'done' && status !== 'error' && status !== 'history';
+    return status !== 'done' && status !== 'error' && status !== 'cancelled' && status !== 'retrying' && status !== 'history';
   }
 
   function _isProtectedLocalSubmit(job) {
@@ -128,7 +128,7 @@
 
   function _isTerminalJob(job) {
     var status = job && job.status || '';
-    return status === 'done' || status === 'error' || status === 'history';
+    return status === 'done' || status === 'history';
   }
 
   function _currentUserId() {
@@ -362,7 +362,7 @@
             // onJobUpdate handles loadHistory for done/error itself
             if (sj.status === 'done' && sj.image) {
               doneOrErrorProcessed = true;
-            } else if (sj.status === 'error') {
+            } else if (sj.status === 'error' || sj.status === 'cancelled' || sj.status === 'retrying') {
               doneOrErrorProcessed = true;
             } else {
               needRerender = true;
@@ -430,7 +430,7 @@
     for (var i = 0; i < vals.length; i++) {
       if (!_isJobVisibleToCurrentUser(vals[i])) continue;
       var s = vals[i].status;
-      if (s !== 'done' && s !== 'error' && s !== 'history') return true;
+      if (s !== 'done' && s !== 'error' && s !== 'cancelled' && s !== 'retrying' && s !== 'history') return true;
     }
     return false;
   };

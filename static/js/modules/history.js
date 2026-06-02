@@ -543,7 +543,7 @@ function _attachSentinel() {
       <div class="gi-img ${hasImage ? '' : 'job-placeholder'}${checkingSensitiveCls}">
         ${imgHtml}
         ${j.status === "error" ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ""}
-        <button class="gi-del" onclick="event.stopPropagation();CW.cancelJob('${escA(j.id)}')" title="${j.status === 'generating' ? '取消' : '删除'}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>
+        <button class="gi-del" onclick="event.stopPropagation();${_isDismissibleJobStatus(j.status) ? 'CW.dismissJob' : 'CW.cancelJob'}('${escA(j.id)}')" title="${_isDismissibleJobStatus(j.status) ? '删除记录' : '取消'}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>
         ${tagHtml || instBadge ? `<div class="gi-tags-row">${tagHtml}${instBadge}</div>` : ''}
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
@@ -697,9 +697,7 @@ function _attachSentinel() {
   }
 
   function _onJobError(job) {
-    // Remove from active jobs
-    delete jobs[job.id];
-    // Re-render to show error state
+    jobs[job.id] = job;
     window.CW.forceGalleryRerender();
   }
 
@@ -1349,13 +1347,13 @@ function setHistoryTypeFilter(value) {
     if (status === 'queued') return 0;
     if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 1;
     if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;
-    if (status === 'error') return 3;
+    if (status === 'error' || status === 'cancelled' || status === 'retrying') return 3;
     return 4;
   }
 
   function _jobSortTimestamp(job) {
     if (!job) return 0;
-    var raw = job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
+    var raw = job.last_update || job.created_at_ts || job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
     if (!raw) return 0;
     if (typeof raw === 'number') return raw;
     var parsed = Date.parse(raw);
@@ -1369,6 +1367,14 @@ function setHistoryTypeFilter(value) {
       }
     }
     return 0;
+  }
+
+  function _isDismissibleJobStatus(status) {
+    return status === 'error' || status === 'cancelled' || status === 'retrying';
+  }
+
+  function _isActiveJobStatus(status) {
+    return status !== 'done' && !_isDismissibleJobStatus(status);
   }
 
   function _sortJobCards(items) {
@@ -1633,12 +1639,11 @@ function _renderGalleryImpl() {
     // Ensure we have an initial batch size on first render
     _ensureInitialBatch();
 
-    // Active jobs (queued, preparing, starting_comfyui, submitting, generating)
-    const activeJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter((j) => j.status !== 'done' && j.status !== 'error');
-    // Error jobs (kept briefly for visibility)
-    const errorJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter((j) => j.status === 'error');
+    const visibleJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser);
+    const activeJobs = visibleJobs.filter((j) => _isActiveJobStatus(j.status));
+    const retainedJobs = _sortJobCards(visibleJobs.filter((j) => _isDismissibleJobStatus(j.status))).slice(0, 10);
 
-    const jobCards = _sortJobCards([...activeJobs, ...errorJobs]);
+    const jobCards = [..._sortJobCards(activeJobs), ...retainedJobs];
 
     // ── Hash check: skip rebuild if nothing changed ──
     const hash = _galleryHash(jobs, historyItems);

@@ -857,6 +857,10 @@ class JobRunner:
         prompt_preview = infer_generation_label(wf, fields)[:200]
 
         new_vllm_was = False
+        old["status"] = "retrying"
+        old["message"] = "已重新排队，等待新任务完成..."
+        old["retried_by"] = new_id
+        old["last_update"] = time.time()
 
         self._jobs[new_id] = {
             "id": new_id,
@@ -868,6 +872,7 @@ class JobRunner:
             "width": width,
             "height": height,
             "fields": fields,
+            "retry_of": job_id,
             "queued_at": datetime.now().strftime("%H:%M:%S"),
             "created_at_ts": time.time(),
         }
@@ -1066,4 +1071,15 @@ class JobRunner:
                     message=f"完成 ({elapsed:.1f}s)",
                     **done_payload,
                 )
+                self._cleanup_retry_source_jobs(job_id)
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+    def _cleanup_retry_source_jobs(self, completed_job_id: str) -> list[str]:
+        removed: list[str] = []
+        for old_id, old in list(self._jobs.items()):
+            if old_id == completed_job_id:
+                continue
+            if old.get("retried_by") == completed_job_id and old.get("status") == "retrying":
+                self._jobs.pop(old_id, None)
+                removed.append(old_id)
+        return removed

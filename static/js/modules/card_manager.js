@@ -177,13 +177,13 @@
     if (status === 'queued') return 0;
     if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 1;
     if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;
-    if (status === 'error') return 3;
+    if (status === 'error' || status === 'cancelled' || status === 'retrying') return 3;
     return 4;
   }
 
   function _jobSortTimestamp(job) {
     if (!job) return 0;
-    var raw = job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
+    var raw = job.last_update || job.created_at_ts || job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
     if (!raw) return 0;
     if (typeof raw === 'number') return raw;
     var parsed = Date.parse(raw);
@@ -197,6 +197,14 @@
       }
     }
     return 0;
+  }
+
+  function _isDismissibleJobStatus(status) {
+    return status === 'error' || status === 'cancelled' || status === 'retrying';
+  }
+
+  function _isActiveJobStatus(status) {
+    return status !== 'done' && !_isDismissibleJobStatus(status);
   }
 
   function _sortJobCards(items) {
@@ -510,7 +518,7 @@
       '<div class="gi-img ' + (hasImage ? '' : 'job-placeholder') + checkingSensitiveCls + '">' +
       imgHtml +
       (j.status === 'error' ? '<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob(\'' + escA(j.id) + '\')">重新尝试</button></div>' : '') +
-      '<button class="gi-del" onclick="event.stopPropagation();CW.cancelJob(\'' + escA(j.id) + '\')" title="' + (j.status === 'generating' ? '取消' : '删除') + '"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' +
+      '<button class="gi-del" onclick="event.stopPropagation();' + (_isDismissibleJobStatus(j.status) ? 'CW.dismissJob' : 'CW.cancelJob') + '(\'' + escA(j.id) + '\')" title="' + (_isDismissibleJobStatus(j.status) ? '删除记录' : '取消') + '"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>' +
       (tagHtml || instBadge ? '<div class="gi-tags-row">' + tagHtml + instBadge + '</div>' : '') +
       '</div>' +
       '<div class="gi-info" onclick="event.stopPropagation();CW.restoreJob(\'' + escA(j.id) + '\')">' +
@@ -764,11 +772,10 @@
       _histVisibleCount = Math.min(_batchSize(), initialItems.length);
     }
 
-    // Active jobs (queued, preparing, starting_comfyui, submitting, generating, downloading)
-    var activeJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter(function (j) { return j.status !== 'done' && j.status !== 'error'; });
-    // Error jobs (kept briefly for visibility)
-    var errorJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser).filter(function (j) { return j.status === 'error'; });
-    var jobCards = _sortJobCards(activeJobs.concat(errorJobs));
+    var visibleJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser);
+    var activeJobs = visibleJobs.filter(function (j) { return _isActiveJobStatus(j.status); });
+    var retainedJobs = _sortJobCards(visibleJobs.filter(function (j) { return _isDismissibleJobStatus(j.status); })).slice(0, 10);
+    var jobCards = _sortJobCards(activeJobs).concat(retainedJobs);
 
     // ── Hash check ──
     var hash = _galleryHash(jobs, historyItems);
@@ -1151,7 +1158,7 @@
   }
 
   /**
-   * 自动清理 — done 保留 5s, error 保留 60s 后自动移入历史
+   * 自动清理 — done 保留 5s，error/cancelled/retrying 等待用户手动删除。
    */
   function _scheduleCleanup() {
     var self = this;
@@ -1180,11 +1187,6 @@
         changed = true;
       }
 
-      // Error: remove from active jobs after keepError ms
-      if (job.status === 'error' && job._errAt && (now - job._errAt > keepError)) {
-        delete jobs[id];
-        changed = true;
-      }
     }
 
     if (changed) {

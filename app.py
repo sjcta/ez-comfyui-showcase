@@ -3078,6 +3078,7 @@ async def _complete_image_protection_job(job_id: str, records: list[dict], elaps
         save_history()
         if job_id and job_id in jobs:
             jobs[job_id].update(_job_done_payload_from_records(job_id, records, elapsed))
+            _cleanup_retry_source_jobs(job_id)
             save_jobs()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
     except Exception as exc:
@@ -3091,6 +3092,7 @@ async def _complete_image_protection_job(job_id: str, records: list[dict], elaps
         save_history()
         if job_id and job_id in jobs:
             jobs[job_id].update(_job_done_payload_from_records(job_id, records, elapsed))
+            _cleanup_retry_source_jobs(job_id)
             save_jobs()
             await broadcast({"type": "job_update", "job": jobs[job_id]})
 
@@ -3333,7 +3335,28 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(_remote_prompt_adoption_watcher()))
     _resume_pending_image_protection_checks()
     _resume_persisted_generation_jobs()
-    yield
+    try:
+        yield
+    finally:
+        save_jobs()
+        for task in list(_background_tasks):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        if _background_tasks:
+            try:
+                await asyncio.wait(_background_tasks, timeout=5)
+            except Exception:
+                pass
+        _background_tasks.clear()
+        if _inst_mgr:
+            stop_loops = getattr(_inst_mgr, "stop_background_loops", None)
+            if callable(stop_loops):
+                try:
+                    stop_loops()
+                except Exception:
+                    pass
 
 app = FastAPI(title="Ez ComfyUI Showcase", version=APP_VERSION, lifespan=lifespan)
 
@@ -5609,7 +5632,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 # ══════════════════════════════════════════════════════════════════════════
 
 def save_jobs():
-    active = {k: v for k, v in jobs.items() if v.get("status") not in ("done", "error")}
+    active = {k: v for k, v in jobs.items() if v.get("status") not in ("done",)}
     try:
         os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
         tmp_file = f"{JOBS_FILE}.tmp"
@@ -5642,13 +5665,13 @@ def load_jobs():
             continue
         job_id = str(item.get("id") or "")
         status = str(item.get("status") or "")
-        if not job_id or status in ("done", "error", "cancelled"):
+        if not job_id or status in ("done",):
             continue
         job = dict(item)
         job["id"] = job_id
         job["status"] = status or "queued"
-        job["last_update"] = now
-        if job.get("prompt_id"):
+        job["last_update"] = float(job.get("last_update") or now)
+        if job.get("prompt_id") and job["status"] not in ("error", "cancelled", "retrying"):
             job["message"] = "服务重启后恢复追踪中..."
         jobs[job_id] = job
         restored += 1
@@ -5776,10 +5799,23 @@ def _resume_persisted_generation_jobs() -> None:
         if job_id in _job_tasks:
             continue
         status = str(job.get("status") or "")
+        if status in {"done", "error", "cancelled", "retrying"}:
+            continue
         if job.get("prompt_id") or status in {"submitting", "generating", "downloading"}:
             _job_tasks[job_id] = asyncio.create_task(_resume_persisted_generation_job(job_id))
     _kick_queued_generation_jobs("重启后")
     save_jobs()
+
+
+def _cleanup_retry_source_jobs(completed_job_id: str) -> list[str]:
+    removed: list[str] = []
+    for old_id, old in list(jobs.items()):
+        if old_id == completed_job_id:
+            continue
+        if old.get("retried_by") == completed_job_id and old.get("status") == "retrying":
+            jobs.pop(old_id, None)
+            removed.append(old_id)
+    return removed
 
 
 async def _resume_persisted_generation_job(job_id: str) -> None:
@@ -7695,10 +7731,28 @@ async def api_cancel_job(job_id: str, current_user: dict = Depends(get_current_u
     if task and not task.done():
         task.cancel()
     _job_tasks.pop(job_id, None)
-    del jobs[job_id]
+    job["cancelled"] = True
+    job["status"] = "cancelled"
+    job["message"] = "任务已取消"
+    job["last_update"] = time.time()
+    job["sem_acquired"] = False
     save_jobs()
     _kick_queued_generation_jobs("取消后")
-    await broadcast({"type": "job_cancelled", "job_id": job_id})
+    await broadcast({"type": "job_update", "job": job})
+    return {"ok": True}
+
+
+@app.delete("/api/jobs/{job_id}/dismiss")
+def api_dismiss_job(job_id: str, current_user: dict = Depends(get_current_user)):
+    if job_id not in jobs:
+        raise HTTPException(404)
+    job = jobs[job_id]
+    if not _can_access_job(job, current_user):
+        raise HTTPException(403, "只能删除自己的任务")
+    if job.get("status") not in ("error", "cancelled", "retrying"):
+        raise HTTPException(400, "只能丢弃失败、已取消或重试中的任务")
+    del jobs[job_id]
+    save_jobs()
     return {"ok": True}
 
 
@@ -7737,10 +7791,13 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     except Exception:
         pass
 
-    del jobs[job_id]
-
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     vllm_was = False
+
+    old["status"] = "retrying"
+    old["message"] = "已重新排队，等待新任务完成..."
+    old["retried_by"] = new_id
+    old["last_update"] = time.time()
 
     prompt_preview = infer_generation_label(wf, fields, _workflow_primary_type(wf))[:200]
 
@@ -7754,6 +7811,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
         "fields": fields,
         "preferred_instance": preferred_instance,
         "preferred_node_id": preferred_node_id,
+        "retry_of": job_id,
         "queued_at": datetime.now().strftime("%H:%M:%S"),
         "created_at_ts": time.time(),
     }
