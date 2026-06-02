@@ -35,6 +35,15 @@ class StartupLoadDedupUiTests(unittest.TestCase):
 
         self.assertLess(load_workflows_pos, load_logged_modules_pos)
 
+    def test_poll_manager_starts_after_auth_restore(self):
+        loader_js = (ROOT / "static/js/module_loader.js").read_text()
+        auth_ready_pos = loader_js.index("var authReady = window.CW.authReady")
+        poll_start_pos = loader_js.index("window.CW.pollManager.start()", auth_ready_pos)
+        load_workflows_pos = loader_js.index("window.CW.loadWorkflows", auth_ready_pos)
+
+        self.assertLess(auth_ready_pos, poll_start_pos)
+        self.assertLess(poll_start_pos, load_workflows_pos)
+
     def test_workflow_preview_uses_lightweight_preview_endpoint_with_history_fallback(self):
         workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
         preview_start = workflows_js.index("async function _loadWorkflowPreviewItems()")
@@ -51,6 +60,20 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertIn("var HISTORY_PAGE_SIZE = 80;", history_js)
         self.assertIn("/api/history/summary", history_js)
         self.assertIn("&compact=1", history_js)
+
+    def test_auth_uses_cookie_session_instead_of_browser_token_storage(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text()
+        workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
+        poll_js = (ROOT / "static/js/modules/poll_manager.js").read_text()
+        app_py = (ROOT / "app.py").read_text()
+
+        self.assertNotIn("localStorage.getItem('v4_token')", auth_js)
+        self.assertNotIn("localStorage.setItem('v4_token'", auth_js)
+        self.assertNotIn("localStorage.getItem('v4_token')", workflows_js)
+        self.assertNotIn("localStorage.getItem('v4_token')", poll_js)
+        self.assertNotIn("'token=' + encodeURIComponent", poll_js)
+        self.assertIn("credentials: 'include'", auth_js)
+        self.assertIn("ws.cookies.get(AUTH_COOKIE_NAME)", app_py)
 
     def test_history_cards_lazy_load_full_reuse_details(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()

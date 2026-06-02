@@ -7,7 +7,7 @@
   'use strict';
 
   var base = 'static/js';
-  var version = '1780412995';
+  var version = '1780414113';
   var runtimeApiBase = (location.protocol === 'file:')
     ? 'http://localhost:18000'
     : '';
@@ -127,8 +127,10 @@
     if (window.CW.initCardManager) window.CW.initCardManager();
     if (window.CW.initPollManager) window.CW.initPollManager();
     if (window.CW._bootApp) window.CW._bootApp();
-    if (window.CW.pollManager && window.CW.pollManager.start) window.CW.pollManager.start();
     var authReady = window.CW.authReady || Promise.resolve(null);
+    authReady.finally(function() {
+      if (window.CW.pollManager && window.CW.pollManager.start) window.CW.pollManager.start();
+    });
     authReady.then(function(user) {
       if (window.CW.loadWorkflows) window.CW.loadWorkflows();
       if (window.CW.loadHistory) window.CW.loadHistory();

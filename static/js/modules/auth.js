@@ -65,20 +65,20 @@
     } catch (e) {}
   }
 
-  function _getToken() { return localStorage.getItem('v4_token'); }
-  function _setToken(t) { localStorage.setItem('v4_token', t); }
+  function _getToken() { return ''; }
+  function _setToken(t) { _clearToken(); }
   function _clearToken() { localStorage.removeItem('v4_token'); }
-  function isLoggedIn() { return !!_getToken(); }
+  function isLoggedIn() { return !!_currentUser; }
   function getCurrentUser() { return _currentUser; }
 
   function getAuthHeaders() {
-    var token = _getToken();
-    return token ? { Authorization: 'Bearer ' + token } : {};
+    return {};
   }
 
   function apiFetch(url, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
+    if (!opts.credentials) opts.credentials = 'include';
     return fetch(url, opts);
   }
 
@@ -127,10 +127,10 @@
   });
 
   function _handleAuthResponse(data, okText, failText) {
-    if (data && data.token) {
-      _setToken(data.token);
+    if (data && (data.id || data.username || data.token)) {
+      _clearToken();
       return fetch(API + '/auth/me', {
-        headers: { 'Authorization': 'Bearer ' + data.token }
+        credentials: 'include'
       }).then(function(r) {
         if (!r.ok) throw new Error('auth/me failed');
         return r.json();
@@ -178,6 +178,7 @@
     return fetch(API + '/auth/register', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
       body: JSON.stringify({ username: username, password: password })
     }).then(function(r) {
       return _parseJsonSafe(r).then(function(data) {
@@ -195,6 +196,7 @@
     return fetch(API + '/auth/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
       body: JSON.stringify({ username: username, password: password })
     }).then(function(r) {
       return _parseJsonSafe(r).then(function(data) {
@@ -210,7 +212,7 @@
 
   function logout() {
     try {
-      fetch(API + '/auth/logout', { method: 'POST' }).catch(function() {});
+      fetch(API + '/auth/logout', { method: 'POST', credentials: 'include' }).catch(function() {});
     } catch (e) {}
     _clearToken();
     _currentUser = null;
@@ -222,15 +224,8 @@
   }
 
   function restoreSession() {
-    var token = _getToken();
-    if (!token) {
-      _historyFavorites = _loadHistoryFavorites();
-      _updateUI();
-      _scheduleSiteNotifications();
-      return Promise.resolve(null);
-    }
     return fetch(API + '/auth/me', {
-      headers: { 'Authorization': 'Bearer ' + token }
+      credentials: 'include'
     }).then(function(r) {
       if (!r.ok) throw new Error('Session expired');
       return r.json();
@@ -242,6 +237,8 @@
       return user;
     }).catch(function() {
       _clearToken();
+      _currentUser = null;
+      _historyFavorites = _loadHistoryFavorites();
       _updateUI();
       _scheduleSiteNotifications();
       return null;
@@ -2077,6 +2074,7 @@
       } catch (e) {}
       if (shouldAttach) {
         opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
+        if (!opts.credentials) opts.credentials = 'include';
         if (shouldBypassCache) {
           opts.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
           opts.headers.Pragma = 'no-cache';

@@ -14,10 +14,7 @@
     if (window.CW && CW.auth && typeof CW.auth.apiFetch === 'function') {
       return CW.auth.apiFetch(url, opts);
     }
-    try {
-      var token = localStorage.getItem('v4_token');
-      if (token && !opts.headers.Authorization) opts.headers.Authorization = 'Bearer ' + token;
-    } catch (e) {}
+    if (!opts.credentials) opts.credentials = 'include';
     return fetch(url, opts);
   }
 

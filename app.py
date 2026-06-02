@@ -8676,7 +8676,9 @@ def api_site_notification_dismiss(req: SiteNotificationDismissRequest, current_u
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
-    ws_user = _get_user_from_token(ws.query_params.get("token"))
+    ws_user = _get_user_from_token(
+        ws.cookies.get(AUTH_COOKIE_NAME) or ws.query_params.get("token")
+    )
     await ws.accept()
     ws_clients.append(ws)
     ws_client_users[ws] = ws_user or {}

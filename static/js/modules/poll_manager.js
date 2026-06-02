@@ -138,10 +138,6 @@
     return user && (user.sub || user.id || user.user_id) ? String(user.sub || user.id || user.user_id) : '';
   }
 
-  function _authToken() {
-    try { return localStorage.getItem('v4_token') || ''; } catch (e) { return ''; }
-  }
-
   function _isJobVisibleToCurrentUser(job) {
     if (!job) return false;
     var user = window.CW && window.CW.auth && window.CW.auth.getCurrentUser
@@ -171,11 +167,6 @@
       var base = location.pathname.replace(/\/+$/, '');
       wsTarget = proto + '://' + location.host + base + '/ws';
     }
-    var token = _authToken();
-    if (token) {
-      wsTarget += (wsTarget.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token);
-    }
-    self._wsAuthToken = token;
     try {
       self.ws = new WebSocket(wsTarget);
     } catch (e) {

@@ -1,5 +1,13 @@
 # 更新日志
 
+## v4.6.3
+
+v4.6.3 收口浏览器端 token 暴露路径。
+
+- 前端认证切换为 httpOnly cookie 会话，不再从 localStorage 读取或写入 `v4_token`。
+- WebSocket 连接不再把 token 拼到 URL 查询参数，后端改为从握手 cookie 识别用户。
+- 普通 API fetch 显式携带 cookie，并清理 workflow fallback 中的 localStorage token 读取路径。
+
 ## v4.6.2
 
 v4.6.2 补齐 prompt 长度限制在 LLM prompt optimizer 入口的遗漏。
