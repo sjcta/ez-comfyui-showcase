@@ -6,7 +6,7 @@ from unittest import mock
 
 from modules.step_calculator import StepCalculator
 from modules.time_estimator import TimeEstimator
-from modules.ws_tracker import WSTracker, PromptStartTimeout, PromptSubmitError
+from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
 
 
 class ProgressCalculationTests(unittest.TestCase):
@@ -270,6 +270,52 @@ class ProgressCalculationTests(unittest.TestCase):
                 await tracker._ws_track_loop(QuietWS(), timeout=5)
 
         asyncio.run(run_timeout())
+
+    def test_ws_exception_http_fallback_uses_remaining_total_timeout(self):
+        workflow = {
+            "1": {
+                "class_type": "SaveImage",
+                "inputs": {},
+            },
+        }
+        step_info = StepCalculator().calculate(workflow)
+        tracker = WSTracker(
+            job_id="job-ws-fallback-remaining-timeout-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+        captured = {}
+        clock = {"now": 100.0}
+
+        class FailingWS:
+            async def close(self):
+                pass
+
+        async def fake_connect(*_args, **_kwargs):
+            return FailingWS()
+
+        async def fake_loop(_ws, _timeout):
+            clock["now"] += 275.0
+            raise RuntimeError("ws dropped")
+
+        async def fake_fallback(timeout):
+            captured["timeout"] = timeout
+            return TrackResult(ok=False, prompt_id="prompt-fallback", elapsed=clock["now"] - 100.0)
+
+        async def run_track():
+            with mock.patch("modules.ws_tracker.time.time", side_effect=lambda: clock["now"]):
+                with mock.patch("modules.ws_tracker.websockets.client.connect", side_effect=fake_connect):
+                    with mock.patch("modules.ws_tracker._http_post", return_value={"prompt_id": "prompt-fallback"}):
+                        with mock.patch.object(tracker, "_ws_track_loop", side_effect=fake_loop):
+                            with mock.patch.object(tracker, "_http_fallback_track", side_effect=fake_fallback):
+                                return await tracker.track(timeout=900)
+
+        result = asyncio.run(run_track())
+
+        self.assertFalse(result.ok)
+        self.assertAlmostEqual(captured["timeout"], 625.0)
 
     def test_http_polling_keeps_waiting_after_transient_connection_refused(self):
         workflow = {

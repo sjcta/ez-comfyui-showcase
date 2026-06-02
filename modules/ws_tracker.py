@@ -254,6 +254,11 @@ class WSTracker:
     def client_id(self) -> str:
         return self._client_id
 
+    def _remaining_timeout(self, timeout: float) -> float:
+        if not self._start_time:
+            return float(timeout)
+        return max(0.1, float(timeout) - (time.time() - self._start_time))
+
     # ── 注入 ────────────────────────────────────────────────────────────
 
     def set_progress_callback(self, callback: Callable[[dict], Awaitable[None]]) -> None:
@@ -290,8 +295,8 @@ class WSTracker:
         Returns:
             TrackResult 包含是否成功、prompt_id、耗时。
         """
-        self._start_time = time.time()
         self._reset_runtime_state(clear_prompt_id=True)
+        self._start_time = time.time()
 
         total_units = self._step_info.total_units
         node_weights = self._step_info.node_weights
@@ -317,7 +322,7 @@ class WSTracker:
 
         if not ws_ok:
             self._log("warn", "ws", "WS 连接全部失败，退化 HTTP", self._job_id)
-            return await self._http_fallback_track(timeout)
+            return await self._http_fallback_track(self._remaining_timeout(timeout))
 
         # ── Phase 2: 提交 prompt ──────────────────────────────────────
         await self._report_progress({
@@ -357,7 +362,7 @@ class WSTracker:
                 raise
             # 退化 HTTP polling
             self._log("warn", "ws", f"WS 异常: {e}，退化 HTTP", self._job_id)
-            return await self._http_fallback_track(timeout)
+            return await self._http_fallback_track(self._remaining_timeout(timeout))
 
     async def resume(self, prompt_id: str, timeout: int = 900) -> TrackResult:
         """重连已有 ComfyUI prompt 的 WebSocket，仅恢复实时事件，不重新提交。
@@ -369,8 +374,8 @@ class WSTracker:
         Returns:
             TrackResult。未收到完成事件时返回 ok=False，让上层继续 queue/history 兜底。
         """
-        self._start_time = time.time()
         self._reset_runtime_state(clear_prompt_id=True)
+        self._start_time = time.time()
         self._prompt_id = str(prompt_id or "")
         if not self._prompt_id:
             return TrackResult(ok=False, prompt_id="", elapsed=0.0)
@@ -555,7 +560,7 @@ class WSTracker:
                 prompt_id=self._prompt_id,
                 elapsed=time.time() - self._start_time,
             )
-        return await self._http_poll_track(timeout - (time.time() - start))
+        return await self._http_poll_track(self._remaining_timeout(timeout))
 
     async def _http_fallback_track(self, timeout: int) -> TrackResult:
         """纯 HTTP fallback：通过 POST /prompt 提交后 polling /history。

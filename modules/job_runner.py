@@ -77,6 +77,10 @@ VIDEO_TRACK_TIMEOUT = 3600
 RUNNING_GENERATION_STATUSES = {"starting_comfyui", "preparing", "submitting", "generating", "downloading"}
 
 
+class _SubmitStallRetry(Exception):
+    """Internal signal to retry prompt submission without recursive run() calls."""
+
+
 def _workflow_track_timeout(job: dict | None, workflow_path: str) -> int:
     job = job or {}
     workflow_type = str(job.get("workflow_type") or "")
@@ -240,6 +244,37 @@ class JobRunner:
         preferred_instance: str = "",
         preferred_node_id: str = "",
     ) -> None:
+        while True:
+            try:
+                await self._run_attempt(
+                    job_id=job_id,
+                    workflow_path=workflow_path,
+                    field_values=field_values,
+                    seed=seed,
+                    vllm_was_running=vllm_was_running,
+                    img_width=img_width,
+                    img_height=img_height,
+                    user_id=user_id,
+                    preferred_instance=preferred_instance,
+                    preferred_node_id=preferred_node_id,
+                )
+                return
+            except _SubmitStallRetry:
+                preferred_instance = ""
+
+    async def _run_attempt(
+        self,
+        job_id: str,
+        workflow_path: str,
+        field_values: dict,
+        seed: int,
+        vllm_was_running: bool,
+        img_width: int = 0,
+        img_height: int = 0,
+        user_id: str = "",
+        preferred_instance: str = "",
+        preferred_node_id: str = "",
+    ) -> None:
         """执行一次完整的出图流程。
 
         编排步骤:
@@ -269,6 +304,7 @@ class JobRunner:
         instance: dict | None = None
         inst_sem_key: str = ""
         prompt_id = ""
+        restart_vllm_on_exit = True
 
         try:
             workflow_name = os.path.basename(workflow_path)
@@ -567,12 +603,8 @@ class JobRunner:
                     sem.release()
                     inst_held = False
                 if attempt_count < self._submit_retry_limit:
-                    await self.run(
-                        job_id, workflow_path, field_values, seed, vllm_was_running,
-                        img_width, img_height, user_id=user_id,
-                        preferred_instance="", preferred_node_id=preferred_node_id,
-                    )
-                    return
+                    restart_vllm_on_exit = False
+                    raise _SubmitStallRetry()
                 raise TimeoutError("提交工作流多次无响应，实例容器或设备可能异常")
             except PromptSubmitError as submit_err:
                 self._add_log("error", "wstrack", f"Prompt submit rejected: {submit_err}", job_id)
@@ -656,6 +688,8 @@ class JobRunner:
             except asyncio.TimeoutError:
                 raise TimeoutError("保存历史超时")
 
+        except _SubmitStallRetry:
+            raise
         except Exception as e:
             import traceback
             if job_id in self._jobs and self._jobs[job_id].get("status") not in ("done", "cancelled"):
@@ -676,7 +710,7 @@ class JobRunner:
             if instance:
                 self._instance_last_active[instance["name"]] = time.time()
             self._save_jobs()
-            if vllm_was_running:
+            if vllm_was_running and restart_vllm_on_exit:
                 self._start_vllm()
 
     async def _recover_submit_stall(self, job_id: str, instance: dict, prompt_id: str) -> None:
