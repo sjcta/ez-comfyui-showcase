@@ -76,7 +76,14 @@ class HistoryStickyUiTests(unittest.TestCase):
 
     def test_checking_job_status_overlay_is_stable_and_centered(self):
         css = (ROOT / "static/css/style.css").read_text()
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
 
+        self.assertIn("function _jobStatusOverlayHtml(content)", history_js)
+        self.assertIn("job-status-overlay", history_js)
+        self.assertIn(".job-status-overlay", css)
+        self.assertIn("position: absolute;", css)
+        self.assertIn("inset: 24px 12px 92px;", css)
+        self.assertIn("justify-content: center;", css)
         self.assertIn(".gi.job-card.checking .gi-img", css)
         self.assertIn("flex-direction: column;", css)
         self.assertIn(".gi.job-card.checking .job-checking-preview", css)

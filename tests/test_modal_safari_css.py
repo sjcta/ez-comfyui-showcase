@@ -38,8 +38,8 @@ class ModalSafariCssContractTests(unittest.TestCase):
         index_html = (ROOT / "static/index.html").read_text()
         loader_js = (ROOT / "static/js/module_loader.js").read_text()
 
-        self.assertIn("static/js/module_loader.js?v=1780506170", index_html)
-        self.assertIn("var version = '1780506170';", loader_js)
+        self.assertIn("static/js/module_loader.js?v=1780506180", index_html)
+        self.assertIn("var version = '1780506180';", loader_js)
 
 
 if __name__ == "__main__":

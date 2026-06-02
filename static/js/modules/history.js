@@ -475,6 +475,10 @@ function _attachSentinel() {
     return _jobProgressPct(j) <= 0 && (status === 'generating' || status === 'submitting') ? ' progress-unknown' : '';
   }
 
+  function _jobStatusOverlayHtml(content) {
+    return `<div class="job-status-overlay">${content}</div>`;
+  }
+
   function _jobTimerHtml(j) {
     if (!_jobShowsTimer(j)) return '';
     var ts = _jobTimerTs(j);
@@ -520,25 +524,27 @@ function _attachSentinel() {
     if (hasImage) {
       imgHtml = imgSrc ? `<img src="${escA(imgSrc)}" loading="lazy" alt="">` : _videoPreviewHtml(j.image, j.thumb);
     } else {
+      let statusHtml = '';
       if (checkingPreview) {
         imgHtml = `<img class="job-checking-preview" src="${escA(checkingImgSrc)}" loading="lazy" alt="">`;
       }
       if (j.status === 'generating' || j.status === 'preparing' || j.status === 'starting_comfyui' || j.status === 'submitting' || j.status === 'downloading' || j.status === 'checking') {
-        imgHtml += `<div class="job-spinner"></div>`;
+        statusHtml += `<div class="job-spinner"></div>`;
       }
       // Status text ABOVE timer (always shown for non-image states)
       if (j.status === 'queued') {
-        imgHtml += `<div class="job-status-text queued">排队中</div>`;
+        statusHtml += `<div class="job-status-text queued">排队中</div>`;
       } else if (j.status === 'generating') {
-        imgHtml += `<div class="job-status-text generating">${escH(statusMsg)}</div>`;
+        statusHtml += `<div class="job-status-text generating">${escH(statusMsg)}</div>`;
       } else if (j.status === 'downloading') {
-        imgHtml += `<div class="job-status-text downloading">${escH(statusMsg || '正在保存结果...')}</div>`;
+        statusHtml += `<div class="job-status-text downloading">${escH(statusMsg || '正在保存结果...')}</div>`;
       } else if (j.status === 'checking') {
-        imgHtml += `<div class="job-status-text checking">${escH(statusMsg || '内容校验中')}</div>`;
+        statusHtml += `<div class="job-status-text checking">${escH(statusMsg || '内容校验中')}</div>`;
       } else {
-        imgHtml += `<div class="job-status-text ${escH(j.status)}">${escH(statusMsg)}</div>`;
+        statusHtml += `<div class="job-status-text ${escH(j.status)}">${escH(statusMsg)}</div>`;
       }
-      imgHtml += _jobTimerHtml(j);
+      statusHtml += _jobTimerHtml(j);
+      imgHtml += _jobStatusOverlayHtml(statusHtml);
     }
 
     // ── Badge ──
@@ -618,9 +624,11 @@ function _attachSentinel() {
             const tpl = document.createElement('template');
             tpl.innerHTML = _jobTimerHtml(job);
             const timerRowNew = tpl.content.firstElementChild;
-            const statusText = imgBox.querySelector('.job-status-text');
+            const statusOverlay = imgBox.querySelector('.job-status-overlay');
+            const statusText = statusOverlay ? statusOverlay.querySelector('.job-status-text') : imgBox.querySelector('.job-status-text');
             if (timerRowNew) {
-              if (statusText && statusText.nextSibling) imgBox.insertBefore(timerRowNew, statusText.nextSibling);
+              if (statusOverlay) statusOverlay.appendChild(timerRowNew);
+              else if (statusText && statusText.nextSibling) imgBox.insertBefore(timerRowNew, statusText.nextSibling);
               else if (statusText) imgBox.appendChild(timerRowNew);
               else imgBox.insertBefore(timerRowNew, imgBox.querySelector('.gi-del'));
               liveTimerEl = card.querySelector('.gi-timer');
