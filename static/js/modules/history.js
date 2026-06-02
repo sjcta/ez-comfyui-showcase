@@ -20,6 +20,9 @@
   var _historyNextOffset = 0;
   var _historyLoadedAll = false;
   var _historyLoadingMore = false;
+  var _historyInitialLoading = false;
+  var _historyLoadError = '';
+  var _historyFilterAutoLoads = 0;
   var _historyScope = '';
   var _atomicDeleteRenderBlockUntil = 0;
   var _deletedHistoryIds = {};
@@ -43,6 +46,7 @@
   var HISTORY_WINDOW_MAX_ITEMS = HISTORY_PAGE_SIZE * 4;
   var HISTORY_DETAIL_CACHE_LIMIT = 24;
   var HISTORY_DELETE_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
+  var HISTORY_FILTER_AUTO_LOAD_PAGE_LIMIT = 3;
 
   function _currentHistoryScope() {
     var user = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
@@ -432,6 +436,7 @@
 function _attachSentinel() {
     const sentinel = document.getElementById('masonrySentinel');
     if (!sentinel) return;
+    if (sentinel.dataset.autoLoadDisabled === '1') return;
     if (_sentinelObs) _sentinelObs.disconnect();
     _sentinelObs = new IntersectionObserver(
       (entries) => {
@@ -439,7 +444,7 @@ function _attachSentinel() {
         if (entries[0].isIntersecting && _histVisibleCount < activeItems.length) {
           _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), activeItems.length);
           _appendNewHistoryCards();
-        } else if (entries[0].isIntersecting && !_historyLoadedAll) {
+        } else if (entries[0].isIntersecting && !_historyLoadedAll && _canAutoLoadMoreHistory()) {
           _loadMoreHistory();
         }
       },
@@ -1056,6 +1061,33 @@ function _clearHistoryDeleteFocus() {
 
   function _blockGalleryRenderForAtomicDelete(ms) {
     _atomicDeleteRenderBlockUntil = Math.max(_atomicDeleteRenderBlockUntil, Date.now() + (ms || 1200));
+  }
+
+  function _historyEmptyHintHtml(message, subText, actionHtml) {
+    return `<div class="empty-hint"><div class="eh-icon">${CW.icon("image", 32)}</div><p>${escH(message)}</p>${subText ? `<p class="hint-sub">${escH(subText)}</p>` : ''}${actionHtml || ''}</div>`;
+  }
+
+  function _activeHistoryFilterHasNoMatches() {
+    return _hasActiveGalleryFilters() && _groupHistoryForGallery(_filteredHistory).length === 0;
+  }
+
+  function _canAutoLoadMoreHistory() {
+    if (_historyLoadingMore || _historyLoadedAll || _historyLoadError) return false;
+    if (!_activeHistoryFilterHasNoMatches()) return true;
+    return _historyFilterAutoLoads < HISTORY_FILTER_AUTO_LOAD_PAGE_LIMIT;
+  }
+
+  function _sentinelHtml() {
+    if (_historyLoadingMore) {
+      return `<div class="masonry-sentinel is-loading" id="masonrySentinel"><span class="gallery-loading-dot"></span><span>正在加载历史...</span></div>`;
+    }
+    if (_historyLoadError) {
+      return `<div class="masonry-sentinel is-error" id="masonrySentinel" data-auto-load-disabled="1"><button class="gallery-load-more-btn" onclick="event.stopPropagation();CW.loadMoreHistory && CW.loadMoreHistory(true)">重试加载</button></div>`;
+    }
+    if (!_canAutoLoadMoreHistory()) {
+      return `<div class="masonry-sentinel is-paused" id="masonrySentinel" data-auto-load-disabled="1"><button class="gallery-load-more-btn" onclick="event.stopPropagation();CW.loadMoreHistory && CW.loadMoreHistory(true)">继续查找</button></div>`;
+    }
+    return `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
   }
 
   function _historyEntryKeysForItems(items) {
@@ -1675,12 +1707,20 @@ function _renderGalleryImpl() {
       html += _renderHistCard(visibleItems[i], i);
     }
 
-    if (displayArr.length > _histVisibleCount || !_historyLoadedAll) {
-      html += `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
+    if (displayArr.length > _histVisibleCount || !_historyLoadedAll || _historyLoadingMore || _historyLoadError) {
+      html += _sentinelHtml();
     }
 
     if (!jobCards.length && !displayArr.length) {
-      html = `<div class="empty-hint"><div class="eh-icon">${CW.icon("image", 32)}</div><p>暂无历史</p><p class="hint-sub">出图后自动出现在这里</p></div>`;
+      if (_historyInitialLoading) {
+        html = _historyEmptyHintHtml('正在加载历史...', '请稍候');
+      } else if (_historyLoadError) {
+        html = _historyEmptyHintHtml('历史加载失败', _historyLoadError, `<button class="gallery-load-more-btn" onclick="event.stopPropagation();CW.loadHistory && CW.loadHistory()">重试</button>`);
+      } else if (_hasActiveGalleryFilters() && !_historyLoadedAll) {
+        html = _historyEmptyHintHtml('当前筛选暂无匹配', '正在继续查找更多历史') + _sentinelHtml();
+      } else {
+        html = _historyEmptyHintHtml('暂无历史', '出图后自动出现在这里');
+      }
     }
 
     try { _patchGalleryHTML(gallery, html); } catch(e) { console.error("[GALLERY ERROR]", e); var ediv = document.getElementById("gallery"); if(ediv) ediv.innerHTML = '<div style="color:red;padding:20px">Render error: ' + escH(e && e.message ? e.message : 'unknown') + '</div>'; }
@@ -1709,7 +1749,7 @@ function _appendNewHistoryCards() {
     const filteredArr2 = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
     const newCount = Math.min(_histVisibleCount, filteredArr2.length);
     if (newCount <= prevCount) {
-      if (!_historyLoadedAll) _loadMoreHistory();
+      if (!_historyLoadedAll && _canAutoLoadMoreHistory()) _loadMoreHistory();
       if (sentinel) _attachSentinel();
       return;
     }
@@ -1738,7 +1778,7 @@ function _appendNewHistoryCards() {
         if (rect.top < window.innerHeight + 200 && _histVisibleCount < filteredArr2.length) {
           _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), filteredArr2.length);
           _appendNewHistoryCards();
-        } else if (rect.top < window.innerHeight + 200 && !_historyLoadedAll) {
+        } else if (rect.top < window.innerHeight + 200 && !_historyLoadedAll && _canAutoLoadMoreHistory()) {
           _loadMoreHistory();
         } else {
           _attachSentinel();
@@ -3184,7 +3224,14 @@ async function delHist(id) {
       _removeDeletedHistoryCardsFromDom(deletedEntryKeys);
       _reorderVisibleHistoryCardsFromData();
       _syncVisibleHistoryCardIndices();
-      _blockGalleryRenderForAtomicDelete(1800);
+      var visibleAfterDelete = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
+      if (visibleAfterDelete === 0 && !Object.values(jobs).some(_isJobVisibleToCurrentUser)) {
+        _atomicDeleteRenderBlockUntil = 0;
+        _lastGalleryHash = '';
+        renderGallery();
+      } else {
+        _blockGalleryRenderForAtomicDelete(1800);
+      }
       _restoreHistoryScroll(scrollSnapshot);
       if (window.CW && typeof CW.loadWorkflows === 'function') {
         Promise.resolve(CW.loadWorkflows()).catch(function(err) {
@@ -3244,12 +3291,24 @@ async function _fetchHistoryPage(offset, limit) {
     return true;
   }
 
-  async function _loadMoreHistory() {
+  async function _loadMoreHistory(manual) {
     if (_historyLoadingMore || _historyLoadedAll) return;
+    if (!manual && !_canAutoLoadMoreHistory()) return;
     _historyLoadingMore = true;
+    _historyLoadError = '';
+    if (!manual && _activeHistoryFilterHasNoMatches()) {
+      _historyFilterAutoLoads += 1;
+    }
+    _lastGalleryHash = '';
+    renderGallery();
     try {
       var page = await _fetchHistoryPage(_historyNextOffset, HISTORY_PAGE_SIZE);
-      if (page.scope !== _historyScope) return;
+      if (page.scope !== _historyScope) {
+        _historyLoadingMore = false;
+        _lastGalleryHash = '';
+        renderGallery();
+        return;
+      }
       var seen = new Set(historyItems.map(function(item) { return String(item && item.id || ''); }));
       page.items.forEach(function(item) {
         var id = String(item && item.id || '');
@@ -3267,12 +3326,19 @@ async function _fetchHistoryPage(offset, limit) {
       _syncTypeFilterButtons();
       _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
       var visibleLen = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
+      if (visibleLen > 0 || !_hasActiveGalleryFilters()) _historyFilterAutoLoads = 0;
       _histVisibleCount = Math.min(Math.max(_histVisibleCount + _batchSize(), _batchSize()), visibleLen);
       _histVisibleCount = _clampHistoryVisibleCount(_histVisibleCount, visibleLen);
+      _historyLoadingMore = false;
       _lastGalleryHash = '';
       renderGallery();
     } catch (e) {
       console.error('loadMoreHistory:', e);
+      _historyLoadingMore = false;
+      _historyLoadError = e && e.message ? e.message : '加载失败';
+      if (window.CW && CW.toast) CW.toast('历史加载失败，可稍后重试', 'error');
+      _lastGalleryHash = '';
+      renderGallery();
     } finally {
       _historyLoadingMore = false;
     }
@@ -3280,6 +3346,10 @@ async function _fetchHistoryPage(offset, limit) {
 
 async function loadHistory() {
     if (_loadHistoryPromise) return _loadHistoryPromise;
+    _historyInitialLoading = true;
+    _historyLoadError = '';
+    _lastGalleryHash = '';
+    renderGallery();
     _loadHistoryPromise = (async function() {
     try {
       var prevVisibleCount = _histVisibleCount || _lastRenderedHistCount || 0;
@@ -3289,6 +3359,7 @@ async function loadHistory() {
       _historyTotal = page.total;
       _historyNextOffset = page.raw_count || nextItems.length;
       _historyLoadedAll = _historyNextOffset >= _historyTotal;
+      _historyFilterAutoLoads = 0;
       _historyDataSignature = _historySignature(nextItems, _historyTotal);
       var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
       _pinnedHistoryIds = _pinnedHistoryIds.filter(function(id) {
@@ -3313,9 +3384,15 @@ async function loadHistory() {
       _histVisibleCount = prevVisibleCount > 0
         ? _clampHistoryVisibleCount(Math.max(prevVisibleCount, _lastRenderedHistCount || 0), filteredArr.length)
         : 0;
+      _historyInitialLoading = false;
       renderGallery();
     } catch (e) {
       console.error('loadHistory:', e);
+      _historyInitialLoading = false;
+      _historyLoadError = e && e.message ? e.message : '加载失败';
+      if (window.CW && CW.toast) CW.toast('历史加载失败，可稍后重试', 'error');
+      _lastGalleryHash = '';
+      renderGallery();
     }
     })();
     return _loadHistoryPromise.finally(function() {
@@ -3331,6 +3408,8 @@ function applyFilters() {
     el = document.getElementById("gfStyle");
     _galleryFilters.style = el ? el.value.toLowerCase() : "";
     _filteredHistory = _filterHistory(historyItems);
+    _historyFilterAutoLoads = 0;
+    _historyLoadError = '';
     _histVisibleCount = 0;
     _lastRenderedHistCount = 0;
     _lastGalleryHash = "";
@@ -3345,6 +3424,8 @@ function clearFilters() {
     el = document.getElementById("gfStyle");
     if (el) el.value = "";
     _filteredHistory = _filterHistory(historyItems);
+    _historyFilterAutoLoads = 0;
+    _historyLoadError = '';
     _histVisibleCount = 0;
     _lastRenderedHistCount = 0;
     _lastGalleryHash = "";
@@ -3413,6 +3494,7 @@ function renderGallery() {
     return false;
   }
 	  window.CW.loadHistoryNoRender = loadHistoryNoRender;
+	  window.CW.loadMoreHistory = _loadMoreHistory;
 	  window.CW.renderGallery = renderGallery;
 	  window.CW.forceGalleryRerender = function() {
 	    _lastGalleryHash = '';

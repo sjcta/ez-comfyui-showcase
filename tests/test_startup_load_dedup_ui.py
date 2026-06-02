@@ -44,6 +44,12 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertLess(auth_ready_pos, poll_start_pos)
         self.assertLess(poll_start_pos, load_workflows_pos)
 
+    def test_app_init_is_idempotent(self):
+        app_js = (ROOT / "static/js/app.js").read_text()
+
+        self.assertIn("if (window.CW.__appInitDone) return;", app_js)
+        self.assertIn("window.CW.__appInitDone = true;", app_js)
+
     def test_workflow_preview_uses_lightweight_preview_endpoint_with_history_fallback(self):
         workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
         preview_start = workflows_js.index("async function _loadWorkflowPreviewItems()")

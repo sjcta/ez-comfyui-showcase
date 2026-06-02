@@ -59,6 +59,8 @@ class JobTimerEstimateUiTest(unittest.TestCase):
     def test_poll_timer_skips_queued_cards(self):
         source = (ROOT / "static/js/modules/poll_manager.js").read_text()
         self.assertIn("closest('.job-card.queued')", source)
+        self.assertIn("requestAnimationFrame(function ()", source)
+        self.assertIn("self._timerRaf", source)
 
 
 if __name__ == "__main__":

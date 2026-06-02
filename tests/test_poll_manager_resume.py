@@ -149,6 +149,8 @@ class PollManagerResumeTest(unittest.TestCase):
 
         self.assertIn("function _isTerminalJob(job)", source)
         self.assertIn("this._seenTerminalJobs = {};", source)
+        self.assertIn("this._seenTerminalJobs[jobId] = Date.now();", source)
+        self.assertIn("PollManager.prototype._pruneSeenTerminalJobs", source)
         self.assertIn("if (!prev && _isTerminalJob(job))", source)
         self.assertIn("if (_isTerminalJob(sj))", source)
         self.assertIn("historyLoader = historyRefreshNeedsRender ? window.CW.loadHistory : (window.CW.loadHistoryNoRender || window.CW.loadHistory)", source)

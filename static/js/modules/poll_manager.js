@@ -32,6 +32,7 @@
     this._resumeHandler = null;
     this._stopped = false;
     this._seenTerminalJobs = {};
+    this._timerRaf = null;
   }
 
   /**
@@ -77,6 +78,10 @@
     if (self._wsPingInterval) {
       clearInterval(self._wsPingInterval);
       self._wsPingInterval = null;
+    }
+    if (self._timerRaf) {
+      cancelAnimationFrame(self._timerRaf);
+      self._timerRaf = null;
     }
     if (self._resumeHandler) {
       if (typeof document !== 'undefined' && document.removeEventListener) {
@@ -245,7 +250,7 @@
     }
 
     if (!prev && _isTerminalJob(job)) {
-      this._seenTerminalJobs[job.id] = true;
+      this._rememberTerminalJob(job.id);
       if (window.CW.loadHistoryNoRender) {
         Promise.resolve(window.CW.loadHistoryNoRender()).catch(function() {});
       }
@@ -354,7 +359,7 @@
           if (!prev) {
             if (_isTerminalJob(sj)) {
               if (!self._seenTerminalJobs[id]) {
-                self._seenTerminalJobs[id] = true;
+                self._rememberTerminalJob(id);
                 historyRefresh = true;
               }
               continue;
@@ -422,10 +427,25 @@
       })
       .then(function () {
         self._httpPollInFlight = false;
+        self._pruneSeenTerminalJobs();
         if (!self._stopped) {
           self._pollTimer = setTimeout(function () { self._doHTTPPoll(); }, 3000);
         }
       });
+  };
+
+  PollManager.prototype._rememberTerminalJob = function (jobId) {
+    if (!jobId) return;
+    this._seenTerminalJobs[jobId] = Date.now();
+  };
+
+  PollManager.prototype._pruneSeenTerminalJobs = function () {
+    var cutoff = Date.now() - 10 * 60 * 1000;
+    for (var id in this._seenTerminalJobs) {
+      if (this._seenTerminalJobs.hasOwnProperty(id) && this._seenTerminalJobs[id] < cutoff) {
+        delete this._seenTerminalJobs[id];
+      }
+    }
   };
 
   /**
@@ -445,24 +465,29 @@
    * 计时器 — 更新所有可用的 gi-timer
    */
   PollManager.prototype._tickTimers = function () {
+    var self = this;
     if (!this._hasActiveJobs()) return;
-    var els = document.querySelectorAll('.gi-timer');
-    for (var i = 0; i < els.length; i++) {
-      var el = els[i];
-      if (el.closest && el.closest('.job-card.queued')) continue;
-      var ts = parseFloat(el.dataset.ts);
-      if (ts > 0) {
-        var estimateLabel = el.dataset.estimateLabel || '';
-        if (window.CW.formatJobElapsedWithEstimate) {
-          el.textContent = window.CW.formatJobElapsedWithEstimate(ts, estimateLabel);
-        } else {
-          var sec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-          var m = Math.floor(sec / 60);
-          var s = sec % 60;
-          el.textContent = m > 0 ? m + 'm' + String(s).padStart(2, '0') + 's' : s + 's';
+    if (self._timerRaf) return;
+    self._timerRaf = requestAnimationFrame(function () {
+      self._timerRaf = null;
+      var els = document.querySelectorAll('.gi-timer');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.closest && el.closest('.job-card.queued')) continue;
+        var ts = parseFloat(el.dataset.ts);
+        if (ts > 0) {
+          var estimateLabel = el.dataset.estimateLabel || '';
+          if (window.CW.formatJobElapsedWithEstimate) {
+            el.textContent = window.CW.formatJobElapsedWithEstimate(ts, estimateLabel);
+          } else {
+            var sec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+            var m = Math.floor(sec / 60);
+            var s = sec % 60;
+            el.textContent = m > 0 ? m + 'm' + String(s).padStart(2, '0') + 's' : s + 's';
+          }
         }
       }
-    }
+    });
   };
 
   // ── Expose ──

@@ -2,7 +2,7 @@
 
 Multi-instance ComfyUI Web Management & Generation Platform.
 
-Current version: **v4.6.12**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
+Current version: **v4.6.13**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
 
 Built for **DGX Spark (GB10)** with 128GB unified memory, running two parallel generation ComfyUI instances (A:8190 / B:8189) plus an isolated prompt auxiliary instance (Prompt:8191) behind an intelligent scheduler.
 

@@ -848,6 +848,8 @@
 
 
 function init() {
+  if (window.CW.__appInitDone) return;
+  window.CW.__appInitDone = true;
   console.log("[BOOT] init function");
     initSiteVersionBadge();
     var unifiedPoller = window.CW && window.CW.pollManager;

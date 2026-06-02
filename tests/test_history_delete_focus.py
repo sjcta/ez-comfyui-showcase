@@ -29,6 +29,7 @@ class HistoryDeleteFocusContractTests(unittest.TestCase):
         self.assertIn("function _blockGalleryRenderForAtomicDelete(ms)", history_js)
         self.assertIn("_historyTotal = Math.max(0, _historyTotal - deleted.size)", history_js)
         self.assertIn("_historyNextOffset = Math.max(0, _historyNextOffset - deleted.size)", history_js)
+        self.assertIn("visibleAfterDelete === 0", history_js)
 
         del_start = history_js.index("async function delHist")
         del_end = history_js.index("async function _fetchHistoryPage", del_start)
@@ -40,7 +41,7 @@ class HistoryDeleteFocusContractTests(unittest.TestCase):
         self.assertLess(remove_call, reorder_call)
         self.assertLess(reorder_call, sync_call)
         self.assertLess(sync_call, workflow_refresh)
-        self.assertNotIn("renderGallery();", del_body)
+        self.assertIn("renderGallery();", del_body)
         self.assertNotIn("_reloadHistoryWindow(true)", del_body)
         self.assertIn("_blockGalleryRenderForAtomicDelete(1800);", del_body)
 

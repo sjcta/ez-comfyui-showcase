@@ -806,9 +806,44 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 .masonry-sentinel {
-  height: 2px;
+  min-height: 2px;
   width: 100%;
   margin-top: 4px;
+  column-span: all;
+}
+
+.masonry-sentinel.is-loading,
+.masonry-sentinel.is-error,
+.masonry-sentinel.is-paused {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.gallery-loading-dot {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+.gallery-load-more-btn {
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.gallery-load-more-btn:hover {
+  border-color: var(--accent);
 }
 
 /* Job cards in masonry share the same fixed card frame as history cards. */
