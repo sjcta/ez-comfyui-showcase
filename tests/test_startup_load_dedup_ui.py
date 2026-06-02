@@ -75,6 +75,17 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertIn("credentials: 'include'", auth_js)
         self.assertIn("ws.cookies.get(AUTH_COOKIE_NAME)", app_py)
 
+    def test_cookie_session_write_requests_attach_csrf_header(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text()
+        app_py = (ROOT / "app.py").read_text()
+
+        self.assertIn("function _attachCsrfHeader(opts)", auth_js)
+        self.assertIn("_readCookie('ez_comfyui_csrf')", auth_js)
+        self.assertIn("'X-CSRF-Token': csrf", auth_js)
+        self.assertIn("opts = _attachCsrfHeader(opts);", auth_js)
+        self.assertIn("_CSRF_HEADER_NAME = \"X-CSRF-Token\"", app_py)
+        self.assertIn("CSRF_COOKIE_NAME = \"ez_comfyui_csrf\"", app_py)
+
     def test_history_cards_lazy_load_full_reuse_details(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
 

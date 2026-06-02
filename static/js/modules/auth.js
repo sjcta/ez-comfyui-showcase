@@ -75,10 +75,40 @@
     return {};
   }
 
+  function _readCookie(name) {
+    try {
+      var prefix = encodeURIComponent(name) + '=';
+      var parts = String(document.cookie || '').split(';');
+      for (var i = 0; i < parts.length; i++) {
+        var part = parts[i].trim();
+        if (part.indexOf(prefix) === 0) return decodeURIComponent(part.slice(prefix.length));
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  function _isUnsafeMethod(method) {
+    method = String(method || 'GET').toUpperCase();
+    return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+  }
+
+  function _attachCsrfHeader(opts) {
+    opts = opts || {};
+    var method = opts.method || 'GET';
+    if (_isUnsafeMethod(method)) {
+      var csrf = _readCookie('ez_comfyui_csrf');
+      if (csrf) {
+        opts.headers = Object.assign({}, opts.headers || {}, { 'X-CSRF-Token': csrf });
+      }
+    }
+    return opts;
+  }
+
   function apiFetch(url, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
     if (!opts.credentials) opts.credentials = 'include';
+    opts = _attachCsrfHeader(opts);
     return fetch(url, opts);
   }
 
@@ -212,7 +242,7 @@
 
   function logout() {
     try {
-      fetch(API + '/auth/logout', { method: 'POST', credentials: 'include' }).catch(function() {});
+      fetch(API + '/auth/logout', _attachCsrfHeader({ method: 'POST', credentials: 'include' })).catch(function() {});
     } catch (e) {}
     _clearToken();
     _currentUser = null;
@@ -2075,6 +2105,7 @@
       if (shouldAttach) {
         opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
         if (!opts.credentials) opts.credentials = 'include';
+        opts = _attachCsrfHeader(opts);
         if (shouldBypassCache) {
           opts.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
           opts.headers.Pragma = 'no-cache';

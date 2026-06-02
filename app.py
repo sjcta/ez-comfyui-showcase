@@ -113,6 +113,12 @@ SECRET_KEY = _load_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 31
 AUTH_COOKIE_NAME = "ez_comfyui_token"
+CSRF_COOKIE_NAME = "ez_comfyui_csrf"
+_CSRF_HEADER_NAME = "X-CSRF-Token"
+_UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_AUTH_RATE_LIMIT_WINDOW_SEC = 300
+_AUTH_RATE_LIMIT_MAX_ATTEMPTS = 8
+_auth_rate_attempts: dict[str, list[float]] = {}
 
 # ── Logging ──
 _log_buffer: list[dict] = []
@@ -2502,15 +2508,58 @@ def _auth_token_from_request(request: Request) -> str:
 
 
 def _set_auth_cookie(response: Response, token: str, request: Request | None = None) -> None:
+    secure = bool(request and request.url.scheme == "https")
     response.set_cookie(
         AUTH_COOKIE_NAME,
         token,
         max_age=ACCESS_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+    )
+    _set_csrf_cookie(response, request)
+
+
+def _set_csrf_cookie(response: Response, request: Request | None = None) -> str:
+    token = secrets.token_urlsafe(32)
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        token,
+        max_age=ACCESS_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        httponly=False,
         secure=bool(request and request.url.scheme == "https"),
         samesite="lax",
         path="/",
     )
+    return token
+
+
+def _csrf_token_valid(request: Request) -> bool:
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME, "")
+    header_token = request.headers.get(_CSRF_HEADER_NAME, "")
+    return bool(cookie_token and header_token and secrets.compare_digest(cookie_token, header_token))
+
+
+def _auth_rate_limit_key(request: Request, action: str, username: str) -> str:
+    host = request.client.host if request.client else "unknown"
+    return f"{action}:{host}:{str(username or '').strip().lower()}"
+
+
+def _check_auth_rate_limit(request: Request, action: str, username: str) -> None:
+    now = time.time()
+    key = _auth_rate_limit_key(request, action, username)
+    cutoff = now - _AUTH_RATE_LIMIT_WINDOW_SEC
+    attempts = [ts for ts in _auth_rate_attempts.get(key, []) if ts >= cutoff]
+    if len(attempts) >= _AUTH_RATE_LIMIT_MAX_ATTEMPTS:
+        _auth_rate_attempts[key] = attempts
+        raise HTTPException(429, "Too many authentication attempts")
+    attempts.append(now)
+    _auth_rate_attempts[key] = attempts
+
+
+def _clear_auth_rate_limit(request: Request, action: str, username: str) -> None:
+    _auth_rate_attempts.pop(_auth_rate_limit_key(request, action, username), None)
 
 
 def get_current_user(request: Request) -> dict:
@@ -3218,6 +3267,23 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Ez ComfyUI Showcase", version=APP_VERSION, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _csrf_cookie_guard(request: Request, call_next):
+    if request.method.upper() not in _UNSAFE_HTTP_METHODS:
+        return await call_next(request)
+    path = request.url.path
+    if path in ("/auth/login", "/auth/register"):
+        return await call_next(request)
+    if not (path.startswith("/api/") or path.startswith("/auth/")):
+        return await call_next(request)
+    if not request.cookies.get(AUTH_COOKIE_NAME):
+        return await call_next(request)
+    if not _csrf_token_valid(request):
+        return JSONResponse({"detail": "CSRF token missing or invalid"}, status_code=403)
+    return await call_next(request)
+
 
 @app.post("/api/nodes/{nid}/connect")
 def _api_node_connect(nid: str, current_user: dict = Depends(require_admin)):
@@ -6636,7 +6702,7 @@ async def api_workflow_upload(file: UploadFile = File(...), current_user: dict =
     name = os.path.basename((file.filename or "").replace("\\", "/"))
     if not name or not name.endswith(".json"):
         raise HTTPException(400, "需要 .json 文件")
-    content = await file.read()
+    content = await _read_upload_limited(file, _UPLOAD_WORKFLOW_MAX_BYTES, "Workflow")
     try:
         json.loads(content)
     except json.JSONDecodeError as e:
@@ -6723,6 +6789,24 @@ _UPLOAD_FORMAT_EXTS = {
     "BMP": {".bmp"},
 }
 _UPLOAD_SAFE_PASSTHROUGH_MODES = {"RGB", "RGBA", "L", "LA", "P"}
+_UPLOAD_IMAGE_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_IMAGE_MAX_BYTES", str(50 * 1024 * 1024)))
+_UPLOAD_VIDEO_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_VIDEO_MAX_BYTES", str(512 * 1024 * 1024)))
+_UPLOAD_WORKFLOW_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_WORKFLOW_MAX_BYTES", str(10 * 1024 * 1024)))
+_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int, label: str) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(413, f"{label} file is too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _register_optional_image_openers() -> None:
@@ -6783,7 +6867,7 @@ def _normalize_uploaded_image_content(filename: str, content: bytes) -> tuple[st
 
 @app.post("/api/upload-image")
 async def api_upload_image(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    content = await file.read()
+    content = await _read_upload_limited(file, _UPLOAD_IMAGE_MAX_BYTES, "Image")
     if not content:
         raise HTTPException(400, "Empty file")
     ext, content = _normalize_uploaded_image_content(file.filename or "", content)
@@ -6803,7 +6887,7 @@ async def api_upload_image(file: UploadFile = File(...), current_user: dict = De
 
 @app.post("/api/upload-video")
 async def api_upload_video(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    content = await file.read()
+    content = await _read_upload_limited(file, _UPLOAD_VIDEO_MAX_BYTES, "Video")
     if not content:
         raise HTTPException(400, "Empty file")
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -8329,6 +8413,7 @@ def _fetch_site_notification(conn: sqlite3.Connection, notification_id: int) -> 
 def auth_register(req: AuthRequest, response: Response, request: Request):
     username = req.username.strip()
     password = req.password
+    _check_auth_rate_limit(request, "register", username)
     if len(username) < 2 or len(password) < 6:
         raise HTTPException(400, "Username (min 2) or password (min 6) too short")
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -8342,6 +8427,7 @@ def auth_register(req: AuthRequest, response: Response, request: Request):
         conn.commit()
         token = _create_token(user_id, username)
         _set_auth_cookie(response, token, request)
+        _clear_auth_rate_limit(request, "register", username)
         conn.close()
         return {"id": user_id, "username": username, "role": role, "token": token}
     except sqlite3.IntegrityError:
@@ -8353,6 +8439,7 @@ def auth_register(req: AuthRequest, response: Response, request: Request):
 def auth_login(req: AuthRequest, response: Response, request: Request):
     username = req.username.strip()
     password = req.password
+    _check_auth_rate_limit(request, "login", username)
     if not username:
         raise HTTPException(400, "Username is required")
     if not password:
@@ -8369,12 +8456,14 @@ def auth_login(req: AuthRequest, response: Response, request: Request):
         raise HTTPException(401, "Incorrect password")
     token = _create_token(row["id"], row["username"])
     _set_auth_cookie(response, token, request)
+    _clear_auth_rate_limit(request, "login", username)
     return {"id": row["id"], "username": row["username"], "role": row["role"], "token": token}
 
 
 @app.post("/auth/logout")
 def auth_logout(response: Response):
     response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/")
     return {"ok": True}
 
 
