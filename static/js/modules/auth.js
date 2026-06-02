@@ -209,6 +209,9 @@
   }
 
   function logout() {
+    try {
+      fetch(API + '/auth/logout', { method: 'POST' }).catch(function() {});
+    } catch (e) {}
     _clearToken();
     _currentUser = null;
     _historyFavorites = _loadHistoryFavorites();
@@ -1050,7 +1053,7 @@
           '<strong>新建用户</strong>' +
           '<div class="account-create-grid">' +
             '<input class="auth-input" id="newUserName" placeholder="用户名">' +
-            '<input class="auth-input" id="newUserPassword" type="password" placeholder="默认 admin">' +
+            '<input class="auth-input" id="newUserPassword" type="password" placeholder="至少 6 位密码" required minlength="6">' +
             _roleOptionHtml('user', 'newUserRole') +
             '<button class="wf-mgr-btn account-action-btn btn-primary-action" type="button" onclick="CW.auth.createUser()">创建用户</button>' +
           '</div>' +
@@ -1170,13 +1173,14 @@
 
   function createUser() {
     var username = ($('#newUserName') && $('#newUserName').value.trim()) || '';
-    var password = ($('#newUserPassword') && $('#newUserPassword').value) || 'admin';
+    var password = ($('#newUserPassword') && $('#newUserPassword').value) || '';
     var role = ($('#newUserRole') && $('#newUserRole').value) || 'user';
     if (!username) return CW.toast('请输入用户名', 'info');
+    if (password.length < 6) return CW.toast('请输入至少 6 位密码', 'info');
     apiFetch(API + '/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username, password: password || 'admin', role: role })
+      body: JSON.stringify({ username: username, password: password, role: role })
     }).then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '创建失败'); });
       return r.json();

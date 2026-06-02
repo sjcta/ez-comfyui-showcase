@@ -80,7 +80,7 @@
   }
 
   function _videoPreviewHtml(filename, thumb) {
-    if (thumb) return '<img class="gi-video-thumb" src="' + API + '/api/thumbs/' + thumb + '" loading="lazy" alt="">' + _videoPosterHtml();
+    if (thumb) return '<img class="gi-video-thumb" src="' + escA(API + '/api/thumbs/' + thumb) + '" loading="lazy" alt="">' + _videoPosterHtml();
     var src = _videoPreviewSrc(filename);
     if (!src) return _videoPosterHtml();
     return '<video class="gi-video-preview" src="' + escA(src) + '" muted playsinline preload="metadata"></video>' + _videoPosterHtml();
@@ -470,10 +470,10 @@
     // ── Image area ──
     var imgHtml = '';
     if (hasImage) {
-      imgHtml = imgSrc ? '<img src="' + imgSrc + '" loading="lazy" alt="">' : _videoPreviewHtml(j.image, j.thumb);
+      imgHtml = imgSrc ? '<img src="' + escA(imgSrc) + '" loading="lazy" alt="">' : _videoPreviewHtml(j.image, j.thumb);
     } else {
       if (checkingPreview) {
-        imgHtml = '<img class="job-checking-preview" src="' + checkingImgSrc + '" loading="lazy" alt="">';
+        imgHtml = '<img class="job-checking-preview" src="' + escA(checkingImgSrc) + '" loading="lazy" alt="">';
       }
       if (j.status === 'generating' || j.status === 'preparing' || j.status === 'starting_comfyui' || j.status === 'submitting' || j.status === 'downloading' || j.status === 'checking') {
         imgHtml += '<div class="job-spinner"></div>';
@@ -684,7 +684,7 @@
       var isVideo = _mediaType(job.media_type, job.image) === 'video';
       var mediaHtml = isVideo
         ? _videoPreviewHtml(job.image, job.thumb)
-        : '<img src="' + API + '/api/images/' + job.image + '" loading="lazy" alt="">';
+        : '<img src="' + escA(API + '/api/images/' + job.image) + '" loading="lazy" alt="">';
       var completeHtml =
         '<div class="gi-img' + sensitiveCls + '" onclick="event.stopPropagation();CW.openJobLB(\'' + escA(job.image) + '\',\'' + escA(job.prompt_preview || '') + '\', this, \'' + escA(job.media_type || '') + '\')">' +
           mediaHtml +
@@ -808,7 +808,7 @@
     } catch (e) {
       console.error('[GALLERY ERROR]', e);
       var ediv = document.getElementById('gallery');
-      if (ediv) ediv.innerHTML = '<div style=color:red;padding:20px>Render error: ' + e.message + '</div>';
+      if (ediv) ediv.innerHTML = '<div style="color:red;padding:20px">Render error: ' + escH(e && e.message ? e.message : 'unknown') + '</div>';
     }
 
     _lastRenderedHistCount = visibleItems.length;

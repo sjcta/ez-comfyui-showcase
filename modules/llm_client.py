@@ -41,7 +41,16 @@ def llm_provider_name(model: str | None = None, *, vision: bool = False) -> str:
     return f"llm-{model or _runtime_settings.get('model') or DEFAULT_LLM_MODEL}{suffix}"
 
 
-def configure_llm_client(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+def _redact_api_key(value: str) -> str:
+    value = str(value or "")
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def configure_llm_client(settings: dict[str, Any] | None = None, *, include_api_key: bool = False) -> dict[str, Any]:
     """Apply runtime LLM API settings used by prompt helpers."""
     raw = settings if isinstance(settings, dict) else {}
     enabled = raw.get("enabled", _runtime_settings.get("enabled", True))
@@ -64,11 +73,14 @@ def configure_llm_client(settings: dict[str, Any] | None = None) -> dict[str, An
             "disable_thinking": bool(disable_thinking),
         }
     )
-    return get_llm_client_settings()
+    return get_llm_client_settings(include_api_key=include_api_key)
 
 
-def get_llm_client_settings() -> dict[str, Any]:
-    return dict(_runtime_settings)
+def get_llm_client_settings(*, include_api_key: bool = False) -> dict[str, Any]:
+    settings = dict(_runtime_settings)
+    if not include_api_key:
+        settings["api_key"] = _redact_api_key(str(settings.get("api_key") or ""))
+    return settings
 
 
 def image_to_data_url(path: str) -> str:

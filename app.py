@@ -17,7 +17,7 @@ from typing import Optional
 
 from fastapi import (
     FastAPI, HTTPException, BackgroundTasks, WebSocket,
-    WebSocketDisconnect, UploadFile, File, Form, Request, Depends
+    WebSocketDisconnect, UploadFile, File, Form, Request, Depends, Response
 )
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -83,11 +83,36 @@ APP_VERSION = _read_app_version()
 
 # ── Auth config
 AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "auth.db")
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or "ez-comfyui-showcase-local-jwt-secret-v1"
-if not os.environ.get("JWT_SECRET_KEY"):
-    print("[auth] JWT_SECRET_KEY is not set; using a stable local development secret.")
+JWT_SECRET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "jwt_secret.key")
+
+
+def _load_jwt_secret() -> str:
+    env_secret = os.environ.get("JWT_SECRET_KEY", "").strip()
+    if env_secret:
+        return env_secret
+    try:
+        if os.path.exists(JWT_SECRET_FILE):
+            stored = Path(JWT_SECRET_FILE).read_text("utf-8").strip()
+            if stored:
+                return stored
+        os.makedirs(os.path.dirname(JWT_SECRET_FILE), exist_ok=True)
+        generated = secrets.token_urlsafe(48)
+        Path(JWT_SECRET_FILE).write_text(generated, encoding="utf-8")
+        try:
+            os.chmod(JWT_SECRET_FILE, 0o600)
+        except Exception:
+            pass
+        print("[auth] JWT_SECRET_KEY is not set; generated a per-install secret in data/jwt_secret.key.")
+        return generated
+    except Exception as e:
+        print(f"[auth] JWT_SECRET_KEY is not set and data/jwt_secret.key is unavailable: {e}; using an ephemeral secret.")
+        return secrets.token_urlsafe(48)
+
+
+SECRET_KEY = _load_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 31
+AUTH_COOKIE_NAME = "ez_comfyui_token"
 
 # ── Logging ──
 _log_buffer: list[dict] = []
@@ -1363,7 +1388,31 @@ def _json_loads_safe(value, default):
         return default
 
 
-def _normalize_system_settings(raw: dict | None) -> dict:
+def _mask_secret(value: str) -> str:
+    value = str(value or "")
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _is_secret_placeholder(value: str, current_secret: str) -> bool:
+    value = str(value or "")
+    current_secret = str(current_secret or "")
+    return bool(current_secret and value and value == _mask_secret(current_secret))
+
+
+def _redact_llm_profiles(profiles: list[dict]) -> list[dict]:
+    redacted = []
+    for profile in profiles:
+        item = dict(profile or {})
+        item["api_key"] = _mask_secret(str(item.get("api_key") or ""))
+        redacted.append(item)
+    return redacted
+
+
+def _normalize_system_settings(raw: dict | None, *, redact_secrets: bool = True) -> dict:
     raw = raw if isinstance(raw, dict) else {}
     image_settings = raw.get("image_protection") if isinstance(raw.get("image_protection"), dict) else {}
     llm_settings = raw.get("llm_api") if isinstance(raw.get("llm_api"), dict) else {}
@@ -1371,10 +1420,11 @@ def _normalize_system_settings(raw: dict | None) -> dict:
     active_profile = str(raw.get("active_llm_api_profile") or "").strip()
     active_profile_settings = _llm_profile_settings(llm_profiles, active_profile)
     effective_llm_settings = active_profile_settings or llm_settings
+    llm_api = configure_llm_client(effective_llm_settings, include_api_key=not redact_secrets)
     return {
         "image_protection": configure_image_protection(image_settings),
-        "llm_api": configure_llm_client(effective_llm_settings),
-        "llm_api_profiles": llm_profiles,
+        "llm_api": llm_api,
+        "llm_api_profiles": _redact_llm_profiles(llm_profiles) if redact_secrets else llm_profiles,
         "active_llm_api_profile": active_profile if active_profile_settings else "",
     }
 
@@ -1438,13 +1488,17 @@ def _llm_profile_settings(profiles: list[dict], profile_id: str) -> dict | None:
     return None
 
 
-def _load_system_settings() -> dict:
+def _load_system_settings_raw() -> dict:
     try:
         with open(SYSTEM_SETTINGS_FILE, "r", encoding="utf-8") as fh:
-            raw = json.load(fh)
+            data = json.load(fh)
     except Exception:
-        raw = {}
-    return _normalize_system_settings(raw)
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_system_settings() -> dict:
+    return _normalize_system_settings(_load_system_settings_raw(), redact_secrets=True)
 
 
 def _save_system_settings(settings: dict) -> None:
@@ -1454,7 +1508,7 @@ def _save_system_settings(settings: dict) -> None:
 
 
 def _update_system_settings(patch: dict | None) -> dict:
-    current = _load_system_settings()
+    current = _load_system_settings_raw()
     patch = patch if isinstance(patch, dict) else {}
     if isinstance(patch.get("image_protection"), dict):
         image_current = dict(current.get("image_protection") or {})
@@ -1462,17 +1516,41 @@ def _update_system_settings(patch: dict | None) -> dict:
         current["image_protection"] = image_current
     if isinstance(patch.get("llm_api"), dict):
         llm_current = dict(current.get("llm_api") or {})
-        llm_current.update(patch["llm_api"])
+        llm_patch = dict(patch["llm_api"])
+        incoming_key = str(llm_patch.get("api_key", ""))
+        if (
+            llm_current.get("api_key")
+            and (incoming_key == "" or _is_secret_placeholder(incoming_key, llm_current.get("api_key", "")))
+        ):
+            llm_patch.pop("api_key", None)
+        llm_current.update(llm_patch)
         current["llm_api"] = llm_current
         if "llm_api_profiles" not in patch and "active_llm_api_profile" not in patch:
             current["active_llm_api_profile"] = ""
     if isinstance(patch.get("llm_api_profiles"), list):
-        current["llm_api_profiles"] = patch["llm_api_profiles"]
+        existing_profiles = {
+            str(profile.get("id") or ""): profile
+            for profile in _normalize_llm_api_profiles(current.get("llm_api_profiles"), current.get("llm_api"))
+        }
+        incoming_profiles = []
+        for item in patch["llm_api_profiles"]:
+            profile = dict(item) if isinstance(item, dict) else {}
+            existing = existing_profiles.get(str(profile.get("id") or ""))
+            incoming_key = str(profile.get("api_key", ""))
+            if (
+                existing
+                and existing.get("api_key")
+                and (incoming_key == "" or _is_secret_placeholder(incoming_key, existing.get("api_key", "")))
+            ):
+                profile.pop("api_key", None)
+                profile["api_key"] = existing.get("api_key", "")
+            incoming_profiles.append(profile)
+        current["llm_api_profiles"] = incoming_profiles
     if "active_llm_api_profile" in patch:
         current["active_llm_api_profile"] = str(patch.get("active_llm_api_profile") or "").strip()
-    updated = _normalize_system_settings(current)
+    updated = _normalize_system_settings(current, redact_secrets=False)
     _save_system_settings(updated)
-    return updated
+    return _normalize_system_settings(updated, redact_secrets=True)
 
 
 def _protection_candidate_paths(record: dict | sqlite3.Row) -> list[str]:
@@ -1664,15 +1742,6 @@ def _init_auth_db():
             conn.execute(ddl)
         except sqlite3.OperationalError:
             pass
-    admin_row = conn.execute("SELECT id FROM users WHERE username='admin' LIMIT 1").fetchone()
-    if not admin_row:
-        admin_hash = bcrypt.hashpw("admin".encode(), bcrypt.gensalt()).decode()
-        conn.execute(
-            "INSERT INTO users (id, username, password_hash, role, disabled) VALUES (?, ?, ?, 'admin', 0)",
-            ("admin", "admin", admin_hash),
-        )
-    else:
-        conn.execute("UPDATE users SET role='admin', disabled=0 WHERE username='admin'")
     has_admin = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
     if not has_admin:
         first_user = conn.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
@@ -2420,12 +2489,35 @@ def _get_user_role(user_id: str) -> str:
         return "user"
 
 
+def _auth_token_from_request(request: Request) -> str:
+    auth = request.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        return auth.split(" ", 1)[1]
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME, "")
+    if cookie_token:
+        if cookie_token.startswith("Bearer "):
+            return cookie_token.split(" ", 1)[1]
+        return cookie_token
+    return ""
+
+
+def _set_auth_cookie(response: Response, token: str, request: Request | None = None) -> None:
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        max_age=ACCESS_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=bool(request and request.url.scheme == "https"),
+        samesite="lax",
+        path="/",
+    )
+
+
 def get_current_user(request: Request) -> dict:
     """Extract current user from Authorization header."""
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer "):
+    token = _auth_token_from_request(request)
+    if not token:
         raise HTTPException(401, "Not authenticated")
-    token = auth.split(" ")[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         conn = sqlite3.connect(AUTH_DB)
@@ -2443,11 +2535,11 @@ def get_current_user(request: Request) -> dict:
 
 
 def get_current_user_optional(request: Request) -> dict | None:
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer "):
+    token = _auth_token_from_request(request)
+    if not token:
         return None
     try:
-        payload = jwt.decode(auth.split(" ")[1], SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         conn = sqlite3.connect(AUTH_DB)
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT role, disabled FROM users WHERE id=?", (payload.get("sub", ""),)).fetchone()
@@ -2692,11 +2784,11 @@ def _can_access_job(job: dict, current_user: dict) -> bool:
 
 def get_current_user_id(request: Request) -> str:
     """Get user_id from Authorization header, returns 'anonymous' if not available."""
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer "):
+    token = _auth_token_from_request(request)
+    if not token:
         return "anonymous"
     try:
-        payload = jwt.decode(auth.split(" ")[1], SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload.get("sub", "anonymous")
     except JWTError:
         return "anonymous"
@@ -6179,7 +6271,7 @@ def api_status(
 
 
 @app.get("/api/gpu")
-def api_gpu():
+def api_gpu(current_user: dict = Depends(get_current_user)):
     return get_gpu_stats()
 
 
@@ -6219,7 +6311,7 @@ def api_comfyui(action: str, current_user: dict = Depends(require_admin)):
 
 
 @app.get("/api/gpu-processes")
-def api_gpu_processes():
+def api_gpu_processes(current_user: dict = Depends(require_admin)):
     import subprocess as _sp
     result = []
     try:
@@ -6520,7 +6612,7 @@ def api_workflow_download(name: str, current_user: dict | None = Depends(get_cur
     return FileResponse(path, media_type="application/json", filename=name)
 
 @app.get("/api/workflows/{name}/config")
-def api_workflow_config_get(name: str):
+def api_workflow_config_get(name: str, current_user: dict | None = Depends(get_current_user_optional)):
     config = load_wf_config(name)
     if not config:
         raise HTTPException(404)
@@ -6541,8 +6633,8 @@ def api_workflow_config_delete(name: str, current_user: dict = Depends(require_a
 
 @app.post("/api/workflows/upload")
 async def api_workflow_upload(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    name = file.filename
-    if not name.endswith(".json"):
+    name = os.path.basename((file.filename or "").replace("\\", "/"))
+    if not name or not name.endswith(".json"):
         raise HTTPException(400, "需要 .json 文件")
     content = await file.read()
     try:
@@ -6578,7 +6670,7 @@ async def api_workflow_upload(file: UploadFile = File(...), current_user: dict =
 # ── Workflow Directory Management ─────────────────────────────────────
 
 @app.get("/api/workflow-dirs")
-def api_workflow_dirs():
+def api_workflow_dirs(current_user: dict = Depends(require_admin)):
     dirs = _load_wf_dirs()
     result = []
     for d in dirs:
@@ -6705,7 +6797,7 @@ async def api_upload_image(file: UploadFile = File(...), current_user: dict = De
         with open(dest, "wb") as f:
             f.write(content)
     except Exception as e:
-        raise HTTPException(500, f"Image upload failed: {e}")
+        raise HTTPException(500, "Image upload failed")
     return {"ok": True, "filename": rel_name, "path": dest}
 
 
@@ -6727,12 +6819,12 @@ async def api_upload_video(file: UploadFile = File(...), current_user: dict = De
         with open(dest, "wb") as f:
             f.write(content)
     except Exception as e:
-        raise HTTPException(500, f"Video upload failed: {e}")
+        raise HTTPException(500, "Video upload failed")
     return {"ok": True, "filename": rel_name, "path": dest}
 
 
 @app.get("/api/input-image/{filename:path}")
-def api_input_image(filename: str):
+def api_input_image(filename: str, current_user: dict = Depends(get_current_user)):
     safe = filename.replace("\\", "/").lstrip("/")
     path = _resolve_input_image_path(safe)
     if not path:
@@ -6743,7 +6835,7 @@ def api_input_image(filename: str):
 
 
 @app.get("/api/input-video/{filename:path}")
-def api_input_video(filename: str):
+def api_input_video(filename: str, current_user: dict = Depends(get_current_user)):
     safe = filename.replace("\\", "/").lstrip("/")
     path = _resolve_input_image_path(safe)
     if not path:
@@ -8137,7 +8229,7 @@ def api_history_clear(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/images/{filename:path}")
-def api_image(filename: str):
+def api_image(filename: str, current_user: dict = Depends(get_current_user)):
     """Serve generated images."""
     path = _safe_rel_path(OUTPUT_DIR, filename)
     if os.path.isfile(path):
@@ -8146,7 +8238,7 @@ def api_image(filename: str):
 
 
 @app.get("/api/thumbs/{filename:path}")
-def api_thumb(filename: str):
+def api_thumb(filename: str, current_user: dict = Depends(get_current_user)):
     """Serve thumbnail images."""
     path = _safe_rel_path(OUTPUT_DIR, filename)
     if os.path.isfile(path):
@@ -8177,7 +8269,7 @@ class AdminUserUpdateRequest(BaseModel):
 
 class AdminUserCreateRequest(BaseModel):
     username: str
-    password: str = "admin"
+    password: str
     role: str = "user"
 
 
@@ -8234,7 +8326,7 @@ def _fetch_site_notification(conn: sqlite3.Connection, notification_id: int) -> 
 
 
 @app.post("/auth/register")
-def auth_register(req: AuthRequest):
+def auth_register(req: AuthRequest, response: Response, request: Request):
     username = req.username.strip()
     password = req.password
     if len(username) < 2 or len(password) < 6:
@@ -8249,6 +8341,7 @@ def auth_register(req: AuthRequest):
                      (user_id, username, hashed, role))
         conn.commit()
         token = _create_token(user_id, username)
+        _set_auth_cookie(response, token, request)
         conn.close()
         return {"id": user_id, "username": username, "role": role, "token": token}
     except sqlite3.IntegrityError:
@@ -8257,7 +8350,7 @@ def auth_register(req: AuthRequest):
 
 
 @app.post("/auth/login")
-def auth_login(req: AuthRequest):
+def auth_login(req: AuthRequest, response: Response, request: Request):
     username = req.username.strip()
     password = req.password
     if not username:
@@ -8275,7 +8368,14 @@ def auth_login(req: AuthRequest):
     if not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
         raise HTTPException(401, "Incorrect password")
     token = _create_token(row["id"], row["username"])
+    _set_auth_cookie(response, token, request)
     return {"id": row["id"], "username": row["username"], "role": row["role"], "token": token}
+
+
+@app.post("/auth/logout")
+def auth_logout(response: Response):
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return {"ok": True}
 
 
 @app.get("/auth/me")
@@ -8342,11 +8442,11 @@ def api_users_list(current_user: dict = Depends(require_admin)):
 @app.post("/api/users")
 def api_user_create(req: AdminUserCreateRequest, current_user: dict = Depends(require_admin)):
     username = req.username.strip()
-    password = req.password or "admin"
+    password = req.password or ""
     role = req.role if req.role in ("admin", "user") else "user"
     if len(username) < 2:
         raise HTTPException(400, "Username too short")
-    if len(password) < 5:
+    if len(password) < 6:
         raise HTTPException(400, "Password too short")
     conn = sqlite3.connect(AUTH_DB)
     try:
@@ -8421,7 +8521,7 @@ def api_system_settings_put(req: dict, current_user: dict = Depends(require_admi
 @app.post("/api/system-settings/llm/test")
 def api_llm_api_test(req: dict, current_user: dict = Depends(require_admin)):
     raw = req.get("llm_api") if isinstance(req, dict) and isinstance(req.get("llm_api"), dict) else {}
-    cfg = configure_llm_client(raw)
+    cfg = configure_llm_client(raw, include_api_key=True)
     try:
         response = chat_completion(
             [{"role": "user", "content": "Reply with pong only."}],

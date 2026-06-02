@@ -13,6 +13,16 @@ from typing import Any, Callable
 from modules.llm_client import DIRECT_FINAL_SYSTEM_PROMPT, chat_text, llm_provider_name
 
 
+MAX_USER_PROMPT_CHARS = 10_000
+
+
+def _bounded_user_prompt(prompt: str, *, field: str = "prompt") -> str:
+    text = str(prompt or "")
+    if len(text) > MAX_USER_PROMPT_CHARS:
+        raise ValueError(f"{field} is too long; maximum is {MAX_USER_PROMPT_CHARS} characters")
+    return text
+
+
 HIGH_SUCCESS_PROMPT_SPEC_GUIDE = (
     "High-success image prompt spec: treat the prompt as an executable image specification, "
     "not a loose tag list. Organize the visual plan by 任务目标、保真要求、主体、动作姿态、场景、"
@@ -269,7 +279,7 @@ def build_superprompt_workflow(
     max_new_tokens: int = 192,
 ) -> dict[str, dict[str, Any]]:
     """Build a small ComfyUI API prompt for KJNodes Superprompt."""
-    cleaned = clean_user_prompt(prompt)
+    cleaned = clean_user_prompt(_bounded_user_prompt(prompt))
     tokens = max(1, min(int(max_new_tokens or 192), 4096))
     return {
         "1": {
@@ -302,7 +312,7 @@ def build_qwen_prompt_optimizer_workflow(
     prompt_context: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build a Qwen3-VL text-only workflow for Chinese-aware prompt cleanup."""
-    cleaned = clean_user_prompt(prompt)
+    cleaned = clean_user_prompt(_bounded_user_prompt(prompt))
     tokens = max(128, min(int(max_new_tokens or 128), 4096))
     reference_context = _known_reference_context(cleaned)
     mode = "video_script" if str(prompt_mode or "").lower() in {"video", "video_script", "script"} else "image"
@@ -350,7 +360,7 @@ def build_qwen_prompt_translator_workflow(
     keep_model_loaded: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Build a Qwen3-VL text-only workflow that translates image prompts to Chinese."""
-    text = str(prompt or "").strip()
+    text = _bounded_user_prompt(prompt).strip()
     tokens = max(96, min(int(max_new_tokens or 192), 4096))
     return {
         "1": {
@@ -384,7 +394,7 @@ def build_qwen_prompt_language_switch_workflow(
     keep_model_loaded: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Build a Qwen3-VL text-only workflow that switches a prompt between Chinese and English."""
-    text = str(prompt or "").strip()
+    text = _bounded_user_prompt(prompt).strip()
     target = "en" if str(target_language or "").lower().startswith("en") else "zh"
     target_name = "English" if target == "en" else "Chinese"
     requested_tokens = int(max_new_tokens or 256)
@@ -1301,6 +1311,7 @@ def _submit_llm_language_switch(
     max_new_tokens: int | None = None,
     model: str | None = None,
 ) -> str:
+    prompt = _bounded_user_prompt(prompt)
     return _llm_user_text(
         QWEN_LANGUAGE_SWITCH_TEMPLATE.format(
             prompt=prompt,
@@ -1382,7 +1393,7 @@ def run_llm_prompt_language_switcher(
     model: str | None = None,
 ) -> dict[str, Any]:
     """Translate a prompt between Chinese and English with the resident local LLM."""
-    text = str(prompt or "").strip()
+    text = _bounded_user_prompt(prompt).strip()
     target = "en" if str(target_language or "").lower().startswith("en") else "zh"
     if not text:
         return {"ok": False, "provider": llm_provider_name(model), "translated_prompt": "", "target_language": target}
@@ -1432,7 +1443,7 @@ def run_qwen_prompt_optimizer(
     prompt_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit the Qwen3 4B text optimizer workflow to ComfyUI."""
-    cleaned = clean_user_prompt(prompt)
+    cleaned = clean_user_prompt(_bounded_user_prompt(prompt))
     mode = "video_script" if str(prompt_mode or "").lower() in {"video", "video_script", "script"} else "image"
     workflow = build_qwen_prompt_optimizer_workflow(
         cleaned,
@@ -1490,7 +1501,7 @@ def run_prompt_translator(
     max_new_tokens: int = 192,
 ) -> dict[str, Any]:
     """Translate an image prompt into Chinese with the same lightweight local Qwen workflow."""
-    text = str(prompt or "").strip()
+    text = _bounded_user_prompt(prompt).strip()
     if not text:
         return {"ok": False, "provider": "comfyui-qwen3-vl-4b-4bit", "prompt_zh": ""}
     workflow = build_qwen_prompt_translator_workflow(text, max_new_tokens=max_new_tokens)
@@ -1538,7 +1549,7 @@ def run_prompt_language_switcher(
     max_new_tokens: int = 256,
 ) -> dict[str, Any]:
     """Translate a prompt between Chinese and English with the local Qwen prompt instance."""
-    text = str(prompt or "").strip()
+    text = _bounded_user_prompt(prompt).strip()
     target = "en" if str(target_language or "").lower().startswith("en") else "zh"
     if not text:
         return {"ok": False, "provider": "comfyui-qwen3-vl-4b-4bit", "translated_prompt": "", "target_language": target}
@@ -1616,7 +1627,7 @@ def run_superprompt_optimizer(
     max_new_tokens: int = 192,
 ) -> dict[str, Any]:
     """Submit the lightweight optimizer workflow to ComfyUI and return text results."""
-    cleaned = clean_user_prompt(prompt)
+    cleaned = clean_user_prompt(_bounded_user_prompt(prompt))
     workflow = build_superprompt_workflow(cleaned, max_new_tokens=max_new_tokens)
     workflow_for_submit = copy.deepcopy(workflow)
     response = comfyui_post(

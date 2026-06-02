@@ -22,3 +22,4 @@ data/cancelled_prompts.json
 data/jobs.json
 data/nodes.db
 data/system_settings.json
+data/jwt_secret.key

@@ -386,6 +386,9 @@ class JobRunner:
             await sem.acquire()
             inst_held = True
             self._jobs[job_id]["sem_acquired"] = True
+            self._jobs[job_id]["semaphore_key"] = inst_sem_key
+            if self._jobs[job_id].get("cancelled"):
+                return
 
             # ── Phase 3: 停止 vLLM（如需） ─────────────────────────
             if vllm_was_running:
@@ -582,6 +585,8 @@ class JobRunner:
             # ── WS 失败时 HTTP polling 兜底 ────────────────────────
             if not ws_ok and prompt_id:
                 for _ in range(60):
+                    if self._jobs.get(job_id, {}).get("cancelled"):
+                        raise RuntimeError("任务已取消")
                     await asyncio.sleep(5)
                     try:
                         check = self._comfyui_get(
@@ -653,7 +658,7 @@ class JobRunner:
 
         except Exception as e:
             import traceback
-            if job_id in self._jobs and self._jobs[job_id].get("status") not in ("done",):
+            if job_id in self._jobs and self._jobs[job_id].get("status") not in ("done", "cancelled"):
                 self._jobs[job_id]["status"] = "error"
                 self._jobs[job_id]["trace"] = traceback.format_exc()[:500]
                 if isinstance(e, TimeoutError):
@@ -748,6 +753,16 @@ class JobRunner:
             return False
 
         job = self._jobs[job_id]
+        active_status = {
+            "dispatching",
+            "queued",
+            "starting_comfyui",
+            "preparing",
+            "submitting",
+            "generating",
+            "downloading",
+            "checking",
+        }
         if job.get("status") == "generating":
             # 获取实例 URL 发送 interrupt
             inst_name = job.get("instance", "")
@@ -767,16 +782,13 @@ class JobRunner:
                             pass
                         break
 
-        # 释放信号量
-        inst_name = job.get("instance", "")
-        if inst_name and inst_name in self._instance_semas:
-            sem = self._instance_semas[inst_name]
-            try:
-                sem.release()
-            except ValueError:
-                pass
-
-        del self._jobs[job_id]
+        if job.get("status") in active_status:
+            job["cancelled"] = True
+            job["status"] = "cancelled"
+            job["message"] = "任务已取消"
+            job["last_update"] = time.time()
+        else:
+            del self._jobs[job_id]
         self._save_jobs()
         await self._broadcast({"type": "job_cancelled", "job_id": job_id})
         return True
