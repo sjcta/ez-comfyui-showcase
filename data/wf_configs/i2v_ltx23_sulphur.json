@@ -118,7 +118,7 @@
       "key": "320:279::ckpt_name",
       "zone": "advanced",
       "visible": true,
-      "label": "ckpt_name",
+      "label": "Sulphur bf16 模型",
       "order": 8,
       "type": "text"
     },
@@ -259,10 +259,10 @@
       "type": "number"
     },
     {
-      "key": "320:315::tile_size",
+      "key": "320:315::horizontal_tiles",
       "zone": "hidden",
       "visible": false,
-      "label": "tile_size",
+      "label": "VAE 横向分块数",
       "order": 16,
       "type": "number"
     },
@@ -270,25 +270,25 @@
       "key": "320:315::overlap",
       "zone": "hidden",
       "visible": false,
-      "label": "overlap",
+      "label": "VAE 解码重叠",
       "order": 17,
       "type": "number"
     },
     {
-      "key": "320:315::temporal_size",
+      "key": "320:315::vertical_tiles",
       "zone": "hidden",
       "visible": false,
-      "label": "temporal_size",
+      "label": "VAE 纵向分块数",
       "order": 18,
       "type": "number"
     },
     {
-      "key": "320:315::temporal_overlap",
+      "key": "320:315::last_frame_fix",
       "zone": "hidden",
       "visible": false,
-      "label": "temporal_overlap",
+      "label": "LTX 尾帧修正",
       "order": 19,
-      "type": "number"
+      "type": "toggle"
     },
     {
       "key": "320:316::ckpt_name",

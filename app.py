@@ -28,7 +28,7 @@ import bcrypt
 
 # ── V4 refactored module imports (keep inline implementations for backward compat) ──
 from modules.config import NodeCategory, ModelGroup, NODE_STATUS_MAP
-from modules.comfyui_upload import ensure_workflow_images_available
+from modules.comfyui_upload import apply_qwen_frame_roll_to_workflow, ensure_workflow_images_available
 from modules.image_protection import (
     ImageProtectionResult,
     ImageProtectionWorker,
@@ -294,13 +294,13 @@ IMAGE_PROTECTION_PROTECTED = "protected"
 IMAGE_PROTECTION_ERROR = "error"
 JOB_STAGE_TIMEOUTS = {
     "dispatching": 120,
-    "queued": 600,
     "starting_comfyui": 360,
     "preparing": 180,
     "submitting": 90,
     "generating": 1200,
     "downloading": 240,
 }
+NON_EXPIRING_JOB_STATUSES = {"queued"}
 JOB_STAGE_TIMEOUT_MESSAGES = {
     "dispatching": "任务调度超时",
     "queued": "排队超时",
@@ -382,14 +382,16 @@ def _is_video_job(job: dict) -> bool:
     return "视频" in workflow_type or any(token in workflow for token in ("i2v", "t2v", "video", "ltx", "sulphur"))
 
 
-def _job_stage_timeout(job: dict, status: str) -> int:
+def _job_stage_timeout(job: dict, status: str) -> int | None:
+    if status in NON_EXPIRING_JOB_STATUSES:
+        return None
     timeout = JOB_STAGE_TIMEOUTS.get(status, 600)
     if status == "generating" and _is_video_job(job):
         return max(timeout, VIDEO_GENERATING_TIMEOUT)
     return timeout
 
 
-def _job_stuck_state(job: dict, now: float | None = None) -> tuple[bool, float, int]:
+def _job_stuck_state(job: dict, now: float | None = None) -> tuple[bool, float, int | None]:
     status = str(job.get("status") or "")
     timeout = _job_stage_timeout(job, status)
     last = _job_last_activity_ts(job)
@@ -397,6 +399,8 @@ def _job_stuck_state(job: dict, now: float | None = None) -> tuple[bool, float, 
         return False, 0.0, timeout
     now = now or time.time()
     age = max(0.0, now - last)
+    if timeout is None:
+        return False, age, None
     return age > timeout, age, timeout
 
 
@@ -431,8 +435,18 @@ def _finalize_instance_jobs(instance_name: str, message: str = "实例已停止"
     return affected
 
 
-def _finalize_interrupted_instance_jobs(instance_name: str, is_active: bool, now: float | None = None) -> list[str]:
-    """Fail jobs that were already running when their ComfyUI instance disappeared."""
+def _finalize_interrupted_instance_jobs(
+    instance_name: str,
+    is_active: bool,
+    now: float | None = None,
+    remote_queue: dict | None = None,
+) -> list[str]:
+    """Fail only pre-submit jobs when a ComfyUI instance disappears.
+
+    A job with a ComfyUI prompt_id may still be running remotely while
+    /system_stats is temporarily unreachable under load. Those jobs are kept
+    alive so WS resume plus /queue and /history polling can recover them.
+    """
     if is_active:
         return []
     now = now or time.time()
@@ -443,6 +457,8 @@ def _finalize_interrupted_instance_jobs(instance_name: str, is_active: bool, now
             continue
         last = _job_last_activity_ts(job)
         if last and now - last < INSTANCE_DOWN_ACTIVE_JOB_GRACE_SEC:
+            continue
+        if str(job.get("prompt_id") or ""):
             continue
         job["status"] = "error"
         job["message"] = "实例已停止，任务已中断"
@@ -1049,17 +1065,9 @@ async def _dispatch_and_run(job_id, workflow_path, field_values, seed, vllm_was,
         jobs[job_id]["last_update"] = time.time()
         jobs[job_id]["message"] = f"排队等待 {inst['name']}..."
         await broadcast({"type": "job_update", "job": jobs[job_id]})
-        try:
-            await asyncio.wait_for(sem.acquire(), timeout=600)
-            inst_held = True
-            jobs[job_id]["sem_acquired"] = True
-        except asyncio.TimeoutError:
-            if job_id in jobs:
-                jobs[job_id]["status"] = "error"
-                jobs[job_id]["message"] = "排队超时（实例繁忙，10分钟未释放）"
-                await broadcast({"type": "job_update", "job": jobs[job_id]})
-                save_jobs()
-            return
+        await sem.acquire()
+        inst_held = True
+        jobs[job_id]["sem_acquired"] = True
 
         jobs[job_id]["status"] = "preparing"
         jobs[job_id]["message"] = f"实例 {inst['name']} 就绪，开始出图"
@@ -1588,6 +1596,9 @@ def _init_gen_db():
         "ALTER TABLE generations ADD COLUMN protection_reason TEXT DEFAULT ''",
         "ALTER TABLE generations ADD COLUMN protection_source TEXT DEFAULT ''",
         "ALTER TABLE generations ADD COLUMN protection_checked_at TEXT DEFAULT ''",
+        "ALTER TABLE generations ADD COLUMN is_hidden INTEGER DEFAULT 0",
+        "ALTER TABLE generations ADD COLUMN hidden_at TEXT DEFAULT ''",
+        "ALTER TABLE generations ADD COLUMN hidden_by TEXT DEFAULT ''",
     ):
         try:
             conn.execute(ddl)
@@ -1687,37 +1698,50 @@ def _init_auth_db():
     conn.close()
 
 
-def _gen_db_to_record(row: dict) -> dict:
+def _history_prompt_preview(prompt: str, max_len: int = 320) -> str:
+    text = str(prompt or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "..."
+
+
+def _gen_db_to_record(row: dict, compact: bool = False) -> dict:
     """Transform a SQLite generations row to the JSON record format used by the frontend."""
     if not isinstance(row, dict):
         row = dict(row)
     seed_val = str(row["seed"]) if row.get("seed") else ""
     deleted_at = row.get("deleted_at", "") or ""
+    hidden_at = row.get("hidden_at", "") or ""
     params = {}
-    if row.get("params"):
+    if not compact and row.get("params"):
         try:
             params = json.loads(row["params"])
         except Exception:
             pass
     workflow = row["workflow"]
     workflow_type = _workflow_primary_type(workflow)
-    return {
+    prompt = row.get("prompt", "") or ""
+    prompt_preview = _history_prompt_preview(prompt)
+    record = {
         "id": row["id"],
         "filename": row.get("image_path", ""),
         "media_type": row.get("media_type", "") or output_media_type(row.get("image_path", "")),
         "thumb": row.get("thumb_path", ""),
         "workflow": workflow,
         "workflow_type": workflow_type,
-        "prompt": row.get("prompt", ""),
+        "prompt": "" if compact else prompt,
+        "prompt_preview": prompt_preview,
         "seed": seed_val,
         "width": row.get("width", 0),
         "height": row.get("height", 0),
         "elapsed": row.get("duration_sec", 0),
         "time": row.get("created_at", ""),
-        "field_values": params,
         "user_id": row.get("user_id", ""),
         "username": row.get("username", ""),
         "is_public": bool(row.get("is_public", 0)),
+        "is_hidden": bool(row.get("is_hidden", 0)),
+        "hidden_at": hidden_at,
+        "hidden_by": row.get("hidden_by", "") or "",
         "is_deleted": bool(deleted_at),
         "deleted_at": deleted_at,
         "deleted_by": row.get("deleted_by", "") or "",
@@ -1731,6 +1755,11 @@ def _gen_db_to_record(row: dict) -> dict:
         "protection_source": row.get("protection_source", "") or "",
         "protection_checked_at": row.get("protection_checked_at", "") or "",
     }
+    if compact:
+        record["__compact"] = True
+    else:
+        record["field_values"] = params
+    return record
 
 
 def _backfill_legacy_prompt_protection(conn: sqlite3.Connection | None = None) -> int:
@@ -2256,6 +2285,112 @@ def _update_generation_thumb(item_id: str, thumb: str) -> None:
         if str(item.get("id") or "") == str(item_id):
             item["thumb"] = thumb
             break
+
+
+def _scan_generation_cover_thumb(item_id: str, thumb: str, prompt: str = "") -> ImageProtectionResult:
+    """Run protection review for a manually selected video-cover frame."""
+    record = {
+        "id": item_id,
+        "thumb": thumb,
+        "thumb_path": thumb,
+        "filename": thumb,
+        "image_path": thumb,
+        "media_type": "image",
+    }
+    try:
+        result = _check_image_protection_candidates(_image_protection_worker, record, prompt or "")
+    except Exception as exc:
+        result = ImageProtectionResult(IMAGE_PROTECTION_ERROR, 1.0, str(exc), "local-error")
+    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _update_generation_protection(
+        item_id,
+        status=result.status,
+        score=result.score,
+        reason=result.reason,
+        source=result.source,
+        checked_at=checked_at,
+    )
+    result.checked_at = checked_at
+    add_log("info", "image_protection", f"{item_id}: cover {result.status} ({result.score:.3f})", item_id)
+    return result
+
+
+def _extract_history_video_frame(
+    video_rel: str,
+    item_id: str,
+    time_sec: float,
+    current_user: dict,
+    copy_to_input: bool = False,
+) -> dict:
+    safe_video_rel = str(video_rel or "").replace("\\", "/").lstrip("/")
+    if not safe_video_rel:
+        raise HTTPException(400, "Missing video path")
+    src = _safe_rel_path(OUTPUT_DIR, safe_video_rel)
+    if not os.path.isfile(src):
+        raise HTTPException(404, "Video file not found")
+    if output_media_type(safe_video_rel) != "video":
+        raise HTTPException(400, "History item is not a video")
+    ffmpeg = _project_ffmpeg_bin()
+    if not ffmpeg:
+        raise HTTPException(500, "ffmpeg is not configured")
+    try:
+        requested_pos = max(0.0, min(float(time_sec or 0), 60 * 60 * 6))
+    except (TypeError, ValueError):
+        requested_pos = 0.0
+    duration, fps = _probe_video_timing(src)
+    pos = _safe_video_frame_time(requested_pos, duration, fps)
+    millis = int(round(pos * 1000))
+    rel_dir = os.path.dirname(safe_video_rel)
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", os.path.splitext(os.path.basename(safe_video_rel))[0])[:80] or "video"
+    frame_name = f"{stem}_frame_{millis:08d}.jpg"
+    frame_rel = os.path.join(rel_dir, frame_name).replace("\\", "/") if rel_dir else frame_name
+    frame_path = _safe_rel_path(OUTPUT_DIR, frame_rel)
+    os.makedirs(os.path.dirname(frame_path), exist_ok=True)
+    result = None
+    frame_ok = False
+    stderr = ""
+    attempts = [pos]
+    if duration > 0:
+        fallback = _safe_video_frame_time(pos - max(0.25, 2.0 / max(fps, 1.0)), duration, fps)
+        if abs(fallback - pos) > 0.001:
+            attempts.append(fallback)
+    for attempt_pos in attempts:
+        try:
+            result = _extract_video_frame_with_ffmpeg(ffmpeg, src, frame_path, attempt_pos)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "Frame extraction timed out")
+        except Exception as e:
+            raise HTTPException(500, f"Frame extraction failed: {e}")
+        stderr = (result.stderr or b"").decode("utf-8", "ignore").strip()
+        frame_ok = result.returncode == 0 and os.path.isfile(frame_path) and os.path.getsize(frame_path) > 0
+        if frame_ok:
+            pos = attempt_pos
+            break
+        try:
+            if os.path.isfile(frame_path):
+                os.remove(frame_path)
+        except OSError:
+            pass
+    if not frame_ok:
+        detail = "视频最后一帧截取失败，请向前移动一帧后重试" if duration > 0 else "视频帧截取失败"
+        if stderr and "conversion failed" not in stderr.lower():
+            detail = f"{detail}: {stderr[-240:]}"
+        raise HTTPException(500, detail)
+    payload = {
+        "ok": True,
+        "frame": frame_rel,
+        "time": pos,
+    }
+    if copy_to_input:
+        user_dir = _user_id(current_user) or "anonymous"
+        date_dir = datetime.now().strftime("%Y-%m-%d")
+        input_name = f"{stem}_frame_{millis:08d}_{random.randint(1000, 9999)}.jpg"
+        input_rel = f"{user_dir}/{date_dir}/{input_name}"
+        input_path = os.path.join(COMFYUI_INPUT, user_dir, date_dir, input_name)
+        os.makedirs(os.path.dirname(input_path), exist_ok=True)
+        shutil.copyfile(frame_path, input_path)
+        payload["input_filename"] = input_rel
+    return payload
 
 
 # ── Auth Helpers ──
@@ -4028,6 +4163,13 @@ EDITABLE_FIELDS = {
         "seed":       {"type": "seed",   "label": "超分种子", "min": 0, "max": 4294967295},
         "resolution": {"type": "number", "label": "超分分辨率", "min": 512, "max": 8192, "step": 64},
     },
+    "QwenMultiangleCameraNode": {
+        "horizontal_angle": {"type": "number", "label": "水平角度", "min": 0, "max": 360, "step": 1},
+        "vertical_angle":   {"type": "number", "label": "俯仰角度", "min": -30, "max": 60, "step": 1},
+        "zoom":             {"type": "number", "label": "镜头距离", "min": 0, "max": 10, "step": 0.1},
+        "default_prompts":  {"type": "toggle", "label": "默认角度词"},
+        "camera_view":      {"type": "toggle", "label": "相机视角"},
+    },
 }
 
 
@@ -4171,6 +4313,143 @@ def _sync_ltx_video_timing(wf: dict, field_values: dict) -> None:
                 pass
 
 
+def _ltx_director_default_segment_prompt(global_prompt: str, index: int, total: int) -> str:
+    if index < max(0, total - 1):
+        transition = (
+            "Smooth cinematic transition from this reference image to the next reference image, "
+            "preserve subject identity, scene continuity, lighting continuity, camera motion continuity, no abrupt cut."
+        )
+    elif index > 0:
+        transition = (
+            "Continue from the previous reference image into this final reference image with subtle natural motion, "
+            "stable composition, consistent lighting, no abrupt cut."
+        )
+    else:
+        transition = (
+            "Animate this reference image with subtle natural motion, stable composition, "
+            "consistent lighting, no abrupt cut."
+        )
+    prompt = str(global_prompt or "").strip()
+    return f"{prompt}\n{transition}" if prompt else transition
+
+
+def _ltx_director_link_value(wf: dict, field_values: dict, value, depth: int = 0):
+    if depth > 8 or not isinstance(value, list) or len(value) < 2:
+        return value
+    node_id = str(value[0])
+    node = wf.get(node_id, {})
+    if not isinstance(node, dict):
+        return value
+    inputs = node.get("inputs") or {}
+    class_type = str(node.get("class_type") or "")
+    if class_type in ("PrimitiveInt", "PrimitiveFloat"):
+        return field_values.get(f"{node_id}::value", inputs.get("value", value))
+    if class_type == "ComfyMathExpression":
+        variables = {}
+        for key, raw in inputs.items():
+            if not str(key).startswith("values."):
+                continue
+            name = str(key).split(".", 1)[1]
+            resolved = _ltx_director_link_value(wf, field_values, raw, depth + 1)
+            try:
+                variables[name] = float(resolved)
+            except (TypeError, ValueError):
+                return value
+        expression = str(inputs.get("expression") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_+\-*/(). ]+", expression):
+            return value
+        try:
+            return eval(expression, {"__builtins__": {}}, variables)
+        except Exception:
+            return value
+    return value
+
+
+def _ltx_director_expected_frames(wf: dict, node: dict, field_values: dict) -> int:
+    inputs = node.get("inputs") or {}
+    frames = _ltx_director_link_value(wf, field_values, inputs.get("duration_frames"))
+    try:
+        frames_i = int(round(float(frames)))
+        if frames_i > 0:
+            return frames_i
+    except (TypeError, ValueError):
+        pass
+    seconds = _ltx_director_link_value(wf, field_values, inputs.get("duration_seconds"))
+    fps = _ltx_director_link_value(wf, field_values, inputs.get("frame_rate"))
+    try:
+        return max(1, int(round(float(seconds) * float(fps))) + 1)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sync_ltx_director_segment_coverage(wf: dict, node: dict, field_values: dict, segments: list[dict]) -> None:
+    expected = _ltx_director_expected_frames(wf, node, field_values)
+    if expected <= 0 or not segments:
+        return
+    total = 0
+    for seg in segments:
+        try:
+            total += max(0, int(seg.get("length") or 0))
+        except (TypeError, ValueError):
+            pass
+    gap = expected - total
+    if gap <= 0:
+        return
+    last = next((seg for seg in reversed(segments) if isinstance(seg, dict)), None)
+    if not last:
+        return
+    try:
+        last["length"] = max(1, int(last.get("length") or 0) + gap)
+    except (TypeError, ValueError):
+        last["length"] = gap
+
+
+def _sync_ltx_director_timeline_prompts(wf: dict, field_values: dict) -> None:
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict) or node.get("class_type") != "LTXDirector":
+            continue
+        inputs = node.get("inputs") or {}
+        timeline_key = f"{nid}::timeline_data"
+        local_prompts_key = f"{nid}::local_prompts"
+        segment_lengths_key = f"{nid}::segment_lengths"
+        guide_strength_key = f"{nid}::guide_strength"
+        global_prompt = field_values.get(f"{nid}::global_prompt", inputs.get("global_prompt", ""))
+        raw_timeline = field_values.get(timeline_key, inputs.get("timeline_data", ""))
+        try:
+            data = json.loads(raw_timeline) if isinstance(raw_timeline, str) else dict(raw_timeline or {})
+        except Exception:
+            continue
+        segments = data.get("segments")
+        if not isinstance(segments, list) or not segments:
+            continue
+        changed = False
+        before_lengths = [seg.get("length") for seg in segments if isinstance(seg, dict)]
+        _sync_ltx_director_segment_coverage(wf, node, field_values, segments)
+        after_lengths = [seg.get("length") for seg in segments if isinstance(seg, dict)]
+        if before_lengths != after_lengths:
+            changed = True
+        total = len(segments)
+        for idx, seg in enumerate(segments):
+            if not isinstance(seg, dict):
+                continue
+            if str(seg.get("prompt") or "").strip():
+                seg["prompt"] = str(seg.get("prompt") or "").strip()
+                continue
+            seg["prompt"] = _ltx_director_default_segment_prompt(str(global_prompt or ""), idx, total)
+            changed = True
+        if changed:
+            field_values[timeline_key] = json.dumps(data, ensure_ascii=False)
+        prompts = [str(seg.get("prompt") or "").strip() for seg in segments if isinstance(seg, dict)]
+        if prompts:
+            field_values[local_prompts_key] = "|".join(prompts)
+        if not str(field_values.get(segment_lengths_key, "") or "").strip():
+            lengths = [str(seg.get("length") or "") for seg in segments if isinstance(seg, dict)]
+            field_values[segment_lengths_key] = ",".join(lengths)
+        if not str(field_values.get(guide_strength_key, "") or "").strip():
+            strengths = [str(seg.get("strength", 0.9)) for seg in segments if isinstance(seg, dict)]
+            field_values[guide_strength_key] = ",".join(strengths)
+
+
 def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
     normalized = dict(field_values or {})
     for key, value in list(normalized.items()):
@@ -4187,6 +4466,7 @@ def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
         )
     _sync_flux2_scheduler_dimensions(wf, normalized)
     _sync_ltx_video_timing(wf, normalized)
+    _sync_ltx_director_timeline_prompts(wf, normalized)
     return normalized
 
 
@@ -4231,6 +4511,11 @@ def _auto_classify(ct: str, field: str, value) -> tuple:
         return ("output", True)
     if ct in ("SeedVR2VideoUpscaler",):
         return ("advanced", True)
+    if ct == "QwenMultiangleCameraNode":
+        if field in ("horizontal_angle", "vertical_angle", "zoom"):
+            return ("user_input", True)
+        if field in ("default_prompts", "camera_view"):
+            return ("hidden", False)
     if ct == "SamplerCustom" and field == "noise_seed":
         return ("advanced", True)
     return ("hidden", False)
@@ -4854,6 +5139,8 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 if "seed" in v.get("inputs", {}):
                     v["inputs"]["seed"] = seed
 
+        apply_qwen_frame_roll_to_workflow(wf, field_values, COMFYUI_INPUT)
+
         issues = validate_api_prompt(wf)
         if issues:
             raise RuntimeError(describe_api_prompt_issues(issues))
@@ -5011,8 +5298,9 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         for idx, (src, filename, media_type) in enumerate(sources):
             ext = os.path.splitext(filename or src)[1].lower() or ".png"
             hist_name = f"{wf_basename}_{seq + idx:04d}{ext}"
-            shutil.copy2(src, os.path.join(output_subdir, hist_name))
             rel_path = f"{subdir}/{hist_name}"
+            dst_path = os.path.join(output_subdir, hist_name)
+            shutil.copy2(src, dst_path)
             thumb_rel = make_thumbnail(rel_path) or ""
             actual_w, actual_h = get_media_size(rel_path, media_type, thumb_rel)
             records.append({
@@ -5315,11 +5603,12 @@ async def _resume_persisted_generation_job(job_id: str) -> None:
     ws_task = None
     try:
         timeout = _workflow_track_timeout(job, path)
-        ws_task = _start_resume_ws_progress(job_id, inst, graph, prompt_id, client_id, timeout)
         if sem:
             await sem.acquire()
             acquired = True
             job["sem_acquired"] = True
+            save_jobs()
+        ws_task = _start_resume_ws_progress(job_id, inst, graph, prompt_id, client_id, timeout)
         start = time.time()
         while time.time() - start < timeout:
             hist = {}
@@ -5432,6 +5721,83 @@ def _project_ffprobe_bin() -> str | None:
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
+
+
+def _parse_video_rate(value: str) -> float:
+    value = str(value or "").strip()
+    if not value or value == "0/0":
+        return 0.0
+    try:
+        if "/" in value:
+            num, den = value.split("/", 1)
+            den_f = float(den or 0)
+            return float(num or 0) / den_f if den_f else 0.0
+        return float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def _probe_video_timing(src: str) -> tuple[float, float]:
+    """Return (duration_seconds, fps) for the first video stream when ffprobe is available."""
+    ffprobe = _project_ffprobe_bin()
+    if not ffprobe or not src:
+        return 0.0, 0.0
+    try:
+        result = subprocess.run([
+            ffprobe,
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=duration,avg_frame_rate,r_frame_rate:format=duration",
+            "-of", "json",
+            src,
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return 0.0, 0.0
+        data = json.loads(getattr(result, "stdout", "") or "{}")
+        streams = data.get("streams") or []
+        stream = streams[0] if streams and isinstance(streams[0], dict) else {}
+        fmt = data.get("format") or {}
+        duration = 0.0
+        for candidate in (stream.get("duration"), fmt.get("duration")):
+            try:
+                duration = max(duration, float(candidate or 0))
+            except (TypeError, ValueError):
+                pass
+        fps = _parse_video_rate(stream.get("avg_frame_rate")) or _parse_video_rate(stream.get("r_frame_rate"))
+        return max(0.0, duration), max(0.0, fps)
+    except Exception:
+        return 0.0, 0.0
+
+
+def _safe_video_frame_time(requested: float, duration: float = 0.0, fps: float = 0.0) -> float:
+    try:
+        pos = max(0.0, min(float(requested or 0.0), 60 * 60 * 6))
+    except (TypeError, ValueError):
+        pos = 0.0
+    try:
+        duration_f = max(0.0, float(duration or 0.0))
+    except (TypeError, ValueError):
+        duration_f = 0.0
+    try:
+        fps_f = max(0.0, float(fps or 0.0))
+    except (TypeError, ValueError):
+        fps_f = 0.0
+    if duration_f <= 0:
+        return pos
+    frame_margin = (1.0 / fps_f) if fps_f > 0 else 0.05
+    frame_margin = max(0.001, min(max(frame_margin, 0.04), duration_f / 2.0))
+    return max(0.0, min(pos, duration_f - frame_margin))
+
+
+def _extract_video_frame_with_ffmpeg(ffmpeg: str, src: str, frame_path: str, pos: float):
+    return subprocess.run([
+        ffmpeg, "-y",
+        "-ss", f"{max(0.0, float(pos or 0.0)):.3f}",
+        "-i", src,
+        "-frames:v", "1",
+        "-q:v", "2",
+        frame_path,
+    ], capture_output=True, timeout=20)
 
 
 def _make_thumbnail_with_pillow(src: str, thumb_path: str) -> bool:
@@ -5721,7 +6087,11 @@ class PromptInterrogateRequest(BaseModel):
     image: str
     mode: str = "image"
     prompt_context: dict = Field(default_factory=dict)
+    level: int | None = None
     expert: bool = False
+    expert_team: bool = False
+    # Backward-compatible no-op: model comparison was removed from the product UI.
+    compare_models: bool = False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -5757,7 +6127,7 @@ def api_status(
         name = inst["name"]
         remote_queue = _get_instance_queue_counts(inst["url"])
         is_active = comfyui_up(base_url=inst["url"])
-        _finalize_interrupted_instance_jobs(name, is_active)
+        _finalize_interrupted_instance_jobs(name, is_active, remote_queue=remote_queue)
         grp = _instance_group.get(name, "")
         is_prompt_aux = _is_prompt_aux_instance(inst)
         inst_jobs = [j for j in jobs.values() if j.get("instance") == name and j.get("status") in ACTIVE_JOB_STATUSES]
@@ -5910,7 +6280,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
         svc = f"comfyui-{name.lower()}"
         is_active = comfyui_up(base_url=inst["url"])
         remote_queue = _get_instance_queue_counts(inst["url"])
-        _finalize_interrupted_instance_jobs(name, is_active)
+        _finalize_interrupted_instance_jobs(name, is_active, remote_queue=remote_queue)
         inst_jobs = [j for j in jobs.values() if _job_is_active_for_instance(j, name)]
         local_running = len([j for j in inst_jobs if j["status"] in ("generating", "dispatching", "starting_comfyui", "downloading")])
         local_pending = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
@@ -6774,7 +7144,12 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
     image_for_interrogate = prepared_image.get("filename") or image
     prepared_image_path = _resolve_input_image_path(image_for_interrogate) or resolved_image_path
     prompt_mode = "video_script" if str(req.mode or "").lower() in {"video", "video_script", "script"} else "image"
-    expert_mode = bool(req.expert) and prompt_mode == "image"
+    try:
+        reverse_level = int(req.level) if req.level is not None else (2 if req.expert_team else (1 if req.expert else 0))
+    except (TypeError, ValueError):
+        reverse_level = 0
+    reverse_level = max(0, min(2, reverse_level))
+    expert_mode = reverse_level > 0 and prompt_mode == "image"
     started_at = time.monotonic()
 
     def _attach_interrogate_timing(result: dict) -> dict:
@@ -6815,11 +7190,14 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
 
     if expert_mode:
         try:
+            team_mode = reverse_level >= 2
             result = run_llm_expert_image_interrogator(
                 prepared_image_path,
                 timeout=None,
-                max_new_tokens=1536,
-                single_pass=False,
+                max_new_tokens=6144 if team_mode else 4096,
+                single_pass=True,
+                review_enabled=team_mode,
+                expert_team=team_mode,
                 include_quality=True,
             )
             result = _consume_reverse_prompt_quality(result, current_user)
@@ -6827,23 +7205,26 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
             result["image_preprocess"] = prepared_image
             result["instance"] = "LLM"
             result["source_image"] = image
+            result["reverse_level"] = reverse_level
+            result["reverse_mode"] = "expert" if team_mode else "advanced"
+            result["reverse_mode_label"] = "专家" if team_mode else "加强"
             add_log("info", "prompt_interrogate", f"Expert image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)} elapsed={result.get('interrogate_elapsed_seconds')}")
             return result
         except TimeoutError as e:
             add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
-            raise HTTPException(504, f"专家组图片反推超时: {e}") from e
+            raise HTTPException(504, f"{'专家' if team_mode else '加强'}图片反推超时: {e}") from e
         except LLMVisionUnsupportedError as e:
             add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
-            raise HTTPException(503, f"专家组图片反推失败: {e}") from e
+            raise HTTPException(503, f"{'专家' if team_mode else '加强'}图片反推失败: {e}") from e
         except Exception as e:
             add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
-            raise HTTPException(500, f"专家组图片反推失败: {e}") from e
+            raise HTTPException(500, f"{'专家' if team_mode else '加强'}图片反推失败: {e}") from e
 
     try:
         result = run_llm_image_interrogator(
             prepared_image_path,
             timeout=None,
-            max_new_tokens=512,
+            max_new_tokens=1024,
             compact=True,
             include_quality=True,
         )
@@ -7137,12 +7518,15 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
 def _history_where_params(scope: str, status: str, current_user: dict | None) -> tuple[str, list]:
     uid = _user_id(current_user or {})
     trash_mode = scope == "trash"
+    hidden_mode = scope == "hidden"
     if trash_mode and not current_user:
         raise HTTPException(401, "Not authenticated")
-    if current_user and trash_mode and current_user.get("role") == "admin":
+    if hidden_mode and not current_user:
+        raise HTTPException(401, "Not authenticated")
+    if current_user and (trash_mode or hidden_mode) and current_user.get("role") == "admin":
         conditions = []
         params = []
-    elif current_user and trash_mode:
+    elif current_user and (trash_mode or hidden_mode):
         conditions = ["user_id = ?"]
         params = [uid]
     elif current_user and scope == "mine":
@@ -7168,6 +7552,10 @@ def _history_where_params(scope: str, status: str, current_user: dict | None) ->
         conditions.append("COALESCE(deleted_at, '') != ''")
     else:
         conditions.append("COALESCE(deleted_at, '') = ''")
+        if hidden_mode:
+            conditions.append("COALESCE(is_hidden, 0) = 1")
+        else:
+            conditions.append("COALESCE(is_hidden, 0) = 0")
         conditions.append("COALESCE(protection_status, 'safe') != ?")
         params.append(IMAGE_PROTECTION_PENDING)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -7182,6 +7570,8 @@ def _history_signature(rows: list[dict], total: int) -> str:
             str(row.get("image_path", "")),
             str(row.get("thumb_path", "")),
             "1" if row.get("is_public") else "0",
+            "1" if row.get("is_hidden") else "0",
+            str(row.get("hidden_at", "") or ""),
             str(row.get("deleted_at", "") or ""),
             str(row.get("protection_status", "") or ""),
             str(row.get("protection_score", "") or ""),
@@ -7202,7 +7592,7 @@ def api_history_summary(limit: int = 80, offset: int = 0, status: str = "", scop
     where_clause, params = _history_where_params(scope, status, current_user)
     rows = [
         dict(r) for r in conn.execute(
-            "SELECT id, image_path, thumb_path, is_public, deleted_at, protection_status, "
+            "SELECT id, image_path, thumb_path, is_public, is_hidden, hidden_at, deleted_at, protection_status, "
             "protection_score, protection_source, protection_checked_at, generations.rowid AS history_rowid "
             "FROM generations" +
             where_clause +
@@ -7231,6 +7621,7 @@ def api_workflow_previews(current_user: dict | None = Depends(get_current_user_o
         params = []
     conditions.extend([
         "COALESCE(deleted_at, '') = ''",
+        "COALESCE(is_hidden, 0) = 0",
         "COALESCE(protection_status, 'safe') != ?",
     ])
     params.append(IMAGE_PROTECTION_PENDING)
@@ -7261,10 +7652,11 @@ def api_workflow_previews(current_user: dict | None = Depends(get_current_user_o
 
 
 @app.get("/api/history")
-def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict | None = Depends(get_current_user_optional)):
+def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", compact: bool = False, current_user: dict | None = Depends(get_current_user_optional)):
     """Query generation history from SQLite with pagination."""
     safe_limit = max(1, min(int(limit or 50), 5000))
     safe_offset = max(0, int(offset or 0))
+    compact_mode = bool(compact)
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     where_clause, params = _history_where_params(scope, status, current_user)
@@ -7278,27 +7670,28 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     ]
     thumb_updates = []
     dimension_updates = []
-    for row in rows:
-        if not row.get("image_path"):
-            continue
-        if not row.get("thumb_path"):
-            thumb = make_thumbnail(row.get("image_path", "")) or ""
-            if thumb:
-                row["thumb_path"] = thumb
-                thumb_updates.append((thumb, row.get("id", "")))
-        media_type = str(row.get("media_type", "") or output_media_type(row.get("image_path", ""))).lower()
-        if media_type == "video":
-            w, h = get_video_size(row.get("image_path", ""))
-            if w and h and (row.get("width") != w or row.get("height") != h):
-                row["width"] = w
-                row["height"] = h
-                dimension_updates.append((w, h, row.get("id", "")))
-        if not row.get("width") or not row.get("height"):
-            w, h = get_media_size(row.get("image_path", ""), media_type, row.get("thumb_path", ""))
-            if w and h:
-                row["width"] = w
-                row["height"] = h
-                dimension_updates.append((w, h, row.get("id", "")))
+    if not compact_mode:
+        for row in rows:
+            if not row.get("image_path"):
+                continue
+            if not row.get("thumb_path"):
+                thumb = make_thumbnail(row.get("image_path", "")) or ""
+                if thumb:
+                    row["thumb_path"] = thumb
+                    thumb_updates.append((thumb, row.get("id", "")))
+            media_type = str(row.get("media_type", "") or output_media_type(row.get("image_path", ""))).lower()
+            if media_type == "video":
+                w, h = get_video_size(row.get("image_path", ""))
+                if w and h and (row.get("width") != w or row.get("height") != h):
+                    row["width"] = w
+                    row["height"] = h
+                    dimension_updates.append((w, h, row.get("id", "")))
+            if not row.get("width") or not row.get("height"):
+                w, h = get_media_size(row.get("image_path", ""), media_type, row.get("thumb_path", ""))
+                if w and h:
+                    row["width"] = w
+                    row["height"] = h
+                    dimension_updates.append((w, h, row.get("id", "")))
     if thumb_updates:
         conn.executemany("UPDATE generations SET thumb_path=? WHERE id=?", thumb_updates)
     if dimension_updates:
@@ -7313,7 +7706,7 @@ def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str =
     usernames = _history_username_map([r.get("user_id", "") for r in rows])
     for row in rows:
         row["username"] = usernames.get(row.get("user_id", ""), "")
-    return {"ok": True, "data": [_gen_db_to_record(r) for r in rows], "total": total}
+    return {"ok": True, "data": [_gen_db_to_record(r, compact=compact_mode) for r in rows], "total": total}
 
 
 @app.post("/api/history")
@@ -7322,6 +7715,57 @@ def api_history_create(req: dict, current_user: dict = Depends(get_current_user)
     elapsed = req.get("duration_sec", req.get("elapsed", 0))
     _insert_generation(req, elapsed, user_id=_user_id(current_user))
     return {"ok": True}
+
+
+@app.get("/api/history/user-counts")
+def api_history_user_counts(current_user: dict = Depends(require_admin)):
+    """Return lightweight visible generation counts grouped by user."""
+    conn = sqlite3.connect(GEN_DB)
+    where_clause, params = _history_where_params("all", "", current_user)
+    rows = conn.execute(
+        "SELECT user_id, COUNT(*) FROM generations" + where_clause + " GROUP BY user_id",
+        params,
+    ).fetchall()
+    conn.close()
+    return {"ok": True, "counts": {str(uid or ""): int(count or 0) for uid, count in rows if uid}}
+
+
+def _history_detail_visible(row: dict, current_user: dict | None) -> bool:
+    uid = _user_id(current_user or {})
+    is_owner = bool(uid and row.get("user_id") == uid)
+    is_admin = _is_admin_user(current_user)
+    is_deleted = bool(row.get("deleted_at"))
+    is_hidden = bool(row.get("is_hidden"))
+    if str(row.get("protection_status") or IMAGE_PROTECTION_SAFE) == IMAGE_PROTECTION_PENDING:
+        return is_owner or is_admin
+    if is_deleted:
+        return is_owner or is_admin
+    if is_hidden and not (is_owner or is_admin):
+        return False
+    if is_owner or is_admin:
+        return True
+    return bool(row.get("is_public"))
+
+
+@app.get("/api/history/{item_id}")
+def api_history_detail(item_id: str, current_user: dict | None = Depends(get_current_user_optional)):
+    """Return a single full history record for reuse/lightbox details."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    row_obj = conn.execute(
+        "SELECT generations.*, generations.rowid AS history_rowid FROM generations WHERE id=?",
+        (item_id,),
+    ).fetchone()
+    if not row_obj:
+        conn.close()
+        raise HTTPException(404, "Record not found")
+    row = dict(row_obj)
+    if not _history_detail_visible(row, current_user):
+        conn.close()
+        raise HTTPException(403, "无权查看该记录")
+    row["username"] = _history_username_map([row.get("user_id", "")]).get(row.get("user_id", ""), "")
+    conn.close()
+    return {"ok": True, "data": _gen_db_to_record(row, compact=False)}
 
 
 @app.delete("/api/history/{item_id}")
@@ -7347,9 +7791,47 @@ def api_history_delete(item_id: str, current_user: dict = Depends(get_current_us
     return {"ok": True, "deleted": True, "deleted_at": deleted_at}
 
 
+@app.post("/api/history/{item_id}/video-frame")
+def api_history_video_frame(item_id: str, body: dict, current_user: dict = Depends(get_current_user)):
+    """Extract a video frame for preview reuse, card cover, or workflow import."""
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = _history_owner_check(conn, item_id, current_user)
+        video_rel = row["image_path"]
+        prompt = row["prompt"] or ""
+    finally:
+        conn.close()
+    media_type = output_media_type(video_rel)
+    if media_type != "video":
+        raise HTTPException(400, "History item is not a video")
+    time_sec = body.get("time", 0) if isinstance(body, dict) else 0
+    set_cover = bool(body.get("set_cover")) if isinstance(body, dict) else False
+    import_input = bool(body.get("import_input")) if isinstance(body, dict) else False
+    data = _extract_history_video_frame(
+        video_rel,
+        item_id,
+        time_sec,
+        current_user,
+        copy_to_input=import_input,
+    )
+    if set_cover:
+        _update_generation_thumb(item_id, data["frame"])
+        protection = _scan_generation_cover_thumb(item_id, data["frame"], prompt)
+        data["thumb"] = data["frame"]
+        data.update({
+            "protection_status": protection.status,
+            "protection_score": protection.score,
+            "protection_reason": protection.reason,
+            "protection_source": protection.source,
+            "protection_checked_at": getattr(protection, "checked_at", ""),
+        })
+    return data
+
+
 def _history_owner_check(conn, item_id: str, current_user: dict, allow_deleted: bool = False):
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT id, image_path, thumb_path, user_id, deleted_at, params FROM generations WHERE id=?", (item_id,)).fetchone()
+    row = conn.execute("SELECT id, image_path, thumb_path, media_type, user_id, deleted_at, is_hidden, hidden_at, params, prompt FROM generations WHERE id=?", (item_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Record not found")
     if current_user.get("role") != "admin" and row["user_id"] != current_user.get("sub"):
@@ -7562,6 +8044,28 @@ def api_history_share(item_id: str, body: dict, current_user: dict = Depends(get
     conn.commit()
     conn.close()
     return {"ok": True, "is_public": bool(is_public)}
+
+
+@app.post("/api/history/{item_id}/hide")
+def api_history_hide(item_id: str, body: dict, current_user: dict = Depends(get_current_user)):
+    is_hidden = 1 if body.get("is_hidden", True) else 0
+    hidden_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if is_hidden else ""
+    hidden_by = current_user.get("sub", "") if is_hidden else ""
+    conn = sqlite3.connect(GEN_DB)
+    _history_owner_check(conn, item_id, current_user)
+    conn.execute(
+        "UPDATE generations SET is_hidden=?, hidden_at=?, hidden_by=? WHERE id=?",
+        (is_hidden, hidden_at, hidden_by, item_id),
+    )
+    conn.commit()
+    conn.close()
+    item = next((h for h in history if h.get("id") == item_id), None)
+    if item:
+        item["is_hidden"] = bool(is_hidden)
+        item["hidden_at"] = hidden_at
+        item["hidden_by"] = hidden_by
+        save_history()
+    return {"ok": True, "is_hidden": bool(is_hidden), "hidden_at": hidden_at}
 
 
 @app.post("/api/history/batch-delete")

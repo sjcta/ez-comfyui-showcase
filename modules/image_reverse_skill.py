@@ -3,20 +3,65 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 
-SKILL_VERSION = "image_reverse_skill_v0.1"
+SKILL_VERSION = "image_reverse_skill_v0.3"
 REPLICATION_TARGET_SCORE = 95
+RULES_DIR = Path(__file__).resolve().parents[1] / "prompt_skills" / "image_reverse" / "rules"
+RULE_CATEGORY_FILES = (
+    "01_overall_visible_facts.md",
+    "02_person_body_pose.md",
+    "03_spatial_relationships.md",
+    "04_objects_counts_text.md",
+    "05_exposure_nsfw.md",
+    "06_color_style_materials.md",
+    "07_output_json_quality.md",
+)
+
+
+def load_reverse_rulebook() -> str:
+    """Load the categorized image reverse rules used by runtime prompts."""
+    sections: list[str] = []
+    for filename in RULE_CATEGORY_FILES:
+        path = RULES_DIR / filename
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if text:
+            sections.append(text)
+    return "\n\n".join(sections)
+
+
+IMAGE_REVERSE_RULEBOOK = load_reverse_rulebook()
+IMAGE_REVERSE_RUNTIME_RULE_INDEX = (
+    "规则来源：每次看图引入 prompt_skills/image_reverse/rules，按整体、人物、空间、物品文字、暴露内容、色彩材质、JSON质量执行；正向只写可见事实。"
+)
 
 REVERSE_PROMPT_SKILL_GUIDE = (
     "反推闭环技能：先做可见证据抽取，再生成复刻提示词。禁止一开始自由发挥成氛围描述。"
     "第一层证据必须覆盖：原图画幅比例、主体可见范围、人物支撑点、身体朝向、手部端点、脚部承重、"
     "服装款式与材质、文字可信度、场景区域、光线色温、NSFW 可见事实。"
-    "第二层才把证据合并成正向提示词、负面提示词和复刻约束。"
+    "第二层才把证据合并成正向提示词和负面提示词；不要输出复刻约束维度。"
     "每个正向字段必须能回答“图里哪里看见的”；看不见、不确定、猜测和二选一不能进入正向提示词。"
     "如果证据互相冲突，以图像几何和实际可见物体优先，例如竖版图不能写 1:1，鞋子入镜不能写裁切到大腿。"
     "复刻成功率目标为 95 分；低于 95 分必须输出扣分原因并把原因转成下一轮 skill 约束。"
+)
+
+DIRECT_REVERSE_PROMPT_WRITING_SKILL = (
+    "图像反推前置规范：不要写感觉，要写可见事实；把提示词写成视觉施工图，不写漂亮、真实、有氛围、高级感这类空泛感受。"
+    "所有正向内容必须来自画面中可见像素，提前替模型决定谁在画面哪里、以什么姿势、和哪些物体有什么空间关系、光从哪里来、颜色和材质是什么。"
+    "图片拆解七层法必须按顺序执行：1画面主题，先说明最重要的主体和重点内容；2构图与镜头，写横竖图、主体位置、主体占比、半身/全身/特写/远景、镜头高度、俯仰视角、焦距感和景深；"
+    "3空间位置关系，写前景/中景/背景、画面左/右/上/下、主体前方/身后、遮挡和接触；4人物细节，写年龄感/性别呈现/可见外貌倾向、发型、脸部方向、视线、手势、身体姿势、服装结构、材质、遮挡关系；"
+    "5物体细节，写数量、形状、颜色、材质、状态、相对位置和遮挡；6光线颜色材质，写光源方向、强度、阴影、高光、主色/辅色、饱和度、对比度、皮肤/织物/金属/玻璃/纸张等材质；"
+    "7风格与禁止项，写媒介类型、真实程度、摄影/绘画风格、情绪氛围，并把最容易翻车的错误转成负面短语。"
+    "复杂画面使用自然九宫格描述：左上、上中、右上、中左、中心、中右、左下、下中、右下；不要输出英文字母区域代码。"
+    "必须设置复刻优先级：最高优先级写人物姿势、主体位置、手部/脚部/视线/道具朝向、光线方向等不能动的结构；中等优先级写物体数量、背景类型、色调；低优先级写可相似替代的背景装饰或小物形状。"
+    "对容易误解的细节必须使用正向描述加排除描述，例如屏幕朝向、衣襟开合、手指接触、左右镜像、不可新增人物、不可改变主要物体数量。"
+    "keyword_prompt、detailed_analysis、expert_observations 中的正向内容使用用户语言的自然语言句式，禁止标签堆料、Markdown、解释前缀、中英对照括号和多余空行；最终可复制正向提示词控制在1000字以内。"
+    "禁止微尘、漂浮粒子、空气细小颗粒、水雾微粒等微观悬浮物；氛围只能写体积光、丁达尔光束、光晕扩散、柔焦虚化等可视觉化宏观光学现象。"
 )
 
 VISUAL_EVIDENCE_GUIDE = (
@@ -135,7 +180,18 @@ def _sexual_boundary_text(structured_prompt: Any) -> str:
     description = _description_section(structured_prompt)
     if not isinstance(description, dict):
         return ""
-    return _joined_text(description.get("性内容边界") or description.get("sexual_boundary") or "")
+    subject = description.get("主体") if isinstance(description.get("主体"), dict) else {}
+    return _joined_text(
+        description.get("性内容边界")
+        or description.get("sexual_boundary")
+        or description.get("裸露与NSFW")
+        or description.get("裸露与nsfw")
+        or subject.get("性内容边界")
+        or subject.get("sexual_boundary")
+        or subject.get("裸露与NSFW")
+        or subject.get("裸露与nsfw")
+        or ""
+    )
 
 
 def validate_reverse_prompt_quality(
@@ -143,6 +199,7 @@ def validate_reverse_prompt_quality(
     *,
     image_size: tuple[int, int] | None = None,
     expert_results: list[dict[str, Any]] | None = None,
+    required_expert_ids: list[str] | tuple[str, ...] | None = None,
     visual_evidence: dict[str, Any] | None = None,
     require_visual_evidence: bool = False,
 ) -> dict[str, Any]:
@@ -258,9 +315,10 @@ def validate_reverse_prompt_quality(
             "看不准时写大号白色英文字母印花，不写具体字母。",
         )
     sexual_text = _sexual_boundary_text(structured_prompt) or positive_text
-    if re.search(r"NSFW|adult_nudity|Adult_Nudity", sexual_text) and not re.search(
+    positive_sexual_text = re.sub(r"裸露与\s*NSFW|NSFW\s*边界|nsfw\s*visible\s*evidence", "", sexual_text, flags=re.IGNORECASE)
+    if re.search(r"NSFW|adult_nudity|Adult_Nudity", positive_sexual_text) and not re.search(
         r"全裸|裸体|裸露胸部|裸露乳房|性器官|生殖器|乳头|乳晕|外阴|阴道|阴茎|睾丸|肛门|性行为|插入|性液体|精液",
-        sexual_text,
+        positive_sexual_text,
     ):
         _add_issue(
             issues,
@@ -305,7 +363,8 @@ def validate_reverse_prompt_quality(
 
     if expert_results is not None:
         seen = {str(item.get("id") or "").strip() for item in expert_results if isinstance(item, dict)}
-        missing = [expert_id for expert_id in REQUIRED_EXPERT_IDS if expert_id not in seen]
+        required_ids = tuple(required_expert_ids) if required_expert_ids is not None else REQUIRED_EXPERT_IDS
+        missing = [expert_id for expert_id in required_ids if expert_id not in seen]
         empty = [
             str(item.get("id") or "").strip()
             for item in expert_results
@@ -318,7 +377,7 @@ def validate_reverse_prompt_quality(
                 "missing_expert_observations",
                 "major",
                 "专家观察缺少维度：" + ", ".join(missing),
-                "每次专家反推必须保留 9 个专家维度。",
+                "专家反推必须保留本轮选中的专家维度。",
             )
         if empty:
             _add_issue(

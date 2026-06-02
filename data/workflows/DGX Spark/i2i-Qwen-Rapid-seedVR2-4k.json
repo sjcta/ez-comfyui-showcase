@@ -24,11 +24,12 @@
   },
   "89": {
     "inputs": {
-      "unet_name": "gguf/qwen-rapid-nsfw-v9.0-Q4_K_M.gguf"
+      "unet_name": "Qwen-Rapid-AIO-NSFW-v23.safetensors",
+      "weight_dtype": "default"
     },
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "_meta": {
-      "title": "Unet Loader (GGUF)"
+      "title": "Load Diffusion Model"
     }
   },
   "92": {
@@ -67,11 +68,11 @@
     "inputs": {
       "model": "seedvr2_ema_7b_sharp-Q4_K_M.gguf",
       "device": "cuda:0",
-      "blocks_to_swap": 32,
+      "blocks_to_swap": 0,
       "swap_io_components": false,
       "offload_device": "cpu",
-      "cache_model": "flash_attn",
-      "attention_mode": "sdpa"
+      "cache_model": true,
+      "attention_mode": "sageattn_3"
     },
     "class_type": "SeedVR2LoadDiTModel",
     "_meta": {
@@ -82,15 +83,15 @@
     "inputs": {
       "model": "ema_vae_fp16.safetensors",
       "device": "cuda:0",
-      "encode_tiled": true,
+      "encode_tiled": false,
       "encode_tile_size": 1024,
       "encode_tile_overlap": 128,
-      "decode_tiled": true,
+      "decode_tiled": false,
       "decode_tile_size": 1024,
       "decode_tile_overlap": 128,
       "tile_debug": "false",
       "offload_device": "cpu",
-      "cache_model": false
+      "cache_model": true
     },
     "class_type": "SeedVR2LoadVAEModel",
     "_meta": {
@@ -120,6 +121,23 @@
     "class_type": "ConditioningZeroOut",
     "_meta": {
       "title": "条件零化"
+    }
+  },
+  "910": {
+    "inputs": {
+      "horizontal_angle": 0,
+      "vertical_angle": 0,
+      "zoom": 5,
+      "default_prompts": true,
+      "camera_view": false,
+      "image": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "QwenMultiangleCameraNode",
+    "_meta": {
+      "title": "Qwen Multiangle Camera"
     }
   },
   "115:38": {
@@ -208,10 +226,10 @@
   "115:3": {
     "inputs": {
       "seed": 21948240408338,
-      "steps": 8,
+      "steps": 4,
       "cfg": 1,
-      "sampler_name": "euler",
-      "scheduler": "simple",
+      "sampler_name": "euler_ancestral",
+      "scheduler": "beta",
       "denoise": 1,
       "model": [
         "115:75",

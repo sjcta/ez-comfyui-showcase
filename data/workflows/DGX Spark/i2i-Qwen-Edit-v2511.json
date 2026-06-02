@@ -21,6 +21,23 @@
       "title": "加载图像"
     }
   },
+  "910": {
+    "inputs": {
+      "horizontal_angle": 0,
+      "vertical_angle": 0,
+      "zoom": 5,
+      "default_prompts": true,
+      "camera_view": false,
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "QwenMultiangleCameraNode",
+    "_meta": {
+      "title": "Qwen Multiangle Camera"
+    }
+  },
   "43": {
     "inputs": {
       "unet_name": "gguf/qwen-image-edit-2511-Q8_0.gguf"

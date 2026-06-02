@@ -13,7 +13,8 @@
     share: 'all',
     user: '',
     favorite: false,
-    trash: false
+    trash: false,
+    hidden: false
   };
   var _historyHoverPreview = null;
   var _accountActiveTab = 'profile';
@@ -367,6 +368,8 @@
     var old = $('#accountModalOverlay');
     if (old) old.remove();
     initialTab = initialTab || 'profile';
+    var requestedHiddenInitial = initialTab === 'hidden';
+    if (requestedHiddenInitial) initialTab = 'history';
     var html = '<div class="auth-modal-overlay" id="accountModalOverlay" onclick="if(event.target===this)CW.auth.closeAccount()">' +
       '<div class="account-modal">' +
       '<div class="auth-modal-header"><span class="auth-modal-title">' + (window.CW && CW.icon ? CW.icon('user-round-pen', 18) : '') + '账户管理</span>' +
@@ -389,7 +392,7 @@
         _setAccountTab(btn.dataset.tab);
       };
     });
-    _setAccountTab(initialTab);
+    _setAccountTab(requestedHiddenInitial ? 'hidden' : initialTab);
   }
 
   function showAccountTab(tab) {
@@ -959,15 +962,18 @@
   }
 
   function _renderAccountTab(tab) {
-    _accountActiveTab = tab || 'profile';
+    var requestedHidden = tab === 'hidden';
+    _accountActiveTab = requestedHidden ? 'history' : (tab || 'profile');
     if (tab === 'users') return _loadUsers();
     if (tab === 'notifications') return _loadNotificationsAdmin();
-    if (tab === 'history') {
+    if (tab === 'history' || requestedHidden) {
       _historyFilters.trash = false;
+      _historyFilters.hidden = requestedHidden ? true : false;
       return _loadMyHistory();
     }
     if (tab === 'trash') {
       _historyFilters.trash = true;
+      _historyFilters.hidden = false;
       _historyFilters.share = 'all';
       _historyFilters.favorite = false;
       return _loadMyHistory();
@@ -1065,11 +1071,12 @@
   }
 
   function _setAccountTab(tab) {
-    _accountActiveTab = tab || 'profile';
+    var requestedHidden = tab === 'hidden';
+    _accountActiveTab = requestedHidden ? 'history' : (tab || 'profile');
     $$('#accountModalOverlay .account-tab').forEach(function(x) {
       x.classList.toggle('active', x.dataset.tab === _accountActiveTab);
     });
-    _renderAccountTab(_accountActiveTab);
+    _renderAccountTab(requestedHidden ? 'hidden' : _accountActiveTab);
   }
 
   function _highlightUserRow(uid) {
@@ -1146,16 +1153,11 @@
   }
 
   function _syncUserGenerationCounts() {
-    return apiFetch(_withCacheBust(API + '/api/history?scope=all&limit=5000'), { cache: 'no-store' }).then(function(r) {
+    return apiFetch(_withCacheBust(API + '/api/history/user-counts'), { cache: 'no-store' }).then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '加载失败'); });
       return r.json();
     }).then(function(d) {
-      var counts = {};
-      (d.data || []).forEach(function(item) {
-        var uid = String(item.user_id || '');
-        if (!uid) return;
-        counts[uid] = (counts[uid] || 0) + 1;
-      });
+      var counts = d.counts || {};
       _usersCache = (_usersCache || []).map(function(u) {
         return Object.assign({}, u, { generation_count: counts[String(u.id)] || 0 });
       });
@@ -1261,6 +1263,7 @@
       hasUser: hasUser,
       canFavorite: !!(hasUser && id && favoriteKey),
       canShare: !!(hasUser && id),
+      canHide: !!(hasUser && hasItem && id && _canDeleteHistoryItem(item)),
       canDelete: !!(hasUser && hasItem && _canDeleteHistoryItem(item)),
       isFavorited: !!(hasUser && favoriteKey && _historyFavorites[favoriteKey])
     };
@@ -1305,8 +1308,11 @@
     var userFilter = _historyFilters.user || '';
     var favoriteOnly = !!_historyFilters.favorite;
     var trashMode = !!_historyFilters.trash;
+    var hiddenMode = !!_historyFilters.hidden;
     var isDeleted = !!(item && (item.is_deleted || item.deleted_at));
+    var isHidden = !!(item && item.is_hidden);
     if (trashMode !== isDeleted) return false;
+    if (!trashMode && hiddenMode !== isHidden) return false;
     if (share === 'shared' && !item.is_public) return false;
     if (share === 'private' && item.is_public) return false;
     if (userFilter && String(item.user_id || '') !== String(userFilter)) return false;
@@ -1372,10 +1378,42 @@
     });
   }
 
-  function toggleHistoryPrompt(id) {
+  async function _hydrateHistoryDetail(item) {
+    if (!item || !item.id) return item;
+    if (!item.__compact && item.prompt && item.field_values) return item;
+    var detail = null;
+    if (window.CW && typeof window.CW.getHistoryDetail === 'function') {
+      detail = await window.CW.getHistoryDetail(item);
+    } else {
+      var r = await apiFetch(_withCacheBust(API + '/api/history/' + encodeURIComponent(item.id)), { cache: 'no-store' });
+      if (!r.ok) return item;
+      var d = await r.json();
+      detail = d && d.data;
+    }
+    if (!detail || !detail.id) return item;
+    for (var i = 0; i < _historyCache.length; i++) {
+      if (String(_historyCache[i] && _historyCache[i].id) === String(detail.id)) {
+        _historyCache[i] = Object.assign({}, _historyCache[i], detail, { __compact: false });
+        return _historyCache[i];
+      }
+    }
+    return detail;
+  }
+
+  async function toggleHistoryPrompt(id) {
     if (!id) return;
-    _expandedHistoryPrompts[id] = !_expandedHistoryPrompts[id];
+    var nextOpen = !_expandedHistoryPrompts[id];
+    _expandedHistoryPrompts[id] = nextOpen;
     if (_accountActiveTab === 'history' || _accountActiveTab === 'trash') _renderHistoryFromCache();
+    if (!nextOpen) return;
+    var item = _findHistoryItem(id);
+    if (!item || !item.__compact) return;
+    try {
+      await _hydrateHistoryDetail(item);
+      if (_expandedHistoryPrompts[id] && (_accountActiveTab === 'history' || _accountActiveTab === 'trash')) _renderHistoryFromCache();
+    } catch (e) {
+      _safeToast(e && e.message ? e.message : '加载提示词失败', 'error');
+    }
   }
 
   function _historyPromptText(item) {
@@ -1423,9 +1461,16 @@
     });
   }
 
-  function copyHistoryPromptById(id) {
+  async function copyHistoryPromptById(id) {
     var item = _findHistoryItem(id);
     if (!item) return _safeToast('未找到这条出图记录', 'info');
+    if (item.__compact) {
+      try {
+        item = await _hydrateHistoryDetail(item);
+      } catch (e) {
+        return _safeToast(e && e.message ? e.message : '加载提示词失败', 'error');
+      }
+    }
     copyHistoryPrompt(_historyPromptText(item));
   }
 
@@ -1513,7 +1558,12 @@
     var filtered = items.filter(_matchHistoryFilter);
     var isAdmin = _currentUser && _currentUser.role === 'admin';
     var trashMode = !!_historyFilters.trash;
-    var activeTotal = items.filter(function(item) { return !!(item && (item.is_deleted || item.deleted_at)) === trashMode; }).length;
+    var hiddenMode = !!_historyFilters.hidden;
+    var activeTotal = items.filter(function(item) {
+      var isDeleted = !!(item && (item.is_deleted || item.deleted_at));
+      var isHidden = !!(item && item.is_hidden);
+      return isDeleted === trashMode && (trashMode || isHidden === hiddenMode);
+    }).length;
     var rows = filtered.map(function(h) {
       var imageUrl = API + '/api/images/' + h.filename;
       var thumbUrl = API + '/api/thumbs/' + (h.thumb || h.filename);
@@ -1527,16 +1577,24 @@
       var favoriteKey = _historyFavoriteKey(h);
       var isFavorited = !!(favoriteKey && _historyFavorites[favoriteKey]);
       var canDeleteItem = _canDeleteHistoryItem(h);
+      var hiddenBadge = h.is_hidden
+        ? '<span class="account-hidden-badge">' + (window.CW && CW.icon ? CW.icon('eye-off', 13) : '') + ' 已隐藏' + (h.hidden_at ? '：' + escH(h.hidden_at) : '') + '</span>'
+        : '';
       var deletedBadge = h.is_deleted || h.deleted_at
         ? '<span class="account-deleted-badge">' + (window.CW && CW.icon ? CW.icon('trash-2', 13) : '') + ' 已删除' + (h.deleted_at ? '：' + escH(h.deleted_at) : '') + '</span>'
         : '';
       var actionHtml = trashMode
         ? '<button class="wf-mgr-btn account-action-btn" type="button" title="恢复图片" onclick="event.stopPropagation();CW.auth.restoreHistoryItem(\'' + escA(h.id) + '\')">' + (window.CW && CW.icon ? CW.icon('refresh-cw') : '') + ' 恢复</button>' +
           '<button class="wf-mgr-btn account-action-btn btn-delete" type="button" title="彻底删除" onclick="event.stopPropagation();CW.auth.permanentDeleteHistoryItem(\'' + escA(h.id) + '\')">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' 彻底删除</button>'
+        : hiddenMode
+          ? '<button class="wf-mgr-btn account-action-btn" type="button" title="取消隐藏" onclick="event.stopPropagation();CW.auth.toggleHistoryHidden(\'' + escA(h.id) + '\', false)">' + (window.CW && CW.icon ? CW.icon('eye') : '') + ' 取消隐藏</button>' +
+            '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>' + (window.CW && CW.icon ? CW.icon('download') : '') + ' 下载</a>' +
+            (canDeleteItem ? '<button class="account-hist-quick-delete" type="button" title="删除" aria-label="删除" onclick="event.stopPropagation();CW.auth.deleteHistoryItem(\'' + escA(h.id) + '\')">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + '</button>' : '')
         : '<button class="wf-mgr-btn account-action-btn account-hist-favorite-btn' + (isFavorited ? ' is-active' : '') + '" type="button" title="' + (isFavorited ? '取消收藏' : '收藏') + '" aria-label="' + (isFavorited ? '取消收藏' : '收藏') + '" onclick="event.stopPropagation();CW.auth.toggleHistoryFavorite(\'' + escA(h.id) + '\')">' +
             '<svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="' + (isFavorited ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 20.2-.7-.63C6.2 14.96 3 12.03 3 8.43 3 5.5 5.24 3.2 8.1 3.2c1.62 0 3.18.78 4.1 2 0 0 .02.03.04.05.92-1.27 2.5-2.05 4.16-2.05C19.26 3.2 21.5 5.5 21.5 8.43c0 3.6-3.2 6.53-8.3 11.14l-.7.63Z"/></svg>' +
             (isFavorited ? ' 已收藏' : ' 收藏') +
           '</button>' +
+          '<button class="wf-mgr-btn account-action-btn" type="button" title="隐藏" onclick="event.stopPropagation();CW.auth.toggleHistoryHidden(\'' + escA(h.id) + '\', true)">' + (window.CW && CW.icon ? CW.icon('eye-off') : '') + ' 隐藏</button>' +
           '<button class="wf-mgr-btn account-action-btn share-state-btn ' + (h.is_public ? 'is-shared' : 'is-private') + '" type="button" title="' + (h.is_public ? '点击取消共享' : '点击设为共享') + '" onclick="CW.auth.toggleShare(\'' + escA(h.id) + '\',' + (!h.is_public) + ')">' + (window.CW && CW.icon ? CW.icon('share') : '') + (h.is_public ? ' 已共享' : ' 未共享') + '</button>' +
           '<a class="wf-mgr-btn account-action-btn" href="' + escA(API + '/api/images/' + h.filename) + '" download>' + (window.CW && CW.icon ? CW.icon('download') : '') + ' 下载</a>' +
           (canDeleteItem ? '<button class="account-hist-quick-delete" type="button" title="删除" aria-label="删除" onclick="event.stopPropagation();CW.auth.deleteHistoryItem(\'' + escA(h.id) + '\')">' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + '</button>' : '');
@@ -1552,6 +1610,7 @@
             ? '<div class="account-hist-admin-meta"><span>用户：<button class="account-inline-link" type="button" onclick="CW.auth.filterHistoryByUser(\'' + escA(h.user_id || '') + '\')">' + escH(ownerLabel) + '</button></span><span>时间：' + escH(h.time || '-') + '</span><span>工作流文件：' + escH(workflowName) + '（' + escH(h.workflow || '-') + '）</span><span>文件名：' + escH(h.filename || '-') + '</span></div>'
             : '<strong>' + escH(workflowName) + '</strong><span>文件名：' + escH(h.filename || '-') + '</span><span>时间：' + escH(h.time || '-') + '</span>') +
           deletedBadge +
+          hiddenBadge +
           '<div class="account-hist-prompt-block">' +
             '<button class="account-hist-prompt-toggle" type="button" onclick="event.stopPropagation();CW.auth.toggleHistoryPrompt(\'' + escA(h.id) + '\')">' + (promptOpen ? '隐藏提示词' : '显示提示词') + '</button>' +
             (promptOpen ? '<div class="account-hist-prompt-panel"><button class="account-hist-copy-btn" type="button" title="复制提示词" aria-label="复制提示词" onclick="event.stopPropagation();CW.auth.copyHistoryPromptById(\'' + escA(h.id) + '\')">' + (window.CW && CW.icon ? CW.icon('copy', 14) : '复制') + '</button><pre class="account-hist-prompt-text">' + escH(promptDisplayText) + '</pre></div>' : '') +
@@ -1566,7 +1625,7 @@
       '<div class="account-section">' +
         '<div class="account-panel-head">' +
           '<strong>' + (trashMode ? '回收站' : (isAdmin ? '全部出图历史' : '出图历史')) + '</strong>' +
-          '<span>' + (trashMode ? '已删除的图片记录会保留在这里，可恢复或彻底清理。' : (isAdmin ? '管理员可查看和管理所有用户及公开图库中的出图记录。' : '管理你生成过的内容，支持筛选、分享、下载和批量清理。')) + '</span>' +
+          '<span>' + (trashMode ? '已删除的图片记录会保留在这里，可恢复或彻底清理。' : (hiddenMode ? '隐藏后的图片和视频不会出现在首页，只在这里管理。' : (isAdmin ? '管理员可查看和管理所有用户及公开图库中的出图记录。' : '管理你生成过的内容，支持筛选、分享、下载和批量清理。'))) + '</span>' +
         '</div>' +
         '<div class="account-list-card">' +
           '<div class="account-history-toolbar">' +
@@ -1579,6 +1638,7 @@
                 '<button class="account-history-filter-btn' + (_historyFilters.share === 'private' ? ' active' : '') + '" type="button" data-share-filter="private">未分享</button>' +
               '</div>' +
               '<button class="account-history-filter-btn account-history-favorite-filter' + (_historyFilters.favorite ? ' active' : '') + '" type="button" data-favorite-filter="' + (_historyFilters.favorite ? 'on' : 'off') + '">已收藏</button>' +
+              '<button class="account-history-filter-btn account-history-hidden-filter' + (_historyFilters.hidden ? ' active' : '') + '" type="button" data-hidden-filter="' + (_historyFilters.hidden ? 'on' : 'off') + '">已隐藏</button>' +
             '</div>' +
           '</div>' +
           '<div class="account-batch-actions">' +
@@ -1611,6 +1671,8 @@
       shareBtns[sbi].onclick = function() {
         if (this.dataset.favoriteFilter) {
           _historyFilters.favorite = !_historyFilters.favorite;
+        } else if (this.dataset.hiddenFilter) {
+          _historyFilters.hidden = !_historyFilters.hidden;
         } else {
           _historyFilters.share = this.dataset.shareFilter || 'all';
         }
@@ -1625,12 +1687,14 @@
     var scope = (_currentUser && _currentUser.role === 'admin') ? 'all' : 'mine';
     var limit = HISTORY_FETCH_LIMIT;
     Promise.all([
-      apiFetch(_withCacheBust(API + '/api/history?scope=' + scope + '&limit=' + limit), { cache: 'no-store' }).then(function(r) { return r.json(); }),
-      apiFetch(_withCacheBust(API + '/api/history?scope=trash&limit=' + limit), { cache: 'no-store' }).then(function(r) { return r.json(); })
+      apiFetch(_withCacheBust(API + '/api/history?scope=' + scope + '&limit=' + limit + '&compact=1'), { cache: 'no-store' }).then(function(r) { return r.json(); }),
+      apiFetch(_withCacheBust(API + '/api/history?scope=hidden&limit=' + limit + '&compact=1'), { cache: 'no-store' }).then(function(r) { return r.json(); }),
+      apiFetch(_withCacheBust(API + '/api/history?scope=trash&limit=' + limit + '&compact=1'), { cache: 'no-store' }).then(function(r) { return r.json(); })
     ]).then(function(results) {
       var normal = results[0] || {};
-      var trash = results[1] || {};
-      _historyCache = (normal.data || []).concat(trash.data || []);
+      var hidden = results[1] || {};
+      var trash = results[2] || {};
+      _historyCache = (normal.data || []).concat(hidden.data || [], trash.data || []);
       _renderHistoryFromCache();
     }).catch(function(e) { body.innerHTML = '<div class="account-error">' + escH(e.message) + '</div>'; });
   }
@@ -1639,14 +1703,17 @@
     var scope = (_currentUser && _currentUser.role === 'admin') ? 'all' : 'mine';
     var limit = HISTORY_FETCH_LIMIT;
     return Promise.all([
-      apiFetch(_withCacheBust(API + '/api/history?scope=' + scope + '&limit=' + limit), { cache: 'no-store' }).then(function(r) { return r.json(); }),
-      apiFetch(_withCacheBust(API + '/api/history?scope=trash&limit=' + limit), { cache: 'no-store' }).then(function(r) { return r.json(); })
+      apiFetch(_withCacheBust(API + '/api/history?scope=' + scope + '&limit=' + limit + '&compact=1'), { cache: 'no-store' }).then(function(r) { return r.json(); }),
+      apiFetch(_withCacheBust(API + '/api/history?scope=hidden&limit=' + limit + '&compact=1'), { cache: 'no-store' }).then(function(r) { return r.json(); }),
+      apiFetch(_withCacheBust(API + '/api/history?scope=trash&limit=' + limit + '&compact=1'), { cache: 'no-store' }).then(function(r) { return r.json(); })
     ]).then(function(results) {
       var normal = results[0] || {};
-      var trash = results[1] || {};
+      var hidden = results[1] || {};
+      var trash = results[2] || {};
       if (!normal.ok) throw new Error(normal.detail || '加载失败');
+      if (!hidden.ok) throw new Error(hidden.detail || '加载失败');
       if (!trash.ok) throw new Error(trash.detail || '加载失败');
-      _historyCache = (normal.data || []).concat(trash.data || []);
+      _historyCache = (normal.data || []).concat(hidden.data || [], trash.data || []);
       if (_accountActiveTab === 'history' || _accountActiveTab === 'trash') _renderHistoryFromCache();
       return _historyCache;
     }).catch(function(e) {
@@ -1670,6 +1737,21 @@
     return changed;
   }
 
+  function _updateHistoryListHiddenState(list, id, makeHidden, hiddenAt) {
+    if (!Array.isArray(list)) return false;
+    var changed = false;
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i] && list[i].id) !== String(id)) continue;
+      if (makeHidden) {
+        list[i] = Object.assign({}, list[i], { is_hidden: true, hidden_at: hiddenAt || list[i].hidden_at || '' });
+      } else {
+        list[i] = Object.assign({}, list[i], { is_hidden: false, hidden_at: '', hidden_by: '' });
+      }
+      changed = true;
+    }
+    return changed;
+  }
+
   function toggleShare(id, makePublic) {
     return apiFetch(API + '/api/history/' + encodeURIComponent(id) + '/share', {
       method: 'POST',
@@ -1687,6 +1769,43 @@
       _renderHistoryFromCache();
       _safeToast(makePublic ? '已分享到公共图库' : '已取消分享', 'done');
       return { id: id, is_public: !!makePublic };
+    }).catch(function(e) {
+      CW.toast(e.message, 'error');
+      throw e;
+    });
+  }
+
+  function toggleHistoryHidden(id, makeHidden) {
+    makeHidden = makeHidden !== false;
+    return apiFetch(API + '/api/history/' + encodeURIComponent(id) + '/hide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_hidden: makeHidden })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '操作失败'); });
+      return r.json();
+    }).then(function(d) {
+      var hiddenAt = (d && d.hidden_at) || '';
+      _updateHistoryListHiddenState(_historyCache, id, makeHidden, hiddenAt);
+      if (window.__APP__) {
+        _updateHistoryListHiddenState(window.__APP__._lbItems, id, makeHidden, hiddenAt);
+        if (Array.isArray(window.__APP__.historyItems)) {
+          if (makeHidden) {
+            for (var i = window.__APP__.historyItems.length - 1; i >= 0; i--) {
+              if (String(window.__APP__.historyItems[i] && window.__APP__.historyItems[i].id) === String(id)) {
+                window.__APP__.historyItems.splice(i, 1);
+              }
+            }
+          } else {
+            _updateHistoryListHiddenState(window.__APP__.historyItems, id, makeHidden, hiddenAt);
+          }
+        }
+      }
+      _renderHistoryFromCache();
+      _safeToast(makeHidden ? '已隐藏，首页不再显示' : '已取消隐藏', 'done');
+      if (window.CW && typeof CW.loadHistory === 'function') CW.loadHistory();
+      if (window.CW && typeof CW.loadWorkflows === 'function') CW.loadWorkflows();
+      return { id: id, is_hidden: !!makeHidden, hidden_at: hiddenAt };
     }).catch(function(e) {
       CW.toast(e.message, 'error');
       throw e;
@@ -1906,6 +2025,7 @@
     toggleUserDisabled: toggleUserDisabled,
     deleteUser: deleteUser,
     toggleShare: toggleShare,
+    toggleHistoryHidden: toggleHistoryHidden,
     filterHistoryByUser: filterHistoryByUser,
     toggleHistoryPrompt: toggleHistoryPrompt,
     toggleHistoryFavorite: toggleHistoryFavorite,

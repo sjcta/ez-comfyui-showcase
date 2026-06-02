@@ -310,6 +310,51 @@ class ProgressCalculationTests(unittest.TestCase):
         self.assertEqual(result.prompt_id, "prompt-video")
         self.assertGreaterEqual(len(calls), 2)
 
+    def test_http_polling_surfaces_comfyui_execution_error_message(self):
+        workflow = {
+            "1": {
+                "class_type": "SaveVideo",
+                "inputs": {},
+            },
+        }
+        step_info = StepCalculator().calculate(workflow)
+        tracker = WSTracker(
+            job_id="job-http-error-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+        tracker.HTTP_POLL_INTERVAL = 0
+        tracker._start_time = 0
+        tracker._prompt_id = "prompt-error"
+
+        def fake_get(_url):
+            return {
+                "prompt-error": {
+                    "status": {
+                        "status_str": "error",
+                        "messages": [
+                            ["execution_start", {"prompt_id": "prompt-error"}],
+                            [
+                                "execution_error",
+                                {
+                                    "exception_message": "list index out of range",
+                                    "exception_type": "IndexError",
+                                },
+                            ],
+                        ],
+                    }
+                }
+            }
+
+        async def run_poll():
+            with mock.patch("modules.ws_tracker._http_get", side_effect=fake_get):
+                return await tracker._http_poll_track(timeout=1)
+
+        with self.assertRaisesRegex(RuntimeError, "ComfyUI: list index out of range"):
+            asyncio.run(run_poll())
+
     def test_normal_nodes_complete_on_executed_not_executing(self):
         workflow = {
             "1": {

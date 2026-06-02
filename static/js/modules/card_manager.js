@@ -246,6 +246,7 @@
       hasUser: false,
       canFavorite: false,
       canShare: false,
+      canHide: false,
       canDelete: false,
       isFavorited: false
     };
@@ -630,14 +631,31 @@
     // ── Timer ──
     var timerEl = card.querySelector('.gi-timer');
     if (_jobShowsTimer(job)) {
-      if (timerEl) {
-        var timerTs = _jobTimerTs(job);
-        timerEl.dataset.ts = timerTs;
-        timerEl.dataset.estimateLabel = job.estimated_duration_label || timerEl.dataset.estimateLabel || '';
-        if (window.CW.formatJobElapsedWithEstimate) {
-          timerEl.textContent = window.CW.formatJobElapsedWithEstimate(timerTs, timerEl.dataset.estimateLabel);
-        } else if (window.CW.formatElapsed) {
-          timerEl.textContent = window.CW.formatElapsed(timerTs);
+      var timerTs = _jobTimerTs(job);
+      if (timerTs) {
+        if (!timerEl) {
+          var imgBox = card.querySelector('.gi-img');
+          if (imgBox) {
+            var wrap = document.createElement('template');
+            wrap.innerHTML = _jobTimerHtml(job);
+            var timerRowNew = wrap.content.firstElementChild;
+            var statusText = imgBox.querySelector('.job-status-text');
+            if (timerRowNew) {
+              if (statusText && statusText.nextSibling) imgBox.insertBefore(timerRowNew, statusText.nextSibling);
+              else if (statusText) imgBox.appendChild(timerRowNew);
+              else imgBox.insertBefore(timerRowNew, imgBox.querySelector('.gi-del'));
+              timerEl = card.querySelector('.gi-timer');
+            }
+          }
+        }
+        if (timerEl) {
+          timerEl.dataset.ts = timerTs;
+          timerEl.dataset.estimateLabel = job.estimated_duration_label || timerEl.dataset.estimateLabel || '';
+          if (window.CW.formatJobElapsedWithEstimate) {
+            timerEl.textContent = window.CW.formatJobElapsedWithEstimate(timerTs, timerEl.dataset.estimateLabel);
+          } else if (window.CW.formatElapsed) {
+            timerEl.textContent = window.CW.formatElapsed(timerTs);
+          }
         }
       }
     } else if (timerEl) {

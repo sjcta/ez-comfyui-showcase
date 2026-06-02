@@ -203,7 +203,9 @@ function showPromptResultToast(prompt, meta) {
   var promptEn = String((meta && (meta.prompt_en || meta.english_prompt)) || (_hasChinese(text) ? '' : text) || '').trim();
   var promptZh = _cleanPromptResultChinese(String((meta && (meta.prompt_zh || meta.zh_prompt || meta.chinese_prompt || meta.translated_prompt)) || (_hasChinese(text) ? text : '') || '').trim());
   var negativePrompt = String((meta && (meta.negative_prompt || meta.negativePrompt)) || '').trim();
-  var expertData = meta && meta.expert_interrogate ? meta.expert_interrogate : null;
+  var rawExpertData = meta && meta.expert_interrogate ? meta.expert_interrogate : null;
+  var isSinglePassExpert = !!(rawExpertData && rawExpertData.mode === 'single_pass');
+  var expertData = rawExpertData && rawExpertData.mode !== 'single_pass' ? rawExpertData : null;
   var currentLang = promptZh ? 'zh' : 'en';
   function stringifyStructured(value) {
     if (!value) return '';
@@ -218,7 +220,6 @@ function showPromptResultToast(prompt, meta) {
     if (!expertData) return '';
     var experts = Array.isArray(expertData.experts) ? expertData.experts : [];
     var description = {};
-    var negativeItems = [];
     var merged = getPromptText();
     if (merged) description['合并提示词'] = merged;
     for (var ei = 0; ei < experts.length; ei++) {
@@ -229,17 +230,9 @@ function showPromptResultToast(prompt, meta) {
       if (Array.isArray(expert.observations) && expert.observations.length) section['观察'] = expert.observations;
       else if (expert.summary) section['观察'] = [String(expert.summary)];
       if (Object.keys(section).length) description[label] = section;
-      if (Array.isArray(expert.negative_constraints)) {
-        for (var ni = 0; ni < expert.negative_constraints.length; ni++) {
-          var neg = String(expert.negative_constraints[ni] || '').trim();
-          if (neg) negativeItems.push(neg);
-        }
-      }
     }
-    if (negativePrompt) negativeItems.push(negativePrompt);
     return stringifyStructured({
-      '画面描述': description,
-      '负面提示词': { '专家负面': Array.from(new Set(negativeItems)) }
+      '画面描述': description
     });
   }
   var structuredJson = '';
@@ -248,7 +241,7 @@ function showPromptResultToast(prompt, meta) {
   var structuredJsonEn = stringifyStructured(meta && (meta.structured_prompt_json_en || meta.english_prompt_json || meta.json_prompt_en || meta.structured_prompt_en));
   if (!structuredJson && expertData) structuredJson = buildExpertFallbackStructuredJson();
   var hasStructuredJson = !!structuredJson;
-  var currentFormat = (expertData && hasStructuredJson) ? 'json' : 'text';
+  var currentFormat = ((expertData || isSinglePassExpert) && hasStructuredJson) ? 'json' : 'text';
   function getPromptText() {
     return currentLang === 'zh' ? promptZh : (promptEn || text);
   }
@@ -264,17 +257,42 @@ function showPromptResultToast(prompt, meta) {
     if (!data) return '';
     var experts = Array.isArray(data.experts) ? data.experts : [];
     var merged = String((resultMeta && (resultMeta.structured_optimized_prompt || resultMeta.prompt || resultMeta.prompt_zh)) || '').trim();
-    var html = '<span class="prompt-result-expert-title">专家组反推</span>';
+    var isExpertMode = data.mode === 'staged' || data.mode === 'single_pass_team' || data.mode === 'multi_pass_team';
+    var title = isExpertMode ? '专家反推' : '加强反推';
+    var html = '<span class="prompt-result-expert-title">' + escH(title) + '</span>';
     if (merged) {
       html += '<span class="prompt-result-expert-merged"><strong>合并结果</strong><span>' + escH(merged) + '</span></span>';
     }
     if (data.review) {
       var reviewSummary = String(data.review.summary || '').trim();
       var retryCount = Number(data.review_retry_count || 0);
+      var reviews = Array.isArray(data.review.reviews) ? data.review.reviews : [];
+      var scored = 0;
+      var scoreTotal = 0;
+      var failedClaims = 0;
+      var failedExperts = [];
+      for (var ri = 0; ri < reviews.length; ri++) {
+        var review = reviews[ri] || {};
+        if (typeof review.accuracy_score === 'number' && isFinite(review.accuracy_score)) {
+          scored += 1;
+          scoreTotal += Math.max(0, Math.min(1, review.accuracy_score));
+        }
+        if (review.passed === false) failedExperts.push(String(review.label || review.id || ('专家 ' + (ri + 1))).trim());
+        var checks = Array.isArray(review.claim_checks) ? review.claim_checks : [];
+        for (var ci = 0; ci < checks.length; ci++) {
+          if ((checks[ci] || {}).verdict === false) failedClaims += 1;
+        }
+      }
+      var reviewMeta = [];
+      if (scored) reviewMeta.push('断言准确率 ' + Math.round((scoreTotal / scored) * 100) + '%');
+      if (failedClaims) reviewMeta.push('未通过断言 ' + failedClaims + ' 条');
+      if (failedExperts.length) reviewMeta.push('需重写 ' + failedExperts.slice(0, 3).join('、'));
       html += '<span class="prompt-result-expert-review"><strong>评审专家</strong><span>'
         + escH(reviewSummary || '已完成专家维度复审')
         + (retryCount ? escH('，打回重写 ' + retryCount + ' 个专家') : '')
-        + '</span></span>';
+        + '</span>'
+        + (reviewMeta.length ? '<span class="prompt-result-expert-review-detail">' + escH(reviewMeta.join(' · ')) + '</span>' : '')
+        + '</span>';
     }
     html += '<span class="prompt-result-expert-list">';
     for (var ei = 0; ei < experts.length; ei++) {
@@ -482,6 +500,9 @@ function showPromptResultToast(prompt, meta) {
   function setPromptControlValue(input, content) {
     if (!input) return false;
     var value = String(content || '').trim();
+    if (!_isNegativePromptControl(input) && window.CW && typeof CW.preparePromptForQwenAngle === 'function') {
+      value = String(CW.preparePromptForQwenAngle(value) || '').trim();
+    }
     if (!value) return false;
     input.value = value;
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -574,12 +595,15 @@ function showPromptResultToast(prompt, meta) {
     replicateExpertPrompt('negative');
   });
   if (copyBtn) copyBtn.addEventListener('click', function () {
-	    var input = findMainPromptInput();
-	    if (window.CW && typeof CW.registerPromptTranslationPair === 'function') {
-	      CW.registerPromptTranslationPair(promptZh, promptEn);
-	    }
-	    if (input) {
-	      input.value = currentText;
+    var input = findMainPromptInput();
+    if (window.CW && typeof CW.registerPromptTranslationPair === 'function') {
+      CW.registerPromptTranslationPair(promptZh, promptEn);
+    }
+    if (input) {
+      var preparedText = (window.CW && typeof CW.preparePromptForQwenAngle === 'function')
+        ? CW.preparePromptForQwenAngle(currentText)
+        : currentText;
+      input.value = String(preparedText || '').trim();
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.focus();
     }

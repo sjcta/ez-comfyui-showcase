@@ -112,7 +112,7 @@
       "visible": false,
       "label": "cache_model",
       "order": 8,
-      "type": "text"
+      "type": "toggle"
     },
     {
       "key": "93::attention_mode",
@@ -425,6 +425,55 @@
       "step": 0.05,
       "min": 0,
       "max": 1
+    },
+    {
+      "key": "910::horizontal_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "水平角度",
+      "order": 2,
+      "type": "number",
+      "step": 1,
+      "min": 0,
+      "max": 360
+    },
+    {
+      "key": "910::vertical_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "俯仰角度",
+      "order": 3,
+      "type": "number",
+      "step": 1,
+      "min": -30,
+      "max": 60
+    },
+    {
+      "key": "910::zoom",
+      "zone": "user_input",
+      "visible": true,
+      "label": "镜头距离",
+      "order": 4,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "910::default_prompts",
+      "zone": "hidden",
+      "visible": false,
+      "label": "默认角度词",
+      "order": 100,
+      "type": "toggle"
+    },
+    {
+      "key": "910::camera_view",
+      "zone": "hidden",
+      "visible": false,
+      "label": "相机视角",
+      "order": 101,
+      "type": "toggle"
     }
   ]
 }

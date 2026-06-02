@@ -28,7 +28,7 @@ from modules.instance_picker import pick_best_instance, strict_preferred_instanc
 from modules.prompt_labels import infer_generation_label
 from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.step_calculator import StepCalculator
-from modules.comfyui_upload import ensure_workflow_images_available
+from modules.comfyui_upload import apply_qwen_frame_roll_to_workflow, ensure_workflow_images_available
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
 
@@ -74,6 +74,7 @@ def _filter_retry_instances(instances: list[dict], workflow_name: str, failed_in
 
 DEFAULT_TRACK_TIMEOUT = 900
 VIDEO_TRACK_TIMEOUT = 3600
+RUNNING_GENERATION_STATUSES = {"starting_comfyui", "preparing", "submitting", "generating", "downloading"}
 
 
 def _workflow_track_timeout(job: dict | None, workflow_path: str) -> int:
@@ -192,6 +193,39 @@ class JobRunner:
         self._submit_retry_limit = 3
 
     # ── 主入口 ─────────────────────────────────────────────────────────
+
+    def _running_generation_blockers(self, job_id: str) -> list[tuple[str, str]]:
+        blockers: list[tuple[str, str]] = []
+        for other_id, job in self._jobs.items():
+            if other_id == job_id:
+                continue
+            status = str(job.get("status") or "")
+            if status in RUNNING_GENERATION_STATUSES:
+                blockers.append((other_id, str(job.get("instance") or "")))
+        return blockers
+
+    async def _wait_for_generation_turn(self, job_id: str, instance_name: str) -> bool:
+        last_notice = 0.0
+        while job_id in self._jobs:
+            blockers = self._running_generation_blockers(job_id)
+            if not blockers:
+                return True
+            now = time.time()
+            if now - last_notice >= 5:
+                blocker_instance = next((name for _jid, name in blockers if name), "")
+                wait_for = blocker_instance or instance_name
+                self._jobs[job_id]["status"] = "queued"
+                self._jobs[job_id]["last_update"] = now
+                self._jobs[job_id]["message"] = (
+                    f"排队等待 {wait_for} 当前任务完成..."
+                    if wait_for else "排队等待当前任务完成..."
+                )
+                self._jobs[job_id]["progress"] = {"pct": 0}
+                self._save_jobs()
+                await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+                last_notice = now
+            await asyncio.sleep(2)
+        return False
 
     async def run(
         self,
@@ -339,7 +373,21 @@ class JobRunner:
             self._jobs[job_id]["progress"] = {"pct": 0}
             await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
 
-            # ── Phase 2: 停止 vLLM（如需） ─────────────────────────
+            if not await self._wait_for_generation_turn(job_id, instance["name"]):
+                return
+
+            # ── Phase 2: 等待实例信号量 ────────────────────────────
+            self._jobs[job_id]["status"] = "queued"
+            self._jobs[job_id]["last_update"] = time.time()
+            self._jobs[job_id]["message"] = f"排队等待 {instance['name']}..."
+            self._jobs[job_id]["progress"] = {"pct": 0}
+            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
+
+            await sem.acquire()
+            inst_held = True
+            self._jobs[job_id]["sem_acquired"] = True
+
+            # ── Phase 3: 停止 vLLM（如需） ─────────────────────────
             if vllm_was_running:
                 self._jobs[job_id]["message"] = "停止 vLLM 释放显存..."
                 self._jobs[job_id]["progress"] = {"pct": 0}
@@ -347,7 +395,7 @@ class JobRunner:
                 self._stop_vllm()
                 await asyncio.sleep(2)
 
-            # ── Phase 3: 实例冷启动 ────────────────────────────────
+            # ── Phase 4: 实例冷启动 ────────────────────────────────
             self._jobs[job_id]["status"] = "starting_comfyui"
             self._jobs[job_id]["message"] = f"启动 ComfyUI #{instance['name']}..."
             self._jobs[job_id]["progress"] = {"pct": 0}
@@ -385,25 +433,6 @@ class JobRunner:
                 else:
                     raise TimeoutError(f"ComfyUI #{instance['name']} 启动超时 (180s)")
 
-            # ── Phase 4: 等待实例信号量 ────────────────────────────
-            self._jobs[job_id]["status"] = "queued"
-            self._jobs[job_id]["last_update"] = time.time()
-            self._jobs[job_id]["message"] = f"排队等待 {instance['name']}..."
-            self._jobs[job_id]["progress"] = {"pct": 0}
-            await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
-
-            try:
-                await asyncio.wait_for(sem.acquire(), timeout=600)
-                inst_held = True
-                self._jobs[job_id]["sem_acquired"] = True
-            except asyncio.TimeoutError:
-                if job_id in self._jobs:
-                    self._jobs[job_id]["status"] = "error"
-                    self._jobs[job_id]["message"] = "排队超时（实例繁忙，10分钟未释放）"
-                    await self._broadcast({"type": "job_update", "job": self._jobs[job_id]})
-                    self._save_jobs()
-                return
-
             self._jobs[job_id]["status"] = "preparing"
             self._jobs[job_id]["message"] = f"实例 {instance['name']} 就绪，开始出图"
             self._jobs[job_id]["instance"] = instance["name"]
@@ -432,6 +461,8 @@ class JobRunner:
                 if isinstance(v, dict) and v.get("class_type") == "KSampler":
                     if "seed" in v.get("inputs", {}):
                         v["inputs"]["seed"] = seed
+
+            apply_qwen_frame_roll_to_workflow(wf, field_values, self._input_dir)
 
             issues = validate_api_prompt(wf)
             if issues:

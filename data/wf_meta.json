@@ -1,4 +1,14 @@
 {
+  "I2V_10eros_v3_TiledSampler.json": {
+    "name": "I2V_10eros_v3_TiledSampler",
+    "tags": [
+      "视频制作"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": false,
+    "source": "ez-comfy",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/ez-comfy/I2V_10eros_v3_TiledSampler.json"
+  },
   "SeedVR2_upscale_2k.json": {
     "name": "SeedVR2 2K 图片放大",
     "tags": [
@@ -10,7 +20,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_upscale_2k.json",
     "thumbnail": "DGX Spark/SeedVR2_upscale_2k.jpg",
-    "sort_order": 8
+    "sort_order": 9
   },
   "SeedVR2_upscale_4k.json": {
     "name": "SeedVR2 4K 图片放大",
@@ -23,7 +33,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_upscale_4k.json",
     "thumbnail": "DGX Spark/SeedVR2_upscale_4k.jpg",
-    "sort_order": 9
+    "sort_order": 10
   },
   "SeedVR2_video_upscale_2k.json": {
     "name": "SeedVR2 2K 视频放大",
@@ -37,7 +47,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_video_upscale_2k.json",
     "thumbnail": "DGX Spark/SeedVR2_upscale_2k.jpg",
-    "sort_order": 10
+    "sort_order": 11
   },
   "SeedVR2_video_upscale_4k.json": {
     "name": "SeedVR2 4K 视频放大",
@@ -51,7 +61,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/SeedVR2_video_upscale_4k.json",
     "thumbnail": "DGX Spark/SeedVR2_upscale_4k.jpg",
-    "sort_order": 11
+    "sort_order": 12
   },
   "i2i-FireRed-Edit-8step.json": {
     "name": "小红书(FireRed) 图片编辑 (8步)",
@@ -141,7 +151,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2i_flux2_dev_q5km.json",
     "thumbnail": "DGX Spark/t2i_flux2_dev_turbo_q4km.webp",
-    "sort_order": 21
+    "sort_order": 23
   },
   "i2i_flux2_dev_q6k.json": {
     "name": "Flux2 Dev Q6_K 图生图",
@@ -155,7 +165,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2i_flux2_dev_q6k.json",
     "thumbnail": "DGX Spark/t2i_flux2_dev_turbo_q4km.webp",
-    "sort_order": 22
+    "sort_order": 24
   },
   "i2i_flux2_dev_turbo_q4km.json": {
     "name": "[实验] Flux2 Dev Turbo Q4 图生图",
@@ -193,10 +203,23 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_10eros.json",
     "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
-    "sort_order": 24
+    "sort_order": 27
+  },
+  "i2v_ltx23_10eros_director.json": {
+    "name": "LTX2.3 10Eros 导演版",
+    "tags": [
+      "视频制作",
+      "图生视频"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": false,
+    "source": "DGX Spark",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_10eros_director.json",
+    "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
+    "sort_order": 28
   },
   "i2v_ltx23_sulphur.json": {
-    "name": "LTX2.3 Sulphur",
+    "name": "LTX2.3 Sulphur 全量版（bf16）",
     "tags": [
       "视频制作"
     ],
@@ -205,7 +228,19 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_sulphur.json",
     "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
-    "sort_order": 23
+    "sort_order": 26
+  },
+  "i2v_ltx23_sulphur_fp8.json": {
+    "name": "LTX2.3 Sulphur 快速版（fp8）",
+    "tags": [
+      "视频制作"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "DGX Spark",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_sulphur_fp8.json",
+    "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
+    "sort_order": 25
   },
   "t2i-nunchaku-z-image-turbo-highSD.json": {
     "name": "Nunchaku (Z-Image) 加速 + SD放大",
@@ -217,7 +252,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-nunchaku-z-image-turbo-highSD.json",
     "thumbnail": "DGX Spark/t2i-nunchaku-z-image-turbo-highSD.png",
-    "sort_order": 18
+    "sort_order": 20
   },
   "t2i-z-image-seedvr4k.json": {
     "name": "Z-Image + SeedVR2 放大",
@@ -230,7 +265,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-z-image-seedvr4k.json",
     "thumbnail": "DGX Spark/t2i-z-image-seedvr4k.png",
-    "sort_order": 16
+    "sort_order": 18
   },
   "t2i-z-image.json": {
     "name": "Z-Image 快速出图",
@@ -243,7 +278,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i-z-image.json",
     "thumbnail": "DGX Spark/t2i-z-image.png",
-    "sort_order": 12
+    "sort_order": 13
   },
   "t2i_Qwen_Image_2512_4steps.json": {
     "name": "千问(2512) 4步出图",
@@ -255,7 +290,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_Qwen_Image_2512_4steps.json",
     "thumbnail": "DGX Spark/t2i_Qwen_Image_2512_4steps.jpg",
-    "sort_order": 13
+    "sort_order": 14
   },
   "t2i_flux2_dev_q5km.json": {
     "name": "Flux2 Dev Q5_K_M 文生图",
@@ -269,7 +304,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_flux2_dev_q5km.json",
     "thumbnail": "DGX Spark/t2i_flux2_dev_turbo_q4km.webp",
-    "sort_order": 19
+    "sort_order": 21
   },
   "t2i_flux2_dev_q6k.json": {
     "name": "Flux2 Dev Q6_K 文生图",
@@ -283,7 +318,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_flux2_dev_q6k.json",
     "thumbnail": "DGX Spark/t2i_flux2_dev_turbo_q4km.webp",
-    "sort_order": 20
+    "sort_order": 22
   },
   "t2i_flux2_dev_turbo_q4km.json": {
     "name": "[实验] Flux2 Dev Turbo Q4 高质量",
@@ -292,11 +327,11 @@
       "Flux2"
     ],
     "owner_id": "1ec621fd",
-    "shared": true,
+    "shared": false,
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_flux2_dev_turbo_q4km.json",
     "thumbnail": "DGX Spark/t2i_flux2_dev_turbo_q4km.webp",
-    "sort_order": 15
+    "sort_order": 17
   },
   "t2i_flux2_klein.json": {
     "name": "Flux2 Klein 9B 快速版",
@@ -309,7 +344,7 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_flux2_klein.json",
     "thumbnail": "DGX Spark/t2i_flux2_klein.webp",
-    "sort_order": 14
+    "sort_order": 16
   },
   "t2i_nunchaku_seedvr4k.json": {
     "name": "Nunchaku + SeedVR2 4K",
@@ -322,10 +357,22 @@
     "source": "DGX Spark",
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2i_nunchaku_seedvr4k.json",
     "thumbnail": "DGX Spark/t2i_nunchaku_seedvr4k.png",
-    "sort_order": 17
+    "sort_order": 19
+  },
+  "t2i_z_image_AIO_8step.json": {
+    "name": "Z-Image AIO",
+    "tags": [
+      "文生图"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "ez-comfy",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/ez-comfy/t2i_z_image_AIO_8step.json",
+    "thumbnail": "ez-comfy/t2i_z_image_AIO_8step.jpeg",
+    "sort_order": 8
   },
   "t2v_sulphur2_q4.json": {
-    "name": "LTX 2.3 文/图生视频（纹身/无音频）",
+    "name": "LTX 2.3 文生视频（无音频）",
     "tags": [
       "文生视频",
       "图生视频",
@@ -334,6 +381,22 @@
     "owner_id": "1ec621fd",
     "shared": false,
     "source": "DGX Spark",
-    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2v_sulphur2_q4.json"
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/t2v_sulphur2_q4.json",
+    "sort_order": 28
+  },
+  "z-image_loras.json": {
+    "name": "z-image_loras",
+    "tags": [
+      "文生图",
+      "2K",
+      "LoRA",
+      "Z-Image"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": false,
+    "source": "DGX Spark",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/z-image_loras.json",
+    "thumbnail": "DGX Spark/z-image_loras.png",
+    "sort_order": 15
   }
 }

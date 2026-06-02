@@ -56,6 +56,23 @@
       "title": "条件零化"
     }
   },
+  "910": {
+    "inputs": {
+      "horizontal_angle": 0,
+      "vertical_angle": 0,
+      "zoom": 5,
+      "default_prompts": true,
+      "camera_view": false,
+      "image": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "QwenMultiangleCameraNode",
+    "_meta": {
+      "title": "Qwen Multiangle Camera"
+    }
+  },
   "115:38": {
     "inputs": {
       "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
@@ -142,10 +159,10 @@
   "115:3": {
     "inputs": {
       "seed": 21948240408338,
-      "steps": 8,
+      "steps": 4,
       "cfg": 1,
-      "sampler_name": "euler",
-      "scheduler": "simple",
+      "sampler_name": "euler_ancestral",
+      "scheduler": "beta",
       "denoise": 1,
       "model": [
         "115:75",

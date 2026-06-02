@@ -22,12 +22,17 @@
   var _historyLoadingMore = false;
   var _historyScope = '';
   var _atomicDeleteRenderBlockUntil = 0;
+  var _deletedHistoryIds = {};
+  var _historyDetailPromises = {};
+  var _historyDetailCache = {};
+  var _historyDetailOrder = [];
   var lbIdx = -1;
   var lbItems = [];
   var _galleryFilters = { owner: 'all', type: '', style: '' };
   var _renderTimer = null;
   var _lbLoadToken = 0;
   var _lbCurrentItem = null;
+  var _lbVideoEditorActive = false;
   var _lbFavorites = {};
   var _lbCompareState = {
     generatedSrc: '',
@@ -35,6 +40,9 @@
     showingOriginal: false,
   };
   var HISTORY_PAGE_SIZE = 80;
+  var HISTORY_WINDOW_MAX_ITEMS = HISTORY_PAGE_SIZE * 4;
+  var HISTORY_DETAIL_CACHE_LIMIT = 24;
+  var HISTORY_DELETE_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
 
   function _currentHistoryScope() {
     var user = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
@@ -49,6 +57,8 @@
         item && item.filename || '',
         item && item.thumb || '',
         item && item.is_public ? '1' : '0',
+        item && item.is_hidden ? '1' : '0',
+        item && item.hidden_at || '',
         item && item.deleted_at || '',
         item && item.protection_status || '',
         item && item.protection_score || '',
@@ -60,12 +70,109 @@
     return parts.join('|');
   }
 
+  function _pruneDeletedHistoryIds(now) {
+    now = now || Date.now();
+    Object.keys(_deletedHistoryIds).forEach(function(id) {
+      if (!_deletedHistoryIds[id] || now - _deletedHistoryIds[id] > HISTORY_DELETE_TOMBSTONE_TTL_MS) {
+        delete _deletedHistoryIds[id];
+      }
+    });
+  }
+
+  function _markHistoryIdsDeleted(ids) {
+    var now = Date.now();
+    (ids || []).forEach(function(id) {
+      id = String(id || '');
+      if (id) _deletedHistoryIds[id] = now;
+    });
+  }
+
+  function _unmarkHistoryIdsDeleted(ids) {
+    (ids || []).forEach(function(id) {
+      delete _deletedHistoryIds[String(id || '')];
+    });
+  }
+
+  function _isHistoryIdLocallyDeleted(id) {
+    _pruneDeletedHistoryIds();
+    return !!_deletedHistoryIds[String(id || '')];
+  }
+
+  function _filterDeletedHistoryItems(items) {
+    _pruneDeletedHistoryIds();
+    return (items || []).filter(function(item) {
+      var id = String(item && item.id || '');
+      return !id || !_deletedHistoryIds[id];
+    });
+  }
+
+  function _historyTotalAfterTombstones(total) {
+    _pruneDeletedHistoryIds();
+    return Math.max(0, (Number(total || 0) || 0) - Object.keys(_deletedHistoryIds).length);
+  }
+
+  function _historyPromptPreview(text, maxLen) {
+    text = String(text || '').trim();
+    maxLen = maxLen || 320;
+    return text.length > maxLen ? text.slice(0, maxLen).trim() + '...' : text;
+  }
+
+  function _compactHistoryRecord(item) {
+    if (!item) return item;
+    var record = Object.assign({}, item);
+    if (!record.prompt_preview && record.prompt) record.prompt_preview = _historyPromptPreview(record.prompt);
+    record.prompt = '';
+    delete record.field_values;
+    record.__compact = true;
+    return record;
+  }
+
+  function _touchHistoryDetailCache(id) {
+    id = String(id || '');
+    if (!id) return;
+    _historyDetailOrder = _historyDetailOrder.filter(function(existing) { return existing !== id; });
+    _historyDetailOrder.unshift(id);
+    while (_historyDetailOrder.length > HISTORY_DETAIL_CACHE_LIMIT) {
+      var evicted = _historyDetailOrder.pop();
+      delete _historyDetailCache[evicted];
+    }
+  }
+
+  function _cacheHistoryDetail(detail) {
+    if (!detail || !detail.id) return detail;
+    var id = String(detail.id || '');
+    var cached = Object.assign({}, detail);
+    delete cached.__compact;
+    _historyDetailCache[id] = cached;
+    _touchHistoryDetailCache(id);
+    return cached;
+  }
+
+  function _cachedHistoryDetail(id) {
+    id = String(id || '');
+    var cached = id ? _historyDetailCache[id] : null;
+    if (cached) _touchHistoryDetailCache(id);
+    return cached || null;
+  }
+
+  function _removeOptimisticHistoryIds(ids) {
+    (ids || []).forEach(function(id) {
+      delete _optimisticHistoryById[String(id || '')];
+      delete _historyDetailCache[String(id || '')];
+      _historyDetailOrder = _historyDetailOrder.filter(function(cachedId) { return cachedId !== String(id || ''); });
+    });
+  }
+
+  function _encodeMediaPath(filename) {
+    return String(filename || '').split('/').map(encodeURIComponent).join('/');
+  }
+
   function _lightboxImageUrl(filename) {
-    return `${API}/api/images/${filename}`;
+    return `${API}/api/images/${_encodeMediaPath(filename)}`;
   }
 
   function _lightboxInputImageUrl(filename) {
-    return `${API}/api/input-image/${filename}`;
+    return `${API}/api/input-image/${_encodeMediaPath(filename)}`;
   }
 
   function _mediaType(itemOrType, filename) {
@@ -97,6 +204,46 @@
       throw new Error(`${label}失败`);
     }
     return data;
+  }
+
+  function _mergeHistoryDetail(detail) {
+    if (!detail || !detail.id) return detail;
+    var fullDetail = _cacheHistoryDetail(detail);
+    var id = String(detail.id || '');
+    var compact = _compactHistoryRecord(fullDetail);
+    [historyItems, _filteredHistory, lbItems].forEach(function(list) {
+      (list || []).forEach(function(item) {
+        if (String(item && item.id || '') === id) {
+          Object.assign(item, compact);
+        }
+      });
+    });
+    if (_lbCurrentItem && String(_lbCurrentItem.id || '') === id) {
+      _lbCurrentItem = Object.assign({}, fullDetail);
+    }
+    _lastGalleryHash = '';
+    return fullDetail;
+  }
+
+  async function getHistoryDetail(itemOrId) {
+    var item = typeof itemOrId === 'object' ? itemOrId : null;
+    var id = String((item && item.id) || itemOrId || '');
+    if (!id) return item;
+    var cached = _cachedHistoryDetail(id);
+    if (cached) return _mergeHistoryDetail(cached);
+    if (item && !item.__compact && item.field_values) return _mergeHistoryDetail(item);
+    if (_historyDetailPromises[id]) return _historyDetailPromises[id];
+    _historyDetailPromises[id] = (async function() {
+      var authHeaders = window.CW && CW.auth && CW.auth.getAuthHeaders ? CW.auth.getAuthHeaders() : {};
+      var r = await fetch(`${API}/api/history/${encodeURIComponent(id)}`, { headers: Object.assign({}, authHeaders) });
+      var d = await _historyJsonOrThrow(r, '加载复刻信息');
+      return _mergeHistoryDetail(d.data || {});
+    })();
+    try {
+      return await _historyDetailPromises[id];
+    } finally {
+      delete _historyDetailPromises[id];
+    }
   }
 
   function _syncLightboxDownload(filename) {
@@ -187,8 +334,14 @@
 	    var favBtn = $('#lbFavoriteBtn');
 	    var shareBtn = $('#lbShareBtn');
 	    var deleteBtn = $('#lbDeleteBtn');
+	    var hideBtn = $('#lbHideBtn');
+	    var videoEditBtn = $('#lbVideoEditBtn');
+	    var imageExportMenu = $('#lbImageExportMenu');
+	    var imageShareHomeBtn = $('#lbImageShareHomeBtn');
 	    var actionState = _historyActionState(item);
 	    var isFav = !!(actionState && actionState.isFavorited);
+	    var isHidden = !!(item && item.is_hidden);
+	    if (!item) _hideLBImageExportMenu();
 	    if (favBtn) {
 	      favBtn.style.display = actionState.canFavorite ? '' : 'none';
       favBtn.classList.toggle('is-active', isFav);
@@ -201,7 +354,15 @@
       shareBtn.classList.toggle('is-shared', !!(item && item.is_public));
       shareBtn.disabled = !actionState.canShare;
 	      shareBtn.classList.toggle('is-disabled', !actionState.canShare);
-	      shareBtn.title = item && item.is_public ? '取消分享' : '快速分享';
+	      shareBtn.title = '导出';
+	      shareBtn.setAttribute('aria-label', '导出');
+	      shareBtn.setAttribute('aria-expanded', imageExportMenu && !imageExportMenu.hidden ? 'true' : 'false');
+	    }
+	    if (imageShareHomeBtn) {
+	      var shared = !!(item && item.is_public);
+	      imageShareHomeBtn.classList.toggle('is-shared', shared);
+	      imageShareHomeBtn.title = shared ? '取消首页分享' : '分享到首页列表';
+	      imageShareHomeBtn.setAttribute('aria-label', shared ? '取消首页分享' : '分享到首页列表');
 	    }
 	    if (deleteBtn) {
 	      var canDelete = !!(item && item.id && actionState.canDelete);
@@ -210,6 +371,24 @@
 	      deleteBtn.classList.toggle('is-disabled', !canDelete);
 	      deleteBtn.dataset.historyId = canDelete ? String(item.id) : '';
 	      deleteBtn.title = canDelete ? '删除' : '';
+	    }
+	    if (hideBtn) {
+	      var canHide = !!(item && item.id && actionState.canHide);
+	      var hideIcon = hideBtn.querySelector('use');
+	      hideBtn.style.display = canHide ? '' : 'none';
+	      hideBtn.disabled = !canHide;
+	      hideBtn.classList.toggle('is-disabled', !canHide);
+	      hideBtn.classList.toggle('is-active', isHidden);
+	      hideBtn.dataset.historyId = canHide ? String(item.id) : '';
+	      hideBtn.title = isHidden ? '取消隐藏' : '隐藏';
+	      hideBtn.setAttribute('aria-label', isHidden ? '取消隐藏' : '隐藏');
+	      if (hideIcon) hideIcon.setAttribute('href', isHidden ? '#icon-eye-off' : '#icon-eye');
+	    }
+	    if (videoEditBtn) {
+	      var canEditVideo = !!(item && item.id && _isVideoItem(item));
+	      videoEditBtn.style.display = canEditVideo ? '' : 'none';
+	      videoEditBtn.disabled = !canEditVideo;
+	      videoEditBtn.classList.toggle('is-disabled', !canEditVideo);
 	    }
 	  }
 
@@ -235,6 +414,7 @@
       hasUser: false,
       canFavorite: false,
       canShare: false,
+      canHide: false,
       canDelete: false,
       isFavorited: false
     };
@@ -248,6 +428,7 @@
     if (!id || !(window.CW && CW.auth && typeof CW.auth.toggleHistoryFavorite === 'function')) return '';
     return '<button class="gi-fav-btn' + (isFav ? ' is-active' : '') + '" type="button" title="' + (isFav ? '取消收藏' : '收藏') + '" aria-label="' + (isFav ? '取消收藏' : '收藏') + '" onclick="event.stopPropagation();CW.auth.toggleHistoryFavorite(\'' + escA(id) + '\')"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.2 10.7 20C5.8 15.6 2.5 12.6 2.5 8.8 2.5 5.8 4.8 3.5 7.8 3.5c1.7 0 3.3.8 4.2 2.1.9-1.3 2.5-2.1 4.2-2.1 3 0 5.3 2.3 5.3 5.3 0 3.8-3.3 6.8-8.2 11.2L12 21.2Z"/></svg></button>';
   }
+
 function _attachSentinel() {
     const sentinel = document.getElementById('masonrySentinel');
     if (!sentinel) return;
@@ -409,13 +590,31 @@ function _attachSentinel() {
     // Timer
     const timerEl = card.querySelector('.gi-timer');
     if (_jobShowsTimer(job)) {
-      if (timerEl) {
-        const timerTs = _jobTimerTs(job);
-        timerEl.dataset.ts = timerTs;
-        timerEl.dataset.estimateLabel = job.estimated_duration_label || timerEl.dataset.estimateLabel || '';
-        timerEl.textContent = window.CW.formatJobElapsedWithEstimate
-          ? window.CW.formatJobElapsedWithEstimate(timerTs, timerEl.dataset.estimateLabel)
-          : window.CW.formatElapsed(timerTs);
+      const timerTs = _jobTimerTs(job);
+      if (timerTs) {
+        let liveTimerEl = timerEl;
+        if (!liveTimerEl) {
+          const imgBox = card.querySelector('.gi-img');
+          if (imgBox) {
+            const tpl = document.createElement('template');
+            tpl.innerHTML = _jobTimerHtml(job);
+            const timerRowNew = tpl.content.firstElementChild;
+            const statusText = imgBox.querySelector('.job-status-text');
+            if (timerRowNew) {
+              if (statusText && statusText.nextSibling) imgBox.insertBefore(timerRowNew, statusText.nextSibling);
+              else if (statusText) imgBox.appendChild(timerRowNew);
+              else imgBox.insertBefore(timerRowNew, imgBox.querySelector('.gi-del'));
+              liveTimerEl = card.querySelector('.gi-timer');
+            }
+          }
+        }
+        if (liveTimerEl) {
+          liveTimerEl.dataset.ts = timerTs;
+          liveTimerEl.dataset.estimateLabel = job.estimated_duration_label || liveTimerEl.dataset.estimateLabel || '';
+          liveTimerEl.textContent = window.CW.formatJobElapsedWithEstimate
+            ? window.CW.formatJobElapsedWithEstimate(timerTs, liveTimerEl.dataset.estimateLabel)
+            : window.CW.formatElapsed(timerTs);
+        }
       }
     } else if (timerEl) {
       const timerRow = timerEl.closest ? timerEl.closest('.gi-timer-row') : null;
@@ -887,6 +1086,25 @@ function _clearHistoryDeleteFocus() {
       removed += 1;
     });
     return removed;
+  }
+
+  function _reorderVisibleHistoryCardsFromData() {
+    var gallery = $('#gallery');
+    if (!gallery) return;
+    var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
+    var displayArr = _groupHistoryForGallery(filteredArr);
+    var visibleItems = displayArr.slice(0, Math.min(_histVisibleCount, displayArr.length));
+    var cursor = Array.prototype.slice.call(gallery.children).find(function(child) {
+      return !(child && child.hasAttribute && child.hasAttribute('data-job-id'));
+    }) || null;
+    visibleItems.forEach(function(entry) {
+      var entryKey = _galleryEntryKey(entry);
+      var card = gallery.querySelector('.gi[data-hist-id="' + _cssAttrEscape(entryKey) + '"]');
+      if (!card) return;
+      if (card !== cursor) gallery.insertBefore(card, cursor);
+      cursor = card.nextSibling;
+    });
+    _lastRenderedHistCount = gallery.querySelectorAll('.gi[data-hist-id]').length;
   }
 
   function _syncHistoryCountText(filteredArr) {
@@ -1387,16 +1605,20 @@ function setHistoryTypeFilter(value) {
           });
         })
       : [_historyRecordFromJob(job)];
+    jobRecords.forEach(function(item) {
+      _cacheHistoryDetail(item);
+    });
+    var displayRecords = jobRecords.map(_compactHistoryRecord);
     var ids = new Set(jobRecords.map(function(item) { return String(item && item.id || ''); }));
     for (var i = historyItems.length - 1; i >= 0; i--) {
       if (ids.has(String(historyItems[i] && historyItems[i].id || ''))) historyItems.splice(i, 1);
     }
-    jobRecords.forEach(function(item) {
+    displayRecords.forEach(function(item) {
       _optimisticHistoryById[item.id] = item;
     });
-    _pinHistoryId(jobRecords[0].id);
-    for (var r = jobRecords.length - 1; r >= 0; r--) {
-      historyItems.unshift(jobRecords[r]);
+    _pinHistoryId(displayRecords[0].id);
+    for (var r = displayRecords.length - 1; r >= 0; r--) {
+      historyItems.unshift(displayRecords[r]);
     }
     historyItems.splice(0, historyItems.length, ..._applyPinnedHistoryOrder(_sortHistoryItems(historyItems)));
     _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
@@ -1644,6 +1866,18 @@ function _ensureInitialBatch() {
 function _batchSize() {
     return _getColumnCount() * 2;
   }
+function _maxRetainedHistoryVisibleCount() {
+    return Math.max(HISTORY_PAGE_SIZE, _batchSize() * 4);
+  }
+function _historyRefreshWindowLimit() {
+    return Math.max(HISTORY_PAGE_SIZE, Math.min(HISTORY_WINDOW_MAX_ITEMS, _maxRetainedHistoryVisibleCount()));
+  }
+function _clampHistoryVisibleCount(count, total) {
+    var safeTotal = Math.max(0, Number(total || 0) || 0);
+    if (!safeTotal) return 0;
+    var safeCount = Math.max(0, Number(count || 0) || 0);
+    return Math.min(safeCount, safeTotal, _maxRetainedHistoryVisibleCount());
+  }
 function _getColumnCount() {
     const gallery = $('#gallery');
     if (!gallery) return 3;
@@ -1667,12 +1901,14 @@ function lbNav(dir) {
   function _resetLightboxVideo() {
     var video = $('#lbVideo');
     var stage = $('#lbStage');
+    _hideLightboxVideoEditor();
     if (!video) return;
     try { video.pause(); } catch (e) {}
     if (stage) stage.classList.remove('lb-video-playing');
     video.classList.remove('lb-video-visible');
     video.onloadedmetadata = null;
     video.onloadeddata = null;
+    video.ontimeupdate = null;
     video.onplay = null;
     video.onpause = null;
     video.onended = null;
@@ -1682,6 +1918,449 @@ function lbNav(dir) {
     video.removeAttribute('src');
     video.removeAttribute('poster');
     try { video.load(); } catch (e) {}
+  }
+
+  function _videoEditorElements() {
+    return {
+      root: $('#lbVideoEditor'),
+      timeline: $('#lbVideoTimeline'),
+      time: $('#lbVideoTime'),
+      ticks: $('#lbVideoTicks'),
+      exportBtn: $('#lbVideoExportBtn'),
+      exportMenu: $('#lbVideoExportMenu'),
+    };
+  }
+
+  function _imageExportElements() {
+    return {
+      btn: $('#lbShareBtn'),
+      menu: $('#lbImageExportMenu'),
+      shareHomeBtn: $('#lbImageShareHomeBtn'),
+    };
+  }
+
+  function _inferVideoFps(item) {
+    if (!item) return 24;
+    var direct = Number(item.fps || item.frame_rate || item.frameRate || 0);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    var fields = item.field_values || item.fields || {};
+    var preferred = [
+      '320:300::value',
+      'frame_rate',
+      'fps',
+      'rate',
+    ];
+    for (var i = 0; i < preferred.length; i += 1) {
+      var exact = Number(fields[preferred[i]] || 0);
+      if (Number.isFinite(exact) && exact > 0 && exact <= 240) return exact;
+    }
+    for (var key in fields) {
+      if (!Object.prototype.hasOwnProperty.call(fields, key)) continue;
+      var lower = String(key || '').toLowerCase();
+      if (!(lower.indexOf('frame') >= 0 || lower.indexOf('fps') >= 0)) continue;
+      var value = Number(fields[key] || 0);
+      if (Number.isFinite(value) && value > 0 && value <= 240) return value;
+    }
+    return 24;
+  }
+
+  function _formatVideoTime(sec) {
+    var value = Number(sec || 0);
+    if (!Number.isFinite(value)) value = 0;
+    return value.toFixed(2) + 's';
+  }
+
+  function _formatVideoTimeFrame(sec, fps) {
+    var value = Number(sec || 0);
+    var rate = Number(fps || 24);
+    if (!Number.isFinite(value)) value = 0;
+    if (!Number.isFinite(rate) || rate <= 0) rate = 24;
+    return value.toFixed(2) + 's / f' + String(Math.round(value * rate)).padStart(3, '0');
+  }
+
+  function _hideLightboxVideoEditor() {
+    _lbVideoEditorActive = false;
+    var els = _videoEditorElements();
+    if (els.root) els.root.hidden = true;
+    if (els.exportMenu) els.exportMenu.hidden = true;
+    if (els.exportBtn) els.exportBtn.setAttribute('aria-expanded', 'false');
+    var overlay = $('#lightbox');
+    if (overlay) overlay.classList.remove('lb-has-video-editor', 'lb-video-editing');
+  }
+
+  function _hideLBImageExportMenu() {
+    var els = _imageExportElements();
+    if (els.menu) els.menu.hidden = true;
+    if (els.btn) els.btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function _hideLBVideoExportMenu() {
+    var els = _videoEditorElements();
+    if (els.exportMenu) els.exportMenu.hidden = true;
+    if (els.exportBtn) els.exportBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleLBImageExportMenu(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    var els = _imageExportElements();
+    if (!els.menu || !els.btn) return;
+    if (!_historyActionState(_lbCurrentItem).canShare) return;
+    var nextOpen = !!els.menu.hidden;
+    _hideLBVideoExportMenu();
+    els.menu.hidden = !nextOpen;
+    els.btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  }
+
+  function toggleLBVideoExportMenu(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    var els = _videoEditorElements();
+    if (!els.exportMenu || !els.exportBtn) return;
+    var nextOpen = !!els.exportMenu.hidden;
+    _hideLBImageExportMenu();
+    els.exportMenu.hidden = !nextOpen;
+    els.exportBtn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  }
+
+  function _renderLightboxVideoTicks(duration, fps) {
+    var els = _videoEditorElements();
+    if (!els.ticks) return;
+    var total = Number(duration || 0);
+    if (!Number.isFinite(total) || total <= 0) {
+      els.ticks.innerHTML = '';
+      return;
+    }
+    var count = Math.min(7, Math.max(3, Math.floor(total) + 1));
+    var labels = [];
+    for (var i = 0; i < count; i += 1) {
+      var t = count === 1 ? 0 : (total * i / (count - 1));
+      var pct = count === 1 ? 0 : (100 * i / (count - 1));
+      labels.push('<span class="lb-video-tick" style="left:' + pct.toFixed(4) + '%">' + escH(_formatVideoTimeFrame(t, fps)) + '</span>');
+    }
+    els.ticks.innerHTML = labels.join('');
+  }
+
+  function _lastLightboxVideoFrameTime(duration, fps) {
+    var total = Number(duration || 0);
+    if (!Number.isFinite(total) || total <= 0) return 0;
+    var rate = Math.max(1, Number(fps || 24) || 24);
+    var margin = Math.max(1 / rate, 0.04);
+    margin = Math.min(margin, total / 2);
+    return Math.max(0, total - margin);
+  }
+
+  function _syncLightboxVideoTimeline() {
+    var video = $('#lbVideo');
+    var els = _videoEditorElements();
+    if (!video || !els.root || !els.timeline) return;
+    var duration = Number(video.duration || 0);
+    var current = Number(video.currentTime || 0);
+    var fps = _inferVideoFps(_lbCurrentItem);
+    if (Number.isFinite(duration) && duration > 0) {
+      els.timeline.max = String(_lastLightboxVideoFrameTime(duration, fps));
+      els.timeline.step = String(1 / Math.max(1, fps));
+      els.timeline.dataset.fps = String(fps);
+      _renderLightboxVideoTicks(duration, fps);
+    }
+    if (Number.isFinite(current)) {
+      var safeCurrent = Math.max(0, Math.min(current, Number(els.timeline.max || duration || current || 0)));
+      els.timeline.value = String(safeCurrent);
+      if (els.time) els.time.textContent = _formatVideoTimeFrame(safeCurrent, fps);
+    }
+  }
+
+  function _ensureLightboxVideoEditorBound() {
+    var els = _videoEditorElements();
+    if (!els.root || !els.timeline || els.root.dataset.bound === '1') return;
+    els.root.dataset.bound = '1';
+    [
+      'click',
+      'dblclick',
+      'mousedown',
+      'mouseup',
+      'mousemove',
+      'pointerdown',
+      'pointermove',
+      'pointerup',
+      'touchstart',
+      'touchmove',
+      'touchend',
+      'wheel',
+    ].forEach(function(eventName) {
+      els.root.addEventListener(eventName, function(ev) {
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+      }, { passive: true });
+    });
+    els.timeline.addEventListener('input', function() {
+      var video = $('#lbVideo');
+      if (!video) return;
+      var value = Number(els.timeline.value || 0);
+      if (!Number.isFinite(value)) value = 0;
+      var maxTime = Number(els.timeline.max || 0);
+      if (Number.isFinite(maxTime) && maxTime > 0) value = Math.min(value, maxTime);
+      els.timeline.value = String(Math.max(0, value));
+      _lbVideoEditorActive = true;
+      try { video.pause(); } catch (e) {}
+      try { video.currentTime = value; } catch (e) {}
+      window.setTimeout(function() {
+        try { video.pause(); } catch (e) {}
+      }, 80);
+      if (els.time) els.time.textContent = _formatVideoTimeFrame(value, Number(els.timeline.dataset.fps || 24));
+    });
+    els.timeline.addEventListener('change', function() {
+      var video = $('#lbVideo');
+      if (!video) return;
+      try { video.pause(); } catch (e) {}
+    });
+  }
+
+  function _prepareLightboxVideoEditor(item) {
+    var video = $('#lbVideo');
+    var els = _videoEditorElements();
+    if (!video || !els.root || !els.timeline || !item || !item.id) {
+      _hideLightboxVideoEditor();
+      return;
+    }
+    _ensureLightboxVideoEditorBound();
+    var duration = Number(video.duration || 0);
+    var fps = _inferVideoFps(item);
+    els.timeline.min = '0';
+    els.timeline.max = Number.isFinite(duration) && duration > 0 ? String(_lastLightboxVideoFrameTime(duration, fps)) : '0';
+    els.timeline.step = String(1 / Math.max(1, fps));
+    els.timeline.dataset.fps = String(fps);
+    _renderLightboxVideoTicks(duration, fps);
+    _syncLightboxVideoTimeline();
+  }
+
+  function enableLBVideoEditor(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!_lbCurrentItem || !_isVideoItem(_lbCurrentItem)) return;
+    var video = $('#lbVideo');
+    var els = _videoEditorElements();
+    if (!video || !els.root) return;
+    _lbVideoEditorActive = true;
+    _prepareLightboxVideoEditor(_lbCurrentItem);
+    els.root.hidden = false;
+    var overlay = $('#lightbox');
+    if (overlay) overlay.classList.add('lb-has-video-editor', 'lb-video-editing');
+    video.controls = false;
+    try { video.pause(); } catch (err) {}
+    _syncLightboxVideoTimeline();
+  }
+
+  function _currentLightboxVideoTime() {
+    var video = $('#lbVideo');
+    var slider = $('#lbVideoTimeline');
+    var value = video && Number.isFinite(Number(video.currentTime)) ? Number(video.currentTime) : Number(slider && slider.value || 0);
+    if (!Number.isFinite(value)) value = 0;
+    var fps = _inferVideoFps(_lbCurrentItem);
+    var duration = Number(video && video.duration || 0);
+    var maxTime = Number.isFinite(duration) && duration > 0
+      ? _lastLightboxVideoFrameTime(duration, fps)
+      : Number(slider && slider.max || 0);
+    return Math.max(0, maxTime > 0 ? Math.min(value, maxTime) : value);
+  }
+
+  async function _requestLightboxVideoFrame(opts) {
+    opts = opts || {};
+    if (!_lbCurrentItem || !_lbCurrentItem.id || !_isVideoItem(_lbCurrentItem)) {
+      throw new Error('当前视频暂不支持帧操作');
+    }
+    var headers = { 'Content-Type': 'application/json' };
+    if (window.CW && CW.auth && typeof CW.auth.getAuthHeaders === 'function') {
+      headers = Object.assign(headers, CW.auth.getAuthHeaders());
+    }
+    var resp = await fetch(API + '/api/history/' + encodeURIComponent(_lbCurrentItem.id) + '/video-frame', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        time: _currentLightboxVideoTime(),
+        set_cover: !!opts.setCover,
+        import_input: !!opts.importInput,
+      }),
+    });
+    var data = await resp.json().catch(function() { return {}; });
+    if (!resp.ok || !data || !data.ok) {
+      throw new Error((data && data.detail) || '视频帧处理失败');
+    }
+    return data;
+  }
+
+  function _syncHistoryItemFrameThumb(itemId, thumb, protection) {
+    if (!itemId || !thumb) return;
+    protection = protection || {};
+    [historyItems, _filteredHistory].forEach(function(list) {
+      (list || []).forEach(function(item) {
+        if (item && String(item.id || '') === String(itemId)) {
+          item.thumb = thumb;
+          if (protection.protection_status) {
+            item.protection_status = protection.protection_status;
+            item.protection_score = protection.protection_score || 0;
+            item.protection_reason = protection.protection_reason || '';
+            item.protection_source = protection.protection_source || '';
+            item.protection_checked_at = protection.protection_checked_at || '';
+          }
+        }
+      });
+    });
+    if (_lbCurrentItem && String(_lbCurrentItem.id || '') === String(itemId)) {
+      _lbCurrentItem.thumb = thumb;
+      if (protection.protection_status) {
+        _lbCurrentItem.protection_status = protection.protection_status;
+        _lbCurrentItem.protection_score = protection.protection_score || 0;
+        _lbCurrentItem.protection_reason = protection.protection_reason || '';
+        _lbCurrentItem.protection_source = protection.protection_source || '';
+        _lbCurrentItem.protection_checked_at = protection.protection_checked_at || '';
+      }
+    }
+    _lastGalleryHash = '';
+    renderGallery();
+  }
+
+  async function setLBVideoCover(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    _hideLBVideoExportMenu();
+    var btn = e && e.currentTarget ? e.currentTarget : $('#lbVideoCoverBtn');
+    if (btn) btn.disabled = true;
+    try {
+      var data = await _requestLightboxVideoFrame({ setCover: true });
+      var thumb = data.thumb || data.frame || '';
+      _syncHistoryItemFrameThumb(_lbCurrentItem && _lbCurrentItem.id, thumb, data);
+      var video = $('#lbVideo');
+      if (video && thumb) video.poster = API + '/api/thumbs/' + thumb;
+      if (window.CW && CW.toast) CW.toast('已设为卡片封面', 'done');
+    } catch (err) {
+      if (window.CW && CW.toast) CW.toast(err && err.message ? err.message : '设置封面失败', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function _workflowTypeForName(name) {
+    var meta = (A._wfMeta || {})[name] || {};
+    var tag = window.CW && CW.wfTag ? CW.wfTag(name, meta.tags || []) : null;
+    return tag && tag.text ? tag.text : ((meta.tags || [])[0] || '');
+  }
+
+  function _workflowMatchesImportType(name, typeText) {
+    var text = _workflowTypeForName(name);
+    var meta = (A._wfMeta || {})[name] || {};
+    var tags = meta.tags || [];
+    if (text === typeText || tags.indexOf(typeText) >= 0) return true;
+    if (typeText === '视频制作') {
+      return text === '图生视频' || tags.indexOf('图生视频') >= 0 || /(^i2v|[-_]i2v)/i.test(name || '');
+    }
+    if (typeText === '图生视频') {
+      return text === '视频制作' || tags.indexOf('视频制作') >= 0 || /(^i2v|[-_]i2v)/i.test(name || '');
+    }
+    return false;
+  }
+
+  function _findWorkflowByType(typeText) {
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.wf-card[data-name]'));
+    var names = cards.map(function(card) { return card.dataset.name || ''; }).filter(Boolean);
+    if (!names.length) names = Object.keys(A._wfMeta || {});
+    var exact = names.find(function(name) { return _workflowMatchesImportType(name, typeText); });
+    if (exact) return exact;
+    if (typeText === '放大') {
+      return names.find(function(name) {
+        var text = _workflowTypeForName(name);
+        var meta = (A._wfMeta || {})[name] || {};
+        return text === '放大' || /upscale|seedvr/i.test(name) || (meta.tags || []).indexOf('放大') >= 0;
+      }) || '';
+    }
+    return '';
+  }
+
+  function _setImportedReferenceImage(filename) {
+    var vInput = document.querySelector('#refImageValue');
+    var preview = document.querySelector('#refImagePreview');
+    var ph = document.querySelector('#refImagePlaceholder');
+    if (vInput) vInput.value = filename;
+    if (preview) {
+      preview.src = API + '/api/input-image/' + encodeURIComponent(filename);
+      preview.style.display = '';
+      preview.classList.remove('hidden');
+    }
+    if (ph) ph.style.display = 'none';
+    if (window.CW && typeof CW.syncQwenAngleReferencePreview === 'function') {
+      CW.syncQwenAngleReferencePreview();
+    }
+  }
+
+  function _lightboxImageImportName(filename) {
+    var parts = String(filename || '').split('/').filter(Boolean);
+    var name = parts.length ? parts[parts.length - 1] : 'lightbox-image.png';
+    return name || 'lightbox-image.png';
+  }
+
+  async function _requestLightboxImageInput() {
+    if (!_lbCurrentItem || !_lbCurrentItem.filename || _isVideoItem(_lbCurrentItem)) {
+      throw new Error('当前图片暂不支持导出');
+    }
+    var imageResp = await fetch(_lightboxImageUrl(_lbCurrentItem.filename), { credentials: 'same-origin' });
+    if (!imageResp.ok) throw new Error('图片读取失败');
+    var blob = await imageResp.blob();
+    if (!blob || !blob.size) throw new Error('图片内容为空');
+    var fd = new FormData();
+    fd.append('file', blob, _lightboxImageImportName(_lbCurrentItem.filename));
+    var uploadResp = (window.CW && window.CW.auth && typeof window.CW.auth.apiFetch === 'function')
+      ? await window.CW.auth.apiFetch(API + '/api/upload-image', { method: 'POST', body: fd })
+      : await fetch(API + '/api/upload-image', { method: 'POST', body: fd });
+    var data = await uploadResp.json().catch(function() { return {}; });
+    if (!uploadResp.ok || !data || !data.ok || !data.filename) {
+      throw new Error((data && data.detail) || '图片导入失败');
+    }
+    return data;
+  }
+
+  async function importLBImage(typeText, e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    var btn = e && e.currentTarget ? e.currentTarget : null;
+    _hideLBImageExportMenu();
+    if (btn) btn.disabled = true;
+    try {
+      if (window.CW && typeof CW.loadWorkflows === 'function') await CW.loadWorkflows();
+      var target = _findWorkflowByType(typeText);
+      if (!target) throw new Error('没有找到可导入的' + typeText + '工作流');
+      var data = await _requestLightboxImageInput();
+      if (window.CW && typeof CW.selectWF === 'function') await CW.selectWF(target);
+      _setImportedReferenceImage(data.filename);
+      if (window.CW && CW.toast) CW.toast('已导入到 ' + typeText + ' 工作流', 'done');
+      closeLB();
+      var left = document.querySelector('.col-left');
+      if (left && left.scrollTo) left.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      if (window.CW && CW.toast) CW.toast(err && err.message ? err.message : '导入失败', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function importLBVideoFrame(typeText, e) {
+    if (e && e.preventDefault) e.preventDefault();
+    var btn = e && e.currentTarget ? e.currentTarget : null;
+    _hideLBVideoExportMenu();
+    if (btn) btn.disabled = true;
+    try {
+      if (window.CW && typeof CW.loadWorkflows === 'function') await CW.loadWorkflows();
+      var target = _findWorkflowByType(typeText);
+      if (!target) throw new Error('没有找到可导入的' + typeText + '工作流');
+      var data = await _requestLightboxVideoFrame({ importInput: true });
+      if (!data.input_filename) throw new Error('视频帧导入失败');
+      if (window.CW && typeof CW.selectWF === 'function') await CW.selectWF(target);
+      _setImportedReferenceImage(data.input_filename);
+      if (window.CW && CW.toast) CW.toast('已导入到 ' + typeText + ' 工作流', 'done');
+      closeLB();
+      var left = document.querySelector('.col-left');
+      if (left && left.scrollTo) left.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      if (window.CW && CW.toast) CW.toast(err && err.message ? err.message : '导入失败', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function _syncLightboxVideoPlayingState() {
@@ -2041,6 +2720,7 @@ function lbNav(dir) {
     if (mediaType === 'video') {
       var video = $('#lbVideo');
       var stageVideo = $('#lbStage');
+      _hideLightboxVideoEditor();
       _lbLoadToken += 1;
       _resetLightboxFullLayer();
       var lbImgVideo = $('#lbImg');
@@ -2061,16 +2741,20 @@ function lbNav(dir) {
         video.playsInline = true;
         video.onloadedmetadata = function () {
           _lockLightboxVideoSize(video);
+          _prepareLightboxVideoEditor(_lbCurrentItem);
           _positionLightboxActions();
         };
         video.onloadeddata = function () {
+          _prepareLightboxVideoEditor(_lbCurrentItem);
           _syncLightboxVideoPlayingState();
         };
+        video.ontimeupdate = _syncLightboxVideoTimeline;
         video.onplay = _syncLightboxVideoPlayingState;
         video.onpause = _syncLightboxVideoPlayingState;
         video.onended = _syncLightboxVideoPlayingState;
         video.onclick = function () {
           if (video.paused || video.ended) {
+            if (_lbVideoEditorActive) return;
             var clickPlay = video.play();
             if (clickPlay && clickPlay.catch) clickPlay.catch(function() { video.controls = true; });
           } else {
@@ -2084,7 +2768,10 @@ function lbNav(dir) {
         video.poster = previewSrc || '';
         video.src = fullSrc;
         video.classList.add('lb-video-visible');
-        if (video.readyState >= 1) _lockLightboxVideoSize(video);
+        if (video.readyState >= 1) {
+          _lockLightboxVideoSize(video);
+          _prepareLightboxVideoEditor(_lbCurrentItem);
+        }
         var playPromise = video.play();
         if (playPromise && playPromise.catch) {
           playPromise.catch(function () {
@@ -2139,7 +2826,7 @@ function renderLB(sourceEl) {
     _syncLightboxDownload(h.filename);
     _syncLightboxActions(h);
     _syncLightboxCompare(h);
-    $('#lbInfo').textContent = h.prompt || '—';
+    $('#lbInfo').textContent = h.prompt || h.prompt_preview || '—';
     $('#lbPrev').style.display = lbIdx > 0 ? '' : 'none';
     $('#lbNext').style.display = lbIdx < lbItems.length - 1 ? '' : 'none';
     _openLightbox({
@@ -2149,12 +2836,24 @@ function renderLB(sourceEl) {
       sourceEl: sourceEl,
       expectedSize: { width: h.width || 0, height: h.height || 0 },
     });
+    if (h && h.__compact && h.id) {
+      getHistoryDetail(h).then(function(detail) {
+        if (!_lbCurrentItem || String(_lbCurrentItem.id || '') !== String(h.id || '')) return;
+        _syncLightboxCompare(detail);
+        _syncLightboxActions(detail);
+        var info = $('#lbInfo');
+        if (info) info.textContent = detail.prompt || detail.prompt_preview || '—';
+      }).catch(function(err) {
+        console.warn('[renderLB] detail hydration failed:', err && err.message ? err.message : err);
+      });
+    }
   }
 
   function _cleanupClosedLightbox() {
     var overlay = $('#lightbox');
     var stage = $('#lbStage');
     var lbImg = $('#lbImg');
+    _hideLBImageExportMenu();
     if (stage) stage.classList.remove('is-live');
     if (stage) stage.classList.remove('is-video');
     if (lbImg) {
@@ -2310,17 +3009,125 @@ function openBatchLB(batchId, sourceEl) {
 	    }).catch(function() {});
 	  }
 
+  function toggleLBShareHome(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    _hideLBImageExportMenu();
+    toggleLBShare();
+  }
+
+  function _removeHiddenHistoryItem(id) {
+    var removed = false;
+    for (var idx = historyItems.length - 1; idx >= 0; idx -= 1) {
+      if (String(historyItems[idx] && historyItems[idx].id || '') !== String(id)) continue;
+      historyItems.splice(idx, 1);
+      removed = true;
+    }
+    if (!removed) return false;
+    _pinnedHistoryIds = _pinnedHistoryIds.filter(function(pinId) { return String(pinId) !== String(id); });
+    _historyTotal = Math.max(0, _historyTotal - 1);
+    _historyNextOffset = Math.max(0, _historyNextOffset - 1);
+    _historyLoadedAll = _historyNextOffset >= _historyTotal;
+    _historyDataSignature = _historySignature(historyItems, _historyTotal);
+    _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+    _lastGalleryHash = '';
+    return true;
+  }
+
+  async function toggleHistoryHidden(id, makeHidden) {
+    id = String(id || '');
+    if (!id) return false;
+    makeHidden = makeHidden !== false;
+    var item = historyItems.find(function(h) { return String(h && h.id || '') === id; }) || _lbCurrentItem;
+    if (item && !_historyActionState(item).canHide) {
+      if (window.CW && CW.toast) CW.toast('只能隐藏自己生成的内容，管理员可隐藏全部历史', 'info');
+      return false;
+    }
+    try {
+      var authHeaders = window.CW && CW.auth && CW.auth.getAuthHeaders ? CW.auth.getAuthHeaders() : {};
+      var r = await fetch(`${API}/api/history/${encodeURIComponent(id)}/hide`, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
+        body: JSON.stringify({ is_hidden: !!makeHidden }),
+      });
+      if (!r.ok) {
+        var err = {};
+        try { err = await r.json(); } catch (e) {}
+        throw new Error(err.detail || '隐藏失败');
+      }
+      var d = await r.json();
+      if (makeHidden) {
+        var wasLightboxCurrent = !!(_lbCurrentItem && String(_lbCurrentItem.id || '') === id);
+        var preservedLbItems = Array.isArray(lbItems) ? lbItems.slice() : [];
+        var hiddenAt = (d && d.hidden_at) || '';
+        for (var lbi = 0; lbi < preservedLbItems.length; lbi += 1) {
+          if (String(preservedLbItems[lbi] && preservedLbItems[lbi].id || '') === id) {
+            preservedLbItems[lbi] = Object.assign({}, preservedLbItems[lbi], { is_hidden: true, hidden_at: hiddenAt });
+          }
+        }
+        _removeHiddenHistoryItem(id);
+        renderGallery();
+        if (wasLightboxCurrent) {
+          lbItems = preservedLbItems;
+          if (window.__APP__) window.__APP__._lbItems = preservedLbItems;
+          _lbCurrentItem = Object.assign({}, _lbCurrentItem, { is_hidden: true, hidden_at: hiddenAt });
+          _syncLightboxActions(_lbCurrentItem);
+        }
+      } else {
+        historyItems.forEach(function(entry) {
+          if (String(entry && entry.id || '') === id) {
+            entry.is_hidden = false;
+            entry.hidden_at = '';
+            entry.hidden_by = '';
+          }
+        });
+        if (_lbCurrentItem && String(_lbCurrentItem.id || '') === id) {
+          _lbCurrentItem = Object.assign({}, _lbCurrentItem, { is_hidden: false, hidden_at: '', hidden_by: '' });
+          _syncLightboxActions(_lbCurrentItem);
+        }
+        _lastGalleryHash = '';
+        renderGallery();
+      }
+      if (window.CW && CW.toast) CW.toast(makeHidden ? '已隐藏，首页不再显示' : '已取消隐藏', 'done');
+      if (window.CW && typeof CW.loadWorkflows === 'function') {
+        Promise.resolve(CW.loadWorkflows()).catch(function(err) {
+          console.warn('refresh workflow previews after hide failed:', err && err.message ? err.message : err);
+        });
+      }
+      return !!(d && d.ok);
+    } catch (e) {
+      if (window.CW && CW.toast) CW.toast(e.message || '隐藏失败', 'error');
+      return false;
+    }
+  }
+
+  function toggleLBHidden(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!_lbCurrentItem || !_lbCurrentItem.id) return;
+    toggleHistoryHidden(_lbCurrentItem.id, !_lbCurrentItem.is_hidden);
+  }
+
 	  async function deleteCurrentLightboxItem(e) {
 	    if (e && e.preventDefault) e.preventDefault();
 	    if (e && e.stopPropagation) e.stopPropagation();
 	    var btn = $('#lbDeleteBtn');
 	    var id = btn && btn.dataset ? String(btn.dataset.historyId || '') : '';
 	    if (!id || !(_historyActionState(_lbCurrentItem).canDelete)) return;
-	    await delHist(id);
-	    var stillExists = historyItems.some(function(item) {
-	      return String(item && item.id || '') === id;
+	    var previousIndex = lbIdx;
+	    var result = await delHist(id);
+	    if (!(result && result.ok)) return;
+	    var deleted = new Set((result.deletedIds || [id]).map(function(deletedId) { return String(deletedId); }));
+	    lbItems = (Array.isArray(lbItems) ? lbItems : []).filter(function(item) {
+	      return !deleted.has(String(item && item.id || ''));
 	    });
-	    if (!stillExists) closeLB();
+	    if (window.__APP__) window.__APP__._lbItems = lbItems;
+	    if (!lbItems.length) {
+	      closeLB();
+	      return;
+	    }
+	    lbIdx = Math.min(Math.max(previousIndex, 0), lbItems.length - 1);
+	    renderLB();
 	  }
 
 async function delHist(id) {
@@ -2339,11 +3146,13 @@ async function delHist(id) {
       .filter(Boolean);
     if (!deleteIds.length) {
       if (window.CW && CW.toast) CW.toast('只能删除自己生成的内容，管理员可删除全部历史', 'info');
-      return;
+      return { ok: false, deletedIds: [] };
     }
     var isBatchDelete = deleteIds.length > 1;
-    if (!confirm(isBatchDelete ? `确认将这个批次的 ${deleteIds.length} 张图片移入回收站？` : '确认将这张图片移入回收站？')) return;
+    if (!confirm(isBatchDelete ? `确认将这个批次的 ${deleteIds.length} 张图片移入回收站？` : '确认将这张图片移入回收站？')) return { ok: false, deletedIds: [] };
     _blockGalleryRenderForAtomicDelete(1800);
+    _markHistoryIdsDeleted(deleteIds);
+    _removeOptimisticHistoryIds(deleteIds);
     // Mark card as deleting immediately
     var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
     if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
@@ -2368,6 +3177,7 @@ async function delHist(id) {
       _historyDataSignature = _historySignature(historyItems, _historyTotal);
       _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
       _removeDeletedHistoryCardsFromDom(deletedEntryKeys);
+      _reorderVisibleHistoryCardsFromData();
       _syncVisibleHistoryCardIndices();
       _blockGalleryRenderForAtomicDelete(1800);
       _restoreHistoryScroll(scrollSnapshot);
@@ -2378,32 +3188,40 @@ async function delHist(id) {
       }
       _clearHistoryDeleteFocus();
       if (window.CW && CW.toast) CW.toast(isBatchDelete ? `已将 ${deleteIds.length} 张图片移入回收站` : '已移入回收站', 'done');
+      return { ok: true, deletedIds: deleteIds };
     } catch (e) {
       console.error('delHist:', e);
+      _unmarkHistoryIdsDeleted(deleteIds);
       if (card) { card.classList.remove('deleting'); card.style.opacity = ''; card.style.pointerEvents = ''; }
+      return { ok: false, deletedIds: [] };
     }
   }
 
 async function _fetchHistoryPage(offset, limit) {
     var authHeaders = window.CW.auth.getAuthHeaders();
     var scope = _currentHistoryScope();
-    var url = `${API}/api/history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit || HISTORY_PAGE_SIZE)}&offset=${encodeURIComponent(offset || 0)}`;
+    var url = `${API}/api/history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit || HISTORY_PAGE_SIZE)}&offset=${encodeURIComponent(offset || 0)}&compact=1`;
     const r = await fetch(url, { headers: Object.assign({}, authHeaders) });
     const d = await _historyJsonOrThrow(r, '加载历史');
+    var items = _filterDeletedHistoryItems(d.data || []);
     return {
       scope: scope,
-      total: Number(d.total || 0) || 0,
-      items: _sortHistoryItems(d.data || []),
+      total: _historyTotalAfterTombstones(d.total),
+      items: _sortHistoryItems(items),
+      raw_count: Array.isArray(d.data) ? d.data.length : items.length,
     };
   }
 
   async function _reloadHistoryWindow(renderAfter) {
-    var limit = Math.max(_historyNextOffset || 0, _lastRenderedHistCount || 0, HISTORY_PAGE_SIZE);
+    var limit = Math.min(
+      Math.max(_historyNextOffset || 0, _lastRenderedHistCount || 0, HISTORY_PAGE_SIZE),
+      _historyRefreshWindowLimit()
+    );
     var page = await _fetchHistoryPage(0, limit);
     var nextItems = page.items;
     _historyScope = page.scope;
     _historyTotal = page.total;
-    _historyNextOffset = nextItems.length;
+    _historyNextOffset = page.raw_count || nextItems.length;
     _historyLoadedAll = _historyNextOffset >= _historyTotal;
     _historyDataSignature = _historySignature(nextItems, _historyTotal);
     var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
@@ -2415,7 +3233,7 @@ async function _fetchHistoryPage(offset, limit) {
     _syncTypeFilterButtons();
     _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
     var visibleLen = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
-    _histVisibleCount = Math.min(Math.max(_histVisibleCount || 0, _batchSize()), visibleLen);
+    _histVisibleCount = _clampHistoryVisibleCount(Math.max(_histVisibleCount || 0, _batchSize()), visibleLen);
     _lastGalleryHash = '';
     if (renderAfter) renderGallery();
     return true;
@@ -2436,8 +3254,8 @@ async function _fetchHistoryPage(offset, limit) {
       });
       historyItems.splice(0, historyItems.length, ..._applyPinnedHistoryOrder(_sortHistoryItems(historyItems)));
       _historyTotal = page.total;
-      _historyNextOffset += page.items.length;
-      _historyLoadedAll = _historyNextOffset >= _historyTotal || page.items.length === 0;
+      _historyNextOffset += page.raw_count || page.items.length;
+      _historyLoadedAll = _historyNextOffset >= _historyTotal || (page.raw_count || page.items.length) === 0;
       _historyDataSignature = _historySignature(historyItems, _historyTotal);
       _populateFilterOptions();
       _syncOwnerFilterButtons();
@@ -2445,6 +3263,7 @@ async function _fetchHistoryPage(offset, limit) {
       _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
       var visibleLen = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
       _histVisibleCount = Math.min(Math.max(_histVisibleCount + _batchSize(), _batchSize()), visibleLen);
+      _histVisibleCount = _clampHistoryVisibleCount(_histVisibleCount, visibleLen);
       _lastGalleryHash = '';
       renderGallery();
     } catch (e) {
@@ -2463,7 +3282,7 @@ async function loadHistory() {
       var nextItems = page.items;
       _historyScope = page.scope;
       _historyTotal = page.total;
-      _historyNextOffset = nextItems.length;
+      _historyNextOffset = page.raw_count || nextItems.length;
       _historyLoadedAll = _historyNextOffset >= _historyTotal;
       _historyDataSignature = _historySignature(nextItems, _historyTotal);
       var serverIds = new Set(nextItems.map(function(item) { return String(item && item.id || ''); }));
@@ -2487,7 +3306,7 @@ async function loadHistory() {
       _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
       var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
       _histVisibleCount = prevVisibleCount > 0
-        ? Math.min(Math.max(prevVisibleCount, _lastRenderedHistCount || 0), filteredArr.length)
+        ? _clampHistoryVisibleCount(Math.max(prevVisibleCount, _lastRenderedHistCount || 0), filteredArr.length)
         : 0;
       renderGallery();
     } catch (e) {
@@ -2556,12 +3375,22 @@ function renderGallery() {
   window.CW.closeLB = closeLB;
   window.CW.downloadLB = downloadLB;
   window.CW.lbNav = lbNav;
+  window.CW.enableLBVideoEditor = enableLBVideoEditor;
+  window.CW.toggleLBImageExportMenu = toggleLBImageExportMenu;
+  window.CW.toggleLBVideoExportMenu = toggleLBVideoExportMenu;
+  window.CW.setLBVideoCover = setLBVideoCover;
+  window.CW.importLBImage = importLBImage;
+  window.CW.importLBVideoFrame = importLBVideoFrame;
   window.CW.toggleLBFavorite = toggleLBFavorite;
   window.CW.showLBOriginalImage = showLBOriginalImage;
   window.CW.restoreLBGeneratedImage = restoreLBGeneratedImage;
 	  window.CW.toggleLBCompareImage = toggleLBCompareImage;
 	  window.CW.toggleLBShare = toggleLBShare;
+	  window.CW.toggleLBShareHome = toggleLBShareHome;
+	  window.CW.toggleLBHidden = toggleLBHidden;
+	  window.CW.toggleHistoryHidden = toggleHistoryHidden;
 	  window.CW.deleteCurrentLightboxItem = deleteCurrentLightboxItem;
+	  window.CW.getHistoryDetail = getHistoryDetail;
 	  window.CW.loadHistory = loadHistory;
   window.CW.scrollHistoryToTop = scrollHistoryToTop;
   // Data-only refresh (no gallery re-render)
@@ -2569,7 +3398,7 @@ function renderGallery() {
     try {
       var authHeaders = window.CW.auth.getAuthHeaders();
       var scope = _currentHistoryScope();
-      var summaryLimit = Math.max(_historyNextOffset || 0, HISTORY_PAGE_SIZE);
+      var summaryLimit = Math.min(Math.max(_historyNextOffset || 0, HISTORY_PAGE_SIZE), _historyRefreshWindowLimit());
       const summaryResp = await fetch(`${API}/api/history/summary?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(summaryLimit)}`, { headers: Object.assign({}, authHeaders) });
       const summary = await _historyJsonOrThrow(summaryResp, '检查历史');
       if (summary.signature === _historyDataSignature && Number(summary.total || 0) === _historyTotal) return false;

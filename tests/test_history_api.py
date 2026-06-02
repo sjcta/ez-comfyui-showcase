@@ -4,6 +4,8 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 from fastapi import HTTPException
 from PIL import Image
@@ -69,6 +71,169 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["data"][0]["username"], "alice")
 
+    def test_compact_history_omits_heavy_reuse_fields_until_detail_fetch(self):
+        long_prompt = "portrait details " * 80
+        heavy_fields = {
+            "1::prompt": "复刻参数" * 800,
+            "2::image": "u1/ref.png",
+        }
+        app._insert_generation(
+            {
+                "id": "hist-compact",
+                "workflow": "i2i-test.json",
+                "filename": "hist-compact.png",
+                "prompt": long_prompt,
+                "field_values": heavy_fields,
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        compact = app.api_history(limit=10, scope="mine", compact=True, current_user={"sub": "u1", "role": "user"})
+        compact_item = compact["data"][0]
+
+        self.assertTrue(compact_item["__compact"])
+        self.assertNotIn("field_values", compact_item)
+        self.assertEqual(compact_item["prompt"], "")
+        self.assertLess(len(compact_item["prompt_preview"]), len(long_prompt))
+
+        full = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(full["data"][0]["field_values"], heavy_fields)
+        self.assertEqual(full["data"][0]["prompt"], long_prompt)
+
+        detail = app.api_history_detail("hist-compact", current_user={"sub": "u1", "role": "user"})
+        self.assertEqual(detail["data"]["field_values"], heavy_fields)
+        self.assertEqual(detail["data"]["prompt"], long_prompt)
+
+    def test_history_user_counts_returns_lightweight_admin_counts(self):
+        for item_id, user_id in (("hist-u1-a", "u1"), ("hist-u1-b", "u1"), ("hist-u2", "u2")):
+            app._insert_generation(
+                {
+                    "id": item_id,
+                    "workflow": "t2i-test.json",
+                    "filename": item_id + ".png",
+                    "prompt": item_id,
+                    "time": "2026-05-18 12:00:00",
+                },
+                elapsed=3,
+                user_id=user_id,
+            )
+
+        result = app.api_history_user_counts(current_user={"sub": "admin", "role": "admin"})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["counts"], {"u1": 2, "u2": 1})
+
+    def test_video_frame_endpoint_sets_cover_and_exports_input_frame(self):
+        video_rel = "video/sample.mp4"
+        video_path = os.path.join(app.OUTPUT_DIR, video_rel)
+        os.makedirs(os.path.dirname(video_path), exist_ok=True)
+        with open(video_path, "wb") as f:
+            f.write(b"fake video")
+        app._insert_generation(
+            {
+                "id": "vid-1",
+                "workflow": "i2v-test.json",
+                "filename": video_rel,
+                "media_type": "video",
+                "thumb": "",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        def fake_run(cmd, **kwargs):
+            with open(cmd[-1], "wb") as out:
+                out.write(b"jpg")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(app, "_project_ffmpeg_bin", return_value="/bin/ffmpeg"), \
+                mock.patch.object(app.subprocess, "run", side_effect=fake_run), \
+                mock.patch.object(app, "_check_image_protection_candidates", return_value=app.ImageProtectionResult("safe", 0.98, "checked frame", "unit-test")) as protection_check, \
+                mock.patch.object(app.random, "randint", return_value=1234):
+            result = app.api_history_video_frame(
+                "vid-1",
+                {"time": 1.25, "set_cover": True, "import_input": True},
+                current_user={"sub": "u1", "role": "user"},
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["frame"], "video/sample_frame_00001250.jpg")
+        self.assertEqual(result["thumb"], result["frame"])
+        self.assertEqual(result["protection_status"], "safe")
+        self.assertEqual(result["protection_source"], "unit-test")
+        self.assertGreater(result["protection_checked_at"], "")
+        protection_check.assert_called_once()
+        protection_record = protection_check.call_args.args[1]
+        self.assertEqual(protection_record["thumb"], result["frame"])
+        self.assertEqual(protection_record["image_path"], result["frame"])
+        self.assertTrue(result["input_filename"].startswith("u1/"))
+        self.assertTrue(result["input_filename"].endswith("/sample_frame_00001250_1234.jpg"))
+        self.assertTrue(os.path.isfile(os.path.join(app.OUTPUT_DIR, result["frame"])))
+        self.assertTrue(os.path.isfile(os.path.join(app.COMFYUI_INPUT, result["input_filename"])))
+        conn = sqlite3.connect(app.GEN_DB)
+        thumb, protection_status, protection_reason = conn.execute(
+            "SELECT thumb_path, protection_status, protection_reason FROM generations WHERE id='vid-1'"
+        ).fetchone()
+        conn.close()
+        self.assertEqual(thumb, result["frame"])
+        self.assertEqual(protection_status, "safe")
+        self.assertEqual(protection_reason, "checked frame")
+
+    def test_video_frame_endpoint_retries_before_end_boundary(self):
+        video_rel = "video/end-boundary.mp4"
+        video_path = os.path.join(app.OUTPUT_DIR, video_rel)
+        os.makedirs(os.path.dirname(video_path), exist_ok=True)
+        with open(video_path, "wb") as f:
+            f.write(b"fake video")
+        app._insert_generation(
+            {
+                "id": "vid-end",
+                "workflow": "i2v-test.json",
+                "filename": video_rel,
+                "media_type": "video",
+                "thumb": "",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+        attempts = []
+
+        def fake_run(cmd, **kwargs):
+            pos = float(cmd[cmd.index("-ss") + 1])
+            attempts.append(pos)
+            if pos > 9.9:
+                return SimpleNamespace(returncode=1, stderr=b"conversion failed")
+            with open(cmd[-1], "wb") as out:
+                out.write(b"jpg")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(app, "_project_ffmpeg_bin", return_value="/bin/ffmpeg"), \
+                mock.patch.object(app, "_probe_video_timing", return_value=(10.0, 24.0)), \
+                mock.patch.object(app.subprocess, "run", side_effect=fake_run), \
+                mock.patch.object(app.random, "randint", return_value=1234):
+            result = app.api_history_video_frame(
+                "vid-end",
+                {"time": 10.0, "import_input": True},
+                current_user={"sub": "u1", "role": "user"},
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertLess(result["time"], 9.9)
+        self.assertGreaterEqual(len(attempts), 2)
+        self.assertTrue(os.path.isfile(os.path.join(app.OUTPUT_DIR, result["frame"])))
+        self.assertTrue(os.path.isfile(os.path.join(app.COMFYUI_INPUT, result["input_filename"])))
+
+    def test_safe_video_frame_time_clamps_duration_boundary(self):
+        self.assertAlmostEqual(app._safe_video_frame_time(10.0, 10.0, 25.0), 9.96, places=3)
+        self.assertEqual(app._safe_video_frame_time(99.0, 0.0, 0.0), 99.0)
+        self.assertLess(app._safe_video_frame_time(0.2, 0.3, 24.0), 0.3)
+
     def test_history_summary_returns_lightweight_signature(self):
         for idx in range(3):
             app._insert_generation(
@@ -118,6 +283,53 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(by_workflow["wf-a.json"]["workflow_count"], 2)
         self.assertEqual(by_workflow["wf-b.json"]["id"], "u1-wfb")
         self.assertNotIn("u2-newer", [item["id"] for item in result["data"]])
+
+    def test_hidden_history_is_excluded_from_gallery_and_listed_in_hidden_scope(self):
+        for item_id in ("visible", "hidden"):
+            app._insert_generation(
+                {
+                    "id": item_id,
+                    "workflow": "t2i-test.json",
+                    "filename": item_id + ".png",
+                    "prompt": item_id,
+                    "time": "2026-05-18 12:00:00",
+                },
+                elapsed=3,
+                user_id="u1",
+            )
+
+        hidden = app.api_history_hide("hidden", {"is_hidden": True}, current_user={"sub": "u1", "role": "user"})
+        gallery = app.api_history(limit=10, scope="mine", current_user={"sub": "u1", "role": "user"})
+        hidden_scope = app.api_history(limit=10, scope="hidden", current_user={"sub": "u1", "role": "user"})
+
+        self.assertTrue(hidden["is_hidden"])
+        self.assertEqual([item["id"] for item in gallery["data"]], ["visible"])
+        self.assertEqual([item["id"] for item in hidden_scope["data"]], ["hidden"])
+        self.assertTrue(hidden_scope["data"][0]["is_hidden"])
+
+    def test_workflow_previews_skip_hidden_items(self):
+        rows = [
+            ("visible-old", "wf-a.json", "visible-old.png", "2026-05-18 12:00:00"),
+            ("hidden-new", "wf-a.json", "hidden-new.png", "2026-05-18 12:05:00"),
+        ]
+        for item_id, workflow, filename, created_at in rows:
+            app._insert_generation(
+                {
+                    "id": item_id,
+                    "workflow": workflow,
+                    "filename": filename,
+                    "prompt": item_id,
+                    "time": created_at,
+                },
+                elapsed=3,
+                user_id="u1",
+            )
+        app.api_history_hide("hidden-new", {"is_hidden": True}, current_user={"sub": "u1", "role": "user"})
+
+        result = app.api_workflow_previews(current_user={"sub": "u1", "role": "user"})
+
+        self.assertEqual(result["data"][0]["id"], "visible-old")
+        self.assertEqual(result["counts"]["wf-a.json"], 1)
 
     def test_invalid_output_file_does_not_pollute_user_logs_with_thumbnail_warnings(self):
         image_path = os.path.join(app.OUTPUT_DIR, "hist-1.png")

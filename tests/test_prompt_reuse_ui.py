@@ -13,8 +13,13 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertIn("pi.dispatchEvent(new Event('input', { bubbles: true }))", generate_js)
         self.assertIn("CW.syncClearPromptButton", generate_js)
         self.assertIn("function _promptFromReusableFields", generate_js)
+        self.assertIn("let h = _historyItemByKey(key) || historyItems[idx];", generate_js)
+        self.assertIn("h = await window.CW.getHistoryDetail(h) || h;", generate_js)
         self.assertIn("var reusedPrompt = _promptFromReusableFields(h.field_values || {}, reuseFieldsMeta)", generate_js)
-        self.assertIn("_setPromptInputValue(reusedPrompt || h.prompt)", generate_js)
+        detail_pos = generate_js.index("h = await window.CW.getHistoryDetail(h) || h;")
+        reuse_pos = generate_js.index("var reusedPrompt = _promptFromReusableFields(h.field_values || {}, reuseFieldsMeta)")
+        self.assertLess(detail_pos, reuse_pos)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentQwenAngle(reusedPrompt || h.prompt));", generate_js)
         self.assertIn("_setPromptInputValue(snap.prompt)", generate_js)
         self.assertIn("_setPromptInputValue(j.prompt_preview)", generate_js)
         self.assertNotIn("_setPromptInputValue(h.prompt)", generate_js)
@@ -105,6 +110,18 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertIn("valueInput.value = ''", generate_js)
         self.assertIn("data-uploading", generate_js)
         self.assertIn("参考图仍在上传", generate_js)
+
+    def test_text_area_restore_preserves_video_reference_image(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _restoreRefImageFromFieldValues", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(snap.adv || {})", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(j.fields)", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(h.field_values, reuseFieldsMeta)", generate_js)
+        self.assertIn("snapshot.adv[key] = refVal", generate_js)
+        self.assertIn("workflow: A.currentWF", generate_js)
+        self.assertIn("await window.CW.selectWF(snap.workflow)", generate_js)
+        self.assertIn("f.class_type === 'LoadImage' && f.field === 'image'", generate_js)
 
     def test_video_mode_controls_reference_image_requirement(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()

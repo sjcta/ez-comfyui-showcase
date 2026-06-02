@@ -114,6 +114,18 @@
     return status !== 'done' && status !== 'error' && status !== 'history';
   }
 
+  function _isProtectedLocalSubmit(job) {
+    if (!job) return false;
+    var ts = Number(job._local_submitted_at || 0);
+    if (!ts || Date.now() - ts > 15000) return false;
+    var status = String(job.status || '');
+    return status === 'queued' ||
+      status === 'dispatching' ||
+      status === 'preparing' ||
+      status === 'starting_comfyui' ||
+      status === 'submitting';
+  }
+
   function _isTerminalJob(job) {
     var status = job && job.status || '';
     return status === 'done' || status === 'error' || status === 'history';
@@ -386,6 +398,7 @@
         // Cleanup stale jobs (server no longer tracks them)
         for (var cleanId in jobs) {
           if (jobs.hasOwnProperty(cleanId) && !serverMap[cleanId]) {
+            if (_isProtectedLocalSubmit(jobs[cleanId])) continue;
             if (_jobNeedsHistoryRefresh(jobs[cleanId])) historyRefresh = true;
             if (_jobNeedsHistoryRefresh(jobs[cleanId])) historyRefreshNeedsRender = true;
             delete jobs[cleanId];

@@ -28,7 +28,7 @@
       "swap_io_components": false,
       "offload_device": "cpu",
       "cache_model": false,
-      "attention_mode": "sdpa"
+      "attention_mode": "sageattn_3"
     },
     "class_type": "SeedVR2LoadDiTModel",
     "_meta": {

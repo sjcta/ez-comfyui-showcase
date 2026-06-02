@@ -195,6 +195,15 @@ class InstanceIdleGuardTest(unittest.TestCase):
         self.assertEqual(age, 91.0)
         self.assertEqual(timeout, app.JOB_STAGE_TIMEOUTS["submitting"])
 
+    def test_queued_jobs_do_not_expire_while_waiting(self):
+        job = {"status": "queued", "last_update": 100.0}
+
+        stuck, age, timeout = app._job_stuck_state(job, now=864100.0)
+
+        self.assertFalse(stuck)
+        self.assertEqual(age, 864000.0)
+        self.assertIsNone(timeout)
+
     def test_generating_jobs_use_longer_progress_timeout(self):
         job = {"status": "generating", "last_update": 100.0}
 

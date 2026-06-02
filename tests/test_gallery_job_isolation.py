@@ -62,6 +62,7 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
         self.assertIn(".masonry .gi.job-card", css)
         self.assertIn("order: -1;", css)
         self.assertIn("window.CW.forceGalleryRerender", generate)
+        self.assertIn("_local_submitted_at: Date.now()", generate)
 
     def test_gallery_patch_keeps_unchanged_cards_in_place(self):
         history = (ROOT / "static/js/modules/history.js").read_text()

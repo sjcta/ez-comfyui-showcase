@@ -27,6 +27,9 @@ class LtxTattooVideoWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["4528"]["inputs"]["audio_latent"], ["3980", 0])
         self.assertEqual(workflow["4802"]["inputs"]["latent_image"], ["4528", 0])
         self.assertEqual(workflow["4983"]["inputs"]["latents"], ["4824", 0])
+        self.assertEqual(workflow["4983"]["inputs"]["horizontal_tiles"], 1)
+        self.assertEqual(workflow["4983"]["inputs"]["vertical_tiles"], 1)
+        self.assertEqual(workflow["4983"]["inputs"]["overlap"], 1)
         self.assertNotIn("audio", workflow["4819"]["inputs"])
         self.assertNotIn("4818", workflow)
 

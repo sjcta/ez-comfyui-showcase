@@ -19,6 +19,39 @@
       "type": "textarea"
     },
     {
+      "key": "910::horizontal_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "水平角度",
+      "order": 2,
+      "type": "number",
+      "step": 1,
+      "min": 0,
+      "max": 360
+    },
+    {
+      "key": "910::vertical_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "俯仰角度",
+      "order": 3,
+      "type": "number",
+      "step": 1,
+      "min": -30,
+      "max": 60
+    },
+    {
+      "key": "910::zoom",
+      "zone": "user_input",
+      "visible": true,
+      "label": "镜头距离",
+      "order": 4,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 10
+    },
+    {
       "key": "88::largest_size",
       "zone": "advanced",
       "visible": true,
@@ -42,7 +75,7 @@
       "order": 2,
       "type": "number",
       "min": 1,
-      "max": 100
+      "max": 8
     },
     {
       "key": "115:3::cfg",
@@ -51,9 +84,9 @@
       "label": "CFG",
       "order": 3,
       "type": "number",
-      "step": 0.5,
+      "step": 0.1,
       "min": 0,
-      "max": 30
+      "max": 4
     },
     {
       "key": "115:3::sampler_name",
@@ -110,6 +143,14 @@
       "max": 1
     },
     {
+      "key": "89::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Rapid v23 模型",
+      "order": 7,
+      "type": "text"
+    },
+    {
       "key": "96::filename_prefix",
       "zone": "output",
       "visible": true,
@@ -126,19 +167,11 @@
       "type": "text"
     },
     {
-      "key": "89::unet_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "unet_name",
-      "order": 1,
-      "type": "text"
-    },
-    {
       "key": "115:38::clip_name",
       "zone": "hidden",
       "visible": false,
       "label": "clip_name",
-      "order": 2,
+      "order": 1,
       "type": "text"
     },
     {
@@ -146,7 +179,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "type",
-      "order": 3,
+      "order": 2,
       "type": "text"
     },
     {
@@ -154,7 +187,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "device",
-      "order": 4,
+      "order": 3,
       "type": "text"
     },
     {
@@ -162,7 +195,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "vae_name",
-      "order": 5,
+      "order": 4,
       "type": "text"
     },
     {
@@ -170,7 +203,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "shift",
-      "order": 6,
+      "order": 5,
       "type": "number"
     },
     {
@@ -178,8 +211,24 @@
       "zone": "hidden",
       "visible": false,
       "label": "strength",
-      "order": 7,
+      "order": 6,
       "type": "number"
+    },
+    {
+      "key": "910::default_prompts",
+      "zone": "hidden",
+      "visible": false,
+      "label": "默认角度词",
+      "order": 7,
+      "type": "toggle"
+    },
+    {
+      "key": "910::camera_view",
+      "zone": "hidden",
+      "visible": false,
+      "label": "相机视角",
+      "order": 8,
+      "type": "toggle"
     }
   ]
 }

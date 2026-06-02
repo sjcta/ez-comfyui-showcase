@@ -532,13 +532,20 @@
       // Remove stale jobs no longer on server (keep error jobs even if server cleaned them up)
       const serverIds = new Set(arr.map((j) => j.id));
       for (const id of Object.keys(jobs)) {
-        if (!serverIds.has(id) && jobs[id]?.status !== 'error') {
+        if (!serverIds.has(id) && jobs[id]?.status !== 'error' && !_isProtectedLocalSubmit(jobs[id])) {
           delete jobs[id];
           changed = true;
         }
       }
       if (changed && window.CW.renderGallery) window.CW.renderGallery();
     } catch {}
+  }
+
+  function _isProtectedLocalSubmit(job) {
+    if (!job) return false;
+    const ts = Number(job._local_submitted_at || 0);
+    if (!ts || Date.now() - ts > 15000) return false;
+    return ['queued', 'dispatching', 'preparing', 'starting_comfyui', 'submitting'].includes(String(job.status || ''));
   }
 
   function onJobUpdate(job) {
@@ -666,6 +673,7 @@
       // Clean up jobs that server no longer tracks (completed while we weren't looking)
       for (const id of Object.keys(jobs)) {
         if (!serverJobs[id]) {
+          if (_isProtectedLocalSubmit(jobs[id])) continue;
           delete jobs[id];
           historyRefresh = true;
         }

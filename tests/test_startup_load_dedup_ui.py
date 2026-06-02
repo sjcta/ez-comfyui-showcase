@@ -50,6 +50,24 @@ class StartupLoadDedupUiTests(unittest.TestCase):
 
         self.assertIn("var HISTORY_PAGE_SIZE = 80;", history_js)
         self.assertIn("/api/history/summary", history_js)
+        self.assertIn("&compact=1", history_js)
+
+    def test_history_cards_lazy_load_full_reuse_details(self):
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+
+        self.assertIn("function getHistoryDetail(itemOrId)", history_js)
+        self.assertIn("window.CW.getHistoryDetail = getHistoryDetail", history_js)
+        self.assertIn("`${API}/api/history/${encodeURIComponent(id)}`", history_js)
+        self.assertIn("var _historyDetailCache = {};", history_js)
+        self.assertIn("var HISTORY_DETAIL_CACHE_LIMIT = 24;", history_js)
+        self.assertIn("function _compactHistoryRecord(item)", history_js)
+        self.assertIn("delete record.field_values;", history_js)
+        self.assertIn("return fullDetail;", history_js)
+        self.assertIn("_cacheHistoryDetail(item);", history_js)
+        self.assertIn("function _clampHistoryVisibleCount(count, total)", history_js)
+        self.assertIn("var HISTORY_WINDOW_MAX_ITEMS = HISTORY_PAGE_SIZE * 4;", history_js)
+        self.assertIn("function _historyRefreshWindowLimit()", history_js)
+        self.assertIn("_clampHistoryVisibleCount(Math.max(prevVisibleCount, _lastRenderedHistCount || 0), filteredArr.length)", history_js)
 
 
 if __name__ == "__main__":

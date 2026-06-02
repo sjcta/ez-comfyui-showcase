@@ -280,6 +280,57 @@ class JobResumeTest(unittest.TestCase):
         self.assertEqual(args[3], prompt_id)
         self.assertEqual(args[4], "client-recovered")
 
+    def test_resume_reserves_instance_before_starting_ws_progress(self):
+        prompt_id = "prompt-resume"
+        graph = {"1": {"class_type": "SaveImage", "inputs": {}}}
+        app.jobs["job-running"] = {
+            "id": "job-running",
+            "status": "generating",
+            "workflow": "resume.json",
+            "instance": "B",
+            "prompt_id": prompt_id,
+            "client_id": "client-resume",
+            "fields": {},
+            "seed": "123",
+        }
+
+        fake_runner = mock.Mock()
+        fake_runner._save_output = mock.AsyncMock(side_effect=lambda **_kwargs: app.jobs["job-running"].update(status="done"))
+        old_semas = dict(app._instance_semas)
+        sem = asyncio.Semaphore(1)
+
+        async def fake_broadcast(_payload):
+            return None
+
+        def fake_get(path, base_url=None):
+            if path.startswith("/history/"):
+                return {prompt_id: {"status": {"completed": True}, "outputs": {}}}
+            return {}
+
+        async def run_case():
+            await sem.acquire()
+            app._instance_semas.clear()
+            app._instance_semas["B"] = sem
+            with mock.patch("app._instance_for_job", return_value={"name": "B", "url": "http://comfy"}), \
+                    mock.patch("app._resolve_workflow", return_value="/tmp/resume.json"), \
+                    mock.patch("app._remote_queue_prompt_graph", return_value=graph), \
+                    mock.patch("app._start_resume_ws_progress", return_value=None) as start_ws, \
+                    mock.patch("app.comfyui_get", side_effect=fake_get), \
+                    mock.patch("app.broadcast", side_effect=fake_broadcast), \
+                    mock.patch.object(app, "_job_runner", fake_runner):
+                task = asyncio.create_task(app._resume_persisted_generation_job("job-running"))
+                await asyncio.sleep(0.05)
+                self.assertFalse(start_ws.called)
+                sem.release()
+                await asyncio.wait_for(task, timeout=1)
+                self.assertTrue(start_ws.called)
+
+        try:
+            asyncio.run(run_case())
+        finally:
+            app._instance_semas.clear()
+            app._instance_semas.update(old_semas)
+
     def test_job_runner_persists_client_id_before_ws_submit(self):
         src = (Path(__file__).resolve().parents[1] / "modules/job_runner.py").read_text()
 

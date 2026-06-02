@@ -24,6 +24,7 @@ class HistoryDeleteFocusContractTests(unittest.TestCase):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
 
         self.assertIn("function _removeDeletedHistoryCardsFromDom(entryKeys)", history_js)
+        self.assertIn("function _reorderVisibleHistoryCardsFromData()", history_js)
         self.assertIn("function _syncVisibleHistoryCardIndices()", history_js)
         self.assertIn("function _blockGalleryRenderForAtomicDelete(ms)", history_js)
         self.assertIn("_historyTotal = Math.max(0, _historyTotal - deleted.size)", history_js)
@@ -33,13 +34,28 @@ class HistoryDeleteFocusContractTests(unittest.TestCase):
         del_end = history_js.index("async function _fetchHistoryPage", del_start)
         del_body = history_js[del_start:del_end]
         remove_call = history_js.index("_removeDeletedHistoryCardsFromDom(deletedEntryKeys);", del_start)
+        reorder_call = history_js.index("_reorderVisibleHistoryCardsFromData();", del_start)
         sync_call = history_js.index("_syncVisibleHistoryCardIndices();", del_start)
         workflow_refresh = history_js.index("CW.loadWorkflows", del_start)
-        self.assertLess(remove_call, sync_call)
+        self.assertLess(remove_call, reorder_call)
+        self.assertLess(reorder_call, sync_call)
         self.assertLess(sync_call, workflow_refresh)
         self.assertNotIn("renderGallery();", del_body)
         self.assertNotIn("_reloadHistoryWindow(true)", del_body)
         self.assertIn("_blockGalleryRenderForAtomicDelete(1800);", del_body)
+
+    def test_atomic_delete_reorders_remaining_history_cards_from_data_order(self):
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+
+        fn_start = history_js.index("function _reorderVisibleHistoryCardsFromData()")
+        fn_end = history_js.index("function _syncHistoryCountText", fn_start)
+        fn_body = history_js[fn_start:fn_end]
+
+        self.assertIn("_groupHistoryForGallery(filteredArr)", fn_body)
+        self.assertIn("_galleryEntryKey(entry)", fn_body)
+        self.assertIn("gallery.insertBefore(card, cursor);", fn_body)
+        self.assertIn("cursor = card.nextSibling;", fn_body)
+        self.assertIn("_lastRenderedHistCount = gallery.querySelectorAll('.gi[data-hist-id]').length;", fn_body)
 
     def test_render_gallery_is_blocked_during_atomic_delete_window(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
@@ -70,6 +86,24 @@ class HistoryDeleteFocusContractTests(unittest.TestCase):
 
         self.assertLess(capture_call, sync_call)
         self.assertGreater(restore_call, sync_call)
+
+    def test_deleted_history_ids_are_tombstoned_against_stale_lazy_loads(self):
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+
+        self.assertIn("var _deletedHistoryIds = {};", history_js)
+        self.assertIn("HISTORY_DELETE_TOMBSTONE_TTL_MS", history_js)
+        self.assertIn("function _markHistoryIdsDeleted(ids)", history_js)
+        self.assertIn("function _filterDeletedHistoryItems(items)", history_js)
+        self.assertIn("function _removeOptimisticHistoryIds(ids)", history_js)
+        self.assertIn("var items = _filterDeletedHistoryItems(d.data || []);", history_js)
+        self.assertIn("raw_count: Array.isArray(d.data) ? d.data.length : items.length", history_js)
+
+        del_start = history_js.index("async function delHist")
+        del_end = history_js.index("async function _fetchHistoryPage", del_start)
+        del_body = history_js[del_start:del_end]
+        self.assertIn("_markHistoryIdsDeleted(deleteIds);", del_body)
+        self.assertIn("_removeOptimisticHistoryIds(deleteIds);", del_body)
+        self.assertIn("_unmarkHistoryIdsDeleted(deleteIds);", del_body)
 
 
 if __name__ == "__main__":

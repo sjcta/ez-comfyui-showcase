@@ -67,11 +67,11 @@
     "inputs": {
       "model": "seedvr2_ema_7b-Q4_K_M.gguf",
       "device": "cuda:0",
-      "blocks_to_swap": 32,
+      "blocks_to_swap": 0,
       "swap_io_components": false,
       "offload_device": "cpu",
-      "cache_model": "flash_attn",
-      "attention_mode": "sdpa"
+      "cache_model": true,
+      "attention_mode": "sageattn_3"
     },
     "class_type": "SeedVR2LoadDiTModel",
     "_meta": {
@@ -82,15 +82,15 @@
     "inputs": {
       "model": "ema_vae_fp16.safetensors",
       "device": "cuda:0",
-      "encode_tiled": true,
+      "encode_tiled": false,
       "encode_tile_size": 1024,
       "encode_tile_overlap": 128,
-      "decode_tiled": true,
+      "decode_tiled": false,
       "decode_tile_size": 1024,
       "decode_tile_overlap": 128,
       "tile_debug": "false",
       "offload_device": "cpu",
-      "cache_model": false
+      "cache_model": true
     },
     "class_type": "SeedVR2LoadVAEModel",
     "_meta": {
@@ -120,6 +120,23 @@
     "class_type": "ConditioningZeroOut",
     "_meta": {
       "title": "条件零化"
+    }
+  },
+  "910": {
+    "inputs": {
+      "horizontal_angle": 0,
+      "vertical_angle": 0,
+      "zoom": 5,
+      "default_prompts": true,
+      "camera_view": false,
+      "image": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "QwenMultiangleCameraNode",
+    "_meta": {
+      "title": "Qwen Multiangle Camera"
     }
   },
   "115:38": {

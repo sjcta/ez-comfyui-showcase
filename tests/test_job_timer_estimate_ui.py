@@ -49,6 +49,13 @@ class JobTimerEstimateUiTest(unittest.TestCase):
             self.assertNotIn("submitted_at", body, rel)
             self.assertNotIn("created_at_ts", body, rel)
 
+    def test_patch_inserts_timer_when_generation_start_arrives_late(self):
+        for rel in ("static/js/modules/history.js", "static/js/modules/card_manager.js"):
+            source = (ROOT / rel).read_text()
+            self.assertRegex(source, r"if \(!(?:liveTimerEl|timerEl)\)", rel)
+            self.assertIn("imgBox.insertBefore(timerRowNew", source, rel)
+            self.assertIn("card.querySelector('.gi-timer')", source, rel)
+
     def test_poll_timer_skips_queued_cards(self):
         source = (ROOT / "static/js/modules/poll_manager.js").read_text()
         self.assertIn("closest('.job-card.queued')", source)

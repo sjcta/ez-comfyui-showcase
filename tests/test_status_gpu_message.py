@@ -221,6 +221,41 @@ class StatusGpuMessageTests(unittest.TestCase):
         self.assertEqual(finalized["job-b"]["status"], "error")
         self.assertIn("实例已停止", finalized["job-b"]["message"])
 
+    def test_status_preserves_prompt_job_when_instance_health_is_transiently_down(self):
+        instances = [
+            {"name": "B", "url": "http://b", "_node_id": "n1"},
+        ]
+        original_jobs = dict(app.jobs)
+        app.jobs.clear()
+        app.jobs["job-b"] = {
+            "id": "job-b",
+            "instance": "B",
+            "status": "generating",
+            "workflow": "i2v_ltx23_sulphur.json",
+            "prompt_id": "prompt-still-running",
+            "progress": {"pct": 49},
+            "last_update": 100.0,
+        }
+
+        try:
+            with mock.patch("app._get_enabled_instances_for_user", return_value=instances), \
+                 mock.patch("app._gpu_stats_for_status_node", return_value={}), \
+                 mock.patch("app.comfyui_up", return_value=False), \
+                 mock.patch("app.comfyui_get", side_effect=RuntimeError("down")), \
+                 mock.patch("app.save_jobs"), \
+                 mock.patch("app.add_log"):
+                status = app.api_status(current_user={"sub": "admin", "role": "admin"})
+        finally:
+            preserved = dict(app.jobs)
+            app.jobs.clear()
+            app.jobs.update(original_jobs)
+
+        inst_b = next(item for item in status["instances"] if item["name"] == "B")
+        self.assertEqual(inst_b["queue_running"], 1)
+        self.assertTrue(inst_b["progress_known"])
+        self.assertEqual(inst_b["progress"], 49)
+        self.assertEqual(preserved["job-b"]["status"], "generating")
+
     def test_status_finalizes_starting_job_when_instance_stopped_after_grace(self):
         instances = [
             {"name": "B", "url": "http://b", "_node_id": "n1"},

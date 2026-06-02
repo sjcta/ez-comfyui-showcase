@@ -16,6 +16,8 @@ data/logs/
 data/outputs/
 data/uploads/
 data/migration_backups/
+data/cleanup_manifests/
+data/media_cleanup_quarantine/
 data/cancelled_prompts.json
 data/jobs.json
 data/nodes.db

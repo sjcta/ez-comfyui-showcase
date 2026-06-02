@@ -1005,7 +1005,7 @@ class PromptOptimizerTests(unittest.TestCase):
 
             def fake_llm_interrogator(image_path, **kwargs):
                 self.assertEqual(image_path, "/tmp/input.png")
-                self.assertEqual(kwargs.get("max_new_tokens"), 512)
+                self.assertEqual(kwargs.get("max_new_tokens"), 1024)
                 self.assertTrue(kwargs.get("compact"))
                 self.assertTrue(kwargs.get("include_quality"))
                 return {
@@ -1050,8 +1050,9 @@ class PromptOptimizerTests(unittest.TestCase):
 
             def fake_expert(image_path, **kwargs):
                 self.assertEqual(image_path, "/tmp/input.png")
-                self.assertEqual(kwargs.get("max_new_tokens"), 1536)
-                self.assertFalse(kwargs.get("single_pass"))
+                self.assertEqual(kwargs.get("max_new_tokens"), 4096)
+                self.assertTrue(kwargs.get("single_pass"))
+                self.assertFalse(kwargs.get("review_enabled"))
                 self.assertTrue(kwargs.get("include_quality"))
                 return {
                     "ok": True,
@@ -1087,6 +1088,88 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertTrue(result["expert_interrogate"]["enabled"])
         self.assertNotIn("reverse_prompt_quality", result)
         self.assertNotIn("quality", result["expert_interrogate"])
+
+    def test_api_prompt_interrogate_compare_models_flag_uses_expert_runner(self):
+        old_instances = app._get_enabled_instances
+        old_resolve = app._resolve_input_image_path
+        old_prepare = app.prepare_interrogate_image
+        old_expert = getattr(app, "run_llm_expert_image_interrogator", None)
+        try:
+            app._get_enabled_instances = lambda: self.fail("expert interrogation should not select ComfyUI instances")
+            app._resolve_input_image_path = lambda image: "/tmp/input.png"
+            app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
+
+            def fake_expert(image_path, **kwargs):
+                self.assertEqual(image_path, "/tmp/input.png")
+                self.assertTrue(kwargs.get("single_pass"))
+                self.assertFalse(kwargs.get("review_enabled"))
+                self.assertTrue(kwargs.get("include_quality"))
+                return {
+                    "ok": True,
+                    "provider": "llm-qwen36-expert",
+                    "prompt": "专家团提示词",
+                    "prompt_zh": "专家团提示词",
+                    "expert_interrogate": {"enabled": True, "experts": []},
+                }
+
+            app.run_llm_expert_image_interrogator = fake_expert
+            result = app.api_prompt_interrogate(
+                app.PromptInterrogateRequest(image="sample.png", expert=True, compare_models=True),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app._get_enabled_instances = old_instances
+            app._resolve_input_image_path = old_resolve
+            app.prepare_interrogate_image = old_prepare
+            if old_expert is None:
+                delattr(app, "run_llm_expert_image_interrogator")
+            else:
+                app.run_llm_expert_image_interrogator = old_expert
+
+        self.assertEqual(result["provider"], "llm-qwen36-expert")
+        self.assertEqual(result["instance"], "LLM")
+        self.assertNotIn("model_comparison", result)
+        self.assertEqual(result["source_image"], "sample.png")
+
+    def test_api_prompt_interrogate_expert_team_uses_staged_review(self):
+        old_instances = app._get_enabled_instances
+        old_resolve = app._resolve_input_image_path
+        old_prepare = app.prepare_interrogate_image
+        old_expert = getattr(app, "run_llm_expert_image_interrogator", None)
+        try:
+            app._get_enabled_instances = lambda: self.fail("expert team should use LLM experts, not ComfyUI instances")
+            app._resolve_input_image_path = lambda image: "/tmp/input.png"
+            app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
+
+            def fake_expert(image_path, **kwargs):
+                self.assertEqual(image_path, "/tmp/input.png")
+                self.assertTrue(kwargs.get("single_pass"))
+                self.assertTrue(kwargs.get("review_enabled"))
+                self.assertTrue(kwargs.get("expert_team"))
+                return {
+                    "ok": True,
+                    "provider": "llm-qwen36-expert",
+                    "prompt": "专家团提示词",
+                    "prompt_zh": "专家团提示词",
+                    "expert_interrogate": {"enabled": True, "mode": "single_pass_team", "experts": []},
+                }
+
+            app.run_llm_expert_image_interrogator = fake_expert
+            result = app.api_prompt_interrogate(
+                app.PromptInterrogateRequest(image="sample.png", expert=True, expert_team=True),
+                current_user={"sub": "u1", "role": "user"},
+            )
+        finally:
+            app._get_enabled_instances = old_instances
+            app._resolve_input_image_path = old_resolve
+            app.prepare_interrogate_image = old_prepare
+            if old_expert is None:
+                delattr(app, "run_llm_expert_image_interrogator")
+            else:
+                app.run_llm_expert_image_interrogator = old_expert
+
+        self.assertEqual(result["instance"], "LLM")
+        self.assertEqual(result["expert_interrogate"]["mode"], "single_pass_team")
 
     def test_api_prompt_interrogate_can_return_timed_video_script(self):
         optimize_calls = []

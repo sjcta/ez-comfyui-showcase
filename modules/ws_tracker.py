@@ -65,6 +65,20 @@ def _is_transient_http_error(err: Exception) -> bool:
     return any(marker in text for marker in transient_markers)
 
 
+def _history_status_error_message(status: dict) -> str:
+    """Extract the useful ComfyUI error from a /history status payload."""
+    for msg in status.get("messages", []) or []:
+        if not isinstance(msg, (list, tuple)) or len(msg) < 2:
+            continue
+        msg_type, data = msg[0], msg[1]
+        if msg_type != "execution_error" or not isinstance(data, dict):
+            continue
+        err = str(data.get("exception_message") or data.get("exception_type") or "").strip()
+        if err:
+            return f"ComfyUI: {err}"
+    return "ComfyUI 执行出错"
+
+
 # ── HTTP 辅助函数（纯同步，通过 asyncio.to_thread 调用） ────────────────
 
 import urllib.request
@@ -600,8 +614,7 @@ class WSTracker:
                         })
                         return TrackResult(ok=True, prompt_id=self._prompt_id, elapsed=elapsed)
                     if status.get("status_str") == "error":
-                        msgs = status.get("messages", [])
-                        raise RuntimeError(str(msgs)[:300] if msgs else "ComfyUI 执行出错")
+                        raise RuntimeError(_history_status_error_message(status))
             except RuntimeError as e:
                 if _is_transient_http_error(e):
                     continue

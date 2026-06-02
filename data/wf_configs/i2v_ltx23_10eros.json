@@ -115,13 +115,13 @@
       "type": "number"
     },
     {
-      "key": "320:330::ckpt_name",
+      "key": "320:316::ckpt_name",
       "zone": "advanced",
       "visible": true,
-      "label": "10Eros Checkpoint模型",
+      "label": "10Eros fp8mixed 主模型",
       "order": 8,
       "type": "text",
-      "help": "默认 ltx/10Eros_v1-fp8mixed_learned.safetensors；Q4/Q8 GGUF 文件仍保留在 unet/gguf 目录中，需要 GGUF loader 工作流时再切回。"
+      "help": "默认 ltx/10Eros_v1-fp8mixed_learned.safetensors；主视频模型、视频 VAE、音频 VAE 和 AV 文本编码器统一使用同族 10Eros checkpoint。"
     },
     {
       "key": "320:279::ckpt_name",
@@ -129,6 +129,62 @@
       "visible": false,
       "label": "音频 VAE / 支撑组件",
       "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "320:308::bypass_tiling",
+      "zone": "advanced",
+      "visible": true,
+      "label": "跳过二阶段分块",
+      "order": 10,
+      "type": "toggle"
+    },
+    {
+      "key": "320:308::tile_axis",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分块方向",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "320:308::n_tiles",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分块数量",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "320:308::tile_overlap",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分块重叠",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "320:308::max_size_for_no_tile",
+      "zone": "advanced",
+      "visible": true,
+      "label": "小尺寸免分块阈值",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "320:308::audio_pass",
+      "zone": "advanced",
+      "visible": true,
+      "label": "音频传递模式",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "320:308::audio_carrier_tile",
+      "zone": "advanced",
+      "visible": true,
+      "label": "音频承载分块",
+      "order": 16,
       "type": "text"
     },
     {
@@ -271,7 +327,7 @@
       "key": "320:315::horizontal_tiles",
       "zone": "hidden",
       "visible": false,
-      "label": "horizontal_tiles",
+      "label": "VAE 横向分块数",
       "order": 16,
       "type": "number"
     },
@@ -279,7 +335,7 @@
       "key": "320:315::overlap",
       "zone": "hidden",
       "visible": false,
-      "label": "overlap",
+      "label": "VAE 解码重叠",
       "order": 17,
       "type": "number"
     },
@@ -287,7 +343,7 @@
       "key": "320:315::vertical_tiles",
       "zone": "hidden",
       "visible": false,
-      "label": "vertical_tiles",
+      "label": "VAE 纵向分块数",
       "order": 18,
       "type": "number"
     },
@@ -295,17 +351,9 @@
       "key": "320:315::last_frame_fix",
       "zone": "hidden",
       "visible": false,
-      "label": "last_frame_fix",
+      "label": "LTX 尾帧修正",
       "order": 19,
       "type": "toggle"
-    },
-    {
-      "key": "320:316::ckpt_name",
-      "zone": "hidden",
-      "visible": false,
-      "label": "ckpt_name",
-      "order": 20,
-      "type": "text"
     },
     {
       "key": "320:317::text_encoder",
@@ -361,62 +409,6 @@
       "visible": false,
       "label": "expression",
       "order": 27,
-      "type": "text"
-    },
-    {
-      "key": "320:308::bypass_tiling",
-      "zone": "advanced",
-      "visible": true,
-      "label": "跳过二阶段分块",
-      "order": 10,
-      "type": "toggle"
-    },
-    {
-      "key": "320:308::tile_axis",
-      "zone": "advanced",
-      "visible": true,
-      "label": "分块方向",
-      "order": 11,
-      "type": "text"
-    },
-    {
-      "key": "320:308::n_tiles",
-      "zone": "advanced",
-      "visible": true,
-      "label": "分块数量",
-      "order": 12,
-      "type": "number"
-    },
-    {
-      "key": "320:308::tile_overlap",
-      "zone": "advanced",
-      "visible": true,
-      "label": "分块重叠",
-      "order": 13,
-      "type": "number"
-    },
-    {
-      "key": "320:308::max_size_for_no_tile",
-      "zone": "advanced",
-      "visible": true,
-      "label": "小尺寸免分块阈值",
-      "order": 14,
-      "type": "number"
-    },
-    {
-      "key": "320:308::audio_pass",
-      "zone": "advanced",
-      "visible": true,
-      "label": "音频传递模式",
-      "order": 15,
-      "type": "text"
-    },
-    {
-      "key": "320:308::audio_carrier_tile",
-      "zone": "advanced",
-      "visible": true,
-      "label": "音频承载分块",
-      "order": 16,
       "type": "text"
     }
   ]

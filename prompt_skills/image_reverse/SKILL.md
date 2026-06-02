@@ -17,6 +17,9 @@ Goal: produce a prompt that can replicate the visible image, not a pleasant capt
 
 ## Evidence Before Prompt
 
+Before every image analysis, load the categorized rulebook from `prompt_skills/image_reverse/rules/`.
+The runtime prompt may inject only the short rule index, but the source of truth for rule details is the rulebook directory.
+
 Always identify these before writing the final prompt:
 
 - image aspect ratio and orientation
@@ -45,4 +48,3 @@ Always identify these before writing the final prompt:
 
 The executable validator lives in `modules/image_reverse_skill.py`.
 Use `validate_reverse_prompt_quality()` after model output and before returning expert results.
-

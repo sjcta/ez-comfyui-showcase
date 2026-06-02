@@ -136,6 +136,10 @@ def _post_chat_completion_payload(
             raw = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", errors="replace")
+        try:
+            e.close()
+        except Exception:
+            pass
         message = _error_message(raw) or str(e)
         if (
             allow_disable_thinking_retry
@@ -155,7 +159,10 @@ def _post_chat_completion_payload(
         if (
             allow_response_format_retry
             and "response_format" in payload
-            and _looks_like_unknown_parameter_error(message)
+            and (
+                _looks_like_unknown_parameter_error(message)
+                or _looks_like_response_format_error(message)
+            )
         ):
             fallback_payload = dict(payload)
             fallback_payload.pop("response_format", None)
@@ -232,3 +239,21 @@ def _looks_like_unknown_parameter_error(message: str) -> bool:
     if "chat_template_kwargs" not in lower:
         return False
     return any(token in lower for token in ("unknown", "unrecognized", "unexpected", "extra", "not permitted"))
+
+
+def _looks_like_response_format_error(message: str) -> bool:
+    lower = str(message or "").lower()
+    if "response_format" not in lower:
+        return False
+    return any(
+        token in lower
+        for token in (
+            "json_object",
+            "json_schema",
+            "must be",
+            "not supported",
+            "unsupported",
+            "invalid",
+            "not permitted",
+        )
+    )

@@ -6,27 +6,40 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros.json"
 CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros.json"
+DIRECTOR_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_director.json"
+DIRECTOR_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros_director.json"
+TILED_WORKFLOW = ROOT / "data/workflows/ez-comfy/I2V_10eros_v3_TiledSampler.json"
+TILED_CONFIG = ROOT / "data/wf_configs/I2V_10eros_v3_TiledSampler.json"
 META = ROOT / "data/wf_meta.json"
 
 
+TEN_EROS_CKPT = "ltx/10Eros_v1-fp8mixed_learned.safetensors"
+
+
 class Ltx10ErosWorkflowTests(unittest.TestCase):
-    def test_uses_10eros_fp8mixed_checkpoint_with_sulphur_support_components(self):
+    def test_uses_10eros_model_with_matching_audio_support_components(self):
         workflow = json.loads(WORKFLOW.read_text())
 
-        self.assertEqual(workflow["320:330"]["class_type"], "CheckpointLoaderSimple")
-        self.assertEqual(
-            workflow["320:330"]["inputs"]["ckpt_name"],
-            "ltx/10Eros_v1-fp8mixed_learned.safetensors",
-        )
-        self.assertEqual(workflow["320:285"]["inputs"]["model"], ["320:330", 0])
+        self.assertNotIn("320:330", workflow)
+        self.assertEqual(workflow["320:316"]["class_type"], "CheckpointLoaderSimple")
+        self.assertEqual(workflow["320:285"]["inputs"]["model"], ["320:316", 0])
+        self.assertEqual(workflow["320:279"]["inputs"]["ckpt_name"], TEN_EROS_CKPT)
         self.assertEqual(
             workflow["320:316"]["inputs"]["ckpt_name"],
-            "ltx/sulphur_dev_fp8mixed.safetensors",
+            TEN_EROS_CKPT,
         )
         self.assertEqual(
             workflow["320:317"]["inputs"]["ckpt_name"],
-            "ltx/sulphur_dev_fp8mixed.safetensors",
+            TEN_EROS_CKPT,
         )
+
+    def test_default_negative_prompt_suppresses_audio_rumble(self):
+        workflow = json.loads(WORKFLOW.read_text())
+        negative = workflow["320:313"]["inputs"]["text"]
+
+        self.assertIn("low frequency hum", negative)
+        self.assertIn("sub-bass rumble", negative)
+        self.assertIn("noisy room tone", negative)
 
     def test_uses_10s_tiled_sampler_for_second_pass(self):
         workflow = json.loads(WORKFLOW.read_text())
@@ -46,25 +59,30 @@ class Ltx10ErosWorkflowTests(unittest.TestCase):
 
         self.assertEqual(decode["class_type"], "LTXVTiledVAEDecode")
         self.assertTrue(decode["inputs"]["last_frame_fix"])
+        self.assertEqual(decode["inputs"]["horizontal_tiles"], 1)
+        self.assertEqual(decode["inputs"]["vertical_tiles"], 1)
+        self.assertEqual(decode["inputs"]["overlap"], 1)
 
     def test_editor_config_exposes_10eros_model_choice(self):
         config = json.loads(CONFIG.read_text())
         fields = {item["key"]: item for item in config["fields"]}
 
         self.assertEqual(config["workflow"], "i2v_ltx23_10eros.json")
-        self.assertEqual(fields["320:330::ckpt_name"]["label"], "10Eros Checkpoint模型")
-        self.assertEqual(fields["320:330::ckpt_name"]["zone"], "advanced")
-        self.assertTrue(fields["320:330::ckpt_name"]["visible"])
+        self.assertEqual(fields["320:316::ckpt_name"]["label"], "10Eros fp8mixed 主模型")
+        self.assertEqual(fields["320:316::ckpt_name"]["zone"], "advanced")
+        self.assertTrue(fields["320:316::ckpt_name"]["visible"])
         self.assertTrue(fields["320:308::n_tiles"]["visible"])
         self.assertEqual(fields["320:308::n_tiles"]["label"], "分块数量")
         self.assertTrue(fields["320:308::tile_overlap"]["visible"])
         self.assertEqual(fields["320:279::ckpt_name"]["zone"], "hidden")
 
-    def test_final_video_output_does_not_decode_audio(self):
+    def test_final_video_output_decodes_audio(self):
         workflow = json.loads(WORKFLOW.read_text())
 
-        self.assertNotIn("audio", workflow["320:310"]["inputs"])
-        self.assertNotIn("320:297", workflow)
+        self.assertEqual(workflow["320:297"]["class_type"], "LTXVAudioVAEDecode")
+        self.assertEqual(workflow["320:297"]["inputs"]["samples"], ["320:309", 1])
+        self.assertEqual(workflow["320:297"]["inputs"]["audio_vae"], ["320:279", 0])
+        self.assertEqual(workflow["320:310"]["inputs"]["audio"], ["320:297", 0])
 
     def test_metadata_registers_workflow(self):
         meta = json.loads(META.read_text())
@@ -73,6 +91,59 @@ class Ltx10ErosWorkflowTests(unittest.TestCase):
         self.assertEqual(entry["name"], "LTX2.3 10Eros")
         self.assertTrue(entry["shared"])
         self.assertIn("视频制作", entry["tags"])
+
+    def test_director_variant_uses_ltx_director_nodes(self):
+        workflow = json.loads(DIRECTOR_WORKFLOW.read_text())
+
+        self.assertEqual(workflow["320:340"]["class_type"], "LTXDirector")
+        self.assertEqual(workflow["320:340"]["inputs"]["model"], ["320:285", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["clip"], ["320:317", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["audio_vae"], ["320:279", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["duration_seconds"], ["320:344", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["frame_rate"], ["320:298", 0])
+        self.assertEqual(workflow["320:304"]["inputs"]["positive"], ["320:340", 1])
+        self.assertEqual(workflow["320:304"]["inputs"]["frame_rate"], ["320:340", 5])
+        self.assertEqual(workflow["320:344"]["class_type"], "ComfyMathExpression")
+        self.assertEqual(workflow["320:342"]["class_type"], "LTXDirectorGuide")
+        self.assertEqual(workflow["320:343"]["class_type"], "LTXDirectorGuide")
+        self.assertEqual(workflow["320:318"]["inputs"]["video_latent"], ["320:342", 2])
+        self.assertEqual(workflow["320:318"]["inputs"]["audio_latent"], ["320:340", 3])
+        self.assertEqual(workflow["320:343"]["inputs"]["positive"], ["320:284", 0])
+        self.assertEqual(workflow["320:343"]["inputs"]["latent"], ["320:287", 0])
+        self.assertEqual(workflow["320:278"]["inputs"]["video_latent"], ["320:343", 2])
+        self.assertEqual(workflow["320:278"]["inputs"]["audio_latent"], ["320:307", 1])
+        self.assertEqual(workflow["320:316"]["inputs"]["ckpt_name"], TEN_EROS_CKPT)
+
+    def test_director_variant_quick_form_exposes_director_fields(self):
+        config = json.loads(DIRECTOR_CONFIG.read_text())
+        fields = {item["key"]: item for item in config["fields"]}
+        meta = json.loads(META.read_text())
+
+        self.assertEqual(config["workflow"], "i2v_ltx23_10eros_director.json")
+        self.assertEqual(fields["320:340::global_prompt"]["zone"], "user_input")
+        self.assertEqual(fields["320:340::global_prompt"]["label"], "导演全局提示词")
+        self.assertEqual(fields["320:340::timeline_data"]["zone"], "hidden")
+        self.assertEqual(fields["320:340::local_prompts"]["zone"], "hidden")
+        self.assertEqual(fields["320:340::segment_lengths"]["zone"], "hidden")
+        entry = meta["i2v_ltx23_10eros_director.json"]
+        self.assertEqual(entry["name"], "LTX2.3 10Eros 导演版")
+        self.assertTrue(entry["shared"])
+        self.assertIn("视频制作", entry["tags"])
+
+    def test_legacy_tiled_sampler_uses_stable_resize_path(self):
+        workflow = json.loads(TILED_WORKFLOW.read_text())
+        config = json.loads(TILED_CONFIG.read_text())
+        config_fields = {item["key"] for item in config["fields"]}
+
+        self.assertEqual(workflow["531"]["class_type"], "ResizeImageMaskNode")
+        self.assertEqual(workflow["531"]["inputs"]["resize_type"], "scale dimensions")
+        self.assertEqual(workflow["531"]["inputs"]["resize_type.width"], ["791", 0])
+        self.assertEqual(workflow["531"]["inputs"]["resize_type.height"], ["792", 0])
+        self.assertEqual(workflow["791"]["inputs"]["Xi"], 720)
+        self.assertEqual(workflow["792"]["inputs"]["Xi"], 1280)
+        self.assertEqual(workflow["532"]["inputs"]["resize_type.multiplier"], 0.5)
+        self.assertNotIn("531::upscale_method", config_fields)
+        self.assertIn("531::resize_type.width", config_fields)
 
 
 if __name__ == "__main__":

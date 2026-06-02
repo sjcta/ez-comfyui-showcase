@@ -1,7 +1,7 @@
 {
   "75": {
     "inputs": {
-      "filename_prefix": "video/LTX_2.3_i2v",
+      "filename_prefix": "video/LTX_2.3_sulphur_bf16_i2v",
       "format": "auto",
       "codec": "auto",
       "video": [
@@ -59,7 +59,7 @@
   },
   "320:279": {
     "inputs": {
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors"
+      "ckpt_name": "ltx/sulphur_dev_bf16.safetensors"
     },
     "class_type": "LTXVAudioVAELoader",
     "_meta": {
@@ -202,7 +202,7 @@
   },
   "320:288": {
     "inputs": {
-      "strength": 0.35,
+      "strength": 1,
       "bypass": [
         "320:302",
         0
@@ -565,7 +565,7 @@
   },
   "320:313": {
     "inputs": {
-      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan ,blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, distorted sound, saturated sound, loud",
+      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan, blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, distorted sound, saturated sound, loud, low frequency background noise, low frequency hum, sub-bass rumble, bass drone, electrical hum, wind rumble, muddy low end, noisy room tone, DC offset, hiss, buzz, crackle, clipping, audio artifacts",
       "clip": [
         "320:317",
         0
@@ -607,21 +607,21 @@
         "320:309",
         0
       ],
-      "horizontal_tiles": 2,
-      "vertical_tiles": 2,
-      "overlap": 6,
+      "horizontal_tiles": 1,
+      "vertical_tiles": 1,
+      "overlap": 1,
       "last_frame_fix": true,
       "working_device": "auto",
       "working_dtype": "auto"
     },
     "class_type": "LTXVTiledVAEDecode",
     "_meta": {
-      "title": "LTXV VAE解码（分块尾帧修复）"
+      "title": "VAE解码（分块）"
     }
   },
   "320:316": {
     "inputs": {
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors"
+      "ckpt_name": "ltx/sulphur_dev_bf16.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -631,7 +631,7 @@
   "320:317": {
     "inputs": {
       "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors",
+      "ckpt_name": "ltx/sulphur_dev_bf16.safetensors",
       "device": "default"
     },
     "class_type": "LTXAVTextEncoderLoader",

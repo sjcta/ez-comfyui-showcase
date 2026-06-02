@@ -82,6 +82,25 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertRegex(css, r"\.lb-compare\s*\{[^}]*bottom:\s*calc\(max\(24px,\s*env\(safe-area-inset-bottom\)\)\s*\+\s*72px\)", re.S)
         self.assertRegex(css, r"\.lb-compare\.is-active\s*\{[^}]*color:\s*#f59e0b", re.S)
 
+    def test_lightbox_favorite_share_hide_stack_below_delete(self):
+        css = pathlib.Path("static/css/style.css").read_text()
+        html = pathlib.Path("static/index.html").read_text()
+
+        self.assertLess(html.index('id="lbDeleteBtn"'), html.index('id="lbActions"'))
+        self.assertLess(html.index('id="lbFavoriteBtn"'), html.index('id="lbImageShareHomeBtn"'))
+        self.assertLess(html.index('id="lbImageShareHomeBtn"'), html.index('id="lbHideBtn"'))
+        self.assertLess(html.index('id="lbHideBtn"'), html.index('id="lbShareBtn"'))
+        self.assertLess(html.index('id="lbShareBtn"'), html.index('id="lbDownload"'))
+        self.assertLess(html.index('id="lbActions"'), html.index('id="lbDownload"'))
+        self.assertRegex(css, r"\.lb-actions\s*\{[^}]*left:\s*max\(24px,\s*env\(safe-area-inset-left\)\)", re.S)
+        self.assertRegex(css, r"\.lb-actions\s*\{[^}]*top:\s*68px", re.S)
+        self.assertRegex(css, r"\.lb-actions\s*\{[^}]*flex-direction:\s*column", re.S)
+        self.assertRegex(css, r"\.lb-hide\s*\{[^}]*position:\s*static", re.S)
+        self.assertRegex(css, r"\.lb-download\s*\{[^}]*right:\s*max\(24px,\s*env\(safe-area-inset-right\)\)", re.S)
+        self.assertRegex(css, r"\.lb-download\s*\{[^}]*bottom:\s*calc\(max\(24px,\s*env\(safe-area-inset-bottom\)\)\s*\+\s*72px\)", re.S)
+        self.assertRegex(css, r"\.lb-image-export-wrap\s*\{[^}]*right:\s*max\(24px,\s*env\(safe-area-inset-right\)\)", re.S)
+        self.assertRegex(css, r"\.lb-image-export-wrap\s*\{[^}]*bottom:\s*calc\(max\(24px,\s*env\(safe-area-inset-bottom\)\)\s*\+\s*124px\)", re.S)
+
     def test_lightbox_exposes_permission_gated_delete_action_on_left_axis(self):
         js = pathlib.Path("static/js/modules/history.js").read_text()
         css = pathlib.Path("static/css/style.css").read_text()
@@ -96,10 +115,50 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertIn("deleteBtn.dataset.historyId", js)
         self.assertIn("function deleteCurrentLightboxItem", js)
         self.assertIn("await delHist(id)", js)
+        self.assertIn("renderLB();", js)
+        self.assertIn("return { ok: true, deletedIds: deleteIds }", js)
         self.assertIn("window.CW.deleteCurrentLightboxItem = deleteCurrentLightboxItem", js)
         self.assertRegex(css, r"\.lb-delete\s*\{[^}]*left:\s*max\(24px,\s*env\(safe-area-inset-left\)\)", re.S)
         self.assertRegex(css, r"\.lb-delete\s*\{[^}]*top:\s*16px", re.S)
         self.assertIn(".lb-delete {\n    left: max(16px, env(safe-area-inset-left));\n  }", css)
+
+    def test_lightbox_share_button_opens_image_export_menu(self):
+        js = pathlib.Path("static/js/modules/history.js").read_text()
+        css = pathlib.Path("static/css/style.css").read_text()
+        html = pathlib.Path("static/index.html").read_text()
+
+        self.assertIn('id="lbImageExportMenu"', html)
+        self.assertIn('class="lb-action-btn lb-share lb-image-export-toggle"', html)
+        self.assertIn('href="#icon-upload"', html)
+        self.assertIn('href="#icon-edit"', html)
+        self.assertIn('href="#icon-video"', html)
+        self.assertIn('href="#icon-scaleup"', html)
+        self.assertIn("CW.toggleLBImageExportMenu", html)
+        self.assertIn("importLBImage('图生图', event)", html)
+        self.assertIn("importLBImage('视频制作', event)", html)
+        self.assertIn("importLBImage('放大', event)", html)
+        self.assertIn('id="lbImageShareHomeBtn"', html)
+        self.assertIn("CW.toggleLBShareHome", html)
+        self.assertIn("function toggleLBImageExportMenu", js)
+        self.assertIn("function _requestLightboxImageInput", js)
+        self.assertIn("API + '/api/upload-image'", js)
+        self.assertIn("function importLBImage(typeText, e)", js)
+        self.assertIn("_setImportedReferenceImage(data.filename)", js)
+        self.assertIn("window.CW.importLBImage = importLBImage", js)
+        self.assertIn("window.CW.toggleLBShareHome = toggleLBShareHome", js)
+        self.assertIn(".lb-image-export-menu", css)
+        self.assertRegex(css, r"\.lb-image-export-menu\s*\{[^}]*right:\s*calc\(100%\s*\+\s*8px\)", re.S)
+
+    def test_lightbox_hide_action_uses_visible_eye_default_and_hidden_eye_off_state(self):
+        js = pathlib.Path("static/js/modules/history.js").read_text()
+        css = pathlib.Path("static/css/style.css").read_text()
+        html = pathlib.Path("static/index.html").read_text()
+
+        self.assertIn('id="lbHideBtn"', html)
+        self.assertIn('href="#icon-eye"', html)
+        self.assertIn("hideIcon.setAttribute('href', isHidden ? '#icon-eye-off' : '#icon-eye')", js)
+        self.assertRegex(css, r"\.lb-hide\s*\{[^}]*color:\s*#fff", re.S)
+        self.assertRegex(css, r"\.lb-hide\.is-active\s*\{[^}]*color:\s*#050508", re.S)
 
 
 if __name__ == "__main__":

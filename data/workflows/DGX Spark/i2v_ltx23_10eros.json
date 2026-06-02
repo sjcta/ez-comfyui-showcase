@@ -59,7 +59,7 @@
   },
   "320:279": {
     "inputs": {
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors"
+      "ckpt_name": "ltx/10Eros_v1-fp8mixed_learned.safetensors"
     },
     "class_type": "LTXVAudioVAELoader",
     "_meta": {
@@ -158,7 +158,7 @@
       "lora_name": "ltx/ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors",
       "strength_model": 0.5,
       "model": [
-        "320:330",
+        "320:316",
         0
       ]
     },
@@ -340,6 +340,22 @@
     "class_type": "LTXVImgToVideoInplace",
     "_meta": {
       "title": "LTXV图像转视频（原地）"
+    }
+  },
+  "320:297": {
+    "inputs": {
+      "samples": [
+        "320:309",
+        1
+      ],
+      "audio_vae": [
+        "320:279",
+        0
+      ]
+    },
+    "class_type": "LTXVAudioVAEDecode",
+    "_meta": {
+      "title": "LTXV音频VAE解码"
     }
   },
   "320:298": {
@@ -526,6 +542,10 @@
       "images": [
         "320:315",
         0
+      ],
+      "audio": [
+        "320:297",
+        0
       ]
     },
     "class_type": "CreateVideo",
@@ -553,7 +573,7 @@
   },
   "320:313": {
     "inputs": {
-      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan ,blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, distorted sound, saturated sound, loud",
+      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan, blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, distorted sound, saturated sound, loud, low frequency background noise, low frequency hum, sub-bass rumble, bass drone, electrical hum, wind rumble, muddy low end, noisy room tone, DC offset, hiss, buzz, crackle, clipping, audio artifacts",
       "clip": [
         "320:317",
         0
@@ -595,9 +615,9 @@
         "320:309",
         0
       ],
-      "horizontal_tiles": 2,
-      "vertical_tiles": 2,
-      "overlap": 6,
+      "horizontal_tiles": 1,
+      "vertical_tiles": 1,
+      "overlap": 1,
       "last_frame_fix": true,
       "working_device": "auto",
       "working_dtype": "auto"
@@ -609,7 +629,7 @@
   },
   "320:316": {
     "inputs": {
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors"
+      "ckpt_name": "ltx/10Eros_v1-fp8mixed_learned.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -619,7 +639,7 @@
   "320:317": {
     "inputs": {
       "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors",
+      "ckpt_name": "ltx/10Eros_v1-fp8mixed_learned.safetensors",
       "device": "default"
     },
     "class_type": "LTXAVTextEncoderLoader",
@@ -667,15 +687,6 @@
     "class_type": "ComfyMathExpression",
     "_meta": {
       "title": "Math Expression (length)"
-    }
-  },
-  "320:330": {
-    "inputs": {
-      "ckpt_name": "ltx/10Eros_v1-fp8mixed_learned.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "10Eros FP8Mixed Checkpoint加载器"
     }
   }
 }

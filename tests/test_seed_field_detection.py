@@ -252,6 +252,54 @@ class SeedFieldDetectionTests(unittest.TestCase):
         self.assertEqual(fields["3980::frame_rate"], ["4986", 0])
         self.assertEqual(fields["4819::fps"], 12)
 
+    def test_ltx_director_empty_segment_prompt_defaults_to_transition(self):
+        workflow = {
+            "300": {
+                "class_type": "PrimitiveInt",
+                "inputs": {"value": 12},
+            },
+            "301": {
+                "class_type": "PrimitiveInt",
+                "inputs": {"value": 3},
+            },
+            "323": {
+                "class_type": "ComfyMathExpression",
+                "inputs": {"expression": "a * b + 1", "values.a": ["301", 0], "values.b": ["300", 0]},
+            },
+            "340": {
+                "class_type": "LTXDirector",
+                "inputs": {
+                    "global_prompt": "A girl checks her phone at a bus stop.",
+                    "duration_frames": ["323", 1],
+                    "duration_seconds": ["301", 0],
+                    "frame_rate": ["300", 0],
+                    "timeline_data": json.dumps({
+                        "segments": [
+                            {"imageFile": "a.png", "start": 0, "length": 12, "prompt": ""},
+                            {"imageFile": "b.png", "start": 12, "length": 12, "prompt": ""},
+                        ],
+                        "audioSegments": [],
+                    }),
+                    "local_prompts": "",
+                    "segment_lengths": "",
+                    "guide_strength": "",
+                },
+            },
+        }
+
+        fields = app._normalize_workflow_field_values(
+            workflow,
+            {"340::timeline_data": workflow["340"]["inputs"]["timeline_data"]},
+        )
+
+        timeline = json.loads(fields["340::timeline_data"])
+        prompts = [seg["prompt"] for seg in timeline["segments"]]
+        self.assertIn("next reference image", prompts[0])
+        self.assertIn("final reference image", prompts[1])
+        self.assertIn("A girl checks her phone", fields["340::local_prompts"])
+        self.assertEqual(fields["340::segment_lengths"], "12,25")
+        self.assertEqual(fields["340::guide_strength"], "0.9,0.9")
+
 
 if __name__ == "__main__":
     unittest.main()

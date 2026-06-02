@@ -207,9 +207,9 @@
         "4824",
         0
       ],
-      "horizontal_tiles": 2,
-      "vertical_tiles": 2,
-      "overlap": 6,
+      "horizontal_tiles": 1,
+      "vertical_tiles": 1,
+      "overlap": 1,
       "last_frame_fix": false,
       "working_device": "auto",
       "working_dtype": "auto"
