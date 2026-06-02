@@ -15,9 +15,6 @@
   setVH();
 
   const API = window.CW_API_BASE || (location.protocol === 'file:' ? 'http://localhost:18000' : location.pathname.replace(/\/+$/, ''));
-  const BASE = API;
-
-  let ws = null;
   let currentWF = null;
   let advOpen = false;
   let jobs = {};
@@ -145,23 +142,6 @@
       return { text: metaTags[0], cls: tagClassForText(metaTags[0], fallback) };
     }
     return fallback;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  WebSocket
-  // ══════════════════════════════════════════════════════════════════════════
-
-  function connectWS() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}${BASE}/ws`);
-    ws.onopen = () => console.log('[WS] ok');
-    ws.onmessage = (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        if (d.type === 'job_update') onJobUpdate(d.job);
-      } catch {}
-    };
-    ws.onclose = () => setTimeout(connectWS, 5000);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -503,112 +483,8 @@
   
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  Jobs + Gallery
+  //  Job formatting helpers
   // ══════════════════════════════════════════════════════════════════════════
-
-  async function pollJobs() {
-  console.log("[BOOT] pollJobs");
-    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) return;
-    try {
-      const r = await window.CW.auth.apiFetch(`${API}/api/jobs`);
-      if (!r.ok) return;
-      const arr = await r.json();
-      const prevCount = Object.keys(jobs).length;
-      // Client-side safety: cancel jobs stuck in generating for >700s
-      const now = Date.now() / 1000;
-      for (const j of arr) {
-        if (j.status === 'generating' && j.generating_at && now - j.generating_at > 700) {
-          window.CW.auth.apiFetch(`${API}/api/jobs/${j.id}`, { method: 'DELETE' });
-        }
-      }
-      let changed = false;
-      for (const j of arr) {
-        const prev = jobs[j.id];
-        if (!prev || prev.status !== j.status || prev.message !== j.message || prev.progress?.pct !== j.progress?.pct) {
-          changed = true;
-        }
-        jobs[j.id] = j;
-      }
-      // Remove stale jobs no longer on server; failed/retrying cards stay until dismissed.
-      const serverIds = new Set(arr.map((j) => j.id));
-      for (const id of Object.keys(jobs)) {
-        if (!serverIds.has(id) && !_isDismissibleJob(jobs[id]) && !_isProtectedLocalSubmit(jobs[id])) {
-          delete jobs[id];
-          changed = true;
-        }
-      }
-      if (changed && window.CW.renderGallery) window.CW.renderGallery();
-    } catch {}
-  }
-
-  function _isProtectedLocalSubmit(job) {
-    if (!job) return false;
-    const ts = Number(job._local_submitted_at || 0);
-    if (!ts || Date.now() - ts > 15000) return false;
-    return ['queued', 'dispatching', 'preparing', 'starting_comfyui', 'submitting'].includes(String(job.status || ''));
-  }
-
-  function _isDismissibleJob(job) {
-    const status = String((job && job.status) || '');
-    return status === 'error' || status === 'retrying';
-  }
-
-  function onJobUpdate(job) {
-    const prev = jobs[job.id];
-    if (job.deleted || job.status === 'cancelled') {
-      delete jobs[job.id];
-      if (window.CW.renderGallery) window.CW.renderGallery();
-      if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
-      return;
-    }
-    // Toast on status change
-    if (prev && prev.status !== job.status) {
-      var shortId = job.id.slice(-6);
-      var wfMeta = (window.__APP__ && window.__APP__._wfMeta && window.__APP__._wfMeta[job.workflow]) || {};
-      var jobWfTag = wfTag(job.workflow, wfMeta.tags);
-      var typeLabel = jobWfTag ? jobWfTag.text : '';
-      var toastByStatus = {
-        queued: ['排队中', 'queued'],
-        generating: ['出图中', 'generating'],
-        done: ['结束出图', 'done'],
-        error: ['失败', 'error']
-      };
-      try {
-        if (toastByStatus[job.status]) showToast(shortId + ' ' + typeLabel + ' ' + toastByStatus[job.status][0], toastByStatus[job.status][1]);
-      } catch(e) {}
-    }
-    jobs[job.id] = job;
-    if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
-    // ── Done: immediate image swap + background history refresh ──
-    if (job.status === 'done' && job.image) {
-      if (!prev || prev.status !== 'done' || !prev.image) {
-        window.CW._onJobDone(job);
-      }
-      return;
-    }
-    // ── Failed/retrying cards stay visible until the user deletes them ──
-    if (_isDismissibleJob(job) && (!prev || prev.status !== job.status)) {
-      window.CW._onJobError(job);
-      return;
-    }
-    // ── Status transition (queued→preparing→generating): full rebuild ──
-    if (!prev || prev.status !== job.status) {
-      window.CW.forceGalleryRerender();
-      return;
-    }
-    // ── Same status (progress update): in-place patch, NO flicker ──
-    window.CW._patchJobCard(job);
-  }
-
-  // Live timer ticker — only runs when there are generating jobs
-  function tickTimers() {
-    const hasGenerating = Object.values(jobs).some((j) => j.status === 'generating');
-    if (!hasGenerating) return;
-    $$('.gi-timer').forEach((el) => {
-      const ts = parseFloat(el.dataset.ts);
-      if (ts > 0) el.textContent = formatJobElapsedWithEstimate(ts, el.dataset.estimateLabel || '');
-    });
-  }
 
   function formatElapsed(startTime) {
     const sec = Math.max(0, Math.floor(Date.now() / 1000 - startTime));
@@ -622,108 +498,6 @@
     return estimateLabel ? `${elapsed} (${estimateLabel})` : elapsed;
   }
 
-
-  // ── Polling fallback: sync active jobs via /api/jobs every 3s ──
-  let _pollTimer = null;
-  function _hasActiveJobs() {
-    return Object.values(jobs).some(j => j.status !== 'done' && !_isDismissibleJob(j));
-  }
-
-  // Track timer for downloading state (rebroadcast download message)
-  let _fetcherActive = false;
-  async function _fetcherTick() {
-    if (!_hasActiveJobs()) { _fetcherActive = false; return; }
-    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) { _fetcherActive = false; return; }
-    // Check for downloading jobs that might need re-broadcast of download message
-    const downloading = Object.values(jobs).filter(j => j.status === 'downloading');
-    if (downloading.length > 0) {
-      // Refresh from server to pick up status changes
-      try {
-        const r = await window.CW.auth.apiFetch(API + '/api/jobs');
-        if (!r.ok) { _fetcherActive = false; return; }
-        const serverJobs = await r.json();
-        for (const sj of serverJobs) {
-          const prev = jobs[sj.id];
-          if (!prev) jobs[sj.id] = sj;
-          else if (prev.status !== sj.status) {
-            jobs[sj.id] = sj;
-            onJobUpdate(sj);
-          }
-        }
-      } catch {}
-    }
-    _fetcherActive = false;
-  }
-  async function _pollActiveJobs() {
-    if (!_hasActiveJobs()) { _pollTimer = null; return; }
-    if (!(window.CW.auth && window.CW.auth.isLoggedIn && window.CW.auth.isLoggedIn())) { _pollTimer = null; return; }
-    try {
-      const r = await window.CW.auth.apiFetch(API + '/api/jobs');
-      if (!r.ok) { _pollTimer = null; return; }
-      const serverJobList = await r.json(); const serverJobs = {}; for (const j of serverJobList) serverJobs[j.id] = j;
-      // serverJobs is a dict {id: job_obj}
-      let needRerender = false;
-      let historyRefresh = false;
-      let alreadyRefreshed = false;
-      for (const [id, sj] of Object.entries(serverJobs)) {
-        const prev = jobs[id];
-        if (!prev) {
-          needRerender = true;
-          onJobUpdate(sj);
-        } else if (prev.status !== sj.status) {
-          onJobUpdate(sj);
-          // onJobUpdate handles loadHistory for done and rerender for retained failures itself
-          if (sj.status === 'done' && sj.image) { alreadyRefreshed = true; }
-          else if (_isDismissibleJob(sj)) { alreadyRefreshed = true; }
-          else needRerender = true;
-        } else if (sj.status === 'generating' && sj.progress && prev.progress?.pct !== sj.progress.pct) {
-          jobs[id] = sj;
-          window.CW._patchJobCard && window.CW._patchJobCard(sj);
-        }
-      }
-      // Clean up jobs that server no longer tracks (completed while we weren't looking)
-      for (const id of Object.keys(jobs)) {
-        if (!serverJobs[id]) {
-          if (_isProtectedLocalSubmit(jobs[id])) continue;
-          if (_isDismissibleJob(jobs[id])) continue;
-          delete jobs[id];
-          historyRefresh = true;
-        }
-      }
-      if (alreadyRefreshed) {
-        // onJobUpdate already called loadHistory — only do forceGalleryRerender if there's still active jobs
-        if (historyRefresh || needRerender) window.CW.forceGalleryRerender();
-      } else if (historyRefresh) {
-        window.CW.forceGalleryRerender();
-        window.CW.loadHistory();
-      } else if (needRerender) {
-        window.CW.forceGalleryRerender();
-      }
-    } catch {}
-    if (_hasActiveJobs()) _pollTimer = setTimeout(_pollActiveJobs, 3000);
-    else _pollTimer = null;
-  }
-  function _startJobPoll() {
-    if (_pollTimer) return;
-    _pollTimer = setTimeout(_pollActiveJobs, 3000);
-  }
-
-  // Patch onJobUpdate to start polling when active jobs exist
-  const _origOnJobUpdate = onJobUpdate;
-  onJobUpdate = function(job) {
-    var _prev = jobs[job.id];
-    _origOnJobUpdate(job);
-    // Status changed → re-render gallery immediately
-    if (_prev && _prev.status !== job.status && job.status !== 'done' && job.status !== 'error') {
-      if (window.CW.renderGallery) window.CW.renderGallery();
-    }
-    if (job.status !== 'done' && job.status !== 'error') _startJobPoll();
-  };
-
-  // Also: onJobUpdate needs to force re-render when downloading → done (image swap)
-  if (!window.CW) window.CW = {};
-  const _origOnJobUpdate2 = window.CW.onJobUpdate;
-  // (already handled by the done + image branch in _origOnJobUpdate)
 
   // ══════════════════════════════════════════════════════════════════════════
   //  Gallery Filters
@@ -852,34 +626,16 @@ function init() {
   window.CW.__appInitDone = true;
   console.log("[BOOT] init function");
     initSiteVersionBadge();
-    var unifiedPoller = window.CW && window.CW.pollManager;
     var statusPoller = (window.CW && window.CW.pollStatus && window.CW.pollStatus !== pollStatus)
       ? window.CW.pollStatus
       : pollStatus;
     statusPoller();
     setInterval(statusPoller, 5000);
-    if (!unifiedPoller) {
-      setInterval(() => {
-        if (ws && ws.readyState === 1) ws.send('ping');
-      }, 30000);
-      if (window.CW.authReady && typeof window.CW.authReady.then === 'function') {
-        window.CW.authReady.finally(function() {
-          pollJobs();
-        });
-      } else {
-        pollJobs();
-      }
-      setInterval(function() {
-        pollJobs();
-      }, 5000);
-      connectWS();
-    }
     initServiceToggles();
     window.CW.initAdvToggle && window.CW.initAdvToggle();
     window.CW.initRatioGrid && window.CW.initRatioGrid();
     window.CW.initOverlayUpload && window.CW.initOverlayUpload();
     window.CW.initResizeHandle && window.CW.initResizeHandle();
-    if (!unifiedPoller) setInterval(tickTimers, 1000);
     if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
   // Clear button clears prompt and focuses input
   // (always visible — toggled in HTML)
@@ -1095,7 +851,6 @@ function init() {
     formatElapsed,
     formatJobElapsedWithEstimate,
     shortSeed,
-    onJobUpdate,
   });
 
   console.log('[BOOT] after Object.assign');

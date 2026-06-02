@@ -88,7 +88,6 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
         self.assertIn("status === 'error' || status === 'retrying'", history)
         self.assertIn("status !== 'done' && status !== 'cancelled' && !_isDismissibleJobStatus(status)", card_manager)
         self.assertIn("status !== 'done' && status !== 'cancelled' && !_isDismissibleJobStatus(status)", history)
-        self.assertIn("job.deleted || job.status === 'cancelled'", app_js)
         self.assertIn("job.deleted || job.status === 'cancelled'", poll_manager)
         self.assertIn("CW.dismissJob", card_manager)
         self.assertIn("CW.dismissJob", history)

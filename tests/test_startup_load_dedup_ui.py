@@ -44,6 +44,31 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertLess(auth_ready_pos, poll_start_pos)
         self.assertLess(poll_start_pos, load_workflows_pos)
 
+    def test_poll_manager_is_only_job_data_source(self):
+        app_js = (ROOT / "static/js/app.js").read_text()
+        poll_js = (ROOT / "static/js/modules/poll_manager.js").read_text()
+        loader_js = (ROOT / "static/js/module_loader.js").read_text()
+
+        for legacy in (
+            "function pollJobs",
+            "function connectWS",
+            "function onJobUpdate",
+            "function _pollActiveJobs",
+            "function _isProtectedLocalSubmit",
+            "let ws = null",
+            "new WebSocket",
+            "window.CW.onJobUpdate",
+        ):
+            self.assertNotIn(legacy, app_js)
+
+        self.assertIn("new WebSocket", poll_js)
+        self.assertIn("window.CW.onJobUpdate = function(job)", poll_js)
+        self.assertIn("function _isProtectedLocalSubmit(job)", poll_js)
+
+        init_poll_pos = loader_js.index("window.CW.initPollManager")
+        boot_app_pos = loader_js.index("window.CW._bootApp")
+        self.assertLess(init_poll_pos, boot_app_pos)
+
     def test_app_init_is_idempotent(self):
         app_js = (ROOT / "static/js/app.js").read_text()
 

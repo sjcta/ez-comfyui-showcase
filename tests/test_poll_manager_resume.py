@@ -139,9 +139,14 @@ class PollManagerResumeTest(unittest.TestCase):
         self.assertNotIn("jobs[id] = sj;\n            self.onJobUpdate(sj);", source)
 
         app_source = (ROOT / "static/js/app.js").read_text("utf-8")
-        self.assertIn("const prev = jobs[id];", app_source)
-        self.assertIn("onJobUpdate(sj);", app_source)
-        self.assertIn("function _isProtectedLocalSubmit(job)", app_source)
+        self.assertNotIn("function pollJobs", app_source)
+        self.assertNotIn("function connectWS", app_source)
+        self.assertNotIn("function onJobUpdate", app_source)
+        self.assertNotIn("function _pollActiveJobs", app_source)
+        self.assertNotIn("function _isProtectedLocalSubmit", app_source)
+        self.assertNotIn("let ws = null", app_source)
+        self.assertNotIn("new WebSocket", app_source)
+        self.assertNotIn("window.CW.onJobUpdate", app_source)
         self.assertNotIn("jobs[id] = sj;\n          onJobUpdate(sj);", app_source)
 
     def test_unseen_terminal_admin_jobs_refresh_history_without_gallery_rerender(self):
