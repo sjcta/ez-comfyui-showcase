@@ -7,6 +7,7 @@
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var jobs = A.jobs, API = A.API;
   var _lastRunningSummaries = [];
+  var _lastStatusInstances = [];
 
   function _setCurrentTarget(inst, manual) {
     if (!inst) return;
@@ -294,9 +295,18 @@
     var comfyBtn = $('#svcComfyUI');
     var comfyState = $('#comfyState');
     var bar = $('#statusbar');
+    var statusInstances = _lastStatusInstances || [];
     if (activePct == null && !runningSummaries.length) {
       if (comfyBtn) comfyBtn.classList.remove('running');
       if (bar && bar.dataset.instanceState === 'running') bar.dataset.instanceState = 'idle';
+      if (statusInstances.length && comfyState) {
+        var idleItems = _instanceSummaryItems(statusInstances);
+        _setComfyStateText(
+          comfyState,
+          idleItems.map(function(item) { return item.text; }).join(' | '),
+          _instanceSummaryHtml(idleItems)
+        );
+      }
       return;
     }
     if (bar) bar.dataset.instanceState = 'running';
@@ -304,7 +314,18 @@
       comfyBtn.classList.remove('pending', 'off');
       comfyBtn.classList.add('on', 'running');
     }
-    if (comfyState) _setComfyStateText(comfyState, _runningStateText(runningSummaries, activePct));
+    if (comfyState) {
+      if (statusInstances.length) {
+        var items = _instanceSummaryItems(statusInstances);
+        _setComfyStateText(
+          comfyState,
+          items.map(function(item) { return item.text; }).join(' | '),
+          _instanceSummaryHtml(items)
+        );
+      } else {
+        _setComfyStateText(comfyState, _runningStateText(runningSummaries, activePct));
+      }
+    }
   }
 
 async function pollStatus() {
@@ -324,6 +345,7 @@ async function pollStatus() {
 
 function updateServices(d) {
     const insts = _sortInstancesForDisplay(d.instances || []);
+    _lastStatusInstances = insts.slice();
     const target = _getCurrentTarget(insts);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');

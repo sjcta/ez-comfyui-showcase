@@ -91,6 +91,88 @@ class StatusButtonRuntimeTest(unittest.TestCase):
         self.assertEqual(data["initial"], "A: 30% | B: 10%")
         self.assertEqual(data["afterJobUpdate"], "A: 30% | B: 22%")
         self.assertEqual(data["afterStatusRefresh"], "A: idle | B: 22%")
+        self.assertNotIn("运行中", data["afterJobUpdate"])
+
+    def test_job_update_preserves_abp_summary_when_only_one_instance_runs(self):
+        script = textwrap.dedent(
+            r"""
+            const fs = require('fs');
+            const vm = require('vm');
+
+            function el() {
+              return {
+                textContent: '',
+                innerHTML: '',
+                className: '',
+                title: '',
+                dataset: {},
+                style: {},
+                classList: { add() {}, remove() {} }
+              };
+            }
+
+            const elements = {
+              '#svcComfyUI': el(),
+              '#comfyState': el(),
+              '#statusbar': el()
+            };
+            const jobs = {
+              b: { id: 'b', status: 'generating', instance: 'B', target_node_id: 'n1', progress: { pct: 12 } }
+            };
+            const statusPayload = {
+              instances: [
+                { name: 'A', node_id: 'n1', up: false, queue_running: 0, queue_pending: 0 },
+                { name: 'B', node_id: 'n1', up: true, queue_running: 1, queue_pending: 0, progress: 12 },
+                { name: 'Prompt', node_id: 'n1', up: true, queue_running: 0, queue_pending: 0, role: 'prompt_aux' }
+              ],
+              gpu: {}
+            };
+
+            global.window = {
+              __APP__: {
+                API: '',
+                jobs,
+                $: (selector) => elements[selector] || null,
+                $$: () => [],
+                escH: (value) => String(value),
+                escA: (value) => String(value)
+              },
+              CW: {},
+              matchMedia: () => ({ matches: false })
+            };
+            global.fetch = async () => ({ json: async () => statusPayload });
+
+            vm.runInThisContext(fs.readFileSync('static/js/modules/status.js', 'utf8'));
+
+            (async () => {
+              await window.CW.pollStatus();
+              jobs.b.progress.pct = 34;
+              window.CW.syncComfyServiceButton();
+              console.log(JSON.stringify({
+                text: elements['#comfyState'].textContent,
+                html: elements['#comfyState'].innerHTML
+              }));
+            })().catch((err) => {
+              console.error(err && err.stack ? err.stack : err);
+              process.exit(1);
+            });
+            """
+        )
+
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=".",
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        data = json.loads(result.stdout.strip())
+
+        self.assertEqual(data["text"], "A: off | B: 34% | P: idle")
+        self.assertNotIn("运行中", data["text"])
+        self.assertIn('svc-inst off', data["html"])
+        self.assertIn('svc-inst running', data["html"])
+        self.assertIn('svc-inst idle', data["html"])
 
     def test_untracked_remote_running_is_not_displayed_as_zero_percent(self):
         script = textwrap.dedent(

@@ -2530,8 +2530,8 @@ select { cursor: pointer; }
 .svc-state .svc-inst { color: var(--dim); }
 .svc-state .svc-inst.running { color: var(--svc-run-color, var(--green)); }
 .svc-state .svc-inst.pending { color: var(--yellow); }
-.svc-state .svc-inst.off,
-.svc-state .svc-inst.idle { color: var(--dim); font-weight: 600; }
+.svc-state .svc-inst.off { color: rgba(148,163,184,.72); font-weight: 600; }
+.svc-state .svc-inst.idle { color: var(--green); font-weight: 600; }
 .svc-state .svc-inst-sep { color: rgba(148,163,184,.45); font-weight: 500; }
 @keyframes svcRunPulse {
   0%, 56% {
