@@ -21,6 +21,16 @@ class ModalSafariCssContractTests(unittest.TestCase):
         self.assertIn("opacity: 1;", before_block)
         self.assertIn("transition: none;", before_block)
 
+    def test_shared_modal_overlay_mask_is_immediate_on_open(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        open_block = css[css.index(".v4-overlay:not(.page).open") : css.index(".v4-overlay:not(.page).modal-closing")]
+        closing_block = css[css.index(".v4-overlay:not(.page).modal-closing") : css.index(".v4-overlay.open::before")]
+        self.assertIn(".auth-modal-overlay.open", open_block)
+        self.assertIn(".confirm-modal.open", open_block)
+        self.assertIn("transition: none;", open_block)
+        self.assertIn("opacity 180ms var(--modal-motion-ease)", closing_block)
+
     def test_modal_cards_use_gpu_stable_transforms(self):
         css = (ROOT / "static/css/style.css").read_text()
 
@@ -41,8 +51,8 @@ class ModalSafariCssContractTests(unittest.TestCase):
         index_html = (ROOT / "static/index.html").read_text()
         loader_js = (ROOT / "static/js/module_loader.js").read_text()
 
-        self.assertIn("static/js/module_loader.js?v=1780506195", index_html)
-        self.assertIn("var version = '1780506195';", loader_js)
+        self.assertIn("static/js/module_loader.js?v=1780506196", index_html)
+        self.assertIn("var version = '1780506196';", loader_js)
 
 
 if __name__ == "__main__":

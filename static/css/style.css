@@ -11003,6 +11003,7 @@ body.node-dragging-active * {
   -webkit-backdrop-filter: none !important;
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
+  transition: visibility 0s linear var(--modal-motion-duration);
 }
 
 .v4-overlay:not(.page)::before,
@@ -11045,6 +11046,20 @@ body.node-dragging-active * {
   visibility: visible;
   pointer-events: auto;
   transition-delay: 0s;
+}
+
+.v4-overlay:not(.page).open,
+.auth-modal-overlay.open,
+.confirm-modal.open {
+  transition: none;
+}
+
+.v4-overlay:not(.page).modal-closing,
+.auth-modal-overlay.modal-closing,
+.confirm-modal.modal-closing {
+  transition:
+    opacity 180ms var(--modal-motion-ease),
+    visibility 0s linear 180ms;
 }
 
 .v4-overlay.open::before,
