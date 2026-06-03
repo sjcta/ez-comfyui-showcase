@@ -1,4 +1,8 @@
-"""Prompt optimization helpers backed by lightweight ComfyUI text workflows."""
+"""Prompt optimization helpers backed by the configured local LLM API.
+
+Legacy ComfyUI text-workflow builders remain here for parser and compatibility
+tests, but the application endpoints use the LLM entry points.
+"""
 
 from __future__ import annotations
 

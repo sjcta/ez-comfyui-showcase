@@ -93,7 +93,7 @@ class StatusButtonRuntimeTest(unittest.TestCase):
         self.assertEqual(data["afterStatusRefresh"], "A: idle | B: 22%")
         self.assertNotIn("运行中", data["afterJobUpdate"])
 
-    def test_job_update_preserves_abp_summary_when_only_one_instance_runs(self):
+    def test_job_update_preserves_instance_summary_when_only_one_instance_runs(self):
         script = textwrap.dedent(
             r"""
             const fs = require('fs');
@@ -122,8 +122,7 @@ class StatusButtonRuntimeTest(unittest.TestCase):
             const statusPayload = {
               instances: [
                 { name: 'A', node_id: 'n1', up: false, queue_running: 0, queue_pending: 0 },
-                { name: 'B', node_id: 'n1', up: true, queue_running: 1, queue_pending: 0, progress: 12 },
-                { name: 'Prompt', node_id: 'n1', up: true, queue_running: 0, queue_pending: 0, role: 'prompt_aux' }
+                { name: 'B', node_id: 'n1', up: true, queue_running: 1, queue_pending: 0, progress: 12 }
               ],
               gpu: {}
             };
@@ -168,11 +167,10 @@ class StatusButtonRuntimeTest(unittest.TestCase):
         )
         data = json.loads(result.stdout.strip())
 
-        self.assertEqual(data["text"], "A: off | B: 34% | P: idle")
+        self.assertEqual(data["text"], "A: off | B: 34%")
         self.assertNotIn("运行中", data["text"])
         self.assertIn('svc-inst off', data["html"])
         self.assertIn('svc-inst running', data["html"])
-        self.assertIn('svc-inst idle', data["html"])
 
     def test_untracked_remote_running_is_not_displayed_as_zero_percent(self):
         script = textwrap.dedent(
@@ -287,7 +285,6 @@ class StatusButtonRuntimeTest(unittest.TestCase):
             global.fetch = async () => ({
               json: async () => ({
                 instances: [
-                  { name: 'Prompt', node_id: 'n1', up: true, queue_running: 0, queue_pending: 0, role: 'prompt_aux' },
                   { name: 'B', node_id: 'n1', up: true, queue_running: 1, queue_pending: 0, progress: 44 },
                   { name: 'A', node_id: 'n1', up: false, queue_running: 0, queue_pending: 0, progress_known: false }
                 ],
@@ -316,7 +313,7 @@ class StatusButtonRuntimeTest(unittest.TestCase):
         )
         data = json.loads(result.stdout.strip())
 
-        self.assertEqual(data["text"], "A: off | B: 44% | P: idle")
+        self.assertEqual(data["text"], "A: off | B: 44%")
 
     def test_statusbar_vram_text_includes_gpu_pressure(self):
         script = textwrap.dedent(

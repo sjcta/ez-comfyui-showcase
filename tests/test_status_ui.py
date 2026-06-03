@@ -61,12 +61,6 @@ class StatusUiContractTests(unittest.TestCase):
         self.assertIn("target_node_id", status_js)
         self.assertIn("target_instance", status_js)
 
-    def test_prompt_aux_card_uses_queue_counts_for_busy_state(self):
-        status_js = (ROOT / "static/js/modules/status.js").read_text()
-
-        self.assertIn("var instBusy = (inst.queue_running || 0) > 0 || (inst.queue_pending || 0) > 0", status_js)
-        self.assertIn("isAux && instBusy", status_js)
-
     def test_service_button_keeps_state_text_compact(self):
         status_js = (ROOT / "static/js/modules/status.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
@@ -78,7 +72,8 @@ class StatusUiContractTests(unittest.TestCase):
         self.assertIn("function _sortInstancesForDisplay", status_js)
         self.assertIn("function _instanceSummaryText", status_js)
         self.assertIn("return { text: name + ': off', cls: 'off' }", status_js)
-        self.assertIn("String(rawName).toUpperCase() === 'PROMPT' ? 'P' : rawName", status_js)
+        self.assertNotIn("prompt_aux", status_js)
+        self.assertNotIn("PROMPT' ? 'P'", status_js)
         self.assertIn(".svc-state .svc-inst.running { color: var(--svc-run-color, var(--green)); }", css)
         self.assertIn(".svc-state .svc-inst.off { color: rgba(148,163,184,.72); font-weight: 600; }", css)
         self.assertIn(".svc-state .svc-inst.idle { color: var(--green); font-weight: 600; }", css)

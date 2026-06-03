@@ -908,73 +908,30 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertEqual(parsed["subject"], "sliced watermelon")
         self.assertEqual(parsed["important_details"], ["white ceramic plate"])
 
-    def test_api_prompt_interrogate_adds_structured_json_when_available(self):
-        optimize_calls = []
+    def test_api_prompt_interrogate_does_not_fallback_to_prompt_instance_when_llm_vision_unavailable(self):
         old_instances = app._get_enabled_instances
-        old_picker = app._pick_ready_aux_instance
         old_resolve = app._resolve_input_image_path
         old_prepare = app.prepare_interrogate_image
-        old_build = app.build_image_interrogate_workflow
-        old_ensure = app.ensure_workflow_images_available
-        old_interrogator = app.run_image_interrogator
-        old_translator = getattr(app, "run_llm_prompt_translator", None)
-        old_optimizer = getattr(app, "run_llm_prompt_optimizer", None)
         old_llm_interrogator = getattr(app, "run_llm_image_interrogator", None)
         old_llm_vision_error = getattr(app, "LLMVisionUnsupportedError", None)
-        old_mark = app._mark_aux_instance_active
         try:
             class FakeVisionUnsupported(Exception):
                 pass
 
             app.LLMVisionUnsupportedError = FakeVisionUnsupported
             app.run_llm_image_interrogator = lambda *args, **kwargs: (_ for _ in ()).throw(FakeVisionUnsupported("mmproj missing"))
-            app._get_enabled_instances = lambda: [{"name": "Prompt", "url": "http://prompt"}]
-            app._pick_ready_aux_instance = lambda instances, phase, timeout=180: instances[0]
+            app._get_enabled_instances = lambda: self.fail("Prompt fallback should not query ComfyUI instances")
             app._resolve_input_image_path = lambda image: "/tmp/input.png"
             app.prepare_interrogate_image = lambda image, input_dir: {"filename": "optimized.png", "optimized": False}
-            app.build_image_interrogate_workflow = lambda image: {"1": {"class_type": "LoadImage"}}
-            app.ensure_workflow_images_available = lambda workflow, input_dir, inst_url: None
-            app.run_image_interrogator = lambda *args, **kwargs: {
-                "ok": True,
-                "provider": "comfyui-wd14-florence",
-                "prompt": "A futuristic sports car on a winding mountain road.",
-            }
-            app.run_llm_prompt_translator = lambda *args, **kwargs: {
-                "provider": "llm-gemma-4-e2b",
-                "prompt_zh": "一辆未来主义超跑在蜿蜒山路上。",
-            }
-
-            def fake_optimizer(prompt, **kwargs):
-                optimize_calls.append(prompt)
-                return {
-                    "provider": "llm-gemma-4-e2b",
-                    "optimized_prompt": "未来主义超跑，蜿蜒山路",
-                    "structured_prompt": {"subject": "未来主义超跑"},
-                    "structured_prompt_json": "{\"subject\":\"未来主义超跑\"}",
-                }
-
-            app.run_llm_prompt_optimizer = fake_optimizer
-            app._mark_aux_instance_active = lambda inst: None
-            result = app.api_prompt_interrogate(
-                app.PromptInterrogateRequest(image="sample.png"),
-                current_user={"sub": "u1", "role": "user"},
-            )
+            with self.assertRaises(app.HTTPException) as ctx:
+                app.api_prompt_interrogate(
+                    app.PromptInterrogateRequest(image="sample.png"),
+                    current_user={"sub": "u1", "role": "user"},
+                )
         finally:
             app._get_enabled_instances = old_instances
-            app._pick_ready_aux_instance = old_picker
             app._resolve_input_image_path = old_resolve
             app.prepare_interrogate_image = old_prepare
-            app.build_image_interrogate_workflow = old_build
-            app.ensure_workflow_images_available = old_ensure
-            app.run_image_interrogator = old_interrogator
-            if old_translator is None:
-                delattr(app, "run_llm_prompt_translator")
-            else:
-                app.run_llm_prompt_translator = old_translator
-            if old_optimizer is None:
-                delattr(app, "run_llm_prompt_optimizer")
-            else:
-                app.run_llm_prompt_optimizer = old_optimizer
             if old_llm_interrogator is None:
                 delattr(app, "run_llm_image_interrogator")
             else:
@@ -983,15 +940,9 @@ class PromptOptimizerTests(unittest.TestCase):
                 delattr(app, "LLMVisionUnsupportedError")
             else:
                 app.LLMVisionUnsupportedError = old_llm_vision_error
-            app._mark_aux_instance_active = old_mark
 
-        self.assertEqual(optimize_calls, ["一辆未来主义超跑在蜿蜒山路上。"])
-        self.assertEqual(result["prompt"], "未来主义超跑，蜿蜒山路")
-        self.assertEqual(result["prompt_zh"], "未来主义超跑，蜿蜒山路")
-        self.assertEqual(result["structured_optimized_prompt"], "未来主义超跑，蜿蜒山路")
-        self.assertEqual(result["structured_prompt"]["subject"], "未来主义超跑")
-        self.assertIn("subject", result["structured_prompt_json"])
-        self.assertEqual(result["structured_provider"], "llm-gemma-4-e2b")
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertIn("mmproj missing", str(ctx.exception.detail))
 
     def test_api_prompt_interrogate_uses_llm_vision_without_comfyui_when_available(self):
         old_instances = app._get_enabled_instances
@@ -1229,23 +1180,18 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertEqual(result["prompt_mode"], "video_script")
         self.assertEqual(result["video_script_provider"], "llm-gemma-4-e2b")
 
-    def test_prompt_aux_instances_are_split_from_generation_pool(self):
+    def test_legacy_roles_no_longer_create_auxiliary_instance_pool(self):
         instances = [
             {"name": "A", "url": "http://comfy-a", "roles": ["generation"]},
-            {"name": "Prompt", "url": "http://comfy-prompt", "roles": ["prompt_aux"]},
-            {"name": "Caption", "url": "http://comfy-caption", "prompt_aux": True},
+            {"name": "LegacyText", "url": "http://comfy-text", "roles": ["text"]},
         ]
 
         self.assertEqual(
             [inst["name"] for inst in app._get_generation_instances(instances)],
-            ["A"],
-        )
-        self.assertEqual(
-            [inst["name"] for inst in app._get_prompt_aux_instances(instances)],
-            ["Prompt", "Caption"],
+            ["A", "LegacyText"],
         )
 
-    def test_prompt_aux_instances_are_hidden_from_regular_user_instance_list(self):
+    def test_legacy_role_instances_are_not_hidden_from_regular_user_instance_list(self):
         old_load_nodes = app._load_nodes
         old_connected = app._is_node_connected
         try:
@@ -1258,7 +1204,7 @@ class PromptOptimizerTests(unittest.TestCase):
                     "shared": True,
                     "instances": [
                         {"name": "A", "port": 8190, "roles": ["generation"]},
-                        {"name": "Prompt", "port": 8191, "roles": ["prompt_aux"]},
+                        {"name": "LegacyText", "port": 8192, "roles": ["text"]},
                     ],
                 }
             ]
@@ -1270,74 +1216,8 @@ class PromptOptimizerTests(unittest.TestCase):
             app._load_nodes = old_load_nodes
             app._is_node_connected = old_connected
 
-        self.assertEqual([inst["name"] for inst in regular], ["A"])
-        self.assertEqual([inst["name"] for inst in admin], ["A", "Prompt"])
-
-    def test_pick_ready_aux_instance_only_uses_reserved_prompt_pool(self):
-        old_ready = app._ensure_aux_instance_ready
-        old_queue = app._get_instance_queue_size
-        old_log = app.add_log
-        try:
-            app._ensure_aux_instance_ready = lambda inst, phase, timeout=180: inst
-            app._get_instance_queue_size = lambda url: 8 if url.endswith("gen") else 0
-            app.add_log = lambda *args, **kwargs: None
-
-            picked = app._pick_ready_aux_instance(
-                [
-                    {"name": "Gen", "url": "http://comfy-gen", "roles": ["generation"]},
-                    {"name": "Prompt", "url": "http://comfy-prompt", "roles": ["prompt_aux"]},
-                ],
-                phase="prompt_optimize",
-            )
-        finally:
-            app._ensure_aux_instance_ready = old_ready
-            app._get_instance_queue_size = old_queue
-            app.add_log = old_log
-
-        self.assertEqual(picked["name"], "Prompt")
-
-    def test_pick_ready_aux_instance_requires_reserved_prompt_pool(self):
-        with self.assertRaisesRegex(RuntimeError, "未配置提示词独立实例"):
-            app._pick_ready_aux_instance(
-                [{"name": "A", "url": "http://comfy-a", "roles": ["generation"]}],
-                phase="prompt_optimize",
-            )
-
-    def test_aux_instance_ready_starts_stopped_instance_before_prompt_task(self):
-        calls = []
-        old_up = app.comfyui_up
-        old_get_node = app._get_node_by_id
-        old_action = app._run_instance_action
-        old_log = app.add_log
-        old_last_active = dict(app._instance_last_active)
-        try:
-            states = iter([False, True])
-            app.comfyui_up = lambda url=None: next(states)
-            app._get_node_by_id = lambda nid: {"id": nid, "name": "Node", "connection": "local"}
-
-            def fake_action(node, inst, action):
-                calls.append((node["id"], inst["name"], action))
-                return True
-
-            app._run_instance_action = fake_action
-            app.add_log = lambda *args, **kwargs: None
-
-            inst = app._ensure_aux_instance_ready(
-                {"name": "A", "url": "http://comfy-a", "_node_id": "node-a"},
-                phase="prompt_optimize",
-                timeout=2,
-                poll_interval=0.2,
-            )
-        finally:
-            app.comfyui_up = old_up
-            app._get_node_by_id = old_get_node
-            app._run_instance_action = old_action
-            app.add_log = old_log
-            app._instance_last_active.clear()
-            app._instance_last_active.update(old_last_active)
-
-        self.assertEqual(inst["name"], "A")
-        self.assertEqual(calls, [("node-a", "A", "start")])
+        self.assertEqual([inst["name"] for inst in regular], ["A", "LegacyText"])
+        self.assertEqual([inst["name"] for inst in admin], ["A", "LegacyText"])
 
 
 if __name__ == "__main__":

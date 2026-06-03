@@ -43,21 +43,14 @@ from modules.job_runner import JobRunner, _workflow_track_timeout
 from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.llm_client import LLMVisionUnsupportedError, chat_completion, configure_llm_client, llm_provider_name
 from modules.prompt_interrogator import (
-    build_image_interrogate_workflow,
     prepare_interrogate_image,
-    run_image_interrogator,
     run_llm_expert_image_interrogator,
     run_llm_image_interrogator,
 )
 from modules.prompt_labels import infer_generation_label
 from modules.prompt_optimizer import (
-    normalize_interrogated_chinese_prompt,
     run_llm_prompt_language_switcher,
     run_llm_prompt_optimizer,
-    run_llm_prompt_translator,
-    run_prompt_language_switcher,
-    run_prompt_optimizer,
-    run_prompt_translator,
 )
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
@@ -797,7 +790,7 @@ def _instance_api_url(node: dict, inst: dict) -> str:
     port = inst.get("port", "")
     access = node.get("access") or {}
     template = str(access.get("url") or "").strip()
-    if access.get("type") == "proxy" and template and not _is_prompt_aux_instance(inst):
+    if access.get("type") == "proxy" and template:
         try:
             return template.format(port=port).rstrip("/")
         except Exception:
@@ -826,76 +819,13 @@ def _get_enabled_instances() -> list[dict]:
     return instances
 
 
-_AUX_INSTANCE_ROLE_TOKENS = {
-    "aux",
-    "assistant",
-    "caption",
-    "interrogate",
-    "llm",
-    "prompt",
-    "prompt-aux",
-    "prompt_aux",
-    "prompt_optimize",
-    "prompt_interrogate",
-    "text",
-    "反推",
-    "提示词",
-    "辅助",
-}
-
-
-def _instance_role_tokens(inst: dict) -> set[str]:
-    """Return normalized role/label tokens that describe how an instance may be used."""
-    values: list[str] = []
-    for key in ("role", "roles", "purpose", "usage", "task_role", "labels", "tags"):
-        raw = inst.get(key)
-        if raw is None:
-            continue
-        if isinstance(raw, (list, tuple, set)):
-            values.extend(str(item) for item in raw)
-        else:
-            values.extend(part.strip() for part in str(raw).replace("，", ",").split(","))
-
-    name = str(inst.get("name") or inst.get("id") or "").strip()
-    service = str(inst.get("service") or "").strip()
-    env_aux_names = {
-        item.strip().lower()
-        for item in os.environ.get("EZ_COMFYUI_AUX_INSTANCES", "").replace("，", ",").split(",")
-        if item.strip()
-    }
-    if name and name.lower() in env_aux_names:
-        values.append("prompt_aux")
-    if service and service.lower() in env_aux_names:
-        values.append("prompt_aux")
-
-    tokens = {item.strip().lower() for item in values if item and item.strip()}
-    return tokens
-
-
-def _is_prompt_aux_instance(inst: dict) -> bool:
-    """Whether this instance is reserved for prompt optimization/image interrogation."""
-    if bool(inst.get("prompt_aux") or inst.get("auxiliary") or inst.get("aux_instance")):
-        return True
-    tokens = _instance_role_tokens(inst)
-    return bool(tokens & _AUX_INSTANCE_ROLE_TOKENS)
-
-
-def _get_prompt_aux_instances(instances: list[dict] | None = None) -> list[dict]:
-    """Return instances reserved for prompt optimization and image interrogation."""
-    pool = _get_enabled_instances() if instances is None else list(instances or [])
-    return [inst for inst in pool if _is_prompt_aux_instance(inst)]
-
-
 def _get_generation_instances(instances: list[dict] | None = None) -> list[dict]:
     """Return instances that may accept image-generation jobs."""
-    pool = _get_enabled_instances() if instances is None else list(instances or [])
-    return [inst for inst in pool if not _is_prompt_aux_instance(inst)]
+    return _get_enabled_instances() if instances is None else list(instances or [])
 
 
 def _can_view_instance(inst: dict, current_user: dict | None = None) -> bool:
-    if _is_admin_user(current_user):
-        return True
-    return not _is_prompt_aux_instance(inst)
+    return True
 
 
 def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[dict]:
@@ -931,8 +861,6 @@ def _get_enabled_instances_for_user(current_user: dict | None = None) -> list[di
 def _instance_display_rank(inst: dict) -> tuple:
     name = str(inst.get("name") or inst.get("id") or "").strip()
     upper = name.upper()
-    if _is_prompt_aux_instance(inst) or upper == "PROMPT":
-        return (3, name.lower())
     if upper == "A":
         return (0, 0)
     if upper == "B":
@@ -2965,9 +2893,6 @@ def _refresh_instance_state():
             _instance_last_active[inst["name"]] = 0
         if inst["name"] not in _instance_group:
             _instance_group[inst["name"]] = ""
-    for inst in _get_prompt_aux_instances():
-        if inst["name"] not in _instance_last_active:
-            _instance_last_active[inst["name"]] = 0
 
 # Model group definitions — workflows sharing a base model get the same group.
 # Affinity matching is done at the GROUP level, not filename level.
@@ -3130,8 +3055,6 @@ async def _idle_instance_watcher():
         await asyncio.sleep(60)
         now = time.time()
         for inst in _get_enabled_instances():
-            if _is_prompt_aux_instance(inst):
-                continue
             name = inst["name"]
             last = _instance_last_active.get(name, 0)
             if last == 0:
@@ -3268,8 +3191,6 @@ async def _remote_prompt_adoption_watcher():
     while True:
         await asyncio.sleep(8)
         for inst in _get_generation_instances():
-            if _is_prompt_aux_instance(inst):
-                continue
             try:
                 remote_queue = _get_instance_queue_counts(inst.get("url", ""))
                 _adopt_untracked_remote_prompts(inst, remote_queue)
@@ -3756,64 +3677,6 @@ def comfyui_up(base_url: str = None) -> bool:
             return r.status == 200
     except Exception:
         return False
-
-
-def _mark_aux_instance_active(instance: dict) -> None:
-    name = str((instance or {}).get("name") or "")
-    if name:
-        _instance_last_active[name] = time.time()
-
-
-def _ensure_aux_instance_ready(
-    instance: dict,
-    phase: str,
-    timeout: float = 180.0,
-    poll_interval: float = 2.0,
-) -> dict:
-    """Ensure a non-generation ComfyUI task has a live instance before submit."""
-    inst = dict(instance or {})
-    url = inst.get("url", "")
-    name = inst.get("name", "unknown")
-    if url and comfyui_up(url):
-        _mark_aux_instance_active(inst)
-        return inst
-
-    node = _get_node_by_id(inst.get("_node_id", ""))
-    conn = (node or {}).get("connection") or inst.get("_node_connection", "local")
-    if conn == "remote-http":
-        raise RuntimeError(f"实例 {name} 当前不可用，HTTP 远程实例不能自动启动")
-    if not node:
-        raise RuntimeError(f"实例 {name} 缺少设备信息，无法自动启动")
-
-    add_log("info", phase, f"启动 ComfyUI 实例 {name}...", details="coldstart")
-    if not _managed_instance_action(node, inst, "start", reason=phase):
-        raise RuntimeError(f"实例 {name} 启动命令失败")
-
-    deadline = time.time() + float(timeout or 180.0)
-    interval = max(0.2, float(poll_interval or 2.0))
-    while time.time() < deadline:
-        if url and comfyui_up(url):
-            _mark_aux_instance_active(inst)
-            add_log("info", phase, f"ComfyUI 实例 {name} 已就绪", details="coldstart")
-            return inst
-        time.sleep(interval)
-    raise TimeoutError(f"实例 {name} 启动后未就绪")
-
-
-def _pick_ready_aux_instance(instances: list[dict], phase: str, timeout: float = 180.0) -> dict:
-    """Pick a reserved auxiliary instance and cold-start it when needed."""
-    aux_instances = _get_prompt_aux_instances(instances)
-    if not aux_instances:
-        raise RuntimeError("未配置提示词独立实例，请新增独立 ComfyUI 入口并为实例设置 roles: ['prompt_aux']")
-    errors = []
-    for inst in sorted(aux_instances, key=lambda item: _get_instance_queue_size(item.get("url", ""))):
-        try:
-            return _ensure_aux_instance_ready(inst, phase=phase, timeout=timeout)
-        except Exception as e:
-            errors.append(f"{inst.get('name', '?')}: {e}")
-            add_log("warn", phase, f"实例 {inst.get('name', '?')} 不可用: {e}")
-    detail = "；".join(errors) if errors else "无候选实例"
-    raise RuntimeError(f"没有可用的提示词独立实例: {detail}")
 
 
 def comfyui_pid() -> int | None:
@@ -6404,11 +6267,10 @@ def api_status(
         is_active = comfyui_up(base_url=inst["url"])
         _finalize_interrupted_instance_jobs(name, is_active, remote_queue=remote_queue)
         grp = _instance_group.get(name, "")
-        is_prompt_aux = _is_prompt_aux_instance(inst)
         inst_jobs = _status_jobs_for_instance(name, is_active)
         local_run = len([j for j in inst_jobs if j["status"] in ("dispatching", "starting_comfyui", "submitting", "generating", "downloading")])
         local_pend = len([j for j in inst_jobs if j["status"] in ("queued", "preparing")])
-        untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
+        untracked_remote_ids = _cleanup_untracked_remote_prompts(inst, remote_queue)
         q_run = max(local_run, remote_queue["running"])
         q_pend = max(local_pend, remote_queue["pending"])
         q_size = max(remote_queue["total"], q_run + q_pend)
@@ -6427,8 +6289,7 @@ def api_status(
             "node_id": inst.get("_node_id", ""),
             "node_name": inst.get("_node_name", ""),
             "node_connection": inst.get("_node_connection", "local"),
-            "role": "prompt_aux" if is_prompt_aux else "generation",
-            "prompt_aux": is_prompt_aux,
+            "role": "generation",
             "up": is_active,
             "queue": q_size,
             "queue_running": q_run,
@@ -6563,9 +6424,8 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
         queue_pending = max(local_pending, remote_queue["pending"])
         queue_total = max(remote_queue["total"], queue_running + queue_pending)
         grp = _instance_group.get(name, "")
-        is_prompt_aux = _is_prompt_aux_instance(inst)
         current_job = _current_status_job_for_instance(name, is_active)
-        untracked_remote_ids = [] if is_prompt_aux else _cleanup_untracked_remote_prompts(inst, remote_queue)
+        untracked_remote_ids = _cleanup_untracked_remote_prompts(inst, remote_queue)
         remote_untracked_running = bool(untracked_remote_ids) and not current_job
         current_label = ""
         current_workflow = ""
@@ -6585,8 +6445,7 @@ def api_comfyui_status(current_user: dict | None = Depends(get_current_user_opti
             "node_id": inst.get("_node_id", ""),
             "node_name": inst.get("_node_name", ""),
             "node_connection": inst.get("_node_connection", "local"),
-            "role": "prompt_aux" if is_prompt_aux else "generation",
-            "prompt_aux": is_prompt_aux,
+            "role": "generation",
             "queue": queue_total,
             "queue_running": queue_running, "queue_pending": queue_pending,
             "progress": _job_progress_pct(current_job),
@@ -7379,8 +7238,7 @@ def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends
         raise HTTPException(504, f"{action_label}超时: {e}") from e
     except RuntimeError as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
-        status_code = 503 if "提示词独立实例" in str(e) else 500
-        raise HTTPException(status_code, f"{action_label}失败: {e}") from e
+        raise HTTPException(500, f"{action_label}失败: {e}") from e
     except Exception as e:
         add_log("error", "prompt_optimize", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"{action_label}失败: {e}") from e
@@ -7413,8 +7271,7 @@ def api_prompt_translate(req: PromptTranslateRequest, current_user: dict = Depen
         raise HTTPException(504, f"提示词翻译超时: {e}") from e
     except RuntimeError as e:
         add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
-        status_code = 503 if "提示词独立实例" in str(e) else 500
-        raise HTTPException(status_code, f"提示词翻译失败: {e}") from e
+        raise HTTPException(500, f"提示词翻译失败: {e}") from e
     except Exception as e:
         add_log("error", "prompt_translate", str(e), details=f"user={_user_id(current_user)}")
         raise HTTPException(500, f"提示词翻译失败: {e}") from e
@@ -7532,85 +7389,11 @@ def api_prompt_interrogate(req: PromptInterrogateRequest, current_user: dict = D
         add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)} elapsed={result.get('interrogate_elapsed_seconds')}")
         return result
     except LLMVisionUnsupportedError as llm_error:
-        add_log("warn", "prompt_interrogate", f"LLM vision unavailable, falling back to Prompt instance: {llm_error}", details=f"user={_user_id(current_user)}")
+        add_log("error", "prompt_interrogate", str(llm_error), details=f"user={_user_id(current_user)}")
+        raise HTTPException(503, f"图片反推失败: {llm_error}") from llm_error
     except Exception as llm_error:
-        add_log("warn", "prompt_interrogate", f"LLM image interrogation failed, falling back to Prompt instance: {llm_error}", details=f"user={_user_id(current_user)}")
-
-    instances = _get_enabled_instances()
-    if not instances:
-        raise HTTPException(503, "No enabled ComfyUI instances available")
-    try:
-        inst = _pick_ready_aux_instance(instances, "prompt_interrogate", timeout=180)
-        inst_url = inst.get("url", COMFYUI_URL)
-        workflow = build_image_interrogate_workflow(image_for_interrogate)
-        ensure_workflow_images_available(workflow, COMFYUI_INPUT, inst_url)
-        result = run_image_interrogator(
-            image_for_interrogate,
-            inst_url,
-            comfyui_post,
-            comfyui_get,
-            timeout=180,
-            poll_interval=1,
-        )
-        _mark_aux_instance_active(inst)
-        result["image_preprocess"] = prepared_image
-        result["source_image"] = image
-        prompt_text = str(result.get("prompt") or "").strip()
-        if prompt_text and not result.get("prompt_zh"):
-            try:
-                translated = run_llm_prompt_translator(
-                    prompt_text,
-                    timeout=90,
-                    max_new_tokens=192,
-                )
-                prompt_zh = normalize_interrogated_chinese_prompt(translated.get("prompt_zh", ""))
-                if prompt_zh:
-                    result["prompt_zh"] = prompt_zh
-                    result["prompt_en"] = prompt_text
-                    result["translator_provider"] = translated.get("provider", "")
-            except Exception as translate_error:
-                add_log("warn", "prompt_interrogate", f"Prompt Chinese translation skipped: {translate_error}", details=f"user={_user_id(current_user)}")
-        if prompt_mode == "video_script":
-            result = _apply_video_script_interrogate(result)
-        elif prompt_text and not result.get("structured_prompt_json"):
-            source_prompt = str(result.get("prompt_zh") or prompt_text).strip()
-            if source_prompt:
-                try:
-                    structured = run_llm_prompt_optimizer(
-                        source_prompt,
-                        timeout=180,
-                        max_new_tokens=384,
-                    )
-                    if structured.get("structured_prompt_json"):
-                        result["structured_prompt_json"] = structured.get("structured_prompt_json")
-                    if structured.get("structured_prompt"):
-                        result["structured_prompt"] = structured.get("structured_prompt")
-                    if structured.get("negative_prompt"):
-                        result["negative_prompt"] = structured.get("negative_prompt")
-                    if structured.get("optimized_prompt"):
-                        optimized_prompt = str(structured.get("optimized_prompt") or "").strip()
-                        result["structured_optimized_prompt"] = optimized_prompt
-                        if optimized_prompt:
-                            result["prompt"] = optimized_prompt
-                            result["prompt_zh"] = optimized_prompt
-                    if structured.get("provider"):
-                        result["structured_provider"] = structured.get("provider")
-                except Exception as structure_error:
-                    add_log("warn", "prompt_interrogate", f"Prompt JSON structure skipped: {structure_error}", details=f"user={_user_id(current_user)}")
-    except TimeoutError as e:
-        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
-        raise HTTPException(504, f"图片反推超时: {e}") from e
-    except RuntimeError as e:
-        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
-        status_code = 503 if "提示词独立实例" in str(e) else 500
-        raise HTTPException(status_code, f"图片反推失败: {e}") from e
-    except Exception as e:
-        add_log("error", "prompt_interrogate", str(e), details=f"user={_user_id(current_user)}")
-        raise HTTPException(500, f"图片反推失败: {e}") from e
-    result = _attach_interrogate_timing(result)
-    result["instance"] = inst.get("name", "")
-    add_log("info", "prompt_interrogate", f"Image interrogated by {result.get('provider', 'unknown')}", details=f"user={_user_id(current_user)} elapsed={result.get('interrogate_elapsed_seconds')}")
-    return result
+        add_log("error", "prompt_interrogate", str(llm_error), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"图片反推失败: {llm_error}") from llm_error
 
 
 @app.post("/api/generate")

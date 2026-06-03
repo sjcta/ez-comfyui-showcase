@@ -1,5 +1,13 @@
 # 更新日志
 
+## v4.6.19
+
+v4.6.19 清理旧 ComfyUI Prompt 辅助实例链路。
+
+- `config/nodes.json` 移除 `Prompt:8191` 实例，只保留 A/B 生成实例。
+- 图片反推、提示词优化、翻译继续走本地 LLM API；LLM vision 不可用时不再 fallback 到 ComfyUI Prompt 实例。
+- 状态 API 和前端实例指示器移除 `prompt_aux` / `P` 特例，实例状态仅展示实际返回的生成实例。
+
 ## v4.6.18
 
 v4.6.18 修正历史画廊删除卡片后首屏窗口补位和排序错乱的问题。

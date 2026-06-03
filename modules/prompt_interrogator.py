@@ -1,4 +1,8 @@
-"""Image-to-prompt helpers backed by the local ComfyUI interrogation workflow."""
+"""Image-to-prompt helpers backed by the configured local vision LLM API.
+
+Legacy ComfyUI interrogation workflow helpers remain here for parsing and
+compatibility tests, but the application endpoints use the LLM entry points.
+"""
 
 from __future__ import annotations
 

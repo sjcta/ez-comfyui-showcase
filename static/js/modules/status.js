@@ -36,7 +36,6 @@
     inst = inst || {};
     var name = String(inst.name || inst.id || '').trim();
     var upper = name.toUpperCase();
-    if (inst.prompt_aux || inst.role === 'prompt_aux' || upper === 'PROMPT') return [3, name.toLowerCase()];
     if (upper === 'A') return [0, 0];
     if (upper === 'B') return [0, 1];
     if (/^[A-Z]$/.test(upper)) return [0, upper.charCodeAt(0) - 65];
@@ -233,7 +232,7 @@
   function _instanceStateMeta(inst, activeByKey) {
     inst = inst || {};
     var rawName = inst.name || inst.node_name || '实例';
-    var name = String(rawName).toUpperCase() === 'PROMPT' ? 'P' : rawName;
+    var name = rawName;
     var nodeId = inst.node_id || '';
     var key = (inst.name || '') + '|' + nodeId;
     var localActive = activeByKey && (activeByKey[key] || activeByKey[(inst.name || '') + '|']);
@@ -486,19 +485,15 @@ async function _refreshInstCards() {
         html += '<div class="popup-section-title">' + escH(group.name) + ' \u5b9e\u4f8b\u5217\u8868</div>';
         for (var idx = 0; idx < group.items.length; idx++) {
         var inst = group.items[idx];
-        var isAux = !!inst.prompt_aux || inst.role === 'prompt_aux';
         var statusCls = inst.up ? 'on' : 'off';
         var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" class="btn-svg"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
         var btnCls = inst.up ? 'stop' : 'start';
         var groupLabel = groupMap[inst.loaded_group] || inst.loaded_group || '';
-        var instBusy = (inst.queue_running || 0) > 0 || (inst.queue_pending || 0) > 0;
         var unknownRemote = !!inst.remote_untracked_running && inst.progress_known === false;
         var stateText = !inst.up
           ? '\u5173\u95ed'
           : unknownRemote
             ? '\u672a\u8ffd\u8e2a\u4efb\u52a1\u4e2d'
-          : isAux && instBusy
-            ? '\u8f85\u52a9\u4efb\u52a1\u4e2d'
           : inst.queue_running > 0
             ? '\u51fa\u56fe\u4e2d'
             : inst.queue_pending > 0
@@ -514,11 +509,7 @@ async function _refreshInstCards() {
           ' <span class="dim-tag">:' +
           inst.port +
           '</span>' +
-          (isAux ? ' <span class="dim-tag">\u63d0\u793a\u8bcd\u8f85\u52a9</span>' : '') +
           '</div>' +
-          (isAux
-            ? '<button class="inst-card-btn" disabled>\u8f85\u52a9\u5b9e\u4f8b</button>'
-            : '') +
           '<button class="inst-card-btn ' +
           btnCls +
           '" onclick="CW.toggleInst(\'' +

@@ -131,10 +131,10 @@ class StatusGpuMessageTests(unittest.TestCase):
         gpu_stats.assert_called_once()
         self.assertEqual(gpu_stats.call_args.args[0]["id"], "dgx")
 
-    def test_status_uses_remote_queue_counts_for_prompt_aux_instance(self):
+    def test_status_uses_remote_queue_counts_for_generation_instance(self):
         instances = [
             {"name": "A", "url": "http://a", "_node_id": "n1"},
-            {"name": "Prompt", "url": "http://prompt", "_node_id": "n1", "roles": ["prompt_aux"]},
+            {"name": "B", "url": "http://b", "_node_id": "n1"},
         ]
 
         with mock.patch("app._get_enabled_instances_for_user", return_value=instances), \
@@ -143,16 +143,16 @@ class StatusGpuMessageTests(unittest.TestCase):
              mock.patch("app.comfyui_get") as comfyui_get:
             comfyui_get.side_effect = lambda path, base_url=None: (
                 {"queue_running": [["1", "prompt-id"]], "queue_pending": []}
-                if base_url == "http://prompt"
+                if base_url == "http://b"
                 else {"queue_running": [], "queue_pending": []}
             )
 
             status = app.api_status(current_user={"sub": "admin", "role": "admin"})
 
-        prompt = next(item for item in status["instances"] if item["name"] == "Prompt")
-        self.assertEqual(prompt["queue"], 1)
-        self.assertEqual(prompt["queue_running"], 1)
-        self.assertEqual(prompt["queue_pending"], 0)
+        inst_b = next(item for item in status["instances"] if item["name"] == "B")
+        self.assertEqual(inst_b["queue"], 1)
+        self.assertEqual(inst_b["queue_running"], 1)
+        self.assertEqual(inst_b["queue_pending"], 0)
 
     def test_status_includes_active_instance_progress(self):
         instances = [
@@ -189,7 +189,6 @@ class StatusGpuMessageTests(unittest.TestCase):
 
     def test_status_instances_are_returned_in_stable_display_order(self):
         instances = [
-            {"name": "Prompt", "url": "http://prompt", "_node_id": "n1", "roles": ["prompt_aux"]},
             {"name": "B", "url": "http://b", "_node_id": "n1"},
             {"name": "A", "url": "http://a", "_node_id": "n1"},
         ]
@@ -201,8 +200,8 @@ class StatusGpuMessageTests(unittest.TestCase):
             status = app.api_status(current_user={"sub": "admin", "role": "admin"})
             comfy_status = app.api_comfyui_status(current_user={"sub": "admin", "role": "admin"})
 
-        self.assertEqual([item["name"] for item in status["instances"]], ["A", "B", "Prompt"])
-        self.assertEqual([item["name"] for item in comfy_status["instances"]], ["A", "B", "Prompt"])
+        self.assertEqual([item["name"] for item in status["instances"]], ["A", "B"])
+        self.assertEqual([item["name"] for item in comfy_status["instances"]], ["A", "B"])
 
     def test_status_does_not_show_local_pending_job_as_down_instance_queue(self):
         instances = [
@@ -378,10 +377,10 @@ class StatusGpuMessageTests(unittest.TestCase):
         self.assertEqual(inst_a["remote_running_prompt_ids"], ["remote-prompt-id"])
         comfyui_post.assert_not_called()
 
-    def test_comfyui_status_uses_remote_queue_counts_for_prompt_aux_instance(self):
+    def test_comfyui_status_uses_remote_queue_counts_for_generation_instance(self):
         instances = [
             {"name": "A", "url": "http://a", "_node_id": "n1"},
-            {"name": "Prompt", "url": "http://prompt", "_node_id": "n1", "roles": ["prompt_aux"]},
+            {"name": "B", "url": "http://b", "_node_id": "n1"},
         ]
 
         with mock.patch("app._get_enabled_instances_for_user", return_value=instances), \
@@ -390,16 +389,16 @@ class StatusGpuMessageTests(unittest.TestCase):
              mock.patch("app.comfyui_get") as comfyui_get:
             comfyui_get.side_effect = lambda path, base_url=None: (
                 {"queue_running": [], "queue_pending": [["2", "prompt-id"]]}
-                if base_url == "http://prompt"
+                if base_url == "http://b"
                 else {"queue_running": [], "queue_pending": []}
             )
 
             status = app.api_comfyui_status(current_user={"sub": "admin", "role": "admin"})
 
-        prompt = next(item for item in status["instances"] if item["name"] == "Prompt")
-        self.assertEqual(prompt["queue"], 1)
-        self.assertEqual(prompt["queue_running"], 0)
-        self.assertEqual(prompt["queue_pending"], 1)
+        inst_b = next(item for item in status["instances"] if item["name"] == "B")
+        self.assertEqual(inst_b["queue"], 1)
+        self.assertEqual(inst_b["queue_running"], 0)
+        self.assertEqual(inst_b["queue_pending"], 1)
 
 
 if __name__ == "__main__":
