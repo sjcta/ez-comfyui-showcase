@@ -34,9 +34,25 @@ class JobCardLayoutContractTests(unittest.TestCase):
         self.assertIn("aspect-ratio: auto", placeholder_block)
         self.assertIn("box-sizing: border-box", placeholder_block)
         self.assertIn("padding: 36px 10px 92px", placeholder_block)
-        self.assertIn("padding-bottom: 104px", error_placeholder_block)
+        self.assertIn("padding: 46px 12px 104px", error_placeholder_block)
         self.assertIn("position: absolute", info_block)
         self.assertIn("bottom: 0", info_block)
+
+    def test_error_job_card_actions_use_stacked_layout(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        error_overlay_block = _css_block(css, ".gi.job-card.error .job-status-overlay")
+        error_retry_block = _css_block(css, ".gi.job-card.error .gi-retry-row")
+        error_delete_block = _css_block(css, ".gi.job-card.error .gi-del")
+        error_icon_block = _css_block(css, ".gi.job-card.error .gi-img.job-placeholder::before")
+
+        self.assertIn("position: static", error_overlay_block)
+        self.assertIn("order: 2", error_overlay_block)
+        self.assertIn("order: 3", error_retry_block)
+        self.assertIn("pointer-events: auto", error_retry_block)
+        self.assertIn("top: 8px", error_delete_block)
+        self.assertIn("right: 8px", error_delete_block)
+        self.assertIn("order: 1", error_icon_block)
 
     def test_status_text_wraps_long_recovery_failures(self):
         css = (ROOT / "static/css/style.css").read_text()
