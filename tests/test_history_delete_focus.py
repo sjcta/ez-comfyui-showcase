@@ -54,6 +54,8 @@ class HistoryDeleteFocusContractTests(unittest.TestCase):
 
         self.assertIn("_groupHistoryForGallery(filteredArr)", fn_body)
         self.assertIn("_galleryEntryKey(entry)", fn_body)
+        self.assertIn("var html = _histCardHTML(entry, idx);", fn_body)
+        self.assertIn("cursor.insertAdjacentHTML('beforebegin', html);", fn_body)
         self.assertIn("gallery.insertBefore(card, cursor);", fn_body)
         self.assertIn("cursor = card.nextSibling;", fn_body)
         self.assertIn("_lastRenderedHistCount = gallery.querySelectorAll('.gi[data-hist-id]').length;", fn_body)

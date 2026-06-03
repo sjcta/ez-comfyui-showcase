@@ -1149,9 +1149,17 @@ function _clearHistoryDeleteFocus() {
     var cursor = Array.prototype.slice.call(gallery.children).find(function(child) {
       return !(child && child.hasAttribute && child.hasAttribute('data-job-id'));
     }) || null;
-    visibleItems.forEach(function(entry) {
+    visibleItems.forEach(function(entry, idx) {
       var entryKey = _galleryEntryKey(entry);
-      var card = gallery.querySelector('.gi[data-hist-id="' + _cssAttrEscape(entryKey) + '"]');
+      var selector = '.gi[data-hist-id="' + _cssAttrEscape(entryKey) + '"]';
+      var card = gallery.querySelector(selector);
+      if (!card) {
+        var html = _histCardHTML(entry, idx);
+        if (cursor) cursor.insertAdjacentHTML('beforebegin', html);
+        else gallery.insertAdjacentHTML('beforeend', html);
+        card = gallery.querySelector(selector);
+        _scheduleVideoPreviewMaskSync(gallery);
+      }
       if (!card) return;
       if (card !== cursor) gallery.insertBefore(card, cursor);
       cursor = card.nextSibling;
