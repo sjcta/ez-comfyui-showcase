@@ -11013,7 +11013,7 @@ body.node-dragging-active * {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0;
+  opacity: 1;
   background:
     radial-gradient(circle at top, rgba(245,158,11,.08), transparent 34%),
     radial-gradient(circle at bottom right, rgba(139,92,246,.10), transparent 30%),
@@ -11022,7 +11022,7 @@ body.node-dragging-active * {
   -webkit-backdrop-filter: blur(18px) saturate(1.08);
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
-  transition: opacity var(--modal-motion-duration) var(--modal-motion-ease);
+  transition: none;
   will-change: opacity;
 }
 

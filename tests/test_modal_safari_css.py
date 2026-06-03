@@ -17,6 +17,9 @@ class ModalSafariCssContractTests(unittest.TestCase):
         self.assertIn("-webkit-backdrop-filter: none !important;", css)
         self.assertIn(".auth-modal-overlay.open::before", css)
         self.assertIn("will-change: opacity;", css)
+        before_block = css[css.index(".v4-overlay:not(.page)::before") : css.index(".v4-overlay.page", css.index(".v4-overlay:not(.page)::before"))]
+        self.assertIn("opacity: 1;", before_block)
+        self.assertIn("transition: none;", before_block)
 
     def test_modal_cards_use_gpu_stable_transforms(self):
         css = (ROOT / "static/css/style.css").read_text()
@@ -38,8 +41,8 @@ class ModalSafariCssContractTests(unittest.TestCase):
         index_html = (ROOT / "static/index.html").read_text()
         loader_js = (ROOT / "static/js/module_loader.js").read_text()
 
-        self.assertIn("static/js/module_loader.js?v=1780506190", index_html)
-        self.assertIn("var version = '1780506190';", loader_js)
+        self.assertIn("static/js/module_loader.js?v=1780506195", index_html)
+        self.assertIn("var version = '1780506195';", loader_js)
 
 
 if __name__ == "__main__":
