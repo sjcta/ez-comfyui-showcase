@@ -573,7 +573,13 @@
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         alert('重试失败: ' + (d.detail || r.status));
+        return;
       }
+      const d = await r.json().catch(() => ({}));
+      const dismissedId = d.dismissed_job_id || jobId;
+      if (dismissedId && jobs[dismissedId]) delete jobs[dismissedId];
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      else if (window.CW.renderGallery) window.CW.renderGallery();
     } catch (e) {
       alert('重试失败: ' + e.message);
     }

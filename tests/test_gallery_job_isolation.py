@@ -91,6 +91,9 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
         self.assertIn(".slice(0, 10)", history)
         self.assertIn("function dismissJob", app_js)
         self.assertIn("/dismiss", app_js)
+        self.assertIn("dismissed_job_id", app_js)
+        self.assertIn("if (dismissedId && jobs[dismissedId]) delete jobs[dismissedId];", app_js)
+        self.assertIn("window.CW.forceGalleryRerender", app_js)
         self.assertNotIn("job.status === 'error' && job._errAt", card_manager)
 
 

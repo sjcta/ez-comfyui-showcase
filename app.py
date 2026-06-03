@@ -7797,11 +7797,6 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     vllm_was = False
 
-    old["status"] = "retrying"
-    old["message"] = "已重新排队，等待新任务完成..."
-    old["retried_by"] = new_id
-    old["last_update"] = time.time()
-
     prompt_preview = infer_generation_label(wf, fields, _workflow_primary_type(wf))[:200]
 
     jobs[new_id] = {
@@ -7822,13 +7817,14 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
         k: v for k, v in _job_with_time_estimate(jobs[new_id]).items()
         if k.startswith("estimated_")
     })
+    jobs.pop(job_id, None)
     save_jobs()
 
     _job_queue.put_nowait((
         new_id, path, fields, seed, vllm_was, width, height, user_id,
         preferred_instance, preferred_node_id
     ))
-    return {"job_id": new_id, "seed": seed}
+    return {"job_id": new_id, "seed": seed, "dismissed_job_id": job_id}
 
 
 # ══════════════════════════════════════════════════════════════════════════

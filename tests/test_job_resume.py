@@ -297,7 +297,7 @@ class JobResumeTest(unittest.TestCase):
             app.api_dismiss_job("job-active", current_user={"sub": "u1", "role": "user"})
         self.assertEqual(ctx.exception.status_code, 400)
 
-    def test_retry_marks_old_job_retrying_until_new_job_finishes(self):
+    def test_retry_removes_old_failed_job_after_new_job_is_queued(self):
         workflow_path = os.path.join(self._tmp.name, "retry.json")
         with open(workflow_path, "w", encoding="utf-8") as fh:
             json.dump({"1": {"class_type": "SaveImage", "inputs": {}}}, fh)
@@ -320,8 +320,8 @@ class JobResumeTest(unittest.TestCase):
             app._job_queue = old_queue
 
         new_id = result["job_id"]
-        self.assertEqual(app.jobs["job-error"]["status"], "retrying")
-        self.assertEqual(app.jobs["job-error"]["retried_by"], new_id)
+        self.assertEqual(result["dismissed_job_id"], "job-error")
+        self.assertNotIn("job-error", app.jobs)
         self.assertEqual(app.jobs[new_id]["retry_of"], "job-error")
 
     def test_queue_prompt_client_id_extracts_comfyui_metadata(self):
