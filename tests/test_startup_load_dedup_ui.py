@@ -157,6 +157,7 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertIn("return fullDetail;", history_js)
         self.assertIn("_cacheHistoryDetail(item);", history_js)
         self.assertIn("function _clampHistoryVisibleCount(count, total)", history_js)
+        self.assertIn("return Math.min(safeCount, safeTotal);", history_js)
         self.assertIn("var HISTORY_WINDOW_MAX_ITEMS = HISTORY_PAGE_SIZE * 4;", history_js)
         self.assertIn("function _historyRefreshWindowLimit()", history_js)
         self.assertIn("_clampHistoryVisibleCount(Math.max(prevVisibleCount, _lastRenderedHistCount || 0), filteredArr.length)", history_js)

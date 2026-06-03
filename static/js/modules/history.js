@@ -175,6 +175,10 @@
     return `${API}/api/images/${_encodeMediaPath(filename)}`;
   }
 
+  function _thumbImageUrl(filename) {
+    return `${API}/api/thumbs/${_encodeMediaPath(filename)}`;
+  }
+
   function _lightboxInputImageUrl(filename) {
     return `${API}/api/input-image/${_encodeMediaPath(filename)}`;
   }
@@ -513,9 +517,9 @@ function _attachSentinel() {
     const hasImage = !!j.image;
     const isVideo = _mediaType(j.media_type, j.image) === 'video';
     const checkingPreview = j.status === 'checking' && (j.pending_thumb || j.pending_image);
-    const imgSrc = hasImage && !isVideo ? `${API}/api/images/${j.image}` : '';
+    const imgSrc = hasImage && !isVideo ? _lightboxImageUrl(j.image) : '';
     const checkingImgSrc = checkingPreview
-      ? (j.pending_thumb ? `${API}/api/thumbs/${j.pending_thumb}` : `${API}/api/images/${j.pending_image}`)
+      ? (j.pending_thumb ? _thumbImageUrl(j.pending_thumb) : _lightboxImageUrl(j.pending_image))
       : '';
     const checkingSensitiveCls = j.status === 'checking' ? ' gi-sensitive' : '';
 
@@ -684,7 +688,7 @@ function _attachSentinel() {
       const isVideo = _mediaType(job.media_type, job.image) === 'video';
       const mediaHtml = isVideo
         ? _videoPreviewHtml(job.image, job.thumb)
-        : `<img src="${escA(API + '/api/images/' + job.image)}" loading="lazy" alt="">`;
+        : `<img src="${escA(_lightboxImageUrl(job.image))}" loading="lazy" alt="">`;
       const completeHtml =
         `<div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();CW.openJobLB('${escA(job.image)}','${escA(job.prompt_preview || '')}', this, '${escA(job.media_type || '')}')">` +
           mediaHtml +
@@ -1107,7 +1111,7 @@ function _clearHistoryDeleteFocus() {
       return `<div class="masonry-sentinel is-error" id="masonrySentinel" data-auto-load-disabled="1"><button class="gallery-load-more-btn" onclick="event.stopPropagation();CW.loadMoreHistory && CW.loadMoreHistory(true)">重试加载</button></div>`;
     }
     if (!_canAutoLoadMoreHistory()) {
-      return `<div class="masonry-sentinel is-paused" id="masonrySentinel" data-auto-load-disabled="1"><button class="gallery-load-more-btn" onclick="event.stopPropagation();CW.loadMoreHistory && CW.loadMoreHistory(true)">继续查找</button></div>`;
+      return '';
     }
     return `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
   }
@@ -1541,8 +1545,8 @@ function setHistoryTypeFilter(value) {
   function _historyImageSrc(item) {
     if (!item) return '';
     if (_isVideoItem(item)) return '';
-    if (item.thumb) return `${API}/api/thumbs/${item.thumb}`;
-    return item.filename ? `${API}/api/images/${item.filename}` : '';
+    if (item.thumb) return _thumbImageUrl(item.thumb);
+    return item.filename ? _lightboxImageUrl(item.filename) : '';
   }
 
   function _videoPosterHtml() {
@@ -1555,11 +1559,11 @@ function setHistoryTypeFilter(value) {
   }
 
   function _videoPreviewSrc(filename) {
-    return filename ? `${API}/api/images/${filename}#t=0.1` : '';
+    return filename ? `${_lightboxImageUrl(filename)}#t=0.1` : '';
   }
 
   function _videoPreviewHtml(filename, thumb) {
-    if (thumb) return `<img class="gi-video-thumb" src="${escA(API + '/api/thumbs/' + thumb)}" loading="lazy" alt="">${_videoPosterHtml()}`;
+    if (thumb) return `<img class="gi-video-thumb" src="${escA(_thumbImageUrl(thumb))}" loading="lazy" alt="">${_videoPosterHtml()}`;
     var src = _videoPreviewSrc(filename);
     if (!src) return _videoPosterHtml();
     return `<video class="gi-video-preview" src="${escA(src)}" muted playsinline preload="metadata"></video>${_videoPosterHtml()}`;
@@ -1746,8 +1750,10 @@ function _renderGalleryImpl() {
         html = _historyEmptyHintHtml('正在加载历史...', '请稍候');
       } else if (_historyLoadError) {
         html = _historyEmptyHintHtml('历史加载失败', _historyLoadError, `<button class="gallery-load-more-btn" onclick="event.stopPropagation();CW.loadHistory && CW.loadHistory()">重试</button>`);
-      } else if (_hasActiveGalleryFilters() && !_historyLoadedAll) {
-        html = _historyEmptyHintHtml('当前筛选暂无匹配', '正在继续查找更多历史') + _sentinelHtml();
+      } else if (_hasActiveGalleryFilters() && !_historyLoadedAll && _canAutoLoadMoreHistory()) {
+        html = _historyEmptyHintHtml('当前筛选暂无匹配', '正在加载更多历史') + _sentinelHtml();
+      } else if (_hasActiveGalleryFilters()) {
+        html = _historyEmptyHintHtml('当前筛选暂无匹配', '可调整筛选条件');
       } else {
         html = _historyEmptyHintHtml('暂无历史', '出图后自动出现在这里');
       }
@@ -1951,7 +1957,7 @@ function _clampHistoryVisibleCount(count, total) {
     var safeTotal = Math.max(0, Number(total || 0) || 0);
     if (!safeTotal) return 0;
     var safeCount = Math.max(0, Number(count || 0) || 0);
-    return Math.min(safeCount, safeTotal, _maxRetainedHistoryVisibleCount());
+    return Math.min(safeCount, safeTotal);
   }
 function _getColumnCount() {
     const gallery = $('#gallery');
@@ -1970,7 +1976,7 @@ function lbNav(dir) {
 
   function _lightboxPreviewUrl(item) {
     if (!item) return '';
-    return item.thumb ? `${API}/api/thumbs/${item.thumb}` : _lightboxImageUrl(item.filename);
+    return item.thumb ? _thumbImageUrl(item.thumb) : _lightboxImageUrl(item.filename);
   }
 
   function _resetLightboxVideo() {
@@ -2303,7 +2309,7 @@ function lbNav(dir) {
       var thumb = data.thumb || data.frame || '';
       _syncHistoryItemFrameThumb(_lbCurrentItem && _lbCurrentItem.id, thumb, data);
       var video = $('#lbVideo');
-      if (video && thumb) video.poster = API + '/api/thumbs/' + thumb;
+      if (video && thumb) video.poster = _thumbImageUrl(thumb);
       if (window.CW && CW.toast) CW.toast('已设为卡片封面', 'done');
     } catch (err) {
       if (window.CW && CW.toast) CW.toast(err && err.message ? err.message : '设置封面失败', 'error');

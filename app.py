@@ -8235,20 +8235,51 @@ def api_history_clear(current_user: dict = Depends(get_current_user)):
     return {"ok": True, "deleted": True, "deleted_at": deleted_at}
 
 
+def _history_media_row_for_path(rel_path: str) -> dict | None:
+    """Find the generation row that owns an output media or thumbnail path."""
+    safe = (rel_path or "").replace("\\", "/").lstrip("/")
+    if not safe:
+        return None
+    conn = sqlite3.connect(GEN_DB)
+    conn.row_factory = sqlite3.Row
+    try:
+        row_obj = conn.execute(
+            "SELECT generations.*, generations.rowid AS history_rowid FROM generations "
+            "WHERE image_path=? OR thumb_path=? "
+            "ORDER BY history_rowid DESC LIMIT 1",
+            (safe, safe),
+        ).fetchone()
+        return dict(row_obj) if row_obj else None
+    finally:
+        conn.close()
+
+
+def _assert_history_media_visible(rel_path: str, current_user: dict | None):
+    row = _history_media_row_for_path(rel_path)
+    if not row:
+        raise HTTPException(404)
+    if not _history_detail_visible(row, current_user):
+        raise HTTPException(403, "无权查看该媒体")
+
+
 @app.get("/api/images/{filename:path}")
-def api_image(filename: str, current_user: dict = Depends(get_current_user)):
-    """Serve generated images."""
-    path = _safe_rel_path(OUTPUT_DIR, filename)
+def api_image(filename: str, current_user: dict | None = Depends(get_current_user_optional)):
+    """Serve generated media when the owning history record is visible."""
+    safe = (filename or "").replace("\\", "/").lstrip("/")
+    path = _safe_rel_path(OUTPUT_DIR, safe)
     if os.path.isfile(path):
+        _assert_history_media_visible(safe, current_user)
         return FileResponse(path, media_type=_image_media_type(path, "image/png"))
     raise HTTPException(404)
 
 
 @app.get("/api/thumbs/{filename:path}")
-def api_thumb(filename: str, current_user: dict = Depends(get_current_user)):
-    """Serve thumbnail images."""
-    path = _safe_rel_path(OUTPUT_DIR, filename)
+def api_thumb(filename: str, current_user: dict | None = Depends(get_current_user_optional)):
+    """Serve thumbnails when the owning history record is visible."""
+    safe = (filename or "").replace("\\", "/").lstrip("/")
+    path = _safe_rel_path(OUTPUT_DIR, safe)
     if os.path.isfile(path):
+        _assert_history_media_visible(safe, current_user)
         return FileResponse(path, media_type=_image_media_type(path, "image/jpeg"))
     raise HTTPException(404)
 

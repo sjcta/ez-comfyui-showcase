@@ -951,11 +951,75 @@ class HistoryApiTest(unittest.TestCase):
             f.write(b"image")
         with open(history_image, "wb") as f:
             f.write(b"legacy")
+        app._insert_generation(
+            {
+                "id": "hist-1",
+                "workflow": "t2i-test.json",
+                "filename": "u1/2026-05-18/hist-1.png",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+                "is_public": True,
+            },
+            elapsed=3,
+            user_id="u1",
+        )
 
-        ok = app.api_image("u1/2026-05-18/hist-1.png")
+        ok = app.api_image("u1/2026-05-18/hist-1.png", current_user=None)
         self.assertEqual(ok.path, output_image)
         with self.assertRaises(HTTPException):
-            app.api_image("u1/2026-05-18/hist-2.png")
+            app.api_image("u1/2026-05-18/hist-2.png", current_user=None)
+
+    def test_public_history_media_is_readable_without_login(self):
+        output_image = os.path.join(app.OUTPUT_DIR, "u1", "2026-05-18", "public.png")
+        thumb_image = os.path.join(app.OUTPUT_DIR, "u1", "2026-05-18", "public_thumb.jpg")
+        os.makedirs(os.path.dirname(output_image), exist_ok=True)
+        with open(output_image, "wb") as f:
+            f.write(b"image")
+        with open(thumb_image, "wb") as f:
+            f.write(b"thumb")
+        app._insert_generation(
+            {
+                "id": "public-media",
+                "workflow": "t2i-test.json",
+                "filename": "u1/2026-05-18/public.png",
+                "thumb": "u1/2026-05-18/public_thumb.jpg",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+                "is_public": True,
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        image = app.api_image("u1/2026-05-18/public.png", current_user=None)
+        thumb = app.api_thumb("u1/2026-05-18/public_thumb.jpg", current_user=None)
+
+        self.assertEqual(image.path, output_image)
+        self.assertEqual(thumb.path, thumb_image)
+
+    def test_private_history_media_requires_owner_or_admin(self):
+        output_image = os.path.join(app.OUTPUT_DIR, "u1", "private.png")
+        os.makedirs(os.path.dirname(output_image), exist_ok=True)
+        with open(output_image, "wb") as f:
+            f.write(b"image")
+        app._insert_generation(
+            {
+                "id": "private-media",
+                "workflow": "t2i-test.json",
+                "filename": "u1/private.png",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+                "is_public": False,
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        with self.assertRaises(HTTPException):
+            app.api_image("u1/private.png", current_user=None)
+        owner = app.api_image("u1/private.png", current_user={"sub": "u1", "role": "user"})
+
+        self.assertEqual(owner.path, output_image)
 
 
 if __name__ == "__main__":

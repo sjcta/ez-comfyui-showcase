@@ -813,8 +813,7 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 .masonry-sentinel.is-loading,
-.masonry-sentinel.is-error,
-.masonry-sentinel.is-paused {
+.masonry-sentinel.is-error {
   display: flex;
   align-items: center;
   justify-content: center;

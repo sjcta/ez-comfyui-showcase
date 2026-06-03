@@ -25,7 +25,7 @@ class HistoryLazyLoadingUiContractTests(unittest.TestCase):
         self.assertNotIn('console.log("[GALLERY DEBUG]', source)
         self.assertNotIn("console.log('[HIST]", source)
 
-    def test_filtered_empty_lazy_load_has_manual_cap_and_feedback(self):
+    def test_filtered_empty_lazy_load_has_auto_cap_without_continue_button(self):
         source = (ROOT / "static/js/modules/history.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
 
@@ -36,7 +36,11 @@ class HistoryLazyLoadingUiContractTests(unittest.TestCase):
         self.assertIn("CW.loadMoreHistory", source)
         self.assertIn("正在加载历史", source)
         self.assertIn("历史加载失败", source)
+        self.assertIn("可调整筛选条件", source)
+        self.assertNotIn("继续查找", source)
+        self.assertNotIn("masonry-sentinel is-paused", source)
         self.assertIn(".masonry-sentinel.is-loading", css)
+        self.assertNotIn(".masonry-sentinel.is-paused", css)
         self.assertIn(".gallery-load-more-btn", css)
 
 
