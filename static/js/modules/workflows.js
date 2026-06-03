@@ -870,6 +870,7 @@ async function selectWF(name) {
         type: f.type,
         label: f.label,
         value: f.value,
+        role: f.role,
         options: f.options,
         step: f.step,
         min: f.min,

@@ -104,6 +104,78 @@
     return opts;
   }
 
+  function _clearPageStateBeforeLogoutReload() {
+    try {
+      if (window.CW && window.CW.pollManager && typeof window.CW.pollManager.stop === 'function') {
+        window.CW.pollManager.stop();
+      }
+    } catch (e) {}
+    try {
+      if (window.__APP__) {
+        if (window.__APP__.historyItems) window.__APP__.historyItems.length = 0;
+        if (window.__APP__.jobs) {
+          Object.keys(window.__APP__.jobs).forEach(function(id) {
+            delete window.__APP__.jobs[id];
+          });
+        }
+        window.__APP__.currentWF = '';
+        window.__APP__.currentTargetInstance = '';
+        window.__APP__.currentTargetNodeId = '';
+        window.__APP__.manualTargetInstance = false;
+        window.__APP__._wfMeta = {};
+      }
+    } catch (e) {}
+    [
+      ['gallery', ''],
+      ['histCount', ''],
+      ['wfGrid', '<div class="wf-empty">正在退出...</div>'],
+      ['wfTabs', ''],
+      ['quickFormFields', ''],
+      ['advFields', '']
+    ].forEach(function(pair) {
+      var el = document.getElementById(pair[0]);
+      if (el) el.innerHTML = pair[1];
+    });
+    var genTitle = document.getElementById('genTitle');
+    if (genTitle) genTitle.style.display = 'none';
+    var genForm = document.getElementById('genForm');
+    if (genForm) genForm.style.display = 'none';
+    var genFooter = document.querySelector('.gen-footer');
+    if (genFooter) genFooter.style.display = 'none';
+    var btnGenerate = document.getElementById('btnGenerate');
+    if (btnGenerate) btnGenerate.disabled = true;
+    try {
+      if (window.CW && typeof window.CW.closeLB === 'function') window.CW.closeLB();
+    } catch (e) {}
+    try {
+      if (typeof closeModal === 'function') closeModal();
+    } catch (e) {}
+  }
+
+  function _reloadPageAfterLogout() {
+    var url = new URL(window.location.href);
+    url.searchParams.set('_logout', String(Date.now()));
+    window.location.replace(url.toString());
+  }
+
+  function _isLogoutReload() {
+    try {
+      return new URL(window.location.href).searchParams.has('_logout');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function _clearLogoutReloadMarker() {
+    try {
+      var url = new URL(window.location.href);
+      if (!url.searchParams.has('_logout')) return;
+      url.searchParams.delete('_logout');
+      var nextUrl = url.pathname + (url.search || '') + (url.hash || '');
+      window.history.replaceState(window.history.state, document.title, nextUrl);
+    } catch (e) {}
+  }
+
   function apiFetch(url, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, opts.headers || {}, getAuthHeaders());
@@ -241,19 +313,44 @@
   }
 
   function logout() {
+    _clearPageStateBeforeLogoutReload();
     try {
-      fetch(API + '/auth/logout', _attachCsrfHeader({ method: 'POST', credentials: 'include' })).catch(function() {});
-    } catch (e) {}
+      var logoutRequest = fetch(API + '/auth/logout', _attachCsrfHeader({
+        method: 'POST',
+        credentials: 'include',
+        keepalive: true
+      })).catch(function() {});
+      var reloadTimeout = new Promise(function(resolve) {
+        setTimeout(resolve, 1200);
+      });
+      Promise.race([logoutRequest, reloadTimeout]).then(_reloadPageAfterLogout, _reloadPageAfterLogout);
+    } catch (e) {
+      _reloadPageAfterLogout();
+    }
     _clearToken();
     _currentUser = null;
     _historyFavorites = _loadHistoryFavorites();
     _closeDropdown();
     _updateUI();
-    if (window.CW && CW.refreshForAuthChange) CW.refreshForAuthChange();
     CW.toast('已退出', 'info');
   }
 
   function restoreSession() {
+    if (_isLogoutReload()) {
+      try {
+        fetch(API + '/auth/logout', _attachCsrfHeader({
+          method: 'POST',
+          credentials: 'include',
+          keepalive: true
+        })).catch(function() {});
+      } catch (e) {}
+      _clearToken();
+      _currentUser = null;
+      _historyFavorites = _loadHistoryFavorites();
+      _updateUI();
+      _clearLogoutReloadMarker();
+      return Promise.resolve(null);
+    }
     return fetch(API + '/auth/me', {
       credentials: 'include'
     }).then(function(r) {

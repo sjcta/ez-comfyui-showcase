@@ -655,19 +655,58 @@ function init() {
       lb.dataset.swipeBound = '1';
       var startX = 0;
       var startY = 0;
+      var suppressLightboxNavUntil = 0;
+      function suppressLightboxNav(ms) {
+        suppressLightboxNavUntil = Math.max(suppressLightboxNavUntil, Date.now() + (ms || 650));
+      }
+      function isLightboxNavSuppressed() {
+        return Date.now() < suppressLightboxNavUntil;
+      }
+      function resetLightboxSwipeStart() {
+        startX = 0;
+        startY = 0;
+      }
+      lb.addEventListener('click', function(e) {
+        var nav = e.target && e.target.closest ? e.target.closest('.lb-nav') : null;
+        if (!nav || !isLightboxNavSuppressed()) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, true);
       lb.addEventListener('touchstart', function(e) {
         if (!e.touches || !e.touches.length) return;
+        if (e.touches.length > 1) {
+          suppressLightboxNav(800);
+          resetLightboxSwipeStart();
+          return;
+        }
+        if (e.target && e.target.closest && e.target.closest('.lb-nav')) {
+          resetLightboxSwipeStart();
+          return;
+        }
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
       }, { passive: true });
+      lb.addEventListener('touchmove', function(e) {
+        if (e.touches && e.touches.length > 1) {
+          suppressLightboxNav(800);
+          resetLightboxSwipeStart();
+        }
+      }, { passive: true });
       lb.addEventListener('touchend', function(e) {
+        if (isLightboxNavSuppressed()) {
+          resetLightboxSwipeStart();
+          return;
+        }
         if (!startX || !e.changedTouches || !e.changedTouches.length) return;
         var dx = e.changedTouches[0].clientX - startX;
         var dy = e.changedTouches[0].clientY - startY;
-        startX = 0;
-        startY = 0;
+        resetLightboxSwipeStart();
         if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
         if (window.CW && CW.lbNav) CW.lbNav(dx < 0 ? 1 : -1);
+      }, { passive: true });
+      lb.addEventListener('touchcancel', function() {
+        suppressLightboxNav(800);
+        resetLightboxSwipeStart();
       }, { passive: true });
     })();
     // Workflow management overlay

@@ -337,6 +337,33 @@ class StepCalculator:
         return float(default)
 
     @staticmethod
+    def _resolve_linked_number(workflow: dict, value: Any, default: int = 0, depth: int = 0) -> int:
+        """Resolve numeric inputs that may be routed through Primitive nodes."""
+        if depth > 5:
+            return default
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return default
+        if isinstance(value, list) and value:
+            linked = workflow.get(str(value[0]))
+            if not isinstance(linked, dict):
+                return default
+            inputs = linked.get("inputs", {})
+            for key in ("value", "INT", "FLOAT", "resolution", "width", "height"):
+                if key in inputs:
+                    resolved = StepCalculator._resolve_linked_number(
+                        workflow, inputs.get(key), default, depth + 1
+                    )
+                    if resolved != default:
+                        return resolved
+            return default
+        return default
+
+    @staticmethod
     def _resolve_resolution_hint(workflow: dict) -> int:
         """从 workflow 中尝试获取分辨率提示。
 
@@ -357,14 +384,15 @@ class StepCalculator:
                 inputs = node.get("inputs", {})
                 w = inputs.get("width", 0)
                 h = inputs.get("height", 0)
-                max_dim = max(max_dim, int(w), int(h))
+                max_dim = max(
+                    max_dim,
+                    StepCalculator._resolve_linked_number(workflow, w),
+                    StepCalculator._resolve_linked_number(workflow, h),
+                )
             if ct in ("SeedVR2VideoUpscaler",):
                 inputs = node.get("inputs", {})
                 resolution = inputs.get("resolution", 0)
-                try:
-                    max_dim = max(max_dim, int(resolution or 0))
-                except (TypeError, ValueError):
-                    pass
+                max_dim = max(max_dim, StepCalculator._resolve_linked_number(workflow, resolution))
         return max_dim
 
     @staticmethod

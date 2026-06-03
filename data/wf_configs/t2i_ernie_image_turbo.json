@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "workflow": "t2i_ernie_image_turbo.json",
+  "fields": [
+    {
+      "key": "94::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "80::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 1,
+      "type": "number",
+      "role": "width",
+      "step": 16,
+      "min": 64,
+      "max": 1376
+    },
+    {
+      "key": "81::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 2,
+      "type": "number",
+      "role": "height",
+      "step": 16,
+      "min": 64,
+      "max": 1376
+    },
+    {
+      "key": "70::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "70::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 1,
+      "type": "number",
+      "min": 1,
+      "max": 16
+    },
+    {
+      "key": "70::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 2,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 8
+    },
+    {
+      "key": "70::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样器",
+      "order": 3,
+      "type": "select",
+      "options": [
+        "euler",
+        "res_multistep",
+        "dpmpp_2m",
+        "uni_pc"
+      ]
+    },
+    {
+      "key": "96::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "提示词增强",
+      "order": 4,
+      "type": "toggle"
+    },
+    {
+      "key": "110::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "超分种子",
+      "order": 5,
+      "type": "seed"
+    },
+    {
+      "key": "110::resolution",
+      "zone": "advanced",
+      "visible": true,
+      "label": "SeedVR2 目标分辨率",
+      "order": 6,
+      "type": "number",
+      "step": 64,
+      "min": 512,
+      "max": 4096
+    },
+    {
+      "key": "110::max_resolution",
+      "zone": "hidden",
+      "visible": false,
+      "label": "max_resolution",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "110::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量",
+      "order": 8,
+      "type": "number"
+    },
+    {
+      "key": "110::uniform_batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量模式",
+      "order": 9,
+      "type": "toggle"
+    },
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "66::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "62::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "63::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "111::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 VAE",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "112::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 DiT",
+      "order": 4,
+      "type": "text"
+    }
+  ]
+}

@@ -161,6 +161,15 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
                     self.assertTrue(by_key[key]["visible"])
                 self.assertEqual(by_key["910::camera_view"]["zone"], "hidden")
 
+    def test_qwen_rapid_high_quality_hides_seedvr2_internal_batch_size(self):
+        cfg = json.loads((ROOT / "data/wf_configs/i2i-Qwen-Rapid-seedVR2-4k.json").read_text())
+        by_key = {item["key"]: item for item in cfg["fields"]}
+
+        field = by_key["92::batch_size"]
+        self.assertEqual(field["zone"], "hidden")
+        self.assertFalse(field["visible"])
+        self.assertEqual(field["label"], "SeedVR2 内部批量")
+
     def test_quick_form_renders_3d_angle_control_and_appends_prompt(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()

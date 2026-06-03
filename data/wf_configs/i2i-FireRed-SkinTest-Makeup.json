@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "workflow": "i2i-FireRed-SkinTest-Makeup.json",
+  "fields": [
+    {
+      "key": "143::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "118::prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 1,
+      "type": "textarea"
+    },
+    {
+      "key": "130::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "130::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样器",
+      "order": 1,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "130::scheduler",
+      "zone": "advanced",
+      "visible": true,
+      "label": "调度器",
+      "order": 2,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "130::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "降噪",
+      "order": 3,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "115::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "115::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "115::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "116::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "117::prompt",
+      "zone": "hidden",
+      "visible": false,
+      "label": "提示词",
+      "order": 4,
+      "type": "textarea"
+    },
+    {
+      "key": "120::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "123::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "128::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "128::weight_dtype",
+      "zone": "hidden",
+      "visible": false,
+      "label": "weight_dtype",
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "151::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "151::strength_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength_model",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "153::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 11,
+      "type": "toggle"
+    },
+    {
+      "key": "155::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "156::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "162::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "163::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 15,
+      "type": "number"
+    },
+    {
+      "key": "901::strength_model",
+      "zone": "user_input",
+      "visible": true,
+      "label": "质感LoRA强度",
+      "order": 2,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1.5
+    }
+  ]
+}

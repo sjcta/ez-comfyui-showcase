@@ -72,12 +72,26 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertNotIn("zone: f.zone || 'advanced'", generate_js)
         self.assertNotIn("zone: f.zone || 'advanced'", workflows_js)
 
+    def test_quick_form_uses_workflow_default_prompt_value(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("var defaultPromptValue = ''", generate_js)
+        self.assertIn("defaultPromptValue = String(f.value || '')", generate_js)
+        self.assertIn('<textarea id="promptInput" placeholder="', generate_js)
+        self.assertIn("+ escH(defaultPromptValue) + '</textarea>", generate_js)
+        self.assertIn("preferWorkflowDefaultPrompt", generate_js)
+        self.assertIn("/SkinTest/i.test(String(A.currentWF || ''))", generate_js)
+
     def test_generate_syncs_flux2_scheduler_dimensions(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
 
         self.assertIn("function _isFlux2SchedulerSizeField", generate_js)
         self.assertIn("_isFlux2SchedulerSizeField(f, 'width')", generate_js)
         self.assertIn("_isFlux2SchedulerSizeField(f, 'height')", generate_js)
+        self.assertIn("role: f.role", generate_js)
+        self.assertIn("if (f && f.role === dim) return true", generate_js)
+        workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
+        self.assertIn("role: f.role", workflows_js)
 
     def test_flux2_ratio_presets_are_limited_by_total_pixels(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
@@ -100,6 +114,12 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertIn("[1024, 1024, '1:1'", generate_js)
         self.assertIn("[1280, 720, '16:9'", generate_js)
         self.assertIn("[720, 1280, '9:16'", generate_js)
+        self.assertIn("var ERNIE_IMAGE_RATIO_PRESETS", generate_js)
+        self.assertIn("[1024, 1024, '1:1'", generate_js)
+        self.assertIn("[1376, 768, '16:9'", generate_js)
+        self.assertIn("[768, 1376, '9:16'", generate_js)
+        self.assertIn("presets: ERNIE_IMAGE_RATIO_PRESETS", generate_js)
+        self.assertIn("inputMax: 1376", generate_js)
         self.assertIn("_ratioPresetsForLimits(limits)", generate_js)
 
     def test_generate_waits_for_pending_reference_image_upload(self):

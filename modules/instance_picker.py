@@ -128,7 +128,11 @@ def _workflow_profile(workflow_name: str) -> dict:
     kind = "other"
     preferred = ""
     pressure = 2
-    if _has_token(lower, "t2i"):
+    if "bernini" in lower:
+        kind = "bernini"
+        preferred = "Bernini"
+        pressure = 3
+    elif _has_token(lower, "t2i"):
         kind = "t2i"
         preferred = "A"
         pressure = 1
@@ -144,7 +148,7 @@ def _workflow_profile(workflow_name: str) -> dict:
         kind = "upscale"
         preferred = "A"
         pressure = 3
-    strict_preferred = kind in {"t2i", "i2i", "upscale", "video"}
+    strict_preferred = kind in {"t2i", "i2i", "upscale", "video", "bernini"}
     return {"kind": kind, "preferred": preferred, "pressure": pressure, "strict_preferred": strict_preferred}
 
 

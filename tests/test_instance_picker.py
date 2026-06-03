@@ -4,20 +4,23 @@ import unittest
 from modules.instance_picker import pick_best_instance, strict_preferred_instance_name
 
 
-def _instances():
-    return [
+def _instances(include_bernini=False):
+    instances = [
         {"name": "A", "url": "http://127.0.0.1:8190", "sort_order": 1},
         {"name": "B", "url": "http://127.0.0.1:8189", "sort_order": 2},
     ]
+    if include_bernini:
+        instances.append({"name": "Bernini", "url": "http://127.0.0.1:8192", "sort_order": 3})
+    return instances
 
 
 class InstancePickerTest(unittest.TestCase):
-    def _pick(self, workflow, loads=None, groups=None):
+    def _pick(self, workflow, loads=None, groups=None, include_bernini=False):
         loads = loads or {}
         groups = groups or {}
         return asyncio.run(
             pick_best_instance(
-                instances=_instances(),
+                instances=_instances(include_bernini=include_bernini),
                 workflow_name=workflow,
                 queue_size_getter=lambda inst: loads.get(inst["name"], 0),
                 group_getter=lambda name: groups.get(name, ""),
@@ -53,6 +56,11 @@ class InstancePickerTest(unittest.TestCase):
 
     def test_strict_preferred_instance_keeps_retry_on_t2i_lane(self):
         self.assertEqual(strict_preferred_instance_name("t2i-z-image.json"), "A")
+
+    def test_bernini_routes_to_dedicated_instance(self):
+        picked = self._pick("t2i_bernini_fp8.json", include_bernini=True)
+        self.assertEqual(picked["name"], "Bernini")
+        self.assertEqual(strict_preferred_instance_name("t2i_bernini_fp8.json"), "Bernini")
 
     def test_matching_loaded_group_can_break_tie(self):
         picked = self._pick(

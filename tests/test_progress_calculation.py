@@ -580,6 +580,49 @@ class ProgressCalculationTests(unittest.TestCase):
         self.assertGreater(upscale_done, halfway)
         self.assertGreater(save_done, upscale_done)
 
+    def test_seedvr_upscale_resolves_linked_flux_latent_dimensions(self):
+        workflow = {
+            "8": {
+                "class_type": "VAEDecode",
+                "inputs": {"samples": ["70", 0], "vae": ["63", 0]},
+            },
+            "63": {
+                "class_type": "VAELoader",
+                "inputs": {"vae_name": "flux2-vae.safetensors"},
+            },
+            "70": {
+                "class_type": "KSampler",
+                "inputs": {"steps": 8, "denoise": 1.0, "latent_image": ["71", 0]},
+            },
+            "71": {
+                "class_type": "EmptyFlux2LatentImage",
+                "inputs": {"width": ["80", 0], "height": ["81", 0]},
+            },
+            "80": {
+                "class_type": "PrimitiveInt",
+                "_meta": {"title": "Width"},
+                "inputs": {"value": 848},
+            },
+            "81": {
+                "class_type": "PrimitiveInt",
+                "_meta": {"title": "Height"},
+                "inputs": {"value": 1264},
+            },
+            "110": {
+                "class_type": "SeedVR2VideoUpscaler",
+                "inputs": {"image": ["8", 0], "resolution": 2048, "seed": 42},
+            },
+        }
+
+        step_info = StepCalculator().calculate(workflow)
+
+        self.assertEqual(step_info.sampler_steps["110"], 0)
+        self.assertIn("110", step_info.time_estimates)
+        self.assertEqual(
+            step_info.time_estimates["110"],
+            TimeEstimator.estimate("SeedVR2VideoUpscaler", 2048),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

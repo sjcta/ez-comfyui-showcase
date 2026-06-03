@@ -2,7 +2,7 @@
 
 Multi-instance ComfyUI Web Management & Generation Platform.
 
-Current version: **v4.6.24**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
+Current version: **v4.7.0**. The canonical project version is stored in [`VERSION`](VERSION) and exposed by `/api/version`.
 
 Built for **DGX Spark (GB10)** with 128GB unified memory, running two serially dispatched generation ComfyUI instances (A:8190 / B:8189) behind an intelligent scheduler. Prompt optimization, translation, and image reverse prompting use the configured local LLM API instead of a separate ComfyUI Prompt instance.
 
@@ -97,8 +97,16 @@ python3 app.py --port 9091
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full user-facing update notes.
 
+### Release Discipline
+
+Every code, workflow, documentation, or configuration change must be recorded in [`CHANGELOG.md`](CHANGELOG.md) with a concise description of what changed, and the smallest applicable project version must be bumped at the same time. For ordinary fixes and documentation updates, increment the patch version in [`VERSION`](VERSION) and keep the README current-version line and version tests aligned.
+
 | Version | Highlights |
 |---------|-----------|
+| v4.7.0 | ERNIE 与皮肤测试工作流 — 新增 ERNIE/BERNINI 工作流配置、Qwen/SkinTest 变体、项目文档，并同步运行与测试修正 |
+| v4.6.27 | 移动端放大手势修正 — lightbox 双指缩放时抑制左右切图按钮和横滑导航误触 |
+| v4.6.26 | 登出刷新修正 — `_logout` 刷新标记消费后立即从地址栏移除，避免用户重新登录后刷新又被登出 |
+| v4.6.25 | 发布流程规范 — README 明确要求每次修改都必须写入修正日志，并同步更新最小适用版本号 |
 | v4.4.0 | 图片对比与运行恢复 — 图生图放大窗口可一键切换原图/新图，增强 GPU 卡住自愈、实例停止收敛、媒体中性状态文案，并新增 LTX2.3 10Eros 工作流 |
 | v4.3.0 | 正式升级 — 登录保持一个月、管理员网站通知、登录前首页、更多工作流、设备管理布局优化、历史画廊载入和 admin 轮询闪烁修复 |
 | v4.2.3 | 图片保护校验 — 出图后先进入“图片校验中”，由本地轻量 worker 写回保护状态后再显示 |

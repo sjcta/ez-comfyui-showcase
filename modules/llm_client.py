@@ -11,8 +11,8 @@ import urllib.request
 from typing import Any
 
 
-DEFAULT_LLM_BASE_URL = os.environ.get("EZ_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
-DEFAULT_LLM_MODEL = os.environ.get("EZ_LLM_MODEL", "gemma-4-e2b")
+DEFAULT_LLM_BASE_URL = os.environ.get("EZ_LLM_BASE_URL", "http://127.0.0.1:18080").rstrip("/")
+DEFAULT_LLM_MODEL = os.environ.get("EZ_LLM_MODEL", "mac-qwen3.5-9b-hauhaucs-aggressive-q4-vision")
 DEFAULT_LLM_TIMEOUT = float(os.environ.get("EZ_LLM_TIMEOUT", "180") or 180)
 DIRECT_FINAL_SYSTEM_PROMPT = (
     "Do not reason. Do not think. Return only the final answer. "

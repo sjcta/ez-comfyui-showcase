@@ -133,6 +133,38 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertIn("credentials: 'include'", auth_js)
         self.assertIn("ws.cookies.get(AUTH_COOKIE_NAME)", app_py)
 
+    def test_logout_clears_visible_state_and_forces_full_page_reload(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text()
+        logout_start = auth_js.index("function logout()")
+        logout_end = auth_js.index("function restoreSession()", logout_start)
+        logout_block = auth_js[logout_start:logout_end]
+
+        self.assertIn("_clearPageStateBeforeLogoutReload();", logout_block)
+        self.assertIn("window.CW.pollManager.stop()", auth_js)
+        self.assertIn("window.__APP__.historyItems.length = 0;", auth_js)
+        self.assertIn("delete window.__APP__.jobs[id];", auth_js)
+        self.assertIn("document.getElementById(pair[0])", auth_js)
+        self.assertIn("window.location.replace(url.toString());", auth_js)
+        self.assertIn("Promise.race([logoutRequest, reloadTimeout])", logout_block)
+        self.assertNotIn("refreshForAuthChange", logout_block)
+
+    def test_logout_reload_skips_session_restore(self):
+        auth_js = (ROOT / "static/js/modules/auth.js").read_text()
+        restore_start = auth_js.index("function restoreSession()")
+        restore_end = auth_js.index("function _updateUI()", restore_start)
+        restore_block = auth_js[restore_start:restore_end]
+
+        self.assertIn("function _isLogoutReload()", auth_js)
+        self.assertIn("searchParams.has('_logout')", auth_js)
+        self.assertIn("function _clearLogoutReloadMarker()", auth_js)
+        self.assertIn("url.searchParams.delete('_logout')", auth_js)
+        self.assertIn("window.history.replaceState(window.history.state, document.title, nextUrl);", auth_js)
+        self.assertIn("if (_isLogoutReload())", restore_block)
+        self.assertIn("fetch(API + '/auth/logout'", restore_block)
+        self.assertIn("_currentUser = null;", restore_block)
+        self.assertIn("_clearLogoutReloadMarker();", restore_block)
+        self.assertIn("return Promise.resolve(null);", restore_block)
+
     def test_cookie_session_write_requests_attach_csrf_header(self):
         auth_js = (ROOT / "static/js/modules/auth.js").read_text()
         app_py = (ROOT / "app.py").read_text()

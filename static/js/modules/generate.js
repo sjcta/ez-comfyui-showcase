@@ -91,6 +91,15 @@
     [2048, 3072, '2:3', '16px', '24px'],
     [2160, 3840, '9:16', '14px', '24px']
   ];
+  var ERNIE_IMAGE_RATIO_PRESETS = [
+    [1024, 1024, '1:1', '22px', '22px'],
+    [1264, 848, '3:2', '26px', '17px'],
+    [1376, 768, '16:9', '28px', '16px'],
+    [1200, 896, '4:3', '24px', '18px'],
+    [896, 1200, '3:4', '18px', '24px'],
+    [848, 1264, '2:3', '16px', '24px'],
+    [768, 1376, '9:16', '14px', '24px']
+  ];
   var QWEN_IMAGE_RATIO_PRESETS = [
     [1328, 1328, '1:1', '22px', '22px'],
     [1584, 1056, '3:2', '26px', '17px'],
@@ -133,7 +142,7 @@ function _workflowSizeLimits(fields) {
       return { name: 'z-image', maxSide: null, maxPixels: 1024 * 1024, multiple: 32, minSide: 256, inputMax: 1536, presets: Z_IMAGE_RATIO_PRESETS };
     }
     if (/ernie/i.test(workflow) || _hasFieldClass(fields, /ERNIE/i)) {
-      return { name: 'ernie-image', maxSide: 2048, maxPixels: null, multiple: 16, minSide: 64, inputMax: 2048, basePresets: FLUX2_RATIO_BASE_PRESETS };
+      return { name: 'ernie-image', maxSide: 1376, maxPixels: null, multiple: 16, minSide: 64, inputMax: 1376, presets: ERNIE_IMAGE_RATIO_PRESETS };
     }
     return DEFAULT_SIZE_LIMITS;
   }
@@ -279,6 +288,7 @@ function _normalizeFieldMeta(fields, workflowName) {
         type: f.type,
         label: f.label,
         value: f.value,
+        role: f.role,
         options: f.options,
         step: f.step,
         min: f.min,
@@ -567,6 +577,7 @@ function _isFlux2SchedulerSizeField(f, dim) {
 
 function _isLatentDimensionField(f, dim) {
     var cls = String((f && f.class_type) || '');
+    if (f && f.role === dim) return true;
     return !!(f && f.field === dim && (cls.indexOf('LatentImage') >= 0 || cls.indexOf('LatentVideo') >= 0));
   }
 
@@ -2722,6 +2733,7 @@ function renderQuickForm(fields) {
     var hasZones = fields.some(function(f) { return f.zone; });
     var hasDirector = _hasDirectorWorkflow(fields);
     var html = '', hasTextEncode = false, hasLoadImage = false, hasLoadVideo = false, quickImageRendered = false, quickVideoRendered = false, sizeRendered = false;
+    var defaultPromptValue = '';
     var qwenAngleGroups = _qwenAngleGroups(fields);
     var qwenAngleByNode = {};
     var qwenAngleRendered = {};
@@ -2770,10 +2782,11 @@ function renderQuickForm(fields) {
       }
       if (_isPromptLikeField(f)) {
         hasTextEncode = true;
+        if (!defaultPromptValue && f.value !== undefined && f.value !== null) defaultPromptValue = String(f.value || '');
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
         var optimizeCopy = _promptOptimizeCopy(fields);
         var directorBtn = hasDirector ? '<button id="directorModeBtn" class="prompt-tool-btn prompt-tool-btn-vibrant" type="button" title="导演模式" onclick="CW.toggleDirectorPanel()">' + (window.CW && CW.icon ? CW.icon('clapperboard') : '') + ' <span class="prompt-tool-label">导演模式</span></button>' : '';
-        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea></div><div class="prompt-actions">' + directorBtn + '<button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="' + escA(optimizeCopy.label) + '" data-optimize-mode="' + escA(optimizeCopy.mode) + '" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">' + escH(optimizeCopy.label) + '</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap"><textarea id="promptInput" placeholder="' + escA(labelText) + '...">' + escH(defaultPromptValue) + '</textarea></div><div class="prompt-actions">' + directorBtn + '<button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="' + escA(optimizeCopy.label) + '" data-optimize-mode="' + escA(optimizeCopy.mode) + '" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">' + escH(optimizeCopy.label) + '</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
       } else if (_isVideoModeField(f)) {
         var modeKey = `${f.node_id}::${f.field}`;
         var isBypass = f.value !== false && f.value !== 'false' && f.value !== 'False';
@@ -2824,10 +2837,12 @@ function renderQuickForm(fields) {
       var hi = $('#heightInput');
       window.CW.highlightRatio && CW.highlightRatio(parseInt((wi && wi.value) || 0, 10), parseInt((hi && hi.value) || 0, 10));
     }
-    // Restore saved prompt text after DOM rebuild (non-latent path)
-    if (_savedPrompt) {
+    // Restore user-entered prompt text after DOM rebuild; SkinTest workflows
+    // intentionally show their LoRA trigger defaults for side-by-side tests.
+    var preferWorkflowDefaultPrompt = !!(defaultPromptValue && /SkinTest/i.test(String(A.currentWF || '')));
+    if (_savedPrompt && !preferWorkflowDefaultPrompt) {
       var pi2 = $('#promptInput');
-      if (pi2 && !pi2.value) pi2.value = _savedPrompt;
+      if (pi2) pi2.value = _savedPrompt;
     }
     var promptInput = $('#promptInput');
     if (promptInput && window.CW.syncClearPromptButton) {

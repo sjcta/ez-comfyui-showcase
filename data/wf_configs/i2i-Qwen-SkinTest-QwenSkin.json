@@ -1,0 +1,288 @@
+{
+  "version": 1,
+  "workflow": "i2i-Qwen-SkinTest-QwenSkin.json",
+  "fields": [
+    {
+      "key": "41::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "image",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "170:151::prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "prompt",
+      "order": 1,
+      "type": "textarea"
+    },
+    {
+      "key": "170:169::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "seed",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "170:169::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "sampler_name",
+      "order": 1,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "170:169::scheduler",
+      "zone": "advanced",
+      "visible": true,
+      "label": "scheduler",
+      "order": 2,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "170:169::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "denoise",
+      "order": 3,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "170:166::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "170:165::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "170:155::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "170:154::value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "value",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "filename_prefix",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "44::prompt",
+      "zone": "hidden",
+      "visible": false,
+      "label": "prompt",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "45::reference_latents_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "reference_latents_method",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "170:162::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "170:162::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "170:162::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "170:168::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 5,
+      "type": "toggle"
+    },
+    {
+      "key": "170:146::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 6,
+      "type": "text"
+    },
+    {
+      "key": "170:145::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "170:152::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 8,
+      "type": "number"
+    },
+    {
+      "key": "170:148::reference_latents_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "reference_latents_method",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "170:153::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "170:153::strength_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength_model",
+      "order": 11,
+      "type": "number"
+    },
+    {
+      "key": "43::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 12,
+      "type": "text"
+    },
+    {
+      "key": "910::horizontal_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "水平角度",
+      "order": 2,
+      "type": "number",
+      "step": 1,
+      "min": 0,
+      "max": 360
+    },
+    {
+      "key": "910::vertical_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "俯仰角度",
+      "order": 3,
+      "type": "number",
+      "step": 1,
+      "min": -30,
+      "max": 60
+    },
+    {
+      "key": "910::zoom",
+      "zone": "user_input",
+      "visible": true,
+      "label": "镜头距离",
+      "order": 4,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "910::default_prompts",
+      "zone": "hidden",
+      "visible": false,
+      "label": "默认角度词",
+      "order": 100,
+      "type": "toggle"
+    },
+    {
+      "key": "910::camera_view",
+      "zone": "hidden",
+      "visible": false,
+      "label": "相机视角",
+      "order": 101,
+      "type": "toggle"
+    },
+    {
+      "key": "901::strength_model",
+      "zone": "user_input",
+      "visible": true,
+      "label": "质感LoRA强度",
+      "order": 2,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1.5
+    }
+  ]
+}

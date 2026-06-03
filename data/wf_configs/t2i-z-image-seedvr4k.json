@@ -90,17 +90,17 @@
     },
     {
       "key": "73::batch_size",
-      "zone": "advanced",
-      "visible": true,
-      "label": "batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量",
       "order": 6,
       "type": "number"
     },
     {
       "key": "73::uniform_batch_size",
-      "zone": "advanced",
-      "visible": true,
-      "label": "uniform_batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量模式",
       "order": 7,
       "type": "toggle"
     },

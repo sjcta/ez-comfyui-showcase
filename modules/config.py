@@ -82,6 +82,7 @@ class ModelGroup:
     """工作流模型分组 — 控制实例亲和性路由。"""
 
     GROUPS: ClassVar[list[tuple[str, list[str]]]] = [
+        ("bernini", ["bernini"]),
         ("flux2-klein", ["flux2_klein", "flux2-klein", "flux-2-klein"]),
         ("flux2-dev", ["flux2_dev", "flux2-dev", "flux.2-dev"]),
         ("nunchaku", ["nunchaku"]),

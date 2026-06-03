@@ -39,6 +39,26 @@ class SeedVR2VideoUpscaleWorkflowTests(unittest.TestCase):
             self.assertEqual(fields["21::file"]["type"], "video")
             self.assertEqual(fields["21::file"]["zone"], "user_input")
             self.assertEqual(fields["10::resolution"]["type"], "number")
+            self.assertEqual(fields["10::batch_size"]["label"], "批处理帧数")
+            self.assertTrue(fields["10::batch_size"]["visible"])
+
+    def test_image_seedvr2_internal_batch_fields_are_hidden(self):
+        expectations = {
+            "SeedVR2_upscale_2k.json": ("10::batch_size", "10::uniform_batch_size"),
+            "SeedVR2_upscale_4k.json": ("10::batch_size", "10::uniform_batch_size"),
+            "i2i-Qwen-Rapid-seedVR2-4k.json": ("92::batch_size", "92::uniform_batch_size"),
+            "i2i-Qwen-SeedVR2.json": ("92::batch_size", "92::uniform_batch_size"),
+            "t2i-z-image-seedvr4k.json": ("73::batch_size", "73::uniform_batch_size"),
+            "t2i_nunchaku_seedvr4k.json": ("59::batch_size", "59::uniform_batch_size"),
+        }
+        for name, keys in expectations.items():
+            with self.subTest(config=name):
+                config = json.loads((CONFIG_DIR / name).read_text())
+                fields = {item["key"]: item for item in config["fields"]}
+                for key in keys:
+                    self.assertEqual(fields[key]["zone"], "hidden")
+                    self.assertFalse(fields[key]["visible"])
+                    self.assertTrue(fields[key]["label"].startswith("SeedVR2 内部批量"))
 
     def test_meta_registers_video_upscale_entries(self):
         meta = json.loads(META.read_text())

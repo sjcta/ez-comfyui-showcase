@@ -1,0 +1,369 @@
+{
+  "9": {
+    "inputs": {
+      "filename_prefix": "SkinTest/Qwen_AnythingReal",
+      "images": [
+        "170:158",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "41": {
+    "inputs": {
+      "image": "z-image-turbo_00010_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "910": {
+    "inputs": {
+      "horizontal_angle": 0,
+      "vertical_angle": 0,
+      "zoom": 5,
+      "default_prompts": true,
+      "camera_view": false,
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "QwenMultiangleCameraNode",
+    "_meta": {
+      "title": "Qwen Multiangle Camera"
+    }
+  },
+  "43": {
+    "inputs": {
+      "unet_name": "gguf/qwen-image-edit-2511-Q8_0.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "44": {
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "170:162",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "TextEncodeQwenImageEditPlus (Negative)"
+    }
+  },
+  "45": {
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "FluxKontext多参考潜在方法"
+    }
+  },
+  "170:162": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "170:165": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "170:166": {
+    "inputs": {
+      "value": 30
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "170:168": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Enable 4steps LoRA?"
+    }
+  },
+  "170:146": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "170:154": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "CFG"
+    }
+  },
+  "170:155": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "CFG"
+    }
+  },
+  "170:160": {
+    "inputs": {
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "FluxKontextImageScale",
+    "_meta": {
+      "title": "图像缩放为FluxKontext"
+    }
+  },
+  "170:145": {
+    "inputs": {
+      "shift": 3.1,
+      "model": [
+        "43",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "170:167": {
+    "inputs": {
+      "switch": [
+        "170:168",
+        0
+      ],
+      "on_false": [
+        "170:166",
+        0
+      ],
+      "on_true": [
+        "170:165",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Steps)"
+    }
+  },
+  "170:164": {
+    "inputs": {
+      "switch": [
+        "170:168",
+        0
+      ],
+      "on_false": [
+        "170:154",
+        0
+      ],
+      "on_true": [
+        "170:155",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (CFG)"
+    }
+  },
+  "170:151": {
+    "inputs": {
+      "prompt": "将参考图中的人物统一改写为同一位成年亚洲女性，半身全裸肖像，半身构图，真实摄影质感，保持自然面部比例和身份一致性；皮肤需要有可见毛孔、细小纹理、自然肤色变化、轻微皮脂高光、真实阴影和细微瑕疵，避免塑料皮肤、磨皮、蜡像感、过度锐化和AI感。85mm portrait photography, raw photo, natural skin texture, visible pores, subtle imperfections, realistic skin tone variation, no airbrushing. transform the image to realistic photograph.",
+      "clip": [
+        "170:162",
+        0
+      ],
+      "vae": [
+        "170:146",
+        0
+      ],
+      "image1": [
+        "170:160",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "TextEncodeQwenImageEditPlus (Positive)"
+    }
+  },
+  "170:156": {
+    "inputs": {
+      "pixels": [
+        "170:160",
+        0
+      ],
+      "vae": [
+        "170:146",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "170:152": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "170:145",
+        0
+      ]
+    },
+    "class_type": "CFGNorm",
+    "_meta": {
+      "title": "CFG归一化"
+    }
+  },
+  "170:148": {
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "170:151",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "FluxKontext多参考潜在方法"
+    }
+  },
+  "170:153": {
+    "inputs": {
+      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "170:152",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "170:163": {
+    "inputs": {
+      "switch": [
+        "170:168",
+        0
+      ],
+      "on_false": [
+        "901",
+        0
+      ],
+      "on_true": [
+        "170:153",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Model)"
+    }
+  },
+  "170:169": {
+    "inputs": {
+      "seed": 424242424242,
+      "steps": [
+        "170:167",
+        0
+      ],
+      "cfg": [
+        "170:164",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "170:163",
+        0
+      ],
+      "positive": [
+        "170:148",
+        0
+      ],
+      "negative": [
+        "45",
+        0
+      ],
+      "latent_image": [
+        "170:156",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "170:158": {
+    "inputs": {
+      "samples": [
+        "170:169",
+        0
+      ],
+      "vae": [
+        "170:146",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "901": {
+    "inputs": {
+      "lora_name": "AnythingtoRealCharacters2511_20.safetensors",
+      "strength_model": 0.45,
+      "model": [
+        "170:152",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Skin Texture LoRA"
+    }
+  }
+}

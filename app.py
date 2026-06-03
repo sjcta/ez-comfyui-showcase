@@ -3,7 +3,7 @@
 ComfyUI Web v3 — 三段式布局，GPU 监控，服务管理。
 节点管理支持从 config/nodes.json 动态读取。
 """
-import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3, secrets, zipfile
+import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3, secrets, zipfile, math
 # Ensure D-Bus session is available for systemctl --user calls in nohup context
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -2898,6 +2898,7 @@ def _refresh_instance_state():
 # Affinity matching is done at the GROUP level, not filename level.
 MODEL_GROUPS = [
     # (group_name, keywords_in_filename)
+    ("bernini",      ["bernini"]),
     ("flux2-klein",  ["flux2_klein", "flux2-klein", "flux-2-klein"]),
     ("flux2-dev",    ["flux2_dev", "flux2-dev", "flux.2-dev"]),
     ("nunchaku",      ["nunchaku"]),
@@ -4383,6 +4384,86 @@ def _sync_flux2_scheduler_dimensions(wf: dict, field_values: dict) -> None:
             field_values.setdefault(f"{nid}::height", height)
 
 
+ERNIE_IMAGE_OFFICIAL_SIZES: tuple[tuple[int, int], ...] = (
+    (1024, 1024),
+    (1264, 848),
+    (1376, 768),
+    (1200, 896),
+    (896, 1200),
+    (848, 1264),
+    (768, 1376),
+)
+ERNIE_I2I_WORKFLOWS = {"i2i_ernie_image.json", "i2i_ernie_image_turbo.json"}
+
+
+def _official_ernie_size_for_aspect(width: int, height: int) -> tuple[int, int]:
+    try:
+        source_ratio = max(1, int(width)) / max(1, int(height))
+    except Exception:
+        source_ratio = 1.0
+    return min(
+        ERNIE_IMAGE_OFFICIAL_SIZES,
+        key=lambda size: abs(math.log((size[0] / size[1]) / source_ratio)),
+    )
+
+
+def _safe_comfy_input_path(image_name: str) -> str:
+    image_name = str(image_name or "").strip()
+    if not image_name:
+        return ""
+    base = Path(COMFYUI_INPUT).resolve()
+    candidate = Path(image_name)
+    if not candidate.is_absolute():
+        candidate = base / image_name
+    try:
+        resolved = candidate.resolve()
+        if resolved == base or base in resolved.parents:
+            return str(resolved)
+    except Exception:
+        return ""
+    return ""
+
+
+def _image_dimensions_for_comfy_input(image_name: str) -> tuple[int, int]:
+    path = _safe_comfy_input_path(image_name)
+    if not path or not os.path.isfile(path):
+        return (0, 0)
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img)
+            return int(img.width or 0), int(img.height or 0)
+    except Exception:
+        return (0, 0)
+
+
+def _sync_ernie_i2i_reference_dimensions(workflow_name: str, wf: dict, field_values: dict) -> tuple[int, int]:
+    if os.path.basename(str(workflow_name or "")) not in ERNIE_I2I_WORKFLOWS:
+        return (0, 0)
+    image_value = ""
+    scale_node_id = ""
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "LoadImage" and not image_value:
+            image_value = field_values.get(f"{nid}::image", inputs.get("image", ""))
+        elif ct == "ImageScale" and not scale_node_id and "width" in inputs and "height" in inputs:
+            scale_node_id = str(nid)
+    if not image_value or not scale_node_id:
+        return (0, 0)
+    source_w, source_h = _image_dimensions_for_comfy_input(str(image_value))
+    if source_w <= 0 or source_h <= 0:
+        return (0, 0)
+    target_w, target_h = _official_ernie_size_for_aspect(source_w, source_h)
+    field_values[f"{scale_node_id}::width"] = target_w
+    field_values[f"{scale_node_id}::height"] = target_h
+    field_values["__ernie_i2i_source_size"] = f"{source_w}x{source_h}"
+    field_values["__ernie_i2i_auto_size"] = f"{target_w}x{target_h}"
+    return target_w, target_h
+
+
 def _sync_ltx_video_timing(wf: dict, field_values: dict) -> None:
     """Keep LTX video/audio timing nodes aligned when the card edits length/FPS."""
     length = None
@@ -4951,7 +5032,7 @@ def _parse_with_config(path: str, config: dict) -> dict:
             ftype = "seed"
         if not ftype:
             ftype = "text"
-        for k in ("options", "step", "min", "max"):
+        for k in ("options", "step", "min", "max", "role"):
             if k in field_cfg:
                 fextra[k] = field_cfg[k]
         fields.append({
@@ -7416,6 +7497,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         with open(path) as f:
             wf_check = json.load(f)
         normalized_fields = _normalize_workflow_field_values(wf_check, req.fields)
+        auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(req.workflow, wf_check, normalized_fields)
         if random_seed_requested:
             _apply_generated_seed_to_seed_fields(wf_check, normalized_fields, seed)
         for key, val in normalized_fields.items():
@@ -7446,7 +7528,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         "workflow": req.workflow, "seed": str(seed),
         "workflow_type": workflow_type,
         "prompt_preview": prompt_preview,
-        "width": req.width, "height": req.height,
+        "width": auto_w or req.width, "height": auto_h or req.height,
         "fields": normalized_fields,
         "preferred_instance": req.preferred_instance or "",
         "preferred_node_id": req.preferred_node_id or "",
@@ -7463,7 +7545,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     save_jobs()
 
     _job_queue.put_nowait((
-        job_id, path, normalized_fields, seed, vllm_was, req.width, req.height, user_id,
+        job_id, path, normalized_fields, seed, vllm_was, auto_w or req.width, auto_h or req.height, user_id,
         req.preferred_instance or "", req.preferred_node_id or ""
     ))
     return {"job_id": job_id, "seed": seed}
@@ -7574,6 +7656,9 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
             wf_check = json.load(f)
         fields = _normalize_workflow_field_values(wf_check, fields)
         _apply_generated_seed_to_seed_fields(wf_check, fields, seed)
+        auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(wf, wf_check, fields)
+        if auto_w and auto_h:
+            width, height = auto_w, auto_h
     except Exception:
         pass
 

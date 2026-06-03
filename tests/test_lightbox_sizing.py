@@ -4,6 +4,19 @@ import unittest
 
 
 class LightboxSizingTest(unittest.TestCase):
+    def test_mobile_lightbox_pinch_does_not_trigger_navigation(self):
+        app_js = pathlib.Path("static/js/app.js").read_text()
+
+        self.assertIn("function suppressLightboxNav(ms)", app_js)
+        self.assertIn("function isLightboxNavSuppressed()", app_js)
+        self.assertIn("e.touches.length > 1", app_js)
+        self.assertIn("suppressLightboxNav(800)", app_js)
+        self.assertIn("resetLightboxSwipeStart();", app_js)
+        self.assertIn("e.target.closest('.lb-nav')", app_js)
+        self.assertIn("e.stopImmediatePropagation();", app_js)
+        self.assertIn("touchmove", app_js)
+        self.assertIn("touchcancel", app_js)
+
     def test_history_lightbox_uses_record_dimensions_to_prevent_preview_jump(self):
         src = pathlib.Path("static/js/modules/history.js").read_text()
 
