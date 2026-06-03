@@ -4,6 +4,7 @@ config/nodes.json
 model/*.gguf
 __pycache__/
 *.pyc
+.DS_Store
 .venv/
 backups/
 model/
