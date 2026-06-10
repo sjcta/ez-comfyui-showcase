@@ -25,7 +25,7 @@ REVERSE_MODE_LABELS = {
 
 MODE_TOKEN_BUDGETS = {
     REVERSE_MODE_STANDARD: 1536,
-    REVERSE_MODE_ADVANCED: 4096,
+    REVERSE_MODE_ADVANCED: 5120,
     REVERSE_MODE_EXPERT_TEAM: 6144,
     REVERSE_MODE_LEGACY_EXPERT_TEAM: 6144,
 }
@@ -67,7 +67,6 @@ class ReverseOutput:
     elapsed_seconds: float | None = None
 
     def to_api_payload(self) -> dict[str, Any]:
-        negative_text = ", ".join(item for item in self.negative_prompt if str(item).strip())
         structured_json = json.dumps(self.visual_spec, ensure_ascii=False, indent=2)
         raw_json = json.dumps(self.raw, ensure_ascii=False)
         payload: dict[str, Any] = {
@@ -85,8 +84,6 @@ class ReverseOutput:
             "structured_prompt": self.visual_spec,
             "structured_prompt_json": structured_json,
         }
-        if negative_text:
-            payload["negative_prompt"] = negative_text
         if self.expert_interrogate is not None:
             payload["expert_interrogate"] = self.expert_interrogate
         if self.elapsed_seconds is not None:

@@ -10,12 +10,13 @@ class CssLoadingContractTests(unittest.TestCase):
         index_html = (ROOT / "static/index.html").read_text()
         loader_js = (ROOT / "static/js/module_loader.js").read_text()
 
-        css_link = '<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1780506197">'
-        loader_script = '<script src="static/js/module_loader.js?v=1780506197"></script>'
+        css_link = '<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1781000019">'
+        loader_script = '<script src="static/js/module_loader.js?v=1781000019"></script>'
         self.assertIn(css_link, index_html)
         self.assertIn(loader_script, index_html)
         self.assertLess(index_html.index(css_link), index_html.index(loader_script))
         self.assertIn("if (!document.getElementById('cwStyleLink'))", loader_js)
+        self.assertIn("var version = '1781000019';", loader_js)
 
 
 if __name__ == "__main__":

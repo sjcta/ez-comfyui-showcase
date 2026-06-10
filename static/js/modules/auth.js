@@ -380,6 +380,10 @@
       var el = document.getElementById(id);
       if (el) el.style.display = _currentUser ? '' : 'none';
     });
+    var adminOnly = document.querySelectorAll('[data-admin-only="true"]');
+    for (var ai = 0; ai < adminOnly.length; ai++) {
+      adminOnly[ai].classList.toggle('hidden', !(_currentUser && _currentUser.role === 'admin'));
+    }
     if (_currentUser) {
       var roleLabel = _currentUser.role === 'admin' ? '管理员' : '用户';
       container.innerHTML =
@@ -661,9 +665,9 @@
         _renderLlmProfilePicker(activeProfileId) +
         '<div class="system-settings-grid">' +
           _settingsSwitch('sysLlmApiEnabled', '启用 LLM API', '关闭后图片反推会直接回退到 Prompt 辅助实例。', llm.enabled !== false) +
-          _settingsText('sysLlmApiBaseUrl', 'Base URL', '例如 http://10.10.10.75:8080，不要带 /v1。', llm.base_url || 'http://10.10.10.75:8080') +
-          _settingsText('sysLlmApiModel', '模型 ID', '例如 HauhauCS/...:Q5_K_P 或服务端模型名。', llm.model || 'HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q5_K_P') +
-          _settingsText('sysLlmApiKey', 'API Key', '可选；本地 llama-server 通常留空。', llm.api_key || '', 'password') +
+          _settingsText('sysLlmApiBaseUrl', 'Base URL', '例如 http://10.10.10.75:8000，不要带 /v1。', llm.base_url || 'http://10.10.10.75:8000') +
+          _settingsText('sysLlmApiModel', '模型 ID', '例如 qwen36-gguf-q4-mtp 或服务端模型名。', llm.model || 'qwen36-gguf-q4-mtp') +
+          _settingsText('sysLlmApiKey', 'API Key', '公网 DGX LLM 必填；保存后会脱敏显示。', llm.api_key || '', 'password') +
           _settingsText('sysLlmApiTimeout', '超时秒数', '开发阶段先保证识别成功率，建议 180 秒起；稳定后再按实测耗时收紧到 30-60 秒。', String(llm.timeout || 180), 'number') +
         '</div>' +
         '<div class="system-settings-test-row">' +
@@ -674,13 +678,17 @@
       '</div>' +
       '<div class="system-settings-panel" data-system-settings-panel="protection">' +
       '<div class="system-settings-section">' +
-        '<div class="account-panel-head"><strong>图片保护</strong><span>控制出图后的视觉审查、阈值和提示词兜底规则。</span></div>' +
+        '<div class="account-panel-head"><strong>图片保护</strong><span>三路组合：人工审查最高优先级；自动审查中 LLM 视觉或提示词任一路命中即保护，两路都未命中才放行。</span></div>' +
         '<div class="system-settings-grid">' +
           _settingsSwitch('sysImageProtectionEnabled', '启用图片保护', '关闭后所有图片都会按 safe 处理。', cfg.enabled !== false) +
-          _settingsSwitch('sysDetectorEnabled', '启用视觉 detector', '使用轻量模型识别两点和性器官等视觉信号。', cfg.detector_enabled !== false) +
-          _settingsSwitch('sysPromptSignalsEnabled', '启用提示词保护', '开启后提示词规则可作为额外保护兜底。', !!cfg.prompt_signals_enabled) +
-          _settingsSwitch('sysPromptContextEnabled', '启用弱视觉提示词确认', '提示词不会单独保护，但可确认低置信度露点视觉信号。', cfg.prompt_context_enabled !== false) +
-          _settingsSwitch('sysVisualFallbackEnabled', '启用本地视觉兜底', 'detector 未命中时启用低成本像素兜底。', !!cfg.visual_fallback_enabled) +
+          _settingsSwitch('sysLlmVisionEnabled', '启用大模型视觉审查', '只判断图片里实际可见的情色、漏点、性器官、半透明暴露和暴力血腥；不按皮肤面积保护。', !!cfg.llm_vision_enabled) +
+          _settingsNumber('sysLlmVisionReviewPasses', '视觉复核轮数', '默认 3 轮；用于降低单次视觉大模型幻觉或漏判。', cfg.llm_vision_review_passes || 3) +
+          _settingsNumber('sysLlmVisionProtectVotes', '视觉保护票数', '默认 2 票；达到该票数才算大模型视觉命中。', cfg.llm_vision_protect_votes || 2) +
+          _settingsSwitch('sysPromptSignalsEnabled', '启用提示词审查', '与大模型视觉审查为 OR 关系：提示词命中情色或暴力血腥规则时，即使视觉审查未命中也会保护。', !!cfg.prompt_signals_enabled) +
+          '<div class="system-settings-note"><strong>人工审查</strong><span>管理员在大图模式用盾牌按钮手动开启/解除保护；人工结果来源为 manual-admin，优先级高于大模型视觉和提示词审查。</span></div>' +
+          _settingsSwitch('sysDetectorEnabled', '启用旧 detector 兼容兜底', '仅在 LLM 视觉不可用或关闭后排队兜底；建议常规保持关闭，避免猫狗等误伤。', cfg.detector_enabled !== false) +
+          _settingsSwitch('sysPromptContextEnabled', '启用弱 detector 提示词确认', '仅服务旧 detector 兜底链路，不影响 LLM 视觉 + 提示词 OR 规则。', cfg.prompt_context_enabled !== false) +
+          _settingsSwitch('sysVisualFallbackEnabled', '启用本地像素兜底', '仅在 LLM 视觉不可用或关闭时作为最后兜底；建议常规保持关闭。', !!cfg.visual_fallback_enabled) +
           _settingsNumber('sysDetectorThreshold', 'Detector 基础阈值', '单项检测低于该值会被忽略。', cfg.detector_threshold) +
           _settingsNumber('sysPairedBreastThreshold', '成对两点阈值', '两侧 EXPOSED_BREAST_F 的较低分必须达到该值。', cfg.paired_breast_threshold) +
           _settingsNumber('sysButtocksThreshold', '臀部裸露阈值', '背面全裸类 EXPOSED_BUTTOCKS 达到该值会保护。', cfg.buttocks_threshold) +
@@ -695,11 +703,12 @@
       '</div>' +
       '<div class="system-settings-panel" data-system-settings-panel="patterns">' +
       '<div class="system-settings-section">' +
-        '<div class="account-panel-head"><strong>提示词管理</strong><span>按正则片段管理；提示词保护关闭时，不会单独保护，但仍可用于弱视觉二次确认。</span></div>' +
+        '<div class="account-panel-head"><strong>提示词管理</strong><span>按正则片段管理；提示词审查开启后，任一规则命中即保护；关闭后只保留人工和视觉审查。</span></div>' +
         '<div class="system-settings-patterns">' +
           _settingsTextarea('sysPromptPatternHard', '硬保护词', patterns.hard) +
           _settingsTextarea('sysPromptPatternRisk', '软风险词', patterns.risk) +
           _settingsTextarea('sysPromptPatternStrongNude', '裸体强信号词', patterns.strong_nude) +
+          _settingsTextarea('sysPromptPatternViolence', '暴力血腥词', patterns.violence) +
           _settingsTextarea('sysPromptPatternObsceneGesture', '不雅手势词', patterns.obscene_gesture) +
         '</div>' +
       '</div>' +
@@ -768,6 +777,9 @@
       active_llm_api_profile: activeProfileId,
       image_protection: {
         enabled: _sysBool('sysImageProtectionEnabled'),
+        llm_vision_enabled: _sysBool('sysLlmVisionEnabled'),
+        llm_vision_review_passes: _sysNumber('sysLlmVisionReviewPasses', 3),
+        llm_vision_protect_votes: _sysNumber('sysLlmVisionProtectVotes', 2),
         detector_enabled: _sysBool('sysDetectorEnabled'),
         prompt_signals_enabled: _sysBool('sysPromptSignalsEnabled'),
         prompt_context_enabled: _sysBool('sysPromptContextEnabled'),
@@ -785,6 +797,7 @@
           hard: _sysText('sysPromptPatternHard'),
           risk: _sysText('sysPromptPatternRisk'),
           strong_nude: _sysText('sysPromptPatternStrongNude'),
+          violence: _sysText('sysPromptPatternViolence'),
           obscene_gesture: _sysText('sysPromptPatternObsceneGesture')
         }
       }
@@ -1392,6 +1405,7 @@
       canFavorite: !!(hasUser && id && favoriteKey),
       canShare: !!(hasUser && id),
       canHide: !!(hasUser && hasItem && id && _canDeleteHistoryItem(item)),
+      canProtect: !!(hasUser && hasItem && id && _currentUser && _currentUser.role === 'admin'),
       canDelete: !!(hasUser && hasItem && _canDeleteHistoryItem(item)),
       isFavorited: !!(hasUser && favoriteKey && _historyFavorites[favoriteKey])
     };

@@ -106,6 +106,35 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(detail["data"]["field_values"], heavy_fields)
         self.assertEqual(detail["data"]["prompt"], long_prompt)
 
+    def test_compact_history_collapses_style_prompt_block_in_preview(self):
+        styled_prompt = (
+            "[Style Preset: 动漫 / anime@v2]\n"
+            "[Style Lock]\nSTYLE LOCK: final image must be rendered as finished anime character artwork.\n"
+            "[General Style]\nAnime illustration style with clean linework.\n"
+            "[User Prompt]\n美女洗澡"
+        )
+        app._insert_generation(
+            {
+                "id": "hist-style",
+                "workflow": "t2i_ernie_image_turbo.json",
+                "filename": "hist-style.png",
+                "prompt": styled_prompt,
+                "field_values": {
+                    "__style_preset_id": "anime",
+                    "94::value": styled_prompt,
+                },
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        compact = app.api_history(limit=10, scope="mine", compact=True, current_user={"sub": "u1", "role": "user"})
+        compact_item = compact["data"][0]
+
+        self.assertEqual(compact_item["prompt_preview"], "动漫｜美女洗澡")
+        self.assertNotIn("Style Lock", compact_item["prompt_preview"])
+
     def test_history_user_counts_returns_lightweight_admin_counts(self):
         for item_id, user_id in (("hist-u1-a", "u1"), ("hist-u1-b", "u1"), ("hist-u2", "u2")):
             app._insert_generation(
@@ -124,6 +153,97 @@ class HistoryApiTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["counts"], {"u1": 2, "u2": 1})
+
+    def test_history_after_id_cursor_is_stable_across_newer_inserts(self):
+        for item_id, created_at in (
+            ("hist-old", "2026-05-18 10:00:00"),
+            ("hist-mid", "2026-05-18 11:00:00"),
+            ("hist-new", "2026-05-18 12:00:00"),
+        ):
+            app._insert_generation(
+                {
+                    "id": item_id,
+                    "workflow": "t2i-test.json",
+                    "filename": item_id + ".png",
+                    "prompt": item_id,
+                    "time": created_at,
+                },
+                elapsed=3,
+                user_id="u1",
+            )
+
+        first_page = app.api_history(limit=2, scope="mine", current_user={"sub": "u1", "role": "user"})
+        first_ids = [item["id"] for item in first_page["data"]]
+        self.assertEqual(first_ids, ["hist-new", "hist-mid"])
+
+        app._insert_generation(
+            {
+                "id": "hist-newer",
+                "workflow": "t2i-test.json",
+                "filename": "hist-newer.png",
+                "prompt": "newer",
+                "time": "2026-05-18 13:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        next_page = app.api_history(
+            limit=10,
+            after_id="hist-mid",
+            scope="mine",
+            current_user={"sub": "u1", "role": "user"},
+        )
+        next_ids = [item["id"] for item in next_page["data"]]
+
+        self.assertEqual(next_ids, ["hist-old"])
+        self.assertNotIn("hist-newer", next_ids)
+        self.assertNotIn("hist-new", next_ids)
+        self.assertNotIn("hist-mid", next_ids)
+
+    def test_history_can_filter_by_workflow_type_before_pagination(self):
+        old_loader = app._load_wf_meta
+        try:
+            app._load_wf_meta = lambda: {
+                "video-a.json": {"tags": ["视频制作", "图生视频"]},
+                "image-a.json": {"tags": ["文生图"]},
+            }
+            for item_id, workflow, created_at in (
+                ("image-new", "image-a.json", "2026-05-18 13:00:00"),
+                ("video-new", "video-a.json", "2026-05-18 12:00:00"),
+                ("video-old", "video-a.json", "2026-05-18 11:00:00"),
+            ):
+                app._insert_generation(
+                    {
+                        "id": item_id,
+                        "workflow": workflow,
+                        "filename": item_id + ".png",
+                        "prompt": item_id,
+                        "time": created_at,
+                    },
+                    elapsed=3,
+                    user_id="u1",
+                )
+
+            result = app.api_history(
+                limit=10,
+                scope="mine",
+                workflow_type="视频制作",
+                current_user={"sub": "u1", "role": "user"},
+            )
+            self.assertEqual(result["total"], 2)
+            self.assertEqual([item["id"] for item in result["data"]], ["video-new", "video-old"])
+
+            summary = app.api_history_summary(
+                limit=10,
+                scope="mine",
+                workflow_type="视频制作",
+                current_user={"sub": "u1", "role": "user"},
+            )
+            self.assertEqual(summary["total"], 2)
+            self.assertEqual(summary["count"], 2)
+        finally:
+            app._load_wf_meta = old_loader
 
     def test_video_frame_endpoint_sets_cover_and_exports_input_frame(self):
         video_rel = "video/sample.mp4"
@@ -650,6 +770,69 @@ class HistoryApiTest(unittest.TestCase):
         self.assertEqual(result["data"][0]["protection_reason"], "classifier matched unsafe label")
         self.assertGreater(result["data"][0]["protection_checked_at"], "")
 
+    def test_admin_can_manually_toggle_history_protection(self):
+        app._insert_generation(
+            {
+                "id": "hist-protect",
+                "workflow": "t2i-test.json",
+                "filename": "hist-protect.png",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+                "protection_status": "protected",
+                "protection_score": 0.92,
+                "protection_reason": "old detector",
+                "protection_source": "detector",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        with mock.patch("app._schedule_broadcast") as schedule:
+            result = app.api_history_protection(
+                "hist-protect",
+                {"protection_status": "safe"},
+                current_user={"sub": "admin", "role": "admin"},
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["protection_status"], "safe")
+        self.assertEqual(result["protection_source"], "manual-admin")
+        history_result = app.api_history(limit=10, scope="all", current_user={"sub": "admin", "role": "admin"})
+        self.assertEqual(history_result["data"][0]["protection_status"], "safe")
+        self.assertEqual(history_result["data"][0]["protection_source"], "manual-admin")
+        schedule.assert_called_once()
+        payload = schedule.call_args.args[0]
+        self.assertEqual(payload["type"], "history_update")
+        self.assertEqual(payload["action"], "protection")
+        self.assertEqual(payload["ids"], ["hist-protect"])
+        self.assertEqual(payload["protection_status"], "safe")
+        self.assertEqual(payload["protection_score"], 0.0)
+        self.assertEqual(payload["protection_reason"], "admin manual safe")
+        self.assertEqual(payload["protection_source"], "manual-admin")
+        self.assertGreater(payload["protection_checked_at"], "")
+
+    def test_non_admin_cannot_manually_toggle_history_protection(self):
+        app._insert_generation(
+            {
+                "id": "hist-protect",
+                "workflow": "t2i-test.json",
+                "filename": "hist-protect.png",
+                "prompt": "hello",
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            app.api_history_protection(
+                "hist-protect",
+                {"protection_status": "protected"},
+                current_user={"sub": "u1", "role": "user"},
+            )
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
     def test_legacy_prompt_rows_are_not_backfilled_when_prompt_protection_is_off(self):
         image_path = os.path.join(app.OUTPUT_DIR, "legacy.png")
         Image.new("RGB", (48, 48), (230, 180, 160)).save(image_path)
@@ -837,6 +1020,31 @@ class HistoryApiTest(unittest.TestCase):
         self.assertTrue(trash["data"][0]["is_deleted"])
         self.assertTrue(trash["data"][0]["deleted_at"])
 
+    def test_delete_broadcasts_history_update_for_open_pages(self):
+        app._insert_generation(
+            {
+                "id": "hist-1",
+                "workflow": "t2i-test.json",
+                "filename": "hist-1.png",
+                "time": "2026-05-18 12:00:00",
+            },
+            elapsed=3,
+            user_id="u1",
+        )
+        user = {"sub": "u1", "role": "user"}
+
+        with mock.patch("app._schedule_broadcast") as schedule:
+            result = app.api_history_delete("hist-1", current_user=user)
+
+        self.assertTrue(result["ok"])
+        schedule.assert_called_once()
+        payload = schedule.call_args.args[0]
+        self.assertEqual(payload["type"], "history_update")
+        self.assertEqual(payload["action"], "delete")
+        self.assertEqual(payload["ids"], ["hist-1"])
+        self.assertEqual(payload["user_id"], "u1")
+        self.assertTrue(payload["deleted_at"])
+
     def test_restore_makes_soft_deleted_record_visible_again(self):
         app._insert_generation(
             {
@@ -966,6 +1174,10 @@ class HistoryApiTest(unittest.TestCase):
 
         ok = app.api_image("u1/2026-05-18/hist-1.png", current_user=None)
         self.assertEqual(ok.path, output_image)
+        download = app.api_image("u1/2026-05-18/hist-1.png", download=True, current_user=None)
+        self.assertEqual(download.path, output_image)
+        self.assertIn("attachment", download.headers["content-disposition"])
+        self.assertIn("hist-1.png", download.headers["content-disposition"])
         with self.assertRaises(HTTPException):
             app.api_image("u1/2026-05-18/hist-2.png", current_user=None)
 

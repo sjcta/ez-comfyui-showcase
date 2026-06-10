@@ -2,14 +2,19 @@
 
 ## JSON 结构
 
-- 标准反推输出 visual_spec、keyword_prompt、negative_prompt。
-- 专家/专家团必须先输出 visual_evidence，再合并为 structured_prompt 或 visual_spec。
+- 标准、加强、专家三档都遵循“清单核对 -> visual_spec/structured_prompt -> keyword_prompt -> 回查漏项”的同一流程。
+- 标准反推输出 visual_spec、keyword_prompt、negative_prompt；加强/专家可补充 expert_observations 或复核信息，但最终仍必须能归入 visual_spec 和 keyword_prompt。
+- 模型第一步必须用 30+ 项清单逐项判断看清/没看清；没看清的项目不得写入正向字段，也不得输出不可见/无法判断占位。
+- 第二步只展开看清项目并落到 visual_spec 或 structured_prompt；第三步把结构化内容完整翻译成 keyword_prompt；第四步回查是否还有看清却没写、左右混淆、重复事实或字段污染。
+- 姿态复刻锁定是最终提示词硬门槛：结构化字段中只要写了身体轴线、裁切框、支撑接触、头部三轴、躯干锁定、四肢端点、关键负空间或近大远小，keyword_prompt 必须有对应正向句。
+- 如果实际生成反复偏成左右镜像、头部正面、手脚位置互换、腿部开合改变、裁切范围变化或普通站坐姿，下一轮反推必须把正确结构写进 keyword_prompt，不能只放进 negative_prompt 或易错点。
 - 专家团的 expert_observations 保持一维：观点标签作为 key，value 是一句高密度观点；不要嵌套“基本描述/观察/细节”等二层对象。
 - 详细结构最多两层；只有一个子字段时直接提升为上级字段描述。
 
 ## 正负提示词
 
 - keyword_prompt 只写可见正向事实，不写 JSON 键名、章节名、Markdown、解释句和负面命令。
+- keyword_prompt 必须完整承接 visual_spec/structured_prompt 中的主体、空间、姿态、材质、颜色、光线、风格和可见暴露结构，不得退化成短标签串。
 - negative_prompt 是纯短语数组，只放水印、文字、Logo、额外人物、错误姿态、左右镜像动作、镜像翻转构图等易错项。
 - 负面提示词必须与画面描述同级，不得嵌入画面描述内部。
 
@@ -23,4 +28,3 @@
 
 - 评审必须逐条判定事实是否属实，低于90%准确率或漏关键关节/物品数量/暴露细节时打回。
 - 复核必须检查主体、姿态、道具身份、数量、支撑点、左右镜像、文字、暴露内容和 JSON 污染。
-

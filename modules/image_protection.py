@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 import re
 import threading
 from typing import Callable, Iterable, Any
+
+from modules.llm_client import DIRECT_FINAL_SYSTEM_PROMPT, chat_text, image_to_data_url
 
 
 _PROMPT_PATTERN_DEFAULTS = {
@@ -29,11 +32,17 @@ _PROMPT_PATTERN_DEFAULTS = {
         r"全裸|裸体|全身裸体|赤裸|裸身|一丝不挂|"
         r"\bnudes?\b|\bnaked\b|\bfully\s+nude\b|\bfull\s+nude\b|\bcompletely\s+naked\b"
     ),
+    "violence": (
+        r"血腥|血迹|大量血|暴力|重伤|伤口|肢解|断肢|残肢|内脏|开膛|尸体|谋杀|砍杀|枪击|刺穿|"
+        r"\bblood(?:y)?\b|\bgore\b|\bgory\b|\bgraphic\s+violence\b|\bsevere\s+injury\b|"
+        r"\bmutilat(?:e|ed|ion)\b|\bdismember(?:ed|ment)?\b|\bexposed\s+organs?\b|\bcorpse\b"
+    ),
     "obscene_gesture": r"竖中指|中指手势|不雅手势|\bmiddle\s+finger\b|\bobscene\s+gesture\b",
 }
 _PROMPT_RE = re.compile(_PROMPT_PATTERN_DEFAULTS["hard"], re.IGNORECASE)
 _NSFW_RISK_PROMPT_RE = re.compile(_PROMPT_PATTERN_DEFAULTS["risk"], re.IGNORECASE)
 _STRONG_NUDE_PROMPT_RE = re.compile(_PROMPT_PATTERN_DEFAULTS["strong_nude"], re.IGNORECASE)
+_VIOLENCE_PROMPT_RE = re.compile(_PROMPT_PATTERN_DEFAULTS["violence"], re.IGNORECASE)
 _OBSCENE_GESTURE_RE = re.compile(_PROMPT_PATTERN_DEFAULTS["obscene_gesture"], re.IGNORECASE)
 _UNSAFE_LABEL_RE = re.compile(r"nsfw|unsafe|porn|hentai|sexy|sexual|nude|explicit|r18", re.IGNORECASE)
 _SAFE_LABEL_RE = re.compile(r"safe|normal|neutral|drawing|anime|sfw", re.IGNORECASE)
@@ -55,13 +64,57 @@ _VISUAL_INTIMATE_SKIN_THRESHOLD = 0.40
 _DETECTOR_PAIRED_BREAST_THRESHOLD = 0.56
 _DETECTOR_BUTTOCKS_THRESHOLD = 0.75
 _DETECTOR_WEAK_BREAST_PROMPT_THRESHOLD = 0.52
+_LLM_VISION_REVIEW_PROMPT = (
+    "Act as an expert visual content-safety reviewer. Inspect the visible image carefully for two "
+    "families only: sexual/erotic exposure and violence/gore. Do not judge skin exposure area by "
+    "itself. Ordinary pets, cats, dogs, animals, plush toys, cartoons, swimwear, underwear, cleavage, "
+    "bare shoulders, bare back, bare torso, bare legs, fitness, fashion, medical, or non-sexual "
+    "artistic nudity must stay safe unless there is visible sexual content or graphic violence. "
+    "For sexual review, specifically check whether nipples, areolae, labia/vulva, penis/scrotum, anus, "
+    "erection, sexual acts, sexual fluids, or sexually explicit contact are actually visible. Treat "
+    "wet, sheer, transparent, translucent, see-through, mesh, lace, thin, or body-painted material as "
+    "exposure when nipples/areolae/genitals/anus are visibly discernible through it. For violence "
+    "review, estimate visible blood/gore severity: none, mild blood, injury, graphic blood, gore, "
+    "mutilation, exposed organs, severe injury, or active violent harm. The generation prompt is "
+    "only context for ambiguous visual evidence; visible image evidence controls. Return one JSON "
+    "object with keys: protected boolean, sexual_visible boolean, violent_visible boolean, "
+    "confidence number from 0 to 1, violence_level string, sexual_findings string, violence_findings "
+    "string, reason short string. The protected field MUST be true if and only if sexual_visible or "
+    "violent_visible is true. If both sexual_visible and violent_visible are false, protected MUST be "
+    "false, even when the image contains underwear, thong, bare back, bare shoulders, cleavage, or "
+    "ordinary non-sexual skin exposure. A covered crotch/pubic area under underwear, thong, swimsuit, "
+    "fabric, shadow, or an object is safe; do not call it genitals unless a concrete anatomical feature "
+    "such as labia/vulva, penis/scrotum, anus, nipple, or areola is visibly discernible."
+)
+_LLM_VISION_REVIEW_PROMPT_STRICT = (
+    "Second-pass expert visual safety verifier. Inspect only what is actually visible in the image. "
+    "Return protected=true only when at least one of these is clearly visible: nipples, areolae, "
+    "labia/vulva, penis/scrotum, anus, sexual act/contact/fluids, or graphic violence/gore/severe injury. Do not infer "
+    "hidden anatomy from camera angle, underwear, thong, shadows, body outline, bare torso, bare legs, "
+    "or ordinary skin exposure. Sheer or transparent fabric counts only when the protected body part is "
+    "visibly discernible through the material. Return one JSON object with keys: protected boolean, "
+    "sexual_visible boolean, violent_visible boolean, confidence number from 0 to 1, violence_level "
+    "string, sexual_findings string, violence_findings string, reason short string."
+)
+_LLM_VISION_REVIEW_PROMPT_ADJUDICATOR = (
+    "Final adjudicator for visual content-safety. Decide from visible evidence only. Protect the image "
+    "when sexual exposure or violence/gore is actually visible; release it when the image only shows "
+    "covered underwear/swimwear/thong, bare skin, suggestive pose, low-angle view, or ambiguous shapes "
+    "without visible protected anatomy or violent injury. Be strict about real leaks through transparent "
+    "material, but do not hallucinate body parts hidden by fabric or objects. Return one JSON object with "
+    "keys: protected boolean, sexual_visible boolean, violent_visible boolean, confidence number from 0 "
+    "to 1, violence_level string, sexual_findings string, violence_findings string, reason short string."
+)
 
 _SETTINGS_LOCK = threading.Lock()
 _RUNTIME_SETTINGS: dict[str, Any] = {
     "enabled": True,
+    "llm_vision_enabled": os.environ.get("EZ_IMAGE_PROTECTION_LLM_VISION", "").strip().lower() in {"1", "true", "yes", "on"},
     "detector_enabled": True,
     "prompt_signals_enabled": os.environ.get("EZ_IMAGE_PROTECTION_PROMPT_SIGNALS", "").strip().lower() in {"1", "true", "yes", "on"},
     "visual_fallback_enabled": os.environ.get("EZ_IMAGE_PROTECTION_VISUAL_FALLBACK", "1").strip().lower() in {"1", "true", "yes", "on"},
+    "llm_vision_review_passes": 3,
+    "llm_vision_protect_votes": 2,
     "classifier_threshold": 0.68,
     "detector_threshold": 0.45,
     "paired_breast_threshold": _DETECTOR_PAIRED_BREAST_THRESHOLD,
@@ -75,6 +128,12 @@ _RUNTIME_SETTINGS: dict[str, Any] = {
     "prompt_patterns": dict(_PROMPT_PATTERN_DEFAULTS),
 }
 _PROMPT_REGEX_CACHE: dict[str, tuple[str, re.Pattern[str]]] = {}
+_SPECIFIC_SEXUAL_EVIDENCE_RE = re.compile(
+    r"\bnipples?\b|\bareolae?\b|\blabia\b|\bvulva\b|\bpenis\b|\bscrotum\b|\btesticles?\b|\banus\b|"
+    r"\berection\b|\bintercourse\b|\bpenetration\b|\boral\s+sex\b|\bsemen\b|\bejaculat(?:e|ion)\b|"
+    r"乳头|乳晕|阴唇|外阴|阴茎|睾丸|肛门|勃起|性交|插入|精液",
+    re.IGNORECASE,
+)
 
 
 def _settings_snapshot() -> dict[str, Any]:
@@ -105,13 +164,28 @@ def _coerce_threshold(value: Any, default: float) -> float:
     return max(0.0, min(1.0, parsed))
 
 
+def _coerce_int(value: Any, default: int, minimum: int = 1, maximum: int = 5) -> int:
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def configure_image_protection(settings: dict[str, Any] | None) -> dict[str, Any]:
     """Merge validated settings into the resident image-protection runtime."""
     incoming = settings or {}
     with _SETTINGS_LOCK:
         current = dict(_RUNTIME_SETTINGS)
         current["prompt_patterns"] = dict(_RUNTIME_SETTINGS.get("prompt_patterns") or {})
-        for key in ("enabled", "detector_enabled", "prompt_signals_enabled", "visual_fallback_enabled", "prompt_context_enabled"):
+        for key in (
+            "enabled",
+            "llm_vision_enabled",
+            "detector_enabled",
+            "prompt_signals_enabled",
+            "visual_fallback_enabled",
+            "prompt_context_enabled",
+        ):
             if key in incoming:
                 current[key] = _coerce_bool(incoming.get(key), bool(current.get(key)))
         for key in (
@@ -127,6 +201,14 @@ def configure_image_protection(settings: dict[str, Any] | None) -> dict[str, Any
         ):
             if key in incoming:
                 current[key] = _coerce_threshold(incoming.get(key), float(current.get(key, 0)))
+        if "llm_vision_review_passes" in incoming:
+            current["llm_vision_review_passes"] = _coerce_int(incoming.get("llm_vision_review_passes"), 3, 1, 5)
+        if "llm_vision_protect_votes" in incoming:
+            current["llm_vision_protect_votes"] = _coerce_int(incoming.get("llm_vision_protect_votes"), 2, 1, 5)
+        current["llm_vision_protect_votes"] = min(
+            int(current.get("llm_vision_review_passes") or 1),
+            int(current.get("llm_vision_protect_votes") or 1),
+        )
         patterns = incoming.get("prompt_patterns")
         if isinstance(patterns, dict):
             for name, value in patterns.items():
@@ -144,6 +226,10 @@ def _setting_bool(key: str, default: bool) -> bool:
 
 def _setting_threshold(key: str, default: float) -> float:
     return _coerce_threshold(_settings_snapshot().get(key), default)
+
+
+def _setting_int(key: str, default: int, minimum: int = 1, maximum: int = 5) -> int:
+    return _coerce_int(_settings_snapshot().get(key), default, minimum, maximum)
 
 
 def _runtime_prompt_re(name: str, fallback: re.Pattern[str]) -> re.Pattern[str]:
@@ -181,6 +267,11 @@ def prompt_has_obscene_gesture(prompt: str) -> bool:
     return bool(_runtime_prompt_re("obscene_gesture", _OBSCENE_GESTURE_RE).search(prompt or ""))
 
 
+def prompt_has_violence_gore(prompt: str) -> bool:
+    """Return whether prompt text requests visible violence or gore."""
+    return bool(_runtime_prompt_re("violence", _VIOLENCE_PROMPT_RE).search(prompt or ""))
+
+
 def prompt_protection_enabled() -> bool:
     """Return whether prompt text can independently trigger protection."""
     return _setting_bool("prompt_signals_enabled", False)
@@ -201,15 +292,19 @@ class ImageProtectionWorker:
         self,
         load_detector: Callable[[], Any] | None = None,
         load_classifier: Callable[[], Any] | None = None,
+        load_vision_reviewer: Callable[[], Any] | None = None,
         threshold: float | None = None,
         detector_threshold: float | None = None,
     ) -> None:
         self._load_detector = load_detector or self._load_default_detector
         self._load_classifier = load_classifier or self._load_default_classifier
+        self._load_vision_reviewer = load_vision_reviewer or self._load_default_vision_reviewer
         self._detector: Any = None
         self._classifier: Any = None
+        self._vision_reviewer: Any = None
         self._detector_loaded = False
         self._loaded = False
+        self._vision_loaded = False
         self._lock = threading.Lock()
         self._threshold = float(threshold if threshold is not None else os.environ.get("EZ_IMAGE_PROTECTION_THRESHOLD", "0.68"))
         self._detector_threshold = float(
@@ -222,6 +317,22 @@ class ImageProtectionWorker:
         if not _setting_bool("enabled", True):
             return ImageProtectionResult("safe", 1.0, "image protection disabled", "settings")
         with self._lock:
+            prompt_result = self._prompt_rule_result(prompt)
+            if _setting_bool("llm_vision_enabled", False):
+                reviewer = self._vision_reviewer_once()
+                if reviewer is not None:
+                    try:
+                        result = self._review_with_llm_vision(reviewer, image_path, prompt)
+                        if result is not None:
+                            if result.status == "protected":
+                                return result
+                            if prompt_result is not None:
+                                return prompt_result
+                            return result
+                    except Exception as exc:
+                        return ImageProtectionResult("error", 1.0, f"llm vision failed: {exc}", "llm-vision")
+            if prompt_result is not None:
+                return prompt_result
             detector = self._detector_once() if _setting_bool("detector_enabled", True) else None
             detector_available = detector is not None
             if detector_available:
@@ -241,6 +352,21 @@ class ImageProtectionWorker:
                     return ImageProtectionResult("error", 1.0, f"classifier failed: {exc}", "classifier")
             visual_fallback = _setting_bool("visual_fallback_enabled", True)
             return self._heuristic_check(image_path, prompt, prompt_fallback=not detector_available, visual_fallback=visual_fallback)
+
+    def _prompt_rule_result(self, prompt: str) -> ImageProtectionResult | None:
+        if not prompt_protection_enabled():
+            return None
+        if prompt_has_obscene_gesture(prompt):
+            return ImageProtectionResult("protected", 0.76, "obscene gesture prompt", "prompt")
+        if prompt_has_violence_gore(prompt):
+            return ImageProtectionResult("protected", 0.82, "violence/gore prompt", "prompt")
+        if prompt_has_strong_nude_intent(prompt):
+            return ImageProtectionResult("protected", 0.80, "strong nude prompt", "prompt")
+        if prompt_needs_protection(prompt):
+            return ImageProtectionResult("protected", 0.78, "explicit sexual prompt", "prompt")
+        if prompt_has_nsfw_risk(prompt):
+            return ImageProtectionResult("protected", 0.74, "nsfw-risk prompt", "prompt")
+        return None
 
     def _detector_once(self) -> Any:
         if self._detector_loaded:
@@ -262,6 +388,16 @@ class ImageProtectionWorker:
             self._classifier = None
         return self._classifier
 
+    def _vision_reviewer_once(self) -> Any:
+        if self._vision_loaded:
+            return self._vision_reviewer
+        self._vision_loaded = True
+        try:
+            self._vision_reviewer = self._load_vision_reviewer()
+        except Exception:
+            self._vision_reviewer = None
+        return self._vision_reviewer
+
     def _load_default_classifier(self) -> Any:
         model_path = os.environ.get("EZ_IMAGE_PROTECTION_MODEL", "").strip()
         if not model_path:
@@ -279,6 +415,53 @@ class ImageProtectionWorker:
             return _ResidentIfNudeDetector(ifnude_detector)
         except Exception:
             return None
+
+    def _load_default_vision_reviewer(self) -> Any:
+        return _default_llm_vision_reviewer
+
+    def _review_with_llm_vision(self, reviewer: Any, image_path: str, prompt: str = "") -> ImageProtectionResult | None:
+        passes = _setting_int("llm_vision_review_passes", 3, 1, 5)
+        required_votes = min(passes, _setting_int("llm_vision_protect_votes", 2, 1, 5))
+        results: list[ImageProtectionResult] = []
+        prompts = (
+            _LLM_VISION_REVIEW_PROMPT,
+            _LLM_VISION_REVIEW_PROMPT_STRICT,
+            _LLM_VISION_REVIEW_PROMPT_ADJUDICATOR,
+        )
+        for index in range(passes):
+            raw = self._call_vision_review_pass(reviewer, image_path, prompt, prompts[min(index, len(prompts) - 1)], index)
+            result = raw if isinstance(raw, ImageProtectionResult) else _coerce_llm_vision_result(raw)
+            if result is not None:
+                results.append(result)
+        if not results:
+            return None
+        protected_results = [result for result in results if result.status == "protected"]
+        if len(protected_results) >= required_votes:
+            best = max(protected_results, key=lambda item: item.score)
+            return ImageProtectionResult(
+                "protected",
+                best.score,
+                f"llm vision consensus {len(protected_results)}/{len(results)}: {best.reason}"[:240],
+                "llm-vision",
+            )
+        best_safe = max(results, key=lambda item: item.score)
+        if protected_results:
+            reason = f"llm vision protected vote disputed {len(protected_results)}/{len(results)}: {best_safe.reason}"
+        else:
+            reason = f"llm vision consensus 0/{len(results)}: {best_safe.reason}"
+        return ImageProtectionResult("safe", best_safe.score, reason[:240], "llm-vision")
+
+    def _call_vision_review_pass(
+        self,
+        reviewer: Any,
+        image_path: str,
+        prompt: str,
+        review_prompt: str,
+        index: int,
+    ) -> Any:
+        if reviewer is _default_llm_vision_reviewer:
+            return _default_llm_vision_reviewer(image_path, prompt if index == 0 else "", review_prompt=review_prompt)
+        return reviewer(image_path, prompt)
 
     def _detect_with_detector(self, detector: Any, image_path: str, prompt: str = "") -> ImageProtectionResult | None:
         raw = detector(image_path, mode="fast") if _call_accepts_fast_mode(detector) else detector(image_path)
@@ -390,13 +573,13 @@ class ImageProtectionWorker:
             return ImageProtectionResult("error", 1.0, f"heuristic failed: {exc}", "heuristic")
         if prompt_protection_enabled():
             if gesture_hit:
-                return ImageProtectionResult("protected", 0.76, "obscene gesture prompt", "heuristic")
+                return ImageProtectionResult("protected", 0.76, "obscene gesture prompt", "prompt")
             if strong_nude_hit:
-                return ImageProtectionResult("protected", 0.78, "strong nude prompt", "heuristic")
+                return ImageProtectionResult("protected", 0.78, "strong nude prompt", "prompt")
             if prompt_hit and skin_ratio >= _setting_threshold("strong_prompt_skin_threshold", _STRONG_PROMPT_SKIN_THRESHOLD):
-                return ImageProtectionResult("protected", max(0.76, skin_ratio), f"prompt signal with skin_ratio={skin_ratio:.3f}", "heuristic")
+                return ImageProtectionResult("protected", max(0.76, skin_ratio), f"prompt signal with skin_ratio={skin_ratio:.3f}", "prompt")
             if prompt_fallback and nsfw_risk_hit and skin_ratio >= _setting_threshold("nsfw_risk_skin_threshold", _NSFW_RISK_SKIN_THRESHOLD):
-                return ImageProtectionResult("protected", max(0.76, skin_ratio), f"nsfw-risk prompt with skin_ratio={skin_ratio:.3f}", "heuristic")
+                return ImageProtectionResult("protected", max(0.76, skin_ratio), f"nsfw-risk prompt with skin_ratio={skin_ratio:.3f}", "prompt")
         visual_signal, visual_reason = _visual_intimate_signal(image_path, skin_ratio) if visual_fallback else (False, "")
         if visual_signal:
             return ImageProtectionResult("protected", max(0.74, skin_ratio), visual_reason, "heuristic")
@@ -412,6 +595,89 @@ def _flatten_classifier_output(raw: Any) -> Iterable[dict]:
                 yield item
             elif isinstance(item, list):
                 yield from _flatten_classifier_output(item)
+
+
+def _default_llm_vision_reviewer(
+    image_path: str,
+    prompt: str = "",
+    review_prompt: str = _LLM_VISION_REVIEW_PROMPT,
+) -> dict[str, Any]:
+    data_url = image_to_data_url(image_path)
+    user_text = review_prompt
+    if prompt:
+        user_text += "\n\nGeneration prompt for context only:\n" + str(prompt)[:1200]
+    raw = chat_text(
+        [
+            {
+                "role": "system",
+                "content": DIRECT_FINAL_SYSTEM_PROMPT + " Return only one valid JSON object. Do not output markdown.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ],
+        temperature=0.02,
+        max_tokens=320,
+        response_format={"type": "json_object"},
+    )
+    return _extract_llm_review_json(raw)
+
+
+def _extract_llm_review_json(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(match.group(0))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _coerce_llm_vision_result(raw: Any) -> ImageProtectionResult | None:
+    data = _extract_llm_review_json(raw)
+    if not data:
+        return None
+    protected = _coerce_bool(data.get("protected"), False)
+    sexual_visible = _coerce_bool(data.get("sexual_visible"), False)
+    violent_visible = _coerce_bool(data.get("violent_visible"), False)
+    confidence = _clamp_score(data.get("confidence", 0.0))
+    reason = str(data.get("reason") or "").strip()
+    sexual_text = " ".join(
+        str(data.get(key) or "")
+        for key in ("sexual_findings", "reason", "visible_parts", "evidence")
+    )
+    if sexual_visible and not _SPECIFIC_SEXUAL_EVIDENCE_RE.search(sexual_text):
+        sexual_visible = False
+        protected = violent_visible
+        reason = "llm sexual flag ignored because no specific visible protected anatomy evidence: " + (reason or "generic sexual finding")
+    if not reason:
+        labels = []
+        if sexual_visible:
+            labels.append("sexual content visible")
+        if violent_visible:
+            labels.append("violent/gory content visible")
+        reason = ", ".join(labels) or "llm vision review"
+    visible_violation = sexual_visible or violent_visible
+    if visible_violation:
+        return ImageProtectionResult("protected", max(0.74, confidence), reason[:240], "llm-vision")
+    if protected:
+        reason = "llm protected flag ignored because sexual_visible=false and violent_visible=false: " + reason
+    return ImageProtectionResult("safe", max(0.0, 1.0 - confidence), reason[:240] or "llm vision safe", "llm-vision")
 
 
 def _flatten_detector_output(raw: Any, image_path: str = "") -> Iterable[dict]:

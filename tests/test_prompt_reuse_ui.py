@@ -13,18 +13,49 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertIn("pi.dispatchEvent(new Event('input', { bubbles: true }))", generate_js)
         self.assertIn("CW.syncClearPromptButton", generate_js)
         self.assertIn("function _promptFromReusableFields", generate_js)
+        self.assertIn("function _historyRecordNeedsDetailForReuse(item)", generate_js)
         self.assertIn("let h = _historyItemByKey(key) || historyItems[idx];", generate_js)
+        self.assertIn("if (_historyRecordNeedsDetailForReuse(h) && window.CW && typeof window.CW.getHistoryDetail === 'function')", generate_js)
         self.assertIn("h = await window.CW.getHistoryDetail(h) || h;", generate_js)
         self.assertIn("var reusedPrompt = _promptFromReusableFields(h.field_values || {}, reuseFieldsMeta)", generate_js)
         detail_pos = generate_js.index("h = await window.CW.getHistoryDetail(h) || h;")
         reuse_pos = generate_js.index("var reusedPrompt = _promptFromReusableFields(h.field_values || {}, reuseFieldsMeta)")
         self.assertLess(detail_pos, reuse_pos)
-        self.assertIn("_setPromptInputValue(_preparePromptForCurrentQwenAngle(reusedPrompt || h.prompt));", generate_js)
-        self.assertIn("_setPromptInputValue(snap.prompt)", generate_js)
-        self.assertIn("_setPromptInputValue(j.prompt_preview)", generate_js)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentControls(reusedPrompt || h.prompt));", generate_js)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentControls(snap.prompt))", generate_js)
+        self.assertIn("var jobReusedPrompt = _promptFromReusableFields(j.fields || {}, jobReuseFieldsMeta);", generate_js)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentControls(jobReusedPrompt || j.prompt || j.prompt_preview));", generate_js)
+        self.assertIn("var withoutMarkers = _stripExistingQwenAngleMarkers(prompt)", generate_js)
+        self.assertIn("return _preparePromptForCurrentStyle(_preparePromptForCurrentQwenAngle(prompt));", generate_js)
         self.assertNotIn("_setPromptInputValue(h.prompt)", generate_js)
         self.assertNotIn("if (pi) pi.value = h.prompt", generate_js)
         self.assertNotIn("if (pi) pi.value = j.prompt_preview", generate_js)
+
+    def test_job_card_reuse_prefers_full_prompt_fields_over_preview(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        restore_start = generate_js.index("async function restoreJob(jobId)")
+        restore_end = generate_js.index("async function doGenerate", restore_start)
+        restore_body = generate_js[restore_start:restore_end]
+
+        self.assertIn("jobReuseFieldsMeta = await _getSubmitFieldsMeta();", restore_body)
+        self.assertIn("var jobReusedPrompt = _promptFromReusableFields(j.fields || {}, jobReuseFieldsMeta);", restore_body)
+        self.assertIn("jobReusedPrompt || j.prompt || j.prompt_preview", restore_body)
+        self.assertLess(
+            restore_body.index("var jobReusedPrompt = _promptFromReusableFields(j.fields || {}, jobReuseFieldsMeta);"),
+            restore_body.index("if (jobReusedPrompt || j.prompt || j.prompt_preview)"),
+        )
+        self.assertNotIn("_setPromptInputValue(_preparePromptForCurrentControls(j.prompt_preview))", restore_body)
+
+    def test_reused_prompt_input_strips_generated_style_and_camera_blocks(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _stripExistingStylePromptBlocks", generate_js)
+        self.assertIn("function _stripExistingQwenAngleMarkers", generate_js)
+        self.assertIn(".replace(/(^|[\\n\\r])\\s*\\[Style Preset:[\\s\\S]*?\\[\\s*User Prompt\\s*\\]\\s*/gi", generate_js)
+        self.assertIn(".replace(/(^|[\\n\\r])\\s*<sks>[^\\n\\r。！？!?;；]*(?:[。！？!?;；])?/gi", generate_js)
+        self.assertIn("if (!_currentQwenAnglePrompt())", generate_js)
+        self.assertIn("return withoutMarkers", generate_js)
 
     def test_prompt_optimization_variant_tabs_live_in_prompt_title_row(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
@@ -72,15 +103,28 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertNotIn("zone: f.zone || 'advanced'", generate_js)
         self.assertNotIn("zone: f.zone || 'advanced'", workflows_js)
 
-    def test_quick_form_uses_workflow_default_prompt_value(self):
+    def test_quick_form_starts_with_empty_prompt_and_no_style_on_fresh_render(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
 
-        self.assertIn("var defaultPromptValue = ''", generate_js)
-        self.assertIn("defaultPromptValue = String(f.value || '')", generate_js)
+        self.assertNotIn("var defaultPromptValue = ''", generate_js)
+        self.assertNotIn("defaultPromptValue = String(f.value || '')", generate_js)
         self.assertIn('<textarea id="promptInput" placeholder="', generate_js)
-        self.assertIn("+ escH(defaultPromptValue) + '</textarea>", generate_js)
-        self.assertIn("preferWorkflowDefaultPrompt", generate_js)
-        self.assertIn("/SkinTest/i.test(String(A.currentWF || ''))", generate_js)
+        self.assertIn("...\"></textarea>' + styleControlHtml", generate_js)
+        self.assertNotIn("preferWorkflowDefaultPrompt", generate_js)
+        self.assertNotIn("/SkinTest/i.test(String(A.currentWF || ''))", generate_js)
+        self.assertIn("_setStylePresetValue(_savedStylePreset || '')", generate_js)
+        self.assertIn("// Restore only text the user had already typed before this DOM rebuild.", generate_js)
+
+    def test_style_preset_control_uses_stable_sidebar_layout(self):
+        css = (ROOT / "static/css/style.css").read_text()
+        summary_block = css.split(".style-preset-summary {", 1)[1].split("}", 1)[0]
+
+        self.assertIn(".style-preset-row", css)
+        self.assertIn("grid-template-columns: auto minmax(0, 1fr)", css)
+        self.assertIn(".style-preset-family {\n  display: none;", css)
+        self.assertIn(".style-preset-summary {\n  grid-column: 1 / -1;", css)
+        self.assertNotIn("grid-template-columns: auto minmax(156px, 220px) auto minmax(0, 1fr)", css)
+        self.assertNotIn("overflow-wrap: anywhere", summary_block)
 
     def test_generate_syncs_flux2_scheduler_dimensions(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
@@ -130,13 +174,15 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertIn("valueInput.value = ''", generate_js)
         self.assertIn("data-uploading", generate_js)
         self.assertIn("参考图仍在上传", generate_js)
+        self.assertIn("delete fields[key];", generate_js)
+        self.assertIn("throw new Error(_isVideoI2VMode() ? '图生视频需要先上传参考图' : '需要先上传参考图');", generate_js)
 
     def test_text_area_restore_preserves_video_reference_image(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
 
         self.assertIn("function _restoreRefImageFromFieldValues", generate_js)
         self.assertIn("_restoreRefImageFromFieldValues(snap.adv || {})", generate_js)
-        self.assertIn("_restoreRefImageFromFieldValues(j.fields)", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(j.fields, jobReuseFieldsMeta)", generate_js)
         self.assertIn("_restoreRefImageFromFieldValues(h.field_values, reuseFieldsMeta)", generate_js)
         self.assertIn("snapshot.adv[key] = refVal", generate_js)
         self.assertIn("workflow: A.currentWF", generate_js)

@@ -18,10 +18,20 @@ class ComfyUIUploadTest(unittest.TestCase):
             "1": {"class_type": "LoadImage", "inputs": {"image": "u1/2026-05-19/a.png"}},
             "2": {"class_type": "LoadImage", "inputs": {"image": "u1/2026-05-19/a.png"}},
             "4": {"class_type": "LoadVideo", "inputs": {"file": "u1/2026-05-19/a.mp4"}},
+            "5": {"class_type": "VHS_LoadVideo", "inputs": {"video": "u1/2026-05-19/b.mp4"}},
+            "6": {"class_type": "LoadAudio", "inputs": {"audio": "u1/2026-05-19/c.wav"}},
             "3": {"class_type": "KSampler", "inputs": {"seed": 1}},
         }
 
-        self.assertEqual(workflow_load_images(workflow), ["u1/2026-05-19/a.png", "u1/2026-05-19/a.mp4"])
+        self.assertEqual(
+            workflow_load_images(workflow),
+            [
+                "u1/2026-05-19/a.png",
+                "u1/2026-05-19/a.mp4",
+                "u1/2026-05-19/b.mp4",
+                "u1/2026-05-19/c.wav",
+            ],
+        )
 
     def test_collects_ltx_director_timeline_media(self):
         workflow = {
@@ -82,6 +92,44 @@ class ComfyUIUploadTest(unittest.TestCase):
                 comfyui_upload.upload_image_to_comfyui = old_upload
 
             self.assertEqual(uploads, [("http://comfy", output_path, image_name)])
+
+    def test_upload_media_uses_ssl_context_for_https(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
+            tmp.write(b"video")
+            tmp.flush()
+            calls = {}
+
+            class Response:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def read(self):
+                    return b'{"name":"ref.mp4"}'
+
+            old_urlopen = comfyui_upload.urllib.request.urlopen
+            try:
+                def fake_urlopen(req, timeout=0, context=None):
+                    calls["url"] = req.full_url
+                    calls["timeout"] = timeout
+                    calls["context"] = context
+                    return Response()
+
+                comfyui_upload.urllib.request.urlopen = fake_urlopen
+                result = comfyui_upload.upload_image_to_comfyui(
+                    "https://example.invalid/dgx/8190",
+                    tmp.name,
+                    "u1/2026-06-05/ref.mp4",
+                )
+            finally:
+                comfyui_upload.urllib.request.urlopen = old_urlopen
+
+            self.assertEqual(result, {"name": "ref.mp4"})
+            self.assertEqual(calls["url"], "https://example.invalid/dgx/8190/upload/image")
+            self.assertEqual(calls["timeout"], 60)
+            self.assertIsNotNone(calls["context"])
 
     def test_qwen_frame_roll_keeps_reference_image_prompt_only(self):
         with tempfile.TemporaryDirectory() as tmp:

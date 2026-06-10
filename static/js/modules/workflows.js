@@ -1021,7 +1021,7 @@ async function loadWorkflows() {
           : firstTextToImage
             ? firstTextToImage.name
             : wfs[0].name;
-      if (!A.currentWF || A.currentWF !== target) selectWF(target);
+      if (!A.currentWF || A.currentWF !== target) await selectWF(target);
       else highlightWF();
     } catch (e) {
       console.error("loadWorkflows:", e.message || "", e.stack || "(no stack)");

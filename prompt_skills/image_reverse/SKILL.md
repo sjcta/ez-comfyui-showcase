@@ -11,7 +11,7 @@ Goal: produce a prompt that can replicate the visible image, not a pleasant capt
 
 1. Extract visible evidence first.
 2. Validate evidence against image geometry and known conflict rules.
-3. Merge evidence into structured positive prompt, negative prompt, and replication constraints.
+3. Merge evidence into `visual_spec` / `structured_prompt`, then translate the full structure into a complete positive `keyword_prompt`; negative constraints are optional and only for explicit error control.
 4. Score the result against a 95 replication target.
 5. Every result below 95 becomes a regression case or a new ontology rule.
 
@@ -33,12 +33,19 @@ Always identify these before writing the final prompt:
 - lighting direction, color temperature, and material response
 - NSFW labels only from visible adult nudity, genitals, sexual contact, or sexual fluids
 
+Before writing the final prompt, use the four-step workflow:
+
+1. Checklist pass: mark 30+ visual items as seen / not seen without conclusions.
+2. Structured pass: expand only seen items into `visual_spec` or `structured_prompt`.
+3. Prompt pass: translate the structured fields into a complete positive `keyword_prompt`.
+4. Review pass: check whether any seen item was omitted, contradicted, duplicated, or polluted by JSON keys.
+
 ## Hard Rules
 
 - Positive fields only contain visible facts.
 - No uncertain alternatives such as A or B, possible, maybe, unclear.
 - Do not mention unseen body parts in positive prompts.
-- Negative prompts are pure tags/phrases and must be sibling to image description.
+- Negative prompts, when present, are pure tags/phrases and must be sibling to image description.
 - Vertical source images must not be described as 1:1.
 - If shoes/feet are visible, crop cannot be upper-body-to-thigh.
 - Crouching with shoes on the ground is shoe/sole weight-bearing, not knee support.

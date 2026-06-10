@@ -44,6 +44,7 @@ from modules.prompt_interrogator import (
     EXPERT_TEAM_SINGLE_EXPERT_QUALITY_STANDARD,
     EXPERT_TEAM_FACT_CARD_STANDARD,
     EXPERT_TEAM_REVIEW_CHECKLIST,
+    QWEN_IMAGE_INTERROGATE_TEMPLATE,
     FAST_IMAGE_INTERROGATE_TEMPLATE,
     EXPERT_IMAGE_INTERROGATE_TEMPLATE,
     EXPERT_IMAGE_REVIEW_TEMPLATE,
@@ -696,6 +697,16 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("B. 一段完整图像生成提示词", FAST_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("C. 一段负面约束", FAST_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("顶层键固定为 visual_spec, keyword_prompt, negative_prompt", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第一步：用30+项清单逐项打勾", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第二步：只对第一步“看清”的项目展开描述", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第三步：把 visual_spec 或 structured_prompt 翻译成 keyword_prompt", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第四步：回到第一步清单二次核对", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("看清却没写", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("keyword_prompt 必须是一段完整连续的中文正向提示词", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("姿态复刻锁定", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("身体轴线", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("关键负空间", FAST_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("易偏成镜像", FAST_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("专家反推定位：1:1 复刻精度", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("可执行的复刻参数", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("高成功率提示词规格书", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
@@ -757,9 +768,11 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("黑色过膝袜不能直接替代黑色丝袜", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("黑色过膝丝袜", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("看不清就省略具体款式", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("姿态复刻锁定标准", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("重复偏差防滑", FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
 
     def test_runtime_expert_prompt_keeps_detail_standards_with_bounded_size(self):
-        self.assertLess(len(RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE), 11000)
+        self.assertLess(len(RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE), 11200)
         self.assertIn("visual_evidence 是内部证据简表", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("请把当前图片拆解成一份适合图像生成模型使用的高精度视觉描述", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("visual_spec 等同结构化视觉规格书", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
@@ -782,6 +795,8 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("车内有方向盘不能自动写手搭方向盘", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("黑色过膝丝袜", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("不写推断/估计", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("姿态复刻锁定", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("身体轴线、裁切框、支撑接触", RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertNotIn(HIGH_SUCCESS_PROMPT_SPEC_GUIDE, RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
 
     def test_front_reverse_rules_define_three_modes_and_seven_layers(self):
@@ -791,11 +806,24 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("05 暴露内容与 NSFW 细节", IMAGE_REVERSE_RULEBOOK)
         self.assertIn("规则来源", IMAGE_REVERSE_RUNTIME_RULE_INDEX)
         self.assertIn(IMAGE_REVERSE_RUNTIME_RULE_INDEX, FAST_IMAGE_INTERROGATE_TEMPLATE)
+
+    def test_qwen_interrogate_template_uses_json_to_prompt_workflow(self):
+        self.assertIn("第一步：用30+项清单逐项打勾", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第二步：只对第一步“看清”的项目展开描述", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第三步：把 visual_spec 或 structured_prompt 翻译成 keyword_prompt", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("第四步：回到第一步清单二次核对", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("手指端点", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("脚尖或鞋底方向", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("可见暴露结构", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("姿态复刻锁定", QWEN_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("keyword_prompt 必须承接身体轴线", QWEN_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn(IMAGE_REVERSE_RUNTIME_RULE_INDEX, RUNTIME_FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn(IMAGE_REVERSE_RUNTIME_RULE_INDEX, RUNTIME_SINGLE_PASS_EXPERT_TEAM_TEMPLATE)
         self.assertIn(IMAGE_REVERSE_RUNTIME_RULE_INDEX, EXPERT_TEAM_GLOBAL_PASS_TEMPLATE)
         self.assertIn(IMAGE_REVERSE_RUNTIME_RULE_INDEX, EXPERT_TEAM_SUBJECT_PASS_TEMPLATE)
         self.assertIn(IMAGE_REVERSE_RUNTIME_RULE_INDEX, EXPERT_TEAM_SECOND_REVIEW_TEMPLATE)
+        self.assertIn("关键负空间", EXPERT_TEAM_SUBJECT_PASS_TEMPLATE)
+        self.assertIn("近大远小", EXPERT_TEAM_SECOND_REVIEW_TEMPLATE)
         self.assertIn("不要写感觉，要写可见事实", DIRECT_REVERSE_PROMPT_WRITING_SKILL)
         self.assertIn("图片拆解七层法", DIRECT_REVERSE_PROMPT_WRITING_SKILL)
         self.assertIn("画面主题", DIRECT_REVERSE_PROMPT_WRITING_SKILL)
@@ -1269,6 +1297,51 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertNotIn("鞋子被裁切", text)
         self.assertNotIn('"画面描述"', structured_text)
 
+    def test_multi_person_partial_body_adds_anatomy_structure_negative_guard(self):
+        raw = json.dumps(
+            {
+                "visual_spec": {
+                    "画面总体概述": "两个人物的局部人体近景，主体互相遮挡。",
+                    "构图与镜头": "竖版近景，画面边缘裁切两个人物的头部和腿部。",
+                    "主体与空间关系": "前景人物位于画面左侧，背景人物位于画面右侧，画面左侧手臂遮挡背景人物躯干。",
+                    "人物姿态分析": "两个人物肢体交叠，画面左侧手臂从中左延伸到中心区域，画面右侧腿部被底部边缘裁切。",
+                },
+                "keyword_prompt": "两个人物局部近景，前景人物遮挡背景人物，肢体交叠，头部和腿部被画面边缘裁切。",
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = _parse_structured_interrogate_text(raw)
+
+        self.assertIn("多余肢体", parsed["negative_prompt"])
+        self.assertIn("肢体融合", parsed["negative_prompt"])
+        self.assertIn("画外身体补全", parsed["negative_prompt"])
+        self.assertIn("双人身体融合", parsed["negative_prompt"])
+        self.assertIn("错位遮挡关系", parsed["negative_prompt"])
+        self.assertNotIn("不要", parsed["negative_prompt"])
+
+    def test_visible_legs_and_socks_add_leg_topology_negative_guard(self):
+        raw = json.dumps(
+            {
+                "visual_spec": {
+                    "画面总体概述": "单人仰卧在白色床单上的竖版近景。",
+                    "人物姿态分析": "双腿并拢向画面右下延伸，画面左侧大腿与画面右侧大腿贴近，膝盖位于下中区域，小腿被底部裁切。",
+                    "服装与材质": "双腿穿白色长筒袜，袜口位于右下区域，袜口有两道紫色横纹。",
+                },
+                "keyword_prompt": "单人仰卧，双腿并拢向画面右下延伸，白色长筒袜袜口有紫色横纹。",
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = _parse_structured_interrogate_text(raw)
+
+        self.assertIn("腿部结构错误", parsed["negative_prompt"])
+        self.assertIn("双腿融合", parsed["negative_prompt"])
+        self.assertIn("膝盖错位", parsed["negative_prompt"])
+        self.assertIn("大腿小腿错接", parsed["negative_prompt"])
+        self.assertIn("袜口位置错误", parsed["negative_prompt"])
+        self.assertNotIn("不要", parsed["negative_prompt"])
+
     def test_single_expert_visual_spec_preserves_user_template_in_result(self):
         def fake_chat(messages, **kwargs):
             return json.dumps(
@@ -1629,8 +1702,17 @@ class PromptInterrogatorTests(unittest.TestCase):
         self.assertIn("所有 HEX 写在括号里", EXPERT_TEAM_SECOND_REVIEW_TEMPLATE)
         self.assertIn("隐私部位细节", NSFW_DETAIL_STANDARD)
         self.assertIn("暴露内容", NSFW_DETAIL_STANDARD)
+        self.assertIn("解剖名词 + 外观形态 + 色彩肤色 + 毛发分布", NSFW_DETAIL_STANDARD)
+        self.assertIn("大阴唇", NSFW_DETAIL_STANDARD)
+        self.assertIn("小阴唇", NSFW_DETAIL_STANDARD)
+        self.assertIn("龟头", NSFW_DETAIL_STANDARD)
+        self.assertIn("冠状缘", NSFW_DETAIL_STANDARD)
+        self.assertIn("左侧点、右侧点、私处、下面", NSFW_DETAIL_STANDARD)
+        self.assertIn("乳晕浅粉边界柔和", NSFW_DETAIL_STANDARD)
         self.assertIn("衣物边界", RUNTIME_SINGLE_PASS_EXPERT_TEAM_TEMPLATE)
         self.assertIn("液体/湿润反光", RUNTIME_DETAILED_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("毛发分布", RUNTIME_DETAILED_IMAGE_INTERROGATE_TEMPLATE)
+        self.assertIn("皮肤/黏膜质感", RUNTIME_DETAILED_IMAGE_INTERROGATE_TEMPLATE)
         self.assertIn("暴露内容必须直接描述可见部位", EXPERT_TEAM_SECOND_REVIEW_TEMPLATE)
         self.assertNotIn("安全标签", NSFW_DETAIL_STANDARD)
         self.assertNotIn("安全标签", EXPERT_TEAM_DETAIL_SCHEMA)

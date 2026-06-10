@@ -24,3 +24,6 @@ data/jobs.json
 data/nodes.db
 data/system_settings.json
 data/jwt_secret.key
+data/labs/projects/
+data/labs/checkpoints/
+data/labs/runs/

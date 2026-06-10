@@ -17,6 +17,7 @@ class SystemSettingsUiTests(unittest.TestCase):
         auth_js = (ROOT / "static/js/modules/auth.js").read_text("utf-8")
         for token in (
             "sysImageProtectionEnabled",
+            "sysLlmVisionEnabled",
             "sysDetectorEnabled",
             "sysPromptSignalsEnabled",
             "sysPromptContextEnabled",
@@ -24,7 +25,11 @@ class SystemSettingsUiTests(unittest.TestCase):
             "sysPairedBreastThreshold",
             "sysButtocksThreshold",
             "sysWeakBreastPromptThreshold",
+            "三路组合：人工审查最高优先级",
+            "LLM 视觉或提示词任一路命中即保护",
+            "manual-admin",
             "sysPromptPatternStrongNude",
+            "sysPromptPatternViolence",
             "sysPromptPatternObsceneGesture",
         ):
             self.assertIn(token, auth_js)
@@ -33,6 +38,7 @@ class SystemSettingsUiTests(unittest.TestCase):
         self.assertIn(".system-settings-modal", css)
         self.assertIn(".system-settings-grid", css)
         self.assertIn(".system-settings-switch", css)
+        self.assertIn(".system-settings-note", css)
 
     def test_system_settings_modal_has_llm_api_controls(self):
         auth_js = (ROOT / "static/js/modules/auth.js").read_text("utf-8")

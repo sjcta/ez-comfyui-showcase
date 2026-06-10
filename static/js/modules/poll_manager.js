@@ -189,6 +189,8 @@
         var d = JSON.parse(e.data);
         if (d.type === 'job_update') {
           self.onJobUpdate(d.job);
+        } else if (d.type === 'history_update') {
+          self.onHistoryUpdate(d);
         } else if (d.type === 'log' && d.entry) {
           if (window.CW._onLog) window.CW._onLog(d.entry);
         }
@@ -265,6 +267,7 @@
       var typeLabel = wfTag ? wfTag.text : '';
       var toastByStatus = {
         queued: ['排队中', 'queued'],
+        paused: ['已暂停', 'queued'],
         generating: ['出图中', 'generating'],
         checking: ['内容校验中', 'generating'],
         done: ['结束出图', 'done'],
@@ -304,6 +307,24 @@
     // ── Same status (progress update): in-place patch via CardManager, NO flicker ──
     var cm = window.CW.cardManager;
     if (cm) cm.patchJobCard(job);
+  };
+
+  PollManager.prototype.onHistoryUpdate = function (update) {
+    if (!update || !update.action) return;
+    if (window.CW && typeof window.CW.onHistoryUpdate === 'function') {
+      window.CW.onHistoryUpdate(update);
+      return;
+    }
+    if (window.CW && typeof window.CW.loadHistory === 'function') {
+      Promise.resolve(window.CW.loadHistory()).catch(function(e) {
+        console.warn('[PollManager] loadHistory after history update failed:', e && e.message ? e.message : e);
+      });
+    }
+    if (window.CW && typeof window.CW.loadWorkflows === 'function') {
+      Promise.resolve(window.CW.loadWorkflows()).catch(function(e) {
+        console.warn('[PollManager] loadWorkflows after history update failed:', e && e.message ? e.message : e);
+      });
+    }
   };
 
   /**
@@ -377,8 +398,8 @@
               doneOrErrorProcessed = true;
             } else {
               needRerender = true;
-            }
-          } else if (sj.status === 'generating' && sj.progress && prev.progress) {
+          }
+        } else if (sj.status === 'generating' && sj.progress && prev.progress) {
             if (prev.progress.pct !== sj.progress.pct) {
               jobs[id] = sj;
               // In-place patch via CardManager
@@ -386,6 +407,11 @@
               if (cm) cm.patchJobCard(sj);
               if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
             }
+          } else if ((sj.status === 'queued' || sj.status === 'paused') && prev.message !== sj.message) {
+            jobs[id] = sj;
+            var cmQueued = window.CW.cardManager;
+            if (cmQueued) cmQueued.patchJobCard(sj);
+            if (window.CW.syncComfyServiceButton) window.CW.syncComfyServiceButton();
           } else if (sj.status === 'generating') {
             // First progress info
             if (sj.progress && !prev.progress) {

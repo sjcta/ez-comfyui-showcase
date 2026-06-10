@@ -8,6 +8,10 @@ WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros.json"
 CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros.json"
 DIRECTOR_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_director.json"
 DIRECTOR_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros_director.json"
+ANTIFLICKER_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_antiflicker.json"
+ANTIFLICKER_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros_antiflicker.json"
+AUDIO_CLEAN_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_antiflicker_audio_clean_test.json"
+AUDIO_CLEAN_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros_antiflicker_audio_clean_test.json"
 TILED_WORKFLOW = ROOT / "data/workflows/ez-comfy/I2V_10eros_v3_TiledSampler.json"
 TILED_CONFIG = ROOT / "data/wf_configs/I2V_10eros_v3_TiledSampler.json"
 META = ROOT / "data/wf_meta.json"
@@ -53,15 +57,17 @@ class Ltx10ErosWorkflowTests(unittest.TestCase):
         self.assertEqual(sampler["inputs"]["audio_carrier_tile"], "first")
         self.assertEqual(workflow["320:309"]["inputs"]["av_latent"], ["320:308", 1])
 
-    def test_keeps_ltx_tail_decode_fix(self):
+    def test_uses_standard_tiled_decode(self):
         workflow = json.loads(WORKFLOW.read_text())
         decode = workflow["320:315"]
 
-        self.assertEqual(decode["class_type"], "LTXVTiledVAEDecode")
-        self.assertTrue(decode["inputs"]["last_frame_fix"])
-        self.assertEqual(decode["inputs"]["horizontal_tiles"], 1)
-        self.assertEqual(decode["inputs"]["vertical_tiles"], 1)
-        self.assertEqual(decode["inputs"]["overlap"], 1)
+        self.assertEqual(decode["class_type"], "VAEDecodeTiled")
+        self.assertEqual(decode["inputs"]["samples"], ["320:309", 0])
+        self.assertEqual(decode["inputs"]["vae"], ["320:316", 2])
+        self.assertEqual(decode["inputs"]["tile_size"], 512)
+        self.assertEqual(decode["inputs"]["overlap"], 64)
+        self.assertEqual(decode["inputs"]["temporal_size"], 64)
+        self.assertEqual(decode["inputs"]["temporal_overlap"], 8)
 
     def test_editor_config_exposes_10eros_model_choice(self):
         config = json.loads(CONFIG.read_text())
@@ -83,6 +89,46 @@ class Ltx10ErosWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["320:297"]["inputs"]["samples"], ["320:309", 1])
         self.assertEqual(workflow["320:297"]["inputs"]["audio_vae"], ["320:279", 0])
         self.assertEqual(workflow["320:310"]["inputs"]["audio"], ["320:297", 0])
+
+    def test_antiflicker_variant_aligns_available_official_settings(self):
+        workflow = json.loads(ANTIFLICKER_WORKFLOW.read_text())
+        config = json.loads(ANTIFLICKER_CONFIG.read_text())
+        fields = {item["key"]: item for item in config["fields"]}
+        meta = json.loads(META.read_text())
+
+        self.assertEqual(config["workflow"], "i2v_ltx23_10eros_antiflicker.json")
+        self.assertEqual(workflow["320:291"]["inputs"]["sampler_name"], "euler_ancestral")
+        self.assertIn("0.1206", workflow["320:306"]["inputs"]["sigmas"])
+        self.assertEqual(workflow["320:314"]["inputs"]["cfg"], 3)
+        self.assertEqual(workflow["320:325"]["inputs"]["strength_model"], 0.28)
+        self.assertEqual(workflow["320:280"]["inputs"]["sampler_name"], "euler_ancestral_cfg_pp")
+        self.assertEqual(workflow["320:281"]["inputs"]["sigmas"], "0.715, 0.4824, 0.2412, 0.0")
+        self.assertEqual(workflow["320:315"]["class_type"], "VAEDecode")
+        self.assertEqual(workflow["320:315"]["inputs"]["samples"], ["320:309", 0])
+        self.assertEqual(workflow["320:310"]["inputs"]["images"], ["320:315", 0])
+        self.assertEqual(workflow["75"]["inputs"]["filename_prefix"], "video/LTX_2.3_10Eros_i2v_antiflicker")
+        self.assertIn("269::image", fields)
+        self.assertNotIn("320:315::horizontal_tiles", fields)
+        self.assertTrue(fields["320:308::bypass_tiling"]["visible"])
+        self.assertTrue(meta["i2v_ltx23_10eros_antiflicker.json"]["shared"])
+
+    def test_antiflicker_audio_clean_test_variant_is_registered(self):
+        workflow = json.loads(AUDIO_CLEAN_WORKFLOW.read_text())
+        config = json.loads(AUDIO_CLEAN_CONFIG.read_text())
+        meta = json.loads(META.read_text())
+        entry = meta["i2v_ltx23_10eros_antiflicker_audio_clean_test.json"]
+
+        self.assertEqual(config["workflow"], "i2v_ltx23_10eros_antiflicker_audio_clean_test.json")
+        self.assertEqual(workflow["320:314"]["inputs"]["cfg"], 3)
+        self.assertEqual(workflow["320:325"]["inputs"]["strength_model"], 0.28)
+        self.assertEqual(workflow["320:325"]["inputs"]["model"], ["320:316", 0])
+        self.assertEqual(workflow["320:314"]["inputs"]["model"], ["320:325", 0])
+        self.assertEqual(
+            workflow["75"]["inputs"]["filename_prefix"],
+            "video/LTX_2.3_10Eros_i2v_antiflicker_audio_clean_test",
+        )
+        self.assertEqual(entry["name"], "LTX2.3 10Eros 抗闪降噪测试版")
+        self.assertFalse(entry["shared"])
 
     def test_metadata_registers_workflow(self):
         meta = json.loads(META.read_text())

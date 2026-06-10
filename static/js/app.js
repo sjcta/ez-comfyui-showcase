@@ -550,6 +550,36 @@
     }
   }
 
+  async function pauseJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    try {
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/pause`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || r.status);
+      if (d.job) jobs[jobId] = d.job;
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      else if (window.CW.renderGallery) window.CW.renderGallery();
+    } catch (e) {
+      alert('暂停失败: ' + e.message);
+    }
+  }
+
+  async function resumeJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    try {
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/resume`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || r.status);
+      if (d.job) jobs[jobId] = d.job;
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      else if (window.CW.renderGallery) window.CW.renderGallery();
+    } catch (e) {
+      alert('恢复失败: ' + e.message);
+    }
+  }
+
   async function dismissJob(jobId) {
     var j = jobs[jobId];
     if (!j) return;
@@ -647,6 +677,8 @@ function init() {
   // (always visible — toggled in HTML)
   (()=>{var el=$('#btnGenerate');if(el)el.addEventListener('click',function(){if(window.CW.doGenerate)window.CW.doGenerate();});})();
     ($('#lightbox')||{})['addEventListener']('click', (e) => {
+      var stage = $('#lbStage');
+      if (e.target === $('#lbImg') && stage && stage.classList.contains('lb-image-zoomed')) return;
       if (e.target === $('#lightbox') || e.target === $('#lbImg')) { if (window.CW.closeLB) window.CW.closeLB(); }
     });
     (() => {
@@ -886,6 +918,8 @@ function init() {
   console.log('[BOOT] before Object.assign');
   Object.assign(window.CW, {
     cancelJob,
+    pauseJob,
+    resumeJob,
     dismissJob,
     retryJob,
     rndSeed,

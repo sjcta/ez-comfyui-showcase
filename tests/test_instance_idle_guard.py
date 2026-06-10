@@ -228,6 +228,19 @@ class InstanceIdleGuardTest(unittest.TestCase):
             900,
         )
 
+    def test_longcat_workflows_use_video_timeouts_even_when_tagged_as_test(self):
+        job = {"status": "generating", "last_update": 100.0, "workflow": "longcat_avatar15_q4_smoke.json"}
+
+        stuck, age, timeout = app._job_stuck_state(job, now=1401.0)
+
+        self.assertFalse(stuck)
+        self.assertEqual(age, 1301.0)
+        self.assertGreater(timeout, app.JOB_STAGE_TIMEOUTS["generating"])
+        self.assertEqual(
+            _workflow_track_timeout({"workflow_type": "测试"}, "longcat_avatar15_q4_smoke.json"),
+            3600,
+        )
+
     def test_stuck_job_finalizer_marks_error_and_cancels_task(self):
         async def never_finishes():
             await app.asyncio.sleep(60)

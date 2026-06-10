@@ -78,6 +78,544 @@ class ImageProtectionWorkerTests(unittest.TestCase):
         self.assertIn('visual_fallback = _setting_bool("visual_fallback_enabled", True)', source)
         self.assertNotIn('not detector_available\n                and _setting_bool("visual_fallback_enabled", False)', source)
 
+    def test_startup_backfill_does_not_run_llm_vision_review(self):
+        app_py = (Path(__file__).resolve().parents[1] / "app.py").read_text("utf-8")
+        for name in (
+            "_backfill_legacy_prompt_protection",
+            "_recheck_safe_heuristic_nsfw_risk_rows",
+            "_recheck_safe_heuristic_video_rows",
+        ):
+            start = app_py.index("def " + name)
+            end = app_py.find("\ndef ", start + 1)
+            body = app_py[start:end if end != -1 else len(app_py)]
+            self.assertIn("load_vision_reviewer=lambda: None", body)
+
+    def test_llm_vision_review_protects_visible_erotic_or_violent_content(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+        calls = {"review": 0}
+
+        def load_vision_reviewer():
+            def review(_path, _prompt):
+                calls["review"] += 1
+                return {
+                    "protected": True,
+                    "sexual_visible": False,
+                    "violent_visible": True,
+                    "confidence": 0.91,
+                    "reason": "graphic blood and severe injury visible",
+                }
+
+            return review
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "violent.jpg")
+                Image.new("RGB", (48, 48), (20, 20, 20)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(calls["review"], 3)
+        self.assertEqual(result.status, "protected")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("consensus 3/3", result.reason)
+        self.assertIn("severe injury", result.reason)
+
+    def test_llm_vision_safe_result_does_not_protect_skin_area_alone(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.88,
+                "reason": "non-sexual skin exposure only",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "skin-area.jpg")
+                Image.new("RGB", (48, 48), (230, 180, 160)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertEqual(result.source, "llm-vision")
+
+    def test_llm_vision_contradictory_protected_flag_is_ignored_when_no_visible_violation(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": True,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.98,
+                "violence_level": "none",
+                "sexual_findings": "No nipples, areolae, genitals, anus, or sexual acts are visible.",
+                "violence_findings": "No blood, gore, or injury visible.",
+                "reason": "Safe image with ordinary non-sexual skin exposure.",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "contradictory-safe.jpg")
+                Image.new("RGB", (48, 48), (230, 180, 160)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("protected flag ignored", result.reason)
+
+    def test_llm_vision_single_protected_vote_is_disputed_safe(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "llm_vision_review_passes": 3,
+            "llm_vision_protect_votes": 2,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+        reviews = iter([
+            {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.95,
+                "reason": "ambiguous low-angle view claims visible nipple",
+            },
+            {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.95,
+                "reason": "underwear only, no protected anatomy visible",
+            },
+            {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.93,
+                "reason": "covered underwear and ordinary skin exposure only",
+            },
+        ])
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: next(reviews)
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "disputed.jpg")
+                Image.new("RGB", (48, 48), (230, 180, 160)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("protected vote disputed 1/3", result.reason)
+
+    def test_llm_vision_generic_pubic_region_claim_without_specific_evidence_is_safe(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "llm_vision_review_passes": 3,
+            "llm_vision_protect_votes": 2,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+        reviews = iter([
+            {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.95,
+                "sexual_findings": "pubic region and genitals are claimed visible",
+                "reason": "low-angle view reveals pubic region and genitals",
+            },
+            {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.92,
+                "sexual_findings": "covered crotch area under thong, no exact anatomical feature named",
+                "reason": "generic genital exposure claim",
+            },
+            {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.9,
+                "reason": "underwear only",
+            },
+        ])
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: next(reviews)
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "generic-pubic.jpg")
+                Image.new("RGB", (48, 48), (230, 180, 160)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("consensus 0/3", result.reason)
+
+    def test_llm_vision_negative_sexual_act_phrase_is_not_specific_evidence(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "llm_vision_review_passes": 1,
+            "llm_vision_protect_votes": 1,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.9,
+                "sexual_findings": "covered underwear; no sexual acts or sexual fluids are visible",
+                "reason": "generic sexual flag with no concrete anatomy evidence",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "negative-acts.jpg")
+                Image.new("RGB", (48, 48), (230, 180, 160)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertIn("no specific visible protected anatomy evidence", result.reason)
+
+    def test_llm_vision_two_protected_votes_are_consensus_protected(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "llm_vision_review_passes": 3,
+            "llm_vision_protect_votes": 2,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+        reviews = iter([
+            {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.91,
+                "reason": "visible nipple exposure through sheer fabric",
+            },
+            {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.82,
+                "reason": "second pass uncertain",
+            },
+            {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.94,
+                "reason": "visible areola exposure confirmed",
+            },
+        ])
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: next(reviews)
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "consensus.jpg")
+                Image.new("RGB", (48, 48), (180, 120, 110)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "protected")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("consensus 2/3", result.reason)
+
+    def test_llm_vision_safe_result_still_protects_when_prompt_matches(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": False,
+            "prompt_signals_enabled": True,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.91,
+                "reason": "no visible sexual exposure or gore",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "prompt-hit.jpg")
+                Image.new("RGB", (48, 48), (8, 10, 12)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="人物露出乳头和性器官，写实肖像")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "protected")
+        self.assertEqual(result.source, "prompt")
+        self.assertIn("explicit sexual prompt", result.reason)
+
+    def test_llm_vision_and_prompt_both_safe_allows_image(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": False,
+            "prompt_signals_enabled": True,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.94,
+                "reason": "ordinary pet dog, no sexual exposure or gore visible",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "pet-dog.jpg")
+                Image.new("RGB", (48, 48), (120, 90, 70)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="一只可爱小狗坐在草地上")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertEqual(result.source, "llm-vision")
+
+    def test_llm_vision_safe_result_overrides_detector_pet_false_positive(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": True,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_detector():
+            return lambda _path: [{"label": "EXPOSED_GENITALIA_F", "score": 0.99}]
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": False,
+                "sexual_visible": False,
+                "violent_visible": False,
+                "confidence": 0.93,
+                "reason": "ordinary pet dog, no sexual exposure or gore visible",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "pet-dog.jpg")
+                Image.new("RGB", (48, 48), (120, 90, 70)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=load_detector,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "safe")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("pet dog", result.reason)
+
+    def test_llm_vision_protects_sheer_fabric_visible_nipple_exposure(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": True,
+            "detector_enabled": False,
+            "prompt_signals_enabled": False,
+            "visual_fallback_enabled": False,
+        })
+
+        def load_vision_reviewer():
+            return lambda _path, _prompt: {
+                "protected": True,
+                "sexual_visible": True,
+                "violent_visible": False,
+                "confidence": 0.9,
+                "sexual_findings": "areola and nipple visible through transparent fabric",
+                "reason": "visible nipple exposure through sheer clothing",
+            }
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "sheer.jpg")
+                Image.new("RGB", (48, 48), (180, 130, 120)).save(path)
+                worker = ImageProtectionWorker(
+                    load_detector=lambda: None,
+                    load_classifier=lambda: None,
+                    load_vision_reviewer=load_vision_reviewer,
+                )
+
+                result = worker.check(path, prompt="半透明薄纱材质")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "protected")
+        self.assertEqual(result.source, "llm-vision")
+        self.assertIn("nipple", result.reason.lower())
+
+    def test_prompt_protection_blocks_violence_gore_prompt(self):
+        from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
+
+        old_settings = get_image_protection_settings()
+        configure_image_protection({
+            "llm_vision_enabled": False,
+            "detector_enabled": False,
+            "prompt_signals_enabled": True,
+            "visual_fallback_enabled": False,
+        })
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "gore.jpg")
+                Image.new("RGB", (48, 48), (8, 10, 12)).save(path)
+                worker = ImageProtectionWorker(load_detector=lambda: None, load_classifier=lambda: None)
+
+                result = worker.check(path, prompt="graphic gore, exposed organs, severe injury")
+        finally:
+            configure_image_protection(old_settings)
+
+        self.assertEqual(result.status, "protected")
+        self.assertEqual(result.source, "prompt")
+        self.assertIn("violence/gore", result.reason)
+
+    def test_llm_vision_review_prompt_excludes_skin_area_policy(self):
+        from modules import image_protection
+
+        self.assertIn("Do not judge skin exposure area by itself", image_protection._LLM_VISION_REVIEW_PROMPT)
+        self.assertIn("Ordinary pets, cats, dogs", image_protection._LLM_VISION_REVIEW_PROMPT)
+        self.assertIn("transparent, translucent, see-through", image_protection._LLM_VISION_REVIEW_PROMPT)
+        self.assertIn("violence_level string", image_protection._LLM_VISION_REVIEW_PROMPT)
+        self.assertIn("violence/gore", image_protection._LLM_VISION_REVIEW_PROMPT)
+        self.assertIn("protected field MUST be true if and only if", image_protection._LLM_VISION_REVIEW_PROMPT)
+        self.assertIn("underwear, thong, bare back", image_protection._LLM_VISION_REVIEW_PROMPT)
+
     def test_detector_exposed_breast_label_without_three_points_is_safe(self):
         from modules.image_protection import ImageProtectionWorker
 
@@ -308,7 +846,8 @@ class ImageProtectionWorkerTests(unittest.TestCase):
             configure_image_protection(old_settings)
 
         self.assertEqual(result.status, "protected")
-        self.assertIn("prompt signal", result.reason)
+        self.assertEqual(result.source, "prompt")
+        self.assertIn("explicit sexual prompt", result.reason)
 
     def test_enabled_prompt_protection_blocks_strong_nude_prompt_even_with_low_skin_signal(self):
         from modules.image_protection import ImageProtectionWorker, configure_image_protection, get_image_protection_settings
@@ -326,6 +865,7 @@ class ImageProtectionWorkerTests(unittest.TestCase):
             configure_image_protection(old_settings)
 
         self.assertEqual(result.status, "protected")
+        self.assertEqual(result.source, "prompt")
         self.assertIn("strong nude prompt", result.reason)
 
     def test_no_clothes_prompt_with_skin_signal_is_safe_when_prompt_protection_is_off(self):

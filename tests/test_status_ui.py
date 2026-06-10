@@ -54,6 +54,15 @@ class StatusUiContractTests(unittest.TestCase):
         self.assertIn("animation: toastInMobile .25s ease, toastOut .4s ease 3.6s forwards;", css)
         self.assertNotIn("top: 83px", css)
 
+    def test_standard_toasts_do_not_block_gallery_actions(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        toast_block = css[css.index(".toast {") : css.index(".toast::before")]
+        self.assertIn("pointer-events: none;", toast_block)
+        self.assertIn(".toast-close {\n  pointer-events: auto;\n}", css)
+        self.assertIn(".prompt-result-toast {\n  pointer-events: auto;", css)
+        self.assertIn(".toast.is-persistent {\n  pointer-events: auto;", css)
+
     def test_status_poll_sends_current_device_target(self):
         status_js = (ROOT / "static/js/modules/status.js").read_text()
 

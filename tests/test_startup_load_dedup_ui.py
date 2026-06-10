@@ -26,6 +26,8 @@ class StartupLoadDedupUiTests(unittest.TestCase):
         self.assertIn("var _loadWorkflowsPromise = null;", workflows_js)
         self.assertIn("if (_loadWorkflowsPromise) return _loadWorkflowsPromise;", workflows_js)
         self.assertIn("_loadWorkflowsPromise.finally(function()", workflows_js)
+        self.assertIn("await selectWF(target);", workflows_js)
+        self.assertNotIn(") selectWF(target);", workflows_js)
 
     def test_logged_in_modules_do_not_block_primary_startup_data(self):
         loader_js = (ROOT / "static/js/module_loader.js").read_text()

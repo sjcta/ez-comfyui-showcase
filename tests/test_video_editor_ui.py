@@ -65,6 +65,8 @@ class VideoEditorUiTests(unittest.TestCase):
         css = (ROOT / "static/css/style.css").read_text()
 
         self.assertIn(".lightbox.lb-video-editing .lb-actions", css)
+        self.assertIn(".lightbox.lb-video-editing .lb-download", css)
+        self.assertIn(".lightbox.lb-video-editing .lb-image-export-wrap", css)
         self.assertIn(".lightbox.lb-video-editing .lb-nav", css)
         self.assertIn(".lightbox.lb-video-editing .lb-info", css)
 
@@ -88,8 +90,19 @@ class VideoEditorUiTests(unittest.TestCase):
         self.assertIn(".lb-action-btn svg,\n  .lb-video-icon-btn svg,", css)
         self.assertIn(".lb-video-ticks {\n  position: relative;", css)
         self.assertIn(".lb-video-tick {\n  position: absolute;", css)
+        self.assertIn(".lb-video-tick-time,\n.lb-video-tick-frame", css)
+        self.assertIn("@media (hover: none) and (pointer: coarse) and (orientation: landscape)", css)
+        self.assertIn("calc(100vw - max(224px", css)
         self.assertIn("@media (max-width: 560px)", css)
         self.assertIn(".lb-video-timeline-row {\n    grid-template-columns: minmax(0, 1fr);", css)
+
+    def test_video_timeline_tick_density_uses_track_width(self):
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+
+        self.assertIn("function _formatVideoTickLabel(sec, fps)", history_js)
+        self.assertIn("var trackWidth = Number(els.ticks.clientWidth || 0);", history_js)
+        self.assertIn("trackWidth < 520 ? 3", history_js)
+        self.assertIn("_formatVideoTickLabel(t, fps)", history_js)
 
     def test_video_timeline_thumb_uses_primary_round_button(self):
         css = (ROOT / "static/css/style.css").read_text()
@@ -109,8 +122,8 @@ class VideoEditorUiTests(unittest.TestCase):
         self.assertIn('id="icon-clapperboard"', sprite)
         self.assertIn(".lb-video-edit-icon", css)
         self.assertIn("color: var(--accent);", css)
-        self.assertIn(".lb-video-edit {\n    left: max(16px, env(safe-area-inset-left));", css)
-        self.assertIn("bottom: calc(max(16px, env(safe-area-inset-bottom)) + 228px);", css)
+        self.assertIn(".lb-video-edit {\n    left: max(var(--lb-round-edge-offset), env(safe-area-inset-left));", css)
+        self.assertIn("bottom: calc(max(var(--lb-round-edge-offset), env(safe-area-inset-bottom)) + var(--lb-round-bottom-offset) + var(--lb-round-step) + var(--lb-round-step));", css)
 
 
 if __name__ == "__main__":

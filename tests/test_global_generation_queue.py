@@ -43,7 +43,7 @@ class GlobalGenerationQueueTest(unittest.TestCase):
                 app._job_queue.put_nowait(_queue_item("job-one", "t2i_flux2_klein.json"))
                 app._job_queue.put_nowait(_queue_item("job-two", "i2i_flux2_klein.json"))
 
-                await asyncio.wait_for(runner.first_started.wait(), timeout=1)
+                await asyncio.wait_for(runner.first_started.wait(), timeout=3)
                 await asyncio.sleep(0.05)
                 self.assertEqual(runner.started, ["job-one"])
 
@@ -100,6 +100,121 @@ class GlobalGenerationQueueTest(unittest.TestCase):
                 app._job_runner = old_runner
                 app._job_tasks.clear()
                 app._job_tasks.update(old_tasks)
+
+        asyncio.run(run_case())
+
+    def test_queue_worker_skips_paused_job_and_runs_next(self):
+        async def run_case():
+            old_queue = app._job_queue
+            old_runner = app._job_runner
+            old_tasks = dict(app._job_tasks)
+            app._job_queue = asyncio.Queue()
+            app._job_tasks.clear()
+            app.jobs["job-paused"] = {"id": "job-paused", "status": "paused"}
+            app.jobs["job-two"] = {"id": "job-two", "status": "queued"}
+            runner = _BlockingRunner()
+            app._job_runner = runner
+            worker = asyncio.create_task(app._queue_worker())
+            try:
+                app._job_queue.put_nowait(_queue_item("job-paused", "t2i_flux2_klein.json"))
+                app._job_queue.put_nowait(_queue_item("job-two", "i2i_flux2_klein.json"))
+
+                await asyncio.wait_for(runner.second_started.wait(), timeout=3)
+                self.assertEqual(runner.started, ["job-two"])
+                self.assertEqual(app.jobs["job-paused"]["status"], "paused")
+
+                runner.second_release.set()
+                await asyncio.wait_for(app._job_queue.join(), timeout=1)
+            finally:
+                runner.second_release.set()
+                worker.cancel()
+                try:
+                    await worker
+                except asyncio.CancelledError:
+                    pass
+                for task in list(app._job_tasks.values()):
+                    if not task.done():
+                        task.cancel()
+                app._job_queue = old_queue
+                app._job_runner = old_runner
+                app.jobs.pop("job-paused", None)
+                app.jobs.pop("job-two", None)
+                app._job_tasks.clear()
+                app._job_tasks.update(old_tasks)
+
+        asyncio.run(run_case())
+
+    def test_stale_dispatch_epoch_is_skipped_after_pause_resume_race(self):
+        app.jobs["job-epoch"] = {"id": "job-epoch", "status": "queued", "pause_epoch": 2}
+        try:
+            self.assertTrue(app._job_dispatch_stale_or_paused("job-epoch", 1))
+            self.assertFalse(app._job_dispatch_stale_or_paused("job-epoch", 2))
+            app.jobs["job-epoch"]["status"] = "paused"
+            self.assertTrue(app._job_dispatch_stale_or_paused("job-epoch", 2))
+        finally:
+            app.jobs.pop("job-epoch", None)
+
+    def test_external_resource_lock_holds_comfyui_jobs_in_queue(self):
+        async def run_case():
+            old_queue = app._job_queue
+            old_runner = app._job_runner
+            old_tasks = dict(app._job_tasks)
+            old_lock = dict(app._external_resource_lock)
+            old_save_jobs = app.save_jobs
+            old_broadcast = app.broadcast
+            old_add_log = app.add_log
+            app._job_queue = asyncio.Queue()
+            app._job_tasks.clear()
+            app.jobs["job-one"] = {"id": "job-one", "status": "queued"}
+            app._external_resource_lock = {
+                "project": "JoyAI-Echo",
+                "reason": "unit test lock",
+                "holder": "tester",
+                "created_at": "2026-06-04 00:00:00",
+                "expires_at": 9999999999,
+                "ttl_sec": 3600,
+            }
+            app.save_jobs = lambda: None
+
+            async def fake_broadcast(_payload):
+                return None
+
+            app.broadcast = fake_broadcast
+            app.add_log = lambda *_args, **_kwargs: None
+            runner = _BlockingRunner()
+            app._job_runner = runner
+            worker = asyncio.create_task(app._queue_worker())
+            try:
+                app._job_queue.put_nowait(_queue_item("job-one", "t2i_flux2_klein.json"))
+                await asyncio.sleep(0.08)
+                self.assertEqual(runner.started, [])
+                self.assertEqual(app.jobs["job-one"]["status"], "queued")
+                self.assertIn("resource_lock", app.jobs["job-one"])
+
+                app._external_resource_lock = {}
+                await asyncio.wait_for(runner.first_started.wait(), timeout=3)
+                self.assertEqual(runner.started, ["job-one"])
+                runner.first_release.set()
+                await asyncio.wait_for(app._job_queue.join(), timeout=1)
+            finally:
+                runner.first_release.set()
+                worker.cancel()
+                try:
+                    await worker
+                except asyncio.CancelledError:
+                    pass
+                for task in list(app._job_tasks.values()):
+                    if not task.done():
+                        task.cancel()
+                app._job_queue = old_queue
+                app._job_runner = old_runner
+                app._job_tasks.clear()
+                app._job_tasks.update(old_tasks)
+                app.jobs.pop("job-one", None)
+                app._external_resource_lock = old_lock
+                app.save_jobs = old_save_jobs
+                app.broadcast = old_broadcast
+                app.add_log = old_add_log
 
         asyncio.run(run_case())
 

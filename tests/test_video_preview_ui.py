@@ -38,6 +38,14 @@ class VideoPreviewUiContractTests(unittest.TestCase):
         self.assertNotIn("function _setVideoPreviewMaskHeight", card_manager_js)
         self.assertNotIn("ResizeObserver", card_manager_js)
 
+    def test_video_preview_layer_does_not_block_history_lightbox_clicks(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        block_start = css.index(".gi-video-preview,")
+        block_end = css.index(".gi-video-preview + .gi-video-poster", block_start)
+        block = css[block_start:block_end]
+        self.assertIn("pointer-events: none;", block)
+
     def test_video_cards_do_not_render_redundant_bottom_video_badge(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text()
         card_manager_js = (ROOT / "static/js/modules/card_manager.js").read_text()
@@ -86,12 +94,31 @@ class VideoPreviewUiContractTests(unittest.TestCase):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
 
-        self.assertIn("f.class_type === 'LoadVideo' && f.field === 'file'", generate_js)
+        self.assertIn("function _isReferenceVideoField", generate_js)
+        self.assertIn("cls === 'LoadVideo' && field === 'file'", generate_js)
+        self.assertIn("cls === 'VHS_LoadVideo' && field === 'video'", generate_js)
+        self.assertIn("f.type === 'video'", generate_js)
         self.assertIn("id=\"refVideoFile\"", generate_js)
         self.assertIn("/api/upload-video", generate_js)
         self.assertIn("/api/input-video/", generate_js)
-        self.assertIn("视频放大需要先上传参考视频", generate_js)
+        self.assertIn("需要先上传参考视频", generate_js)
         self.assertIn(".video-upload-preview", css)
+
+    def test_quick_form_supports_reference_audio_upload(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn("function _isReferenceAudioField", generate_js)
+        self.assertIn("cls === 'LoadAudio' && field === 'audio'", generate_js)
+        self.assertIn("f.type === 'audio'", generate_js)
+        self.assertIn("id=\"refAudioFile\"", generate_js)
+        self.assertIn("id=\"refAudioPreview\"", generate_js)
+        self.assertIn("id=\"refAudioReplace\"", generate_js)
+        self.assertIn("/api/upload-audio", generate_js)
+        self.assertIn("/api/input-audio/", generate_js)
+        self.assertIn("需要先上传参考音频", generate_js)
+        self.assertIn(".audio-upload-preview", css)
+        self.assertIn(".audio-upload-replace", css)
 
     def test_seedvr2_video_upscale_uses_long_edge_target(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()

@@ -39,6 +39,22 @@ class TitlebarLayoutTest(unittest.TestCase):
         self.assertIn("#authDropdownTrigger .auth-role-chip", body)
         self.assertRegex(css, r"@media \(max-width: 480px\) \{[^}]*#authDropdownTrigger \.auth-role-chip\s*\{[^}]*display:\s*none !important;", re.S)
 
+    def test_desktop_service_indicator_does_not_ellipsis_instance_summary(self):
+        css = (ROOT / "static/css/style.css").read_text()
+        running = re.search(r"\.svc-btn\.running\s*\{(?P<body>.*?)\n\}", css, re.S)
+        state = re.search(r"\.svc-btn\.running \.svc-state\s*\{(?P<body>.*?)\n\}", css, re.S)
+
+        self.assertIsNotNone(running)
+        self.assertIsNotNone(state)
+        self.assertIn("width: max-content;", running.group("body"))
+        self.assertIn("max-width: min(360px, 52vw);", running.group("body"))
+        self.assertIn("grid-template-columns: auto max-content minmax(0, 1fr);", running.group("body"))
+        self.assertIn("max-width: none;", state.group("body"))
+        self.assertIn("overflow: visible;", state.group("body"))
+        self.assertIn("text-overflow: clip;", state.group("body"))
+        self.assertNotIn("max-width: 126px;", state.group("body"))
+        self.assertNotIn("text-overflow: ellipsis;", state.group("body"))
+
 
 if __name__ == "__main__":
     unittest.main()

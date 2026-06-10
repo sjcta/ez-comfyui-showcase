@@ -1,0 +1,262 @@
+{
+  "6": {
+    "inputs": {
+      "text": "srx_detail, edit the reference image into a realistic photographic result while preserving the main subject identity, structure, and composition. Refine fine detail, organic textures, materials, lighting, and environmental realism without over-sharpening skin.",
+      "clip": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "13",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "i2i-flux2-klein-realistic",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "12": {
+    "inputs": {
+      "unet_name": "gguf/Flux-2-Klein-9B-KV-Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "noise": [
+        "25",
+        0
+      ],
+      "guider": [
+        "22",
+        0
+      ],
+      "sampler": [
+        "16",
+        0
+      ],
+      "sigmas": [
+        "48",
+        0
+      ],
+      "latent_image": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "16": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "20": {
+    "inputs": {
+      "model": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "FluxKVCache",
+    "_meta": {
+      "title": "Flux KV Cache"
+    }
+  },
+  "22": {
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "conditioning": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "BasicGuider"
+    }
+  },
+  "25": {
+    "inputs": {
+      "noise_seed": 2406090334
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "26": {
+    "inputs": {
+      "guidance": 4.0,
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "FluxGuidance"
+    }
+  },
+  "38": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "40": {
+    "inputs": {
+      "image": "t2i-z-xxx_00001_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "参考图片"
+    }
+  },
+  "41": {
+    "inputs": {
+      "image": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "FluxKontextImageScale",
+    "_meta": {
+      "title": "Flux Kontext 图片缩放"
+    }
+  },
+  "42": {
+    "inputs": {
+      "pixels": [
+        "41",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode Reference"
+    }
+  },
+  "43": {
+    "inputs": {
+      "conditioning": [
+        "26",
+        0
+      ],
+      "reference_latents_method": "index"
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Edit Model Reference Method"
+    }
+  },
+  "44": {
+    "inputs": {
+      "conditioning": [
+        "43",
+        0
+      ],
+      "latent": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "Reference Latent"
+    }
+  },
+  "47": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "48": {
+    "inputs": {
+      "steps": 4,
+      "width": 1024,
+      "height": 1024
+    },
+    "class_type": "Flux2Scheduler",
+    "_meta": {
+      "title": "Flux2Scheduler"
+    }
+  },
+  "89": {
+    "inputs": {
+      "model": [
+        "12",
+        0
+      ],
+      "lora_name": "Flux2 Klein 9B Realistic Detail LoRA.safetensors",
+      "strength_model": 0.8
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Realistic Detail LoRA"
+    }
+  }
+}

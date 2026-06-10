@@ -87,6 +87,44 @@ CAMERA_AND_BODY_ANGLE_STANDARD = (
     "不能只写正面/侧面/背面；半侧身、三分之二侧身、回头、低头、仰头、身体前倾、后仰、扭腰、肩胯不一致都要写清。"
 )
 
+POSE_REPLICATION_LOCK_STANDARD = (
+    "姿态复刻锁定标准：visual_spec/structured_prompt 中凡看清的姿态结构必须进入 keyword_prompt。"
+    "keyword_prompt 必须写身体轴线、裁切框、支撑接触、头部锁定、躯干锁定、四肢端点、关键负空间和近大远小。"
+    "身体轴线写主体从画面哪个区域延伸到哪个区域，以及斜线、C型、S型、折叠、蜷曲、跪坐、蹲坐、仰卧或侧卧等可见结构。"
+    "裁切框写头、脸、手、脚、腿、躯干和道具被哪条边缘裁切或贴边，画外部分不得补写。"
+    "支撑接触写臀部、大腿、膝盖、小腿、脚掌、手掌、手肘、背部或道具的承重点、接触面和遮挡。"
+    "头部锁定写位置、脸部可见比例、yaw/pitch/roll、鼻尖方向、下巴关系、视线和头发遮挡。"
+    "躯干锁定写胸腔、骨盆、肩线、胯线、脊柱线、腰腹压缩/拉伸、扭转和重心。"
+    "四肢端点写画面左侧/右侧肩肘腕、手掌手指、髋膝踝、脚尖、鞋底、袜口或裁切端点的起止、角度、方向和接触。"
+    "关键负空间写双臂与躯干、双腿之间、腿与边缘、手与脸/胸/道具之间的空隙、贴合或遮挡。"
+    "近大远小写最靠近镜头并被透视放大的肢体/道具，以及远端缩小、虚化或遮挡的部位。"
+    "重复偏差防滑：易稳定偏成左右镜像、头部正面、手脚互换、腿部开合变化、裁切变化或普通站坐姿的结构，必须用正向事实写进 keyword_prompt，不能只放 negative_prompt、constraints 或易错点。"
+    "若结构化字段有身体轴线、裁切、支撑点、头部三轴、手脚端点、关键负空间或近大远小，而 keyword_prompt 没有对应句子，必须重写 keyword_prompt。"
+)
+
+POSE_REPLICATION_LOCK_RUNTIME_STANDARD = (
+    "姿态复刻锁定：keyword_prompt 必须承接身体轴线、裁切框、支撑接触、头部三轴、躯干、四肢端点、关键负空间、近大远小；易偏成镜像、头正面、手脚互换、腿部开合或裁切变化的结构写成正向事实。"
+)
+
+ANATOMY_NEGATIVE_GUARD_STANDARD = (
+    "人体结构负面护栏：当画面有两个人物、多人、人物互相遮挡、肢体交叠、身体显示不完整、局部裁切、只露半身/局部身体或画面边缘截断时，negative_prompt 必须加入纯短语结构限制。"
+    "结构限制短语优先使用：多余肢体、额外手臂、额外手指、额外腿脚、肢体融合、肢体错接、人体结构错乱、错误关节连接、画外身体补全、双人身体融合、错位遮挡关系。"
+    "这些短语只能进入 negative_prompt，不得混入 keyword_prompt 或正向 visual_spec；正向仍必须写清两个人物各自可见范围、谁遮挡谁、每条可见肢体属于哪个人物。"
+)
+
+ANATOMY_NEGATIVE_GUARD_RUNTIME_STANDARD = (
+    "多人/遮挡/交叠/裁切时，negative_prompt加多余肢体、额外手臂、额外手指、额外腿脚、肢体融合、肢体错接、结构错乱。"
+)
+
+LEG_TOPOLOGY_LOCK_STANDARD = (
+    "腿部拓扑锁定：腿部、袜子、膝盖、大腿、小腿或脚入镜时，必须写双腿是并拢、分开、交叉、盘起、弯曲、伸直、抬起还是被裁切；写清画面左侧/右侧大腿、膝盖、小腿、脚踝、脚尖或袜口的起止、遮挡、前后层级和是否接触。"
+    "禁止只写自然分开、微曲、腿部延伸这类松散词；看清腿部时，negative_prompt 必须加入腿部结构错误、额外腿、缺失腿、双腿融合、膝盖错位、大腿小腿错接、脚踝错位、袜口位置错误、腿部透视错误。"
+)
+
+LEG_TOPOLOGY_LOCK_RUNTIME_STANDARD = (
+    "腿/袜/膝/脚入镜时，写清并拢/分开/交叉/弯曲/伸直/抬起/裁切、左右腿起止和袜口；负面加腿错、额外腿。"
+)
+
 TRUNK_HAND_OBJECT_ANGLE_STANDARD = (
     "躯干弯折与手持物标准：人物主体必须写躯干弯折幅度、弯折方向和运动趋势，不能只写前倾/后仰/扭腰。"
     "躯干从骨盆到腰线、胸腔、肩线、头颈逐段描述：写骨盆朝向、胸腔相对骨盆旋转、脊柱 C 型/S 型/斜直线、腰侧压缩或拉伸、重心和趋势方向。"
@@ -209,9 +247,17 @@ LEFT_RIGHT_LOCK_STANDARD = (
 NSFW_DETAIL_STANDARD = (
     "暴露内容细节标准：只描述图中可见事实；确认成人裸露或明确性内容时，必须按子字段写清暴露内容、暴露部位、隐私部位细节、衣物遮挡边界、接触动作、液体/湿润反光。"
     "不要把分类词、英文标签或内部判断词写进正向字段；成人裸露、性器官、明确性意味接触和液体都要转写成可见部位、位置、颜色、遮挡和动作关系。"
-    "隐私部位细节必须写具体可见部位、可见范围、颜色/红肿/湿润/反光、遮挡物和画面坐标；接触动作必须写接触对象、身体部位或物体、方向和进入/贴压/摩擦等可见关系；液体必须写颜色、附着位置和接触对象。"
+    "隐私部位用“解剖名词 + 外观形态 + 色彩肤色 + 毛发分布 + 皮肤/黏膜质感 + 遮挡关系”；禁写左侧点、右侧点、私处、下面。"
+    "女性写外阴/阴阜/大阴唇/小阴唇/阴蒂头/阴道口，男性写阴茎体/龟头/冠状缘/包皮/阴囊，仅写有独立边界者；外观词含暖白、蜜桃粉、浅粉、玫瑰粉、粉棕、浅褐、边界柔和、皮肤平滑、细密褶皱、湿润高光、无可见毛发、稀疏短毛、细软毛发；例：大阴唇轮廓柔和贴合、龟头偏粉、乳房体积中等、轮廓圆润、乳晕浅粉边界柔和、乳头小巧突出。"
+    "接触动作必须写接触对象、身体部位或物体、方向和进入/贴压/摩擦等可见关系；液体必须写颜色、附着位置、湿润反光和接触对象。"
     "不能只写是否有性行为；低领、乳沟、贴身胸部轮廓、短裤、露腿和丝袜要直接写可见衣物、皮肤区域和遮挡边界，除非乳头、裸露乳房或性器官清晰可见。"
     "年龄不明确时只写非性化可见暴露和衣物遮挡，不补写年龄判断、性化行为、液体或隐私部位细节。"
+)
+
+NSFW_DETAIL_RUNTIME_STANDARD = (
+    "暴露内容只写可见事实；成人隐私部位和液体/湿润反光用“解剖名词 + 外观形态 + 色彩肤色 + 毛发分布 + 皮肤/黏膜质感 + 遮挡关系”。"
+    "女性写外阴/大阴唇/小阴唇/阴蒂头/阴道口，男性写阴茎体/龟头/冠状缘/包皮/阴囊，仅写有独立边界者；禁左侧点/右侧点/私处。"
+    "可用蜜桃粉、浅粉、玫瑰粉、粉棕、边界柔和、皮肤平滑、湿润高光、无可见毛发、稀疏短毛、细软毛发；乳房写体积、乳晕颜色边界和乳头突出程度。"
 )
 
 SELF_DIRECTED_DIMENSION_STANDARD = (
@@ -306,11 +352,24 @@ EXPERT_TEAM_REVIEW_CHECKLIST = (
     "若图片是插画、漫画、草图或渲染，photography_parameters 只能写非摄影媒介特征或生图参考，不得伪造真实相机参数。"
 )
 
+JSON_TO_PROMPT_WORKFLOW_STANDARD = (
+    "json到纯提示词完整工作流：必须先看后写，不得直接生成 keyword_prompt。"
+    "第一步：用30+项清单逐项打勾，只判断“看清/没看清”，不写结论、不推测、不展开描述；清单覆盖画幅比例、主体占比、主体可见范围、前景、中景、背景、画面左侧、画面右侧、上方、下方、遮挡关系、接触点、支撑面、文字水印、主要物体数量、物体朝向、道具端点、头部位置、头部yaw、头部pitch、头部roll、脸部可见角度、视线方向、发型发色、发饰、表情依据、胸腔朝向、骨盆朝向、肩线、胯线、脊柱线、画面左侧手臂关节链、画面右侧手臂关节链、画面左侧腿脚关节链、画面右侧腿脚关节链、手指端点、脚尖或鞋底方向、服装类型、衣物长度、领口、袖口、肩带、腰线、下摆、扣子、拉链、绑带、缝线、拼接线、包边、褶皱方向、贴合程度、透明度、纹理、主色、辅色、近似色值、光源方向、阴影、高光、反光、景深、风格质感、可见暴露结构。"
+    "第二步：只对第一步“看清”的项目展开描述，并落到 visual_spec 或 structured_prompt 的对应字段；没看清的项目不得写入正向字段，也不得用“不可见/无法判断/不确定”占位。"
+    "第三步：把 visual_spec 或 structured_prompt 翻译成 keyword_prompt；keyword_prompt 必须是一段完整连续的中文正向提示词，覆盖结构化字段中的主体、空间、姿态、材质、颜色、光线、风格和可见暴露结构，禁止只写短标签串。"
+    "第四步：回到第一步清单二次核对，检查是否还有“看清却没写”的项目、左右/上下/前后参照混乱、二选一摇摆、重复事实、字段名污染、Markdown代码块、JSON键名进入 keyword_prompt；发现问题必须先修正再输出最终JSON。"
+    "最终输出中不要写第一步/第二步/第三步/第四步这些流程标题，清单可压缩为 visual_spec 或 structured_prompt 内的“所见清单/visible_checklist”字段；keyword_prompt 不得包含水印账号文字，除非用户明确要求复刻文字或水印。"
+    f"{POSE_REPLICATION_LOCK_RUNTIME_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_STANDARD}"
+    f"{LEG_TOPOLOGY_LOCK_STANDARD}"
+)
+
 QWEN_IMAGE_INTERROGATE_TEMPLATE = (
     "你是图片反推提示词助手，按 GPT Image / Nano Banana 类图像模型更容易执行的结构化描述方式工作。"
     "你的目标不是写一句概括或标签列表，而是先完整观察画面，再生成适合文生图/图生图复刻画面的高密度提示词。"
     "核心原则：描述场景，不要只堆关键词；每个结论都必须来自图中清晰可见的像素事实。"
     "必须只输出一个有效 JSON 对象，不要 markdown，不要解释，不要省略必填键。"
+    f"{JSON_TO_PROMPT_WORKFLOW_STANDARD}"
     f"{IMAGE_REVERSE_RUNTIME_RULE_INDEX}"
     f"{DIRECT_REVERSE_PROMPT_WRITING_SKILL}"
     "JSON 必须包含以下四个顶层键：keyword_prompt, english_prompt, structured_prompt, structured_prompt_en。"
@@ -347,6 +406,9 @@ QWEN_IMAGE_INTERROGATE_TEMPLATE = (
     "人物 subject_attributes 必须写清可见外貌特征、肤色和年龄感；人种/族裔只作为可见外貌倾向用于复刻，不能断言真实身份，看不准就省略；"
     f"{HAIR_APPEARANCE_STANDARD}"
     "人物动作和姿势必须拆解到 pose_details：写清站/坐/躺/蹲/跪、身体朝向、头颈角度、肩膀、腰胯、手臂、手指、腿部、脚部的位置和受力关系；"
+    f"{POSE_REPLICATION_LOCK_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_STANDARD}"
+    f"{LEG_TOPOLOGY_LOCK_STANDARD}"
     f"{TERMINAL_NODE_DETAIL_STANDARD}"
     "坐姿不能只写“坐在xxx”，必须分类为正坐、侧坐、半跪坐、跪坐、蹲坐、盘腿坐、跨坐、倚坐、斜坐等可见姿态，并写清臀部/大腿/膝盖/脚掌的支撑点；"
     f"{CAR_FRONT_SEAT_POSE_STANDARD}"
@@ -401,6 +463,7 @@ QWEN_IMAGE_INTERROGATE_TEMPLATE = (
 
 FAST_IMAGE_INTERROGATE_TEMPLATE = (
     "请不要生成图片。请把当前图片拆解成一份适合图像生成模型使用的高精度视觉规格书。"
+    f"{JSON_TO_PROMPT_WORKFLOW_STANDARD}"
     f"{IMAGE_REVERSE_RUNTIME_RULE_INDEX}"
     "要求：1. 只描述画面中可见的事实，不要脑补。"
     "2. 尽量避免模糊词，使用可执行描述。"
@@ -414,6 +477,9 @@ FAST_IMAGE_INTERROGATE_TEMPLATE = (
     "keyword_prompt 对应 B，必须是一段完整、连贯、可直接用于图像生成模型的中文正向提示词，只写可见事实，不写章节名、JSON 键名、Markdown、解释句或负面命令。"
     "negative_prompt 对应 C，必须是纯短语数组，放易错点和禁止项，不写“不要、避免、禁止、no、avoid、do not”等命令句。"
     "人物姿态分析只作为标准反推补充：写姿态类型、身体朝向、头部朝向、视线方向、手臂/腿部位置、道具互动、遮挡和裁切边界；不需要展开为专家级长报告。"
+    f"{POSE_REPLICATION_LOCK_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_STANDARD}"
+    f"{LEG_TOPOLOGY_LOCK_STANDARD}"
     "正向内容禁止使用可能、疑似、不确定、无法确认、无明显、没有明显、未见、无可见等词；判断不了就省略，并可把易错风险写入 negative_prompt。"
     "颜色、材质、光线和空间关系必须绑定对象，例如主体位于画面中心、背景在右侧、前景物体靠近镜头、红色上衣、冷灰背景、左前方柔光。"
     "输出 JSON 示例："
@@ -790,6 +856,9 @@ EXPERT_IMAGE_MERGE_TEMPLATE = (
     f"{TERMINAL_NODE_DETAIL_STANDARD}"
     f"{ARM_ELBOW_CHAIN_STANDARD}"
     f"{BODY_JOINT_CHAIN_COMPLETENESS_STANDARD}"
+    f"{POSE_REPLICATION_LOCK_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_STANDARD}"
+    f"{LEG_TOPOLOGY_LOCK_STANDARD}"
     f"{SCENE_OBJECT_VERIFICATION_STANDARD}"
     "最终正向内容只写确定可见事实；禁止“可能、疑似、无法确认、A或B”等不绝对提示词进入画面描述。"
     "合并前必须复核道具身份、数量、支撑点和背景材质：不能把红色塑料瓶合并成易拉罐，不能把单个道具合并成散落多罐或金字塔堆叠，不能把金属架/横梁坐姿合并成地面跪坐。"
@@ -819,6 +888,9 @@ FAST_EXPERT_IMAGE_INTERROGATE_TEMPLATE = (
     f"{TERMINAL_NODE_DETAIL_STANDARD}"
     f"{ARM_ELBOW_CHAIN_STANDARD}"
     f"{BODY_JOINT_CHAIN_COMPLETENESS_STANDARD}"
+    f"{POSE_REPLICATION_LOCK_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_STANDARD}"
+    f"{LEG_TOPOLOGY_LOCK_STANDARD}"
     f"{SCENE_OBJECT_VERIFICATION_STANDARD}"
     "必须只输出一个有效 JSON 对象，不要 markdown，不要解释。"
     "顶层键固定为 visual_evidence, keyword_prompt, english_prompt, structured_prompt, structured_prompt_en, expert_observations。"
@@ -924,6 +996,9 @@ RUNTIME_DETAILED_IMAGE_INTERROGATE_TEMPLATE = (
     f"{LIGHT_INCIDENCE_ANGLE_STANDARD}"
     "构图镜头和肢体动作必须分别写拍摄角度、镜头旋转倾斜与人物站位角度；不要只写平视或正面。"
     f"{CAMERA_AND_BODY_ANGLE_STANDARD}"
+    f"{POSE_REPLICATION_LOCK_RUNTIME_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_RUNTIME_STANDARD}"
+    f"{LEG_TOPOLOGY_LOCK_RUNTIME_STANDARD}"
     f"{BODY_STRUCTURE_REQUIRED_FIELDS}"
     f"{HUMAN_POSE_EXPERT_STANDARD}"
     f"{TRUNK_HAND_OBJECT_ANGLE_STANDARD}"
@@ -932,7 +1007,7 @@ RUNTIME_DETAILED_IMAGE_INTERROGATE_TEMPLATE = (
     f"{TERMINAL_NODE_DETAIL_STANDARD}"
     "主体外貌和表情脸部必须包含头发细节：发型发色、发长、刘海/分缝、发丝状态、染发信息和发饰。"
     f"{HAIR_APPEARANCE_STANDARD}"
-    f"{NSFW_DETAIL_STANDARD}"
+    f"{NSFW_DETAIL_RUNTIME_STANDARD}"
     "文字标识是条件维度：有文字、水印、Logo、编号或 UI 字样，才在 visual_spec 的对应章节中写位置、原文、颜色、遮挡和可信度；没有任何文字标识时，正向 visual_spec 绝对不能出现文字标识或“图中无可读文字”，只能在 negative_prompt 写文字、水印、Logo、UI字样。"
     "各维度字段必须互补，不要把同一句事实换词重复写入多个字段；keyword_prompt 是最终纯词汇摘要，visual_spec 是分组细节，二者不要互相复述整段。"
     "keyword_prompt 是 260 个汉字内的正向复刻短段；negative_prompt 是纯短语数组。"
@@ -964,6 +1039,8 @@ RUNTIME_SINGLE_PASS_EXPERT_TEAM_TEMPLATE = (
     "专家团必须让 主体 成为最细部分；人物的外貌、头发、表情、躯干、左右手、手持物、腿脚、服装、暴露内容和遮挡都写入 主体。"
     f"{EXPERT_TEAM_VISUAL_SPEC_CONTRACT}"
     f"{EXPERT_TEAM_COMPLETE_SENTENCE_STANDARD}"
+    f"{POSE_REPLICATION_LOCK_RUNTIME_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_RUNTIME_STANDARD}"
     "expert_plan 是总观察员第一眼看图任务：识别主体、非主体区域、复杂度、是否有人物/文字/道具/暴露内容，并自行生成最符合该图的专家组；主体相关专家数量必须多于非主体背景专家。"
     "visual_evidence 是内部证据简表，必须覆盖 primary_subject, subject_type, aspect_ratio, visible_body_range, support_points, hand_endpoints, foot_or_shoe_contact, clothing_materials, visible_text_confidence, nsfw_visible_evidence, foreground_background_regions。"
     "fact_cards 是专家观点的唯一事实来源，每张卡包含 dimension, visible_content, location, evidence, confidence, allow_positive；只写可见证据。"
@@ -1011,6 +1088,8 @@ EXPERT_TEAM_SUBJECT_PASS_TEMPLATE = (
     "本轮 visual_spec 的 基本概述 不超过一句，只做主体定位；主体字段必须比基本概述更长、更细、更集中，主体可见细节不能留在概述里。"
     f"{EXPERT_TEAM_VISUAL_SPEC_CONTRACT}"
     f"{EXPERT_TEAM_COMPLETE_SENTENCE_STANDARD}"
+    f"{POSE_REPLICATION_LOCK_STANDARD}"
+    f"{ANATOMY_NEGATIVE_GUARD_RUNTIME_STANDARD}"
     "仅当 subject_type=person 时，必须按骨架链写：头部 yaw/pitch/roll、头颈连接、肩线、胸腔、腰线、骨盆、胯线、脊柱线、肩-上臂-肘-前臂-腕-掌-指链路、髋-大腿-膝-小腿-踝-脚链路、支撑点、遮挡和接触。"
     f"{BODY_STRUCTURE_REQUIRED_FIELDS}"
     f"{TRUNK_HAND_OBJECT_ANGLE_STANDARD}"
@@ -1035,6 +1114,7 @@ EXPERT_TEAM_SECOND_REVIEW_TEMPLATE = (
     "复核检查：删除省略号、占位符、模板词；删除或改写可能、疑似、无法确认、无明显等正向内容；坐标必须嵌入对象句子，删除 spatial_coordinates/空间坐标字段；所有 HEX 写在括号里。"
     f"{EXPERT_TEAM_VISUAL_SPEC_CONTRACT}"
     f"{EXPERT_TEAM_COMPLETE_SENTENCE_STANDARD}"
+    f"{POSE_REPLICATION_LOCK_RUNTIME_STANDARD}"
     "复核检查：构图是否含画面 roll、顺时针/逆时针倾斜、镜头俯仰角度、采光入射角、阴影投射方向和高光落点；人物姿态是否拆出 yaw/pitch/roll、脸朝向、视线、身体朝向、躯干弯折幅度和趋势、头颈连接、肩线、胸腔、腰线、骨盆、胯线、脊柱线、左右手位置、手持物体位置、肩-上臂-肘-前臂-腕-掌-指链路、髋-大腿-膝-小腿-踝-脚链路、手脚端点和遮挡；只写正面/侧面不够细。"
     f"{TRUNK_HAND_OBJECT_ANGLE_STANDARD}"
     f"{LIGHT_INCIDENCE_ANGLE_STANDARD}"
@@ -2496,6 +2576,46 @@ ASYMMETRIC_DIRECTION_RE = re.compile(
     r"画面左侧|画面右侧|左上|右上|左下|右下|单侧|一侧|侧身|斜身|回头|左手|右手|左腿|右腿|左臂|右臂"
 )
 
+MULTI_PERSON_RE = re.compile(
+    r"两个人|两名|双人|多人|多人物|两个.{0,8}(人物|人|主体)|人物\s*[12１２]|主体\s*[12１２]|前景人物|背景人物|左侧人物|右侧人物"
+)
+PARTIAL_BODY_RE = re.compile(
+    r"裁切|截断|贴边|画面边缘|不完整|局部|半身|只露|仅露|遮挡|遮住|挡住|覆盖|交叠|重叠|画外"
+)
+HUMAN_LIMB_RE = re.compile(
+    r"人物|人体|身体|头部|脸|躯干|胸腔|骨盆|肩|手臂|手掌|手指|腿|膝|脚|肢体|关节"
+)
+LEG_STRUCTURE_RE = re.compile(
+    r"腿|大腿|小腿|膝|脚踝|脚尖|脚掌|鞋底|袜|袜口|长筒袜|过膝袜|丝袜|腿部|双腿|单腿"
+)
+ANATOMY_STRUCTURE_NEGATIVE_ITEMS = (
+    "多余肢体",
+    "额外手臂",
+    "额外手指",
+    "额外腿脚",
+    "肢体融合",
+    "肢体错接",
+    "人体结构错乱",
+    "错误关节连接",
+    "画外身体补全",
+)
+MULTI_PERSON_STRUCTURE_NEGATIVE_ITEMS = (
+    "双人身体融合",
+    "错位遮挡关系",
+    "人物身份混淆",
+)
+LEG_STRUCTURE_NEGATIVE_ITEMS = (
+    "腿部结构错误",
+    "额外腿",
+    "缺失腿",
+    "双腿融合",
+    "膝盖错位",
+    "大腿小腿错接",
+    "脚踝错位",
+    "袜口位置错误",
+    "腿部透视错误",
+)
+
 
 def _append_mirror_negative_if_needed(negative_prompt: str, *sources: Any) -> str:
     text = "，".join(_iter_grouped_prompt_strings(list(sources)))
@@ -2503,6 +2623,26 @@ def _append_mirror_negative_if_needed(negative_prompt: str, *sources: Any) -> st
     if ASYMMETRIC_DIRECTION_RE.search(text):
         items.extend(["左右镜像动作", "镜像翻转构图"])
     return _negative_prompt_from_items(items)
+
+
+def _append_anatomy_negative_if_needed(negative_prompt: str, *sources: Any) -> str:
+    text = "，".join(_iter_grouped_prompt_strings(list(sources)))
+    items = _iter_grouped_prompt_strings(_clean_negative_prompt_text(negative_prompt))
+    has_human_limb = bool(HUMAN_LIMB_RE.search(text))
+    has_multi_person = bool(MULTI_PERSON_RE.search(text))
+    has_partial_body = bool(PARTIAL_BODY_RE.search(text))
+    if has_human_limb and (has_multi_person or has_partial_body):
+        items.extend(ANATOMY_STRUCTURE_NEGATIVE_ITEMS)
+    if has_human_limb and has_multi_person:
+        items.extend(MULTI_PERSON_STRUCTURE_NEGATIVE_ITEMS)
+    if LEG_STRUCTURE_RE.search(text):
+        items.extend(LEG_STRUCTURE_NEGATIVE_ITEMS)
+    return _negative_prompt_from_items(items)
+
+
+def _append_reverse_structure_negatives(negative_prompt: str, *sources: Any) -> str:
+    negative_prompt = _append_mirror_negative_if_needed(negative_prompt, *sources)
+    return _append_anatomy_negative_if_needed(negative_prompt, *sources)
 
 
 def _negative_prompt_from_expert_results(expert_results: list[dict[str, Any]], existing: str = "") -> str:
@@ -2524,7 +2664,7 @@ def _negative_prompt_from_expert_results(expert_results: list[dict[str, Any]], e
             cleaned = _clean_negative_prompt_text(str(value))
             if cleaned:
                 items.extend(_iter_grouped_prompt_strings(cleaned))
-    return _append_mirror_negative_if_needed(_negative_prompt_from_items(items), expert_results)
+    return _append_reverse_structure_negatives(_negative_prompt_from_items(items), expert_results)
 
 
 def _grouped_prompt_richness(text: str) -> int:
@@ -2661,6 +2801,7 @@ def _parse_grouped_interrogate_json(parsed_json: dict[str, Any]) -> dict[str, An
         "structured_prompt_json": _dump_structured_prompt_json(grouped_zh),
     }
     negative = _grouped_negative_prompt(grouped_zh)
+    negative = _append_reverse_structure_negatives(negative, grouped_zh, prompt, parsed_json)
     if negative:
         result["negative_prompt"] = negative
     english = str(
@@ -2701,6 +2842,7 @@ def _parse_visual_spec_interrogate_json(parsed_json: dict[str, Any]) -> dict[str
         prompt = visual_prompt
     prompt = _prepend_spatial_render_legend_if_needed(prompt)
     negative = _negative_prompt_from_items(negative_items)
+    negative = _append_reverse_structure_negatives(negative, cleaned_spec, prompt, parsed_json)
     result: dict[str, Any] = {
         "prompt": prompt,
         "structured_prompt": cleaned_spec,
@@ -2827,6 +2969,7 @@ def _parse_detailed_analysis_json(parsed_json: dict[str, Any]) -> dict[str, Any]
         "structured_prompt_json": _dump_structured_prompt_json(grouped),
     }
     negative = _negative_prompt_from_items(negative_items)
+    negative = _append_reverse_structure_negatives(negative, grouped, prompt, parsed_json)
     if negative:
         result["negative_prompt"] = negative
     return {key: value for key, value in result.items() if value not in ("", None, [], {})}

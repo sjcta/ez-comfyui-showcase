@@ -88,7 +88,8 @@
       "visible": true,
       "label": "负面提示词",
       "order": 4,
-      "type": "textarea"
+      "type": "textarea",
+      "value": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay, flicker, jitter, ghosting, temporal artifacts, warped motion, frozen frame, repeated frames, low frequency hum, sub-bass rumble, noisy room tone, audio distortion, audio clipping"
     },
     {
       "key": "320:288::strength",
@@ -410,6 +411,22 @@
       "label": "expression",
       "order": 27,
       "type": "text"
+    },
+    {
+      "key": "320:325::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "audio_clean_lora_name",
+      "order": 28,
+      "type": "text"
+    },
+    {
+      "key": "320:325::strength_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "音频首段 LoRA 强度",
+      "order": 29,
+      "type": "number"
     }
   ]
 }

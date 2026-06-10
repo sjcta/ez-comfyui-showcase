@@ -26,9 +26,10 @@ from typing import Any, Awaitable, Callable
 from modules.instance_manager import InstanceManager
 from modules.instance_picker import pick_best_instance, strict_preferred_instance_name
 from modules.prompt_labels import infer_generation_label
-from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
+from modules.media_outputs import collect_preferred_history_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.step_calculator import StepCalculator
 from modules.comfyui_upload import apply_qwen_frame_roll_to_workflow, ensure_workflow_images_available
+from modules.bernini_workflow import apply_bernini_mixed_mode_to_workflow
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
 
@@ -83,9 +84,16 @@ class _SubmitStallRetry(Exception):
 
 def _workflow_track_timeout(job: dict | None, workflow_path: str) -> int:
     job = job or {}
+    fields = job.get("fields") or {}
+    if isinstance(fields, dict):
+        bernini_mode = str(fields.get("50::__bernini_mode") or fields.get("__bernini_mode") or "").lower()
+        if bernini_mode in {"i2v", "r2v"}:
+            return VIDEO_TRACK_TIMEOUT
     workflow_type = str(job.get("workflow_type") or "")
     workflow_name = os.path.basename(str(workflow_path or "")).lower()
-    if "视频" in workflow_type or any(token in workflow_name for token in ("i2v", "t2v", "video", "ltx", "sulphur")):
+    if "视频" in workflow_type or any(
+        token in workflow_name for token in ("i2v", "t2v", "video", "ltx", "sulphur", "longcat", "avatar")
+    ):
         return VIDEO_TRACK_TIMEOUT
     return DEFAULT_TRACK_TIMEOUT
 
@@ -502,6 +510,7 @@ class JobRunner:
                         v["inputs"]["seed"] = seed
 
             apply_qwen_frame_roll_to_workflow(wf, field_values, self._input_dir)
+            apply_bernini_mixed_mode_to_workflow(wf, field_values, workflow_name)
 
             issues = validate_api_prompt(wf)
             if issues:
@@ -937,17 +946,12 @@ class JobRunner:
                     hist = self._comfyui_get(f"/history/{prompt_id}", inst_url)
                     if isinstance(hist, dict) and prompt_id in hist:
                         found: list[tuple[str, str, str]] = []
-                        for ref in collect_preferred_outputs(hist[prompt_id].get("outputs", {})):
+                        for ref in collect_preferred_history_outputs(hist[prompt_id]):
                             filename = ref.get("filename", "")
                             rel_path = output_ref_rel_path(ref)
                             if not filename or not rel_path:
                                 continue
                             src_path = os.path.join(self._output_dir, rel_path)
-                            if not os.path.isfile(src_path):
-                                for root, _dirs, files in os.walk(self._output_dir):
-                                    if filename in files:
-                                        src_path = os.path.join(root, filename)
-                                        break
                             if os.path.isfile(src_path):
                                 found.append((src_path, filename, output_media_type(filename)))
                         if found:

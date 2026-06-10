@@ -24,7 +24,13 @@
   var _historyLoadError = '';
   var _historyFilterAutoLoads = 0;
   var _historyScope = '';
+  var _historyWindowType = '';
+  var _historyFilterToken = 0;
   var _atomicDeleteRenderBlockUntil = 0;
+  var _sentinelRearmTimer = 0;
+  var _sentinelRearmAfterScroll = false;
+  var _sentinelRearmScrollSeen = false;
+  var _sentinelRearmScrollBound = false;
   var _deletedHistoryIds = {};
   var _historyDetailPromises = {};
   var _historyDetailCache = {};
@@ -33,6 +39,7 @@
   var lbItems = [];
   var _galleryFilters = { owner: 'all', type: '', style: '' };
   var _renderTimer = null;
+  var _galleryRenderReason = '';
   var _lbLoadToken = 0;
   var _lbCurrentItem = null;
   var _lbVideoEditorActive = false;
@@ -42,7 +49,17 @@
     originalSrc: '',
     showingOriginal: false,
   };
+  var _lbZoomState = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    pinch: null,
+    pan: null,
+    baseWidth: 0,
+    baseHeight: 0,
+  };
   var HISTORY_PAGE_SIZE = 80;
+  var HISTORY_FILTERED_PAGE_SIZE = 5000;
   var HISTORY_WINDOW_MAX_ITEMS = HISTORY_PAGE_SIZE * 4;
   var HISTORY_DETAIL_CACHE_LIMIT = 24;
   var HISTORY_DELETE_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
@@ -115,6 +132,176 @@
     return Math.max(0, (Number(total || 0) || 0) - Object.keys(_deletedHistoryIds).length);
   }
 
+  function _nextHistoryFetchOffset() {
+    _pruneDeletedHistoryIds();
+    return Math.max(
+      Number(_historyNextOffset || 0) || 0,
+      (historyItems || []).length + Object.keys(_deletedHistoryIds).length
+    );
+  }
+
+  function _lastLoadedHistoryCursorId() {
+    var sorted = _sortHistoryItems(historyItems || []);
+    var tail = sorted.length ? sorted[sorted.length - 1] : null;
+    return String(tail && tail.id || '');
+  }
+
+  function _syncHistoryLoadedAllAfterLocalRemoval() {
+    // Keep the server offset monotonic. Deleting/hiding shrinks local rows and total,
+    // but the next offset must still point after the rows already fetched from server.
+    _historyLoadedAll = _historyNextOffset >= _historyTotal;
+  }
+
+  function _syncDerivedHistoryState(options) {
+    options = options || {};
+    if (options.dataSignature !== false) {
+      _historyDataSignature = _historySignature(historyItems, _historyTotal);
+    }
+    _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+  }
+
+  function _bumpHistoryFilterToken() {
+    _historyFilterToken += 1;
+    return _historyFilterToken;
+  }
+
+  function _resetHistoryPagingForFilter() {
+    _historyNextOffset = 0;
+    _historyLoadedAll = false;
+    _historyLoadingMore = false;
+    _historyLoadError = '';
+    _historyFilterAutoLoads = 0;
+    _histVisibleCount = 0;
+    _lastRenderedHistCount = 0;
+    _lastGalleryHash = '';
+  }
+
+  function _isAtomicDeleteRenderBlocked() {
+    return !!(_atomicDeleteRenderBlockUntil && Date.now() < _atomicDeleteRenderBlockUntil);
+  }
+
+  function _atomicDeleteBlockRemainingMs() {
+    return Math.max(0, (_atomicDeleteRenderBlockUntil || 0) - Date.now());
+  }
+
+  function _bindSentinelRearmScroll() {
+    if (_sentinelRearmScrollBound) return;
+    _sentinelRearmScrollBound = true;
+    _historyBackTopRoots().forEach(function(root) {
+      root.addEventListener('scroll', _onSentinelRearmScroll, { passive: true });
+    });
+  }
+
+  function _unbindSentinelRearmScroll() {
+    if (!_sentinelRearmScrollBound) return;
+    _sentinelRearmScrollBound = false;
+    _historyBackTopRoots().forEach(function(root) {
+      root.removeEventListener('scroll', _onSentinelRearmScroll);
+    });
+  }
+
+  function _finishSentinelRearmAfterDelete() {
+    if (_isAtomicDeleteRenderBlocked()) {
+      _scheduleSentinelRearmAfterAtomicDelete();
+      return;
+    }
+    _sentinelRearmAfterScroll = false;
+    _sentinelRearmScrollSeen = false;
+    _unbindSentinelRearmScroll();
+    _attachSentinel();
+    _triggerVisibleSentinelLoad();
+  }
+
+  function _onSentinelRearmScroll() {
+    if (!_sentinelRearmAfterScroll) return;
+    _sentinelRearmScrollSeen = true;
+    if (!_isAtomicDeleteRenderBlocked()) {
+      _finishSentinelRearmAfterDelete();
+    }
+  }
+
+  function _scheduleSentinelRearmAfterAtomicDelete() {
+    _sentinelRearmAfterScroll = true;
+    _bindSentinelRearmScroll();
+    if (_sentinelRearmTimer) return;
+    _sentinelRearmTimer = setTimeout(function() {
+      _sentinelRearmTimer = 0;
+      _finishSentinelRearmAfterDelete();
+    }, _atomicDeleteBlockRemainingMs() + 40);
+  }
+
+  function _isSentinelNearViewport(sentinel) {
+    if (!sentinel || !sentinel.getBoundingClientRect) return false;
+    var rect = sentinel.getBoundingClientRect();
+    var viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    var preloadPx = _historyLazyPreloadDistance();
+    return rect.top < viewportH + preloadPx && rect.bottom >= -preloadPx;
+  }
+
+  function _historyLazyPreloadDistance() {
+    var gallery = document.getElementById('gallery');
+    var cards = gallery ? Array.from(gallery.querySelectorAll('.gi[data-hist-id]')).slice(-8) : [];
+    var heights = cards.map(function(card) {
+      return Math.round(card.getBoundingClientRect().height || card.offsetHeight || 0);
+    }).filter(function(height) {
+      return height > 80;
+    }).sort(function(a, b) {
+      return a - b;
+    });
+    var median = heights.length ? heights[Math.floor(heights.length / 2)] : 0;
+    return Math.max(320, Math.min(900, median || 0));
+  }
+
+  function _triggerVisibleSentinelLoad() {
+    if (_isAtomicDeleteRenderBlocked()) return;
+    var sentinel = document.getElementById('masonrySentinel');
+    if (!_isSentinelNearViewport(sentinel)) return;
+    var activeItems = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
+    if (_histVisibleCount < activeItems.length) {
+      _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), activeItems.length);
+      _appendNewHistoryCards();
+    } else if (!_historyLoadedAll && _canAutoLoadMoreHistory()) {
+      _loadMoreHistory();
+    }
+  }
+
+  function _scheduleGalleryRender(reason, options) {
+    options = options || {};
+    _galleryRenderReason = reason || _galleryRenderReason || 'state:update';
+    if (options.force) _lastGalleryHash = '';
+    if (options.clearDeleteBlock) _atomicDeleteRenderBlockUntil = 0;
+    if (_isAtomicDeleteRenderBlocked()) return;
+
+    var run = function() {
+      _renderTimer = null;
+      if (_isAtomicDeleteRenderBlocked()) return;
+      _renderGalleryImpl();
+      _scheduleHistoryBackTopSync();
+    };
+
+    if (options.immediate) {
+      if (_renderTimer) {
+        cancelAnimationFrame(_renderTimer);
+        _renderTimer = null;
+      }
+      run();
+      return;
+    }
+
+    if (_renderTimer) return;
+    _renderTimer = requestAnimationFrame(run);
+  }
+
+  var _galleryStore = {
+    schedule: function(reason, options) {
+      _scheduleGalleryRender(reason, options);
+    },
+    commit: function(reason, mutate, options) {
+      if (typeof mutate === 'function') mutate();
+      _scheduleGalleryRender(reason, Object.assign({ force: true }, options || {}));
+    }
+  };
+
   function _historyPromptPreview(text, maxLen) {
     text = String(text || '').trim();
     maxLen = maxLen || 320;
@@ -173,6 +360,10 @@
 
   function _lightboxImageUrl(filename) {
     return `${API}/api/images/${_encodeMediaPath(filename)}`;
+  }
+
+  function _lightboxDownloadUrl(filename) {
+    return `${_lightboxImageUrl(filename)}?download=1`;
   }
 
   function _thumbImageUrl(filename) {
@@ -254,15 +445,20 @@
     }
   }
 
-  function _syncLightboxDownload(filename) {
+  function _syncLightboxDownload(filename, mediaType) {
     var link = $('#lbDownload');
     if (!link) return;
-    var url = _lightboxImageUrl(filename || '');
+    var imageUrl = _lightboxImageUrl(filename || '');
+    var url = _lightboxDownloadUrl(filename || '');
     var downloadName = _lightboxDownloadName(filename || '');
+    var resolvedType = _mediaType(mediaType || '', filename || '');
     link.href = url;
     link.setAttribute('download', downloadName);
     link.dataset.url = url;
+    link.dataset.imageUrl = imageUrl;
     link.dataset.filename = downloadName;
+    link.dataset.mediaType = resolvedType;
+    link.title = resolvedType === 'video' ? '下载视频' : '下载原图';
   }
 
   function _historyOriginalImageRef(item) {
@@ -343,12 +539,15 @@
 	    var shareBtn = $('#lbShareBtn');
 	    var deleteBtn = $('#lbDeleteBtn');
 	    var hideBtn = $('#lbHideBtn');
+	    var protectionBtn = $('#lbProtectionBtn');
 	    var videoEditBtn = $('#lbVideoEditBtn');
 	    var imageExportMenu = $('#lbImageExportMenu');
 	    var imageShareHomeBtn = $('#lbImageShareHomeBtn');
 	    var actionState = _historyActionState(item);
 	    var isFav = !!(actionState && actionState.isFavorited);
 	    var isHidden = !!(item && item.is_hidden);
+	    var protectionStatus = String(item && item.protection_status || 'safe').toLowerCase();
+	    var isProtected = protectionStatus === 'protected';
 	    if (!item) _hideLBImageExportMenu();
 	    if (favBtn) {
 	      favBtn.style.display = actionState.canFavorite ? '' : 'none';
@@ -392,6 +591,16 @@
 	      hideBtn.setAttribute('aria-label', isHidden ? '取消隐藏' : '隐藏');
 	      if (hideIcon) hideIcon.setAttribute('href', isHidden ? '#icon-eye-off' : '#icon-eye');
 	    }
+	    if (protectionBtn) {
+	      var canProtect = !!(item && item.id && actionState.canProtect);
+	      protectionBtn.style.display = canProtect ? '' : 'none';
+	      protectionBtn.disabled = !canProtect;
+	      protectionBtn.classList.toggle('is-disabled', !canProtect);
+	      protectionBtn.classList.toggle('is-active', isProtected);
+	      protectionBtn.dataset.historyId = canProtect ? String(item.id) : '';
+	      protectionBtn.title = isProtected ? '取消图片保护标记' : '标记为需要保护';
+	      protectionBtn.setAttribute('aria-label', isProtected ? '取消图片保护标记' : '标记为需要保护');
+	    }
 	    if (videoEditBtn) {
 	      var canEditVideo = !!(item && item.id && _isVideoItem(item));
 	      videoEditBtn.style.display = canEditVideo ? '' : 'none';
@@ -423,6 +632,7 @@
       canFavorite: false,
       canShare: false,
       canHide: false,
+      canProtect: false,
       canDelete: false,
       isFavorited: false
     };
@@ -441,18 +651,20 @@ function _attachSentinel() {
     const sentinel = document.getElementById('masonrySentinel');
     if (!sentinel) return;
     if (sentinel.dataset.autoLoadDisabled === '1') return;
+    if (_isAtomicDeleteRenderBlocked()) {
+      _scheduleSentinelRearmAfterAtomicDelete();
+      return;
+    }
     if (_sentinelObs) _sentinelObs.disconnect();
     _sentinelObs = new IntersectionObserver(
       (entries) => {
-        var activeItems = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
-        if (entries[0].isIntersecting && _histVisibleCount < activeItems.length) {
-          _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), activeItems.length);
-          _appendNewHistoryCards();
-        } else if (entries[0].isIntersecting && !_historyLoadedAll && _canAutoLoadMoreHistory()) {
-          _loadMoreHistory();
+        if (_isAtomicDeleteRenderBlocked()) {
+          _scheduleSentinelRearmAfterAtomicDelete();
+          return;
         }
+        if (entries[0].isIntersecting) _triggerVisibleSentinelLoad();
       },
-      { root: null, rootMargin: '300px', threshold: 0 },
+      { root: null, rootMargin: _historyLazyPreloadDistance() + 'px', threshold: 0 },
     );
     _sentinelObs.observe(sentinel);
   }
@@ -538,6 +750,8 @@ function _attachSentinel() {
       // Status text ABOVE timer (always shown for non-image states)
       if (j.status === 'queued') {
         statusHtml += `<div class="job-status-text queued">排队中</div>`;
+      } else if (j.status === 'paused') {
+        statusHtml += `<div class="job-status-text paused">${escH(statusMsg || '已暂停')}</div>`;
       } else if (j.status === 'generating') {
         statusHtml += `<div class="job-status-text generating">${escH(statusMsg)}</div>`;
       } else if (j.status === 'downloading') {
@@ -558,19 +772,24 @@ function _attachSentinel() {
       : (String(wfMeta.name || '').trim() || (j.workflow || '').replace(/\.json$/i, ''));
     const wfTag = window.CW.wfTag ? window.CW.wfTag(j.workflow || '', wfMeta.tags) : '';
     const tagHtml = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-    const instBadge = j.instance ? `<div class="gi-inst-badge">#${escH(j.instance)}</div>` : '';
 
     // ── Info area ──
     // Type class for border color
     const _jTag1 = window.CW.wfTag ? window.CW.wfTag(j.workflow || '', wfMeta.tags) : '';
     const _jCls1 = _jTag1 ? _jTag1.cls : '';
     const jTypeCls = _jCls1 ? 'gi-type-' + _jCls1.replace('wf-tag-', '') : '';
+    const canPauseJob = j.status === 'queued' || j.status === 'dispatching';
+    const isPausedJob = j.status === 'paused';
+    const pauseAction = isPausedJob
+      ? `<button class="gi-pause is-resume" type="button" onclick="event.stopPropagation();CW.resumeJob('${escA(j.id)}')" title="恢复排队" aria-label="恢复排队">${CW.icon("play", 12)}</button>`
+      : (canPauseJob ? `<button class="gi-pause" type="button" onclick="event.stopPropagation();CW.pauseJob('${escA(j.id)}')" title="暂停排队" aria-label="暂停排队">${CW.icon("pause", 12)}</button>` : '');
     return `<div class="gi job-card ${escH(j.status)} ${jTypeCls}" data-job-id="${escA(j.id)}">
       <div class="gi-img ${hasImage ? '' : 'job-placeholder'}${checkingSensitiveCls}">
         ${imgHtml}
         ${j.status === "error" ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ""}
+        ${pauseAction}
         <button class="gi-del" onclick="event.stopPropagation();${_isDismissibleJobStatus(j.status) ? 'CW.dismissJob' : 'CW.cancelJob'}('${escA(j.id)}')" title="${_isDismissibleJobStatus(j.status) ? '删除记录' : '取消'}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>
-        ${tagHtml || instBadge ? `<div class="gi-tags-row">${tagHtml}${instBadge}</div>` : ''}
+        ${tagHtml}
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
         ${j.status === 'generating' || j.status === 'submitting' ? `<div class="gi-progress-top${_jobProgressClass(j)}"><div class="gi-progress-fill" style="width:${_jobProgressPct(j)}%"></div></div>` : ''}
@@ -719,7 +938,7 @@ function _attachSentinel() {
     setTimeout(function() {
       _promoteCompletedJobToHistory(job);
       delete jobs[job.id];
-      renderGallery();
+      _galleryStore.schedule('job:complete', { force: true });
       var historyPromise = window.CW.loadHistory ? window.CW.loadHistory() : null;
       Promise.resolve(historyPromise).then(function() {
         _refreshWorkflowCardsAfterJobDone(job);
@@ -729,7 +948,7 @@ function _attachSentinel() {
 
   function _onJobError(job) {
     jobs[job.id] = job;
-    window.CW.forceGalleryRerender();
+    _galleryStore.schedule('job:error', { force: true });
   }
 
     
@@ -752,6 +971,21 @@ function _histKey(h) {
     return String((h && (h.id || h.filename || h.thumb)) || '');
   }
 
+  function _currentLightboxHistoryItems() {
+    return _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
+  }
+
+  function _syncLightboxHistoryItems(items) {
+    lbItems = Array.isArray(items) ? items : _currentLightboxHistoryItems();
+    if (window.__APP__) window.__APP__._lbItems = lbItems;
+    return lbItems;
+  }
+
+  function _lightboxKeyFromSource(sourceEl) {
+    var card = sourceEl && sourceEl.closest ? sourceEl.closest('.gi[data-hist-id]') : null;
+    return String(card && card.getAttribute('data-hist-id') || '');
+  }
+
 function _galleryChildKey(el) {
     if (!el || !el.getAttribute) return '';
     if (el.hasAttribute('data-job-id')) return 'job:' + el.getAttribute('data-job-id');
@@ -767,7 +1001,7 @@ function _galleryChildKey(el) {
       .replace(/\sdata-video-mask-bound="[^"]*"/g, '')
       .replace(/\sdata-hist-idx="[^"]*"/g, '')
       .replace(/CW\.fillFormFromHistory\(\d+(?:,\s*'[^']*')?\)/g, 'CW.fillFormFromHistory(#)')
-      .replace(/CW\.openLB\(\d+(?:,\s*this)?\)/g, 'CW.openLB(#)');
+      .replace(/CW\.openLB\(\d+(?:,\s*this)?(?:,\s*'[^']*')?\)/g, 'CW.openLB(#)');
   }
 
 function _placeGalleryChild(gallery, child, cursor) {
@@ -794,7 +1028,7 @@ function _patchHistoryCardIndex(oldChild, newChild) {
 
 function _jobCardStatusClass(card) {
     if (!card || !card.classList) return '';
-    var statuses = ['queued', 'preparing', 'dispatching', 'starting_comfyui', 'submitting', 'generating', 'downloading', 'checking'];
+    var statuses = ['queued', 'paused', 'preparing', 'dispatching', 'starting_comfyui', 'submitting', 'generating', 'downloading', 'checking'];
     for (var i = 0; i < statuses.length; i++) {
       if (card.classList.contains(statuses[i])) return statuses[i];
     }
@@ -913,7 +1147,7 @@ function _renderHistCard(h, i) {
     const entryKey = _galleryEntryKey(entry);
     const openAction = isBatch
       ? `CW.openBatchLB('${escA(entry.batch_id)}', this)`
-      : `CW.openLB(${i}, this)`;
+      : `CW.openLB(${i}, this, '${escA(histKey)}')`;
     const batchBadge = isBatch ? `<div class="gi-batch-badge">×${batchCount}</div>` : '';
     const videoTag = _infoVideoTagHtml(h);
 
@@ -923,7 +1157,7 @@ function _renderHistCard(h, i) {
 	        ${_mediaPreviewHtml(h)}
 	        ${_favoriteBadgeHtml(h)}
 	        ${tagBadge}
-        ${canDelete && deleteTargetId ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${escA(deleteTargetId)}')" title="${deleteTitle}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>` : ''}
+        ${canDelete && deleteTargetId ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${escA(deleteTargetId)}', event)" title="${deleteTitle}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>` : ''}
       </div>
       <div class="gi-info">
 	        <div class="gi-info-actions">
@@ -992,13 +1226,32 @@ function _clearHistoryDeleteFocus() {
     return document.scrollingElement || document.documentElement;
   }
 
-  function _captureHistoryScroll() {
+  function _captureHistoryScroll(excludedEntryKeys) {
     var root = _historyScrollRoot();
-    return {
+    var snapshot = {
       root: root,
       top: root ? root.scrollTop : 0,
       left: root ? root.scrollLeft : 0
     };
+    if (!root || !root.getBoundingClientRect) return snapshot;
+    var rootRect = root.getBoundingClientRect();
+    var cards = Array.prototype.slice.call(document.querySelectorAll('#gallery .gi[data-hist-id]'));
+    var anchor = null;
+    for (var i = 0; i < cards.length; i += 1) {
+      var card = cards[i];
+      var key = card.getAttribute('data-hist-id') || '';
+      if (excludedEntryKeys && excludedEntryKeys.has && excludedEntryKeys.has(key)) continue;
+      var rect = card.getBoundingClientRect();
+      if (rect.bottom <= rootRect.top + 1) continue;
+      if (rect.top >= rootRect.bottom - 1) break;
+      anchor = {
+        id: key,
+        offsetTop: rect.top - rootRect.top
+      };
+      break;
+    }
+    if (anchor && anchor.id) snapshot.anchor = anchor;
+    return snapshot;
   }
 
   function _restoreHistoryScroll(snapshot) {
@@ -1007,13 +1260,28 @@ function _clearHistoryDeleteFocus() {
     var top = snapshot.top || 0;
     var left = snapshot.left || 0;
     var apply = function() {
-      root.scrollTop = Math.min(top, Math.max(0, root.scrollHeight - root.clientHeight));
+      if (snapshot.anchor && snapshot.anchor.id && root.getBoundingClientRect) {
+        var selector = '#gallery .gi[data-hist-id="' + _cssAttrEscape(snapshot.anchor.id) + '"]';
+        var anchorEl = document.querySelector(selector);
+        if (anchorEl && anchorEl.getBoundingClientRect) {
+          var rootRect = root.getBoundingClientRect();
+          var anchorRect = anchorEl.getBoundingClientRect();
+          root.scrollTop += (anchorRect.top - rootRect.top) - snapshot.anchor.offsetTop;
+        } else {
+          root.scrollTop = top;
+        }
+      } else {
+        root.scrollTop = top;
+      }
       root.scrollLeft = left;
     };
     apply();
     requestAnimationFrame(function() {
       apply();
       requestAnimationFrame(apply);
+    });
+    [80, 180, 360, 720].forEach(function(delay) {
+      setTimeout(apply, delay);
     });
   }
 
@@ -1087,6 +1355,13 @@ function _clearHistoryDeleteFocus() {
 
   function _blockGalleryRenderForAtomicDelete(ms) {
     _atomicDeleteRenderBlockUntil = Math.max(_atomicDeleteRenderBlockUntil, Date.now() + (ms || 1200));
+    _scheduleSentinelRearmAfterAtomicDelete();
+  }
+
+  function _renderGalleryAfterHistoryRemoval(deletedEntryKeys) {
+    _lastGalleryHash = '';
+    _removeDeletedHistoryCardsFromDom(deletedEntryKeys);
+    _syncVisibleHistoryCardIndices();
   }
 
   function _historyEmptyHintHtml(message, subText, actionHtml) {
@@ -1097,8 +1372,15 @@ function _clearHistoryDeleteFocus() {
     return _hasActiveGalleryFilters() && _groupHistoryForGallery(_filteredHistory).length === 0;
   }
 
+  function _hasUndisplayedHistoryItems() {
+    var activeItems = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
+    return _histVisibleCount < activeItems.length;
+  }
+
   function _canAutoLoadMoreHistory() {
-    if (_historyLoadingMore || _historyLoadedAll || _historyLoadError) return false;
+    if (_historyLoadingMore || _historyLoadError) return false;
+    if (_hasUndisplayedHistoryItems()) return true;
+    if (_historyLoadedAll) return false;
     if (!_activeHistoryFilterHasNoMatches()) return true;
     return _historyFilterAutoLoads < HISTORY_FILTER_AUTO_LOAD_PAGE_LIMIT;
   }
@@ -1114,6 +1396,28 @@ function _clearHistoryDeleteFocus() {
       return '';
     }
     return `<div class="masonry-sentinel" id="masonrySentinel"></div>`;
+  }
+
+  function _syncHistorySentinelState() {
+    var gallery = $('#gallery');
+    if (!gallery) return;
+    var sentinel = gallery.querySelector('.masonry-sentinel');
+    var html = _sentinelHtml();
+    if (!sentinel) {
+      if (html) gallery.insertAdjacentHTML('beforeend', html);
+      _attachSentinel();
+      return;
+    }
+    if (!html) {
+      sentinel.remove();
+      if (_sentinelObs) _sentinelObs.disconnect();
+      return;
+    }
+    var wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    var next = wrap.firstElementChild;
+    if (next) sentinel.replaceWith(next);
+    _attachSentinel();
   }
 
   function _historyEntryKeysForItems(items) {
@@ -1144,12 +1448,32 @@ function _clearHistoryDeleteFocus() {
     return removed;
   }
 
-  function _reorderVisibleHistoryCardsFromData() {
+  function _patchVisibleHistoryCardsFromData(entryKeysToRemove) {
     var gallery = $('#gallery');
-    if (!gallery) return;
+    if (!gallery) return false;
     var filteredArr = _hasActiveGalleryFilters() ? _filteredHistory : historyItems;
     var displayArr = _groupHistoryForGallery(filteredArr);
     var visibleItems = displayArr.slice(0, Math.min(_histVisibleCount, displayArr.length));
+    var visibleJobs = Object.values(jobs).filter(_isJobVisibleToCurrentUser);
+    if (!visibleItems.length) {
+      if (!visibleJobs.length) return false;
+      Array.prototype.slice.call(gallery.querySelectorAll('.gi[data-hist-id]')).forEach(function(card) {
+        card.remove();
+      });
+      _syncHistoryCountText(filteredArr);
+      lbItems = displayArr;
+      if (window.__APP__) window.__APP__._lbItems = displayArr;
+      _lastRenderedHistCount = 0;
+      _lastGalleryHash = _galleryHash(jobs, historyItems);
+      _attachSentinel();
+      return true;
+    }
+    var expectedKeys = new Set(visibleItems.map(_galleryEntryKey));
+    if (entryKeysToRemove && entryKeysToRemove.size) _removeDeletedHistoryCardsFromDom(entryKeysToRemove);
+    Array.prototype.slice.call(gallery.querySelectorAll('.gi[data-hist-id]')).forEach(function(card) {
+      var key = card.getAttribute('data-hist-id') || '';
+      if (!expectedKeys.has(key)) card.remove();
+    });
     var cursor = Array.prototype.slice.call(gallery.children).find(function(child) {
       return !(child && child.hasAttribute && child.hasAttribute('data-job-id'));
     }) || null;
@@ -1168,7 +1492,10 @@ function _clearHistoryDeleteFocus() {
       if (card !== cursor) gallery.insertBefore(card, cursor);
       cursor = card.nextSibling;
     });
-    _lastRenderedHistCount = gallery.querySelectorAll('.gi[data-hist-id]').length;
+    _syncVisibleHistoryCardIndices();
+    _scheduleVideoPreviewMaskSync(gallery);
+    _attachSentinel();
+    return true;
   }
 
   function _syncHistoryCountText(filteredArr) {
@@ -1177,6 +1504,8 @@ function _clearHistoryDeleteFocus() {
     var filtered = filteredArr || (_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
     var totalText = (!_hasActiveGalleryFilters() && _historyTotal > historyItems.length)
       ? String(historyItems.length) + ' / ' + String(_historyTotal)
+      : (_galleryFilters.type && _historyTotal > historyItems.length)
+        ? String(filtered.length) + ' / ' + String(_historyTotal)
       : String(filtered.length) + ' / ' + String(historyItems.length);
     histCountEl.textContent = totalText;
   }
@@ -1198,12 +1527,27 @@ function _clearHistoryDeleteFocus() {
       card.setAttribute('data-hist-idx', String(idx));
       card.setAttribute('onclick', "CW.fillFormFromHistory(" + idx + ", '" + escA(histKey) + "')");
       var image = card.querySelector('.gi-img');
-      if (image && !(entry && entry.__isBatch)) {
-        image.setAttribute('onclick', 'event.stopPropagation();CW.openLB(' + idx + ', this)');
+      if (image) {
+        if (entry && entry.__isBatch) {
+          image.setAttribute('onclick', "event.stopPropagation();CW.openBatchLB('" + escA(entry.batch_id) + "', this)");
+        } else {
+          image.setAttribute('onclick', "event.stopPropagation();CW.openLB(" + idx + ", this, '" + escA(histKey) + "')");
+        }
       }
       var reuse = card.querySelector('.gi-reuse');
       if (reuse) {
         reuse.setAttribute('onclick', "event.stopPropagation();CW.fillFormFromHistory(" + idx + ", '" + escA(histKey) + "')");
+      }
+      var del = card.querySelector('.gi-del');
+      if (del) {
+        var canDelete = _batchCanDelete(entry, cover);
+        var deleteTargetId = _batchDeleteTargetId(entry, cover);
+        if (canDelete && deleteTargetId) {
+          del.setAttribute('onclick', "event.stopPropagation();CW.delHist('" + escA(deleteTargetId) + "', event)");
+          del.setAttribute('title', entry && entry.__isBatch ? '删除本批次' : '删除');
+        } else {
+          del.remove();
+        }
       }
     });
     _lastRenderedHistCount = gallery.querySelectorAll('.gi[data-hist-id]').length;
@@ -1282,6 +1626,20 @@ function _historyDisplayPrompt(item) {
     return /18\s*\+|18禁|r18|r-18|nsfw|nfsw|成人|成年|裸体|全裸|私处|乳头|生殖器|色情|情色|露点|\bsex\b|\bsexual\b|\bnude\b|\bnudity\b|\bporn\b|\berotic\b/.test(text);
   }
 
+  function _patchHistoryProtectionCard(id, data) {
+    var gallery = document.getElementById('gallery');
+    if (!gallery || !id) return;
+    var item = (historyItems || []).find(function(entry) { return String(entry && entry.id || '') === id; }) || data || {};
+    var shouldProtect = _isSensitivePreview(item, _historyDisplayPrompt(item));
+    var keys = [id];
+    if (item && item.batch_id) keys.push('batch:' + String(item.batch_id));
+    keys.forEach(function(key) {
+      var card = gallery.querySelector('.gi[data-hist-id="' + _cssAttrEscape(key) + '"]');
+      var image = card ? card.querySelector('.gi-img') : null;
+      if (image) image.classList.toggle('gi-sensitive', shouldProtect);
+    });
+  }
+
 function _syncOwnerFilterButtons() {
     var val = _galleryFilters.owner || 'all';
     var buttons = document.querySelectorAll('[data-owner-filter]');
@@ -1346,15 +1704,11 @@ function _syncTypeFilterButtons() {
   }
 
 function _historyTypeOptions() {
-    var fromHistory = new Set();
+    var set = new Set();
     historyItems.forEach(function(item) {
       var type = _historyItemType(item);
-      if (type) fromHistory.add(type);
+      if (type) set.add(type);
     });
-    if (fromHistory.size > 0) {
-      return _sortTypeOptions(Array.from(fromHistory));
-    }
-    var set = new Set();
     Object.keys(A._wfMeta || {}).forEach(function(fname) {
       var meta = A._wfMeta[fname] || {};
       var tags = meta.tags || [];
@@ -1411,10 +1765,11 @@ function setHistoryTypeFilter(value) {
 
   function _jobSortPriority(status) {
     if (status === 'queued') return 0;
-    if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 1;
-    if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;
-    if (status === 'error' || status === 'retrying') return 3;
-    return 4;
+    if (status === 'paused') return 1;
+    if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 2;
+    if (status === 'generating' || status === 'downloading' || status === 'checking') return 3;
+    if (status === 'error' || status === 'retrying') return 4;
+    return 5;
   }
 
   function _jobSortTimestamp(job) {
@@ -1596,8 +1951,31 @@ function setHistoryTypeFilter(value) {
   }
 
   function _batchDeleteTargetId(entry, cover) {
-    var target = entry && entry.__isBatch && entry.cover ? entry.cover : cover;
+    var target = entry && entry.__isBatch && Array.isArray(entry.items)
+      ? entry.items.find(function(item) { return _canDeleteHistoryItem(item); })
+      : null;
+    if (!target) target = entry && entry.__isBatch && entry.cover ? entry.cover : cover;
     return String(target && target.id || '');
+  }
+
+  function _historyItemsForDeleteTarget(id, sourceEvent) {
+    id = String(id || '');
+    var item = historyItems.find(function(h) { return String(h && h.id || '') === id; });
+    var cardKey = '';
+    var target = sourceEvent && sourceEvent.target;
+    var card = target && target.closest ? target.closest('.gi[data-hist-id]') : null;
+    if (card) cardKey = String(card.getAttribute('data-hist-id') || '');
+    var batchKey = item ? _batchKey(item) : '';
+    if (!batchKey && cardKey.indexOf('batch:') === 0) batchKey = cardKey.slice(6);
+    if (batchKey) {
+      return historyItems.filter(function(h) { return _batchKey(h) === batchKey; });
+    }
+    if (!item && cardKey) {
+      item = historyItems.find(function(h) {
+        return _galleryEntryKey(h) === cardKey || _histKey(h) === cardKey;
+      });
+    }
+    return item ? [item] : [];
   }
 
   function _galleryEntryKey(entry) {
@@ -1730,6 +2108,8 @@ function _renderGalleryImpl() {
     if (histCountEl) {
       var totalText = (!_hasActiveGalleryFilters() && _historyTotal > historyItems.length)
         ? String(historyItems.length) + ' / ' + String(_historyTotal)
+        : (_galleryFilters.type && _historyTotal > historyItems.length)
+          ? String(filteredArr.length) + ' / ' + String(_historyTotal)
         : String(filteredArr.length) + ' / ' + String(historyItems.length);
       histCountEl.textContent = totalText;
     }
@@ -1777,12 +2157,36 @@ function _galleryHash(jobsObj, histArr) {
     }).join('|');
     return s + '::' + histArr.length + '::total:' + _historyTotal + '::loaded:' + (_historyLoadedAll ? '1' : '0') + '::' + histSig + '::pin:' + _pinnedHistoryIds.join(',');
   }
+
+  function _nextUnrenderedHistoryIndex(displayArr) {
+    var gallery = $('#gallery');
+    if (!gallery) return Math.max(0, _lastRenderedHistCount || 0);
+    var cards = Array.prototype.slice.call(gallery.querySelectorAll('.gi[data-hist-id]'));
+    if (!cards.length) return 0;
+    var indexByKey = {};
+    (displayArr || []).forEach(function(entry, idx) {
+      indexByKey[_galleryEntryKey(entry)] = idx;
+    });
+    for (var i = cards.length - 1; i >= 0; i -= 1) {
+      var key = cards[i].getAttribute('data-hist-id') || '';
+      if (Object.prototype.hasOwnProperty.call(indexByKey, key)) {
+        return indexByKey[key] + 1;
+      }
+    }
+    return Math.max(0, _lastRenderedHistCount || 0);
+  }
+
 function _appendNewHistoryCards() {
     const gallery = $('#gallery');
     if (!gallery) return;
+    if (_isAtomicDeleteRenderBlocked()) {
+      _scheduleSentinelRearmAfterAtomicDelete();
+      return;
+    }
     const sentinel = gallery.querySelector('.masonry-sentinel');
-    const prevCount = _lastRenderedHistCount;
     const filteredArr2 = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems);
+    _syncLightboxHistoryItems(filteredArr2);
+    const prevCount = _nextUnrenderedHistoryIndex(filteredArr2);
     const newCount = Math.min(_histVisibleCount, filteredArr2.length);
     if (newCount <= prevCount) {
       if (!_historyLoadedAll && _canAutoLoadMoreHistory()) _loadMoreHistory();
@@ -1810,6 +2214,10 @@ function _appendNewHistoryCards() {
     // Re-check: if sentinel is still visible after appending, load more immediately
     if (sentinel && (_histVisibleCount < filteredArr2.length || !_historyLoadedAll)) {
       requestAnimationFrame(() => {
+        if (_isAtomicDeleteRenderBlocked()) {
+          _scheduleSentinelRearmAfterAtomicDelete();
+          return;
+        }
         const rect = sentinel.getBoundingClientRect();
         if (rect.top < window.innerHeight + 200 && _histVisibleCount < filteredArr2.length) {
           _histVisibleCount = Math.min(_histVisibleCount + _batchSize(), filteredArr2.length);
@@ -1841,7 +2249,7 @@ function _histCardHTML(h, i) {
     const typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
     const histKey = _histKey(h);
     var entryKey = _galleryEntryKey(entry);
-    var openAction = isBatch ? `CW.openBatchLB('${escA(entry.batch_id)}', this)` : `CW.openLB(${i}, this)`;
+    var openAction = isBatch ? `CW.openBatchLB('${escA(entry.batch_id)}', this)` : `CW.openLB(${i}, this, '${escA(histKey)}')`;
     var batchBadge = isBatch ? `<div class="gi-batch-badge">×${batchCount}</div>` : '';
     var videoTag = _infoVideoTagHtml(h);
     return `<div class="gi ${typeCls2}${isBatch ? ' gi-batch-stack' : ''}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(entryKey || histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
@@ -1850,7 +2258,7 @@ function _histCardHTML(h, i) {
       ${_mediaPreviewHtml(h)}
       ${_favoriteBadgeHtml(h)}
       ${tagBadge}
-      ${canDelete && deleteTargetId ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${escA(deleteTargetId)}')" title="${deleteTitle}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>` : ''}
+      ${canDelete && deleteTargetId ? `<button class="gi-del" onclick="event.stopPropagation();CW.delHist('${escA(deleteTargetId)}', event)" title="${deleteTitle}"><svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg></button>` : ''}
     </div>
     <div class="gi-info">
       <div class="gi-info-actions">
@@ -2001,6 +2409,178 @@ function lbNav(dir) {
     try { video.load(); } catch (e) {}
   }
 
+  function _clampLightboxZoomScale(scale) {
+    scale = Number(scale || 1);
+    if (!Number.isFinite(scale)) scale = 1;
+    return Math.max(1, Math.min(4, scale));
+  }
+
+  function _clampLightboxPan(x, y, scale) {
+    var stage = $('#lbStage');
+    var rect = stage && stage.getBoundingClientRect ? stage.getBoundingClientRect() : null;
+    if (!rect || scale <= 1) return { x: 0, y: 0 };
+    var maxX = Math.max(0, rect.width * (scale - 1) / 2);
+    var maxY = Math.max(0, rect.height * (scale - 1) / 2);
+    return {
+      x: Math.max(-maxX, Math.min(maxX, Number(x || 0))),
+      y: Math.max(-maxY, Math.min(maxY, Number(y || 0))),
+    };
+  }
+
+  function _applyLightboxImageZoom() {
+    var stage = $('#lbStage');
+    if (!stage) return;
+    var scale = _clampLightboxZoomScale(_lbZoomState.scale);
+    stage.classList.toggle('lb-image-zoomed', scale > 1.01);
+    var pan = _clampLightboxPan(_lbZoomState.x, _lbZoomState.y, scale);
+    _lbZoomState.scale = scale;
+    _lbZoomState.x = pan.x;
+    _lbZoomState.y = pan.y;
+    stage.style.setProperty('--lb-image-zoom', String(scale));
+    stage.style.setProperty('--lb-image-pan-x', pan.x.toFixed(2) + 'px');
+    stage.style.setProperty('--lb-image-pan-y', pan.y.toFixed(2) + 'px');
+  }
+
+  function _resetLightboxImageZoom() {
+    _restoreLightboxZoomBaseSize();
+    _lbZoomState.scale = 1;
+    _lbZoomState.x = 0;
+    _lbZoomState.y = 0;
+    _lbZoomState.pinch = null;
+    _lbZoomState.pan = null;
+    _applyLightboxImageZoom();
+    _lbZoomState.baseWidth = 0;
+    _lbZoomState.baseHeight = 0;
+  }
+
+  function _lockLightboxZoomBaseSize() {
+    var img = $('#lbImg');
+    var full = $('#lbFullImg');
+    if (!img || !img.getBoundingClientRect) return;
+    if (!_lbZoomState.baseWidth || !_lbZoomState.baseHeight) {
+      var styledWidth = parseFloat(img.style.width || '');
+      var styledHeight = parseFloat(img.style.height || '');
+      if (styledWidth > 0 && styledHeight > 0) {
+        _lbZoomState.baseWidth = styledWidth;
+        _lbZoomState.baseHeight = styledHeight;
+      } else {
+        var rect = img.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        _lbZoomState.baseWidth = rect.width;
+        _lbZoomState.baseHeight = rect.height;
+      }
+    }
+    img.style.width = _lbZoomState.baseWidth + 'px';
+    img.style.height = _lbZoomState.baseHeight + 'px';
+    if (full) {
+      full.style.width = _lbZoomState.baseWidth + 'px';
+      full.style.height = _lbZoomState.baseHeight + 'px';
+    }
+  }
+
+  function _restoreLightboxZoomBaseSize() {
+    if (!_lbZoomState.baseWidth || !_lbZoomState.baseHeight) return;
+    var img = $('#lbImg');
+    var full = $('#lbFullImg');
+    if (img) {
+      img.style.width = _lbZoomState.baseWidth + 'px';
+      img.style.height = _lbZoomState.baseHeight + 'px';
+    }
+    if (full) {
+      full.style.width = _lbZoomState.baseWidth + 'px';
+      full.style.height = _lbZoomState.baseHeight + 'px';
+    }
+  }
+
+  function _touchDistance(a, b) {
+    var dx = a.clientX - b.clientX;
+    var dy = a.clientY - b.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function _touchCenter(a, b) {
+    return {
+      x: (a.clientX + b.clientX) / 2,
+      y: (a.clientY + b.clientY) / 2,
+    };
+  }
+
+  function _isImageZoomTarget(target) {
+    var stage = $('#lbStage');
+    if (!stage || stage.classList.contains('is-video')) return false;
+    if (!target || !target.closest) return false;
+    return !!target.closest('#lbStage');
+  }
+
+  function _ensureLightboxImageZoomBound() {
+    var stage = $('#lbStage');
+    if (!stage || stage.dataset.imageZoomBound === '1') return;
+    stage.dataset.imageZoomBound = '1';
+    stage.addEventListener('touchstart', function(e) {
+      if (!_isImageZoomTarget(e.target) || !e.touches) return;
+      if (e.touches.length === 2) {
+        _lockLightboxZoomBaseSize();
+        var rect = stage.getBoundingClientRect();
+        var center = _touchCenter(e.touches[0], e.touches[1]);
+        _lbZoomState.pinch = {
+          distance: Math.max(1, _touchDistance(e.touches[0], e.touches[1])),
+          scale: _lbZoomState.scale,
+          x: _lbZoomState.x,
+          y: _lbZoomState.y,
+          anchorX: center.x - rect.left - rect.width / 2,
+          anchorY: center.y - rect.top - rect.height / 2,
+        };
+        _lbZoomState.pan = null;
+        e.preventDefault();
+        e.stopPropagation();
+      } else if (e.touches.length === 1 && _lbZoomState.scale > 1.01) {
+        _lbZoomState.pan = {
+          x: _lbZoomState.x,
+          y: _lbZoomState.y,
+          touchX: e.touches[0].clientX,
+          touchY: e.touches[0].clientY,
+        };
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, { passive: false });
+    stage.addEventListener('touchmove', function(e) {
+      if (!_isImageZoomTarget(e.target) || !e.touches) return;
+      if (e.touches.length === 2 && _lbZoomState.pinch) {
+        var pinch = _lbZoomState.pinch;
+        var nextScale = _clampLightboxZoomScale(pinch.scale * (_touchDistance(e.touches[0], e.touches[1]) / pinch.distance));
+        var ratio = nextScale / Math.max(1, pinch.scale);
+        _lbZoomState.scale = nextScale;
+        _lbZoomState.x = pinch.x + (pinch.anchorX - pinch.x) * (1 - ratio);
+        _lbZoomState.y = pinch.y + (pinch.anchorY - pinch.y) * (1 - ratio);
+        _applyLightboxImageZoom();
+        e.preventDefault();
+        e.stopPropagation();
+      } else if (e.touches.length === 1 && _lbZoomState.pan && _lbZoomState.scale > 1.01) {
+        _lbZoomState.x = _lbZoomState.pan.x + (e.touches[0].clientX - _lbZoomState.pan.touchX);
+        _lbZoomState.y = _lbZoomState.pan.y + (e.touches[0].clientY - _lbZoomState.pan.touchY);
+        _applyLightboxImageZoom();
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, { passive: false });
+    stage.addEventListener('touchend', function(e) {
+      if (!_isImageZoomTarget(e.target)) return;
+      if (_lbZoomState.scale <= 1.01) _resetLightboxImageZoom();
+      _lbZoomState.pinch = null;
+      _lbZoomState.pan = null;
+      if (_lbZoomState.scale > 1.01) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, { passive: false });
+    stage.addEventListener('touchcancel', function() {
+      _lbZoomState.pinch = null;
+      _lbZoomState.pan = null;
+      if (_lbZoomState.scale <= 1.01) _resetLightboxImageZoom();
+    }, { passive: true });
+  }
+
   function _videoEditorElements() {
     return {
       root: $('#lbVideoEditor'),
@@ -2059,6 +2639,15 @@ function lbNav(dir) {
     return value.toFixed(2) + 's / f' + String(Math.round(value * rate)).padStart(3, '0');
   }
 
+  function _formatVideoTickLabel(sec, fps) {
+    var value = Number(sec || 0);
+    var rate = Number(fps || 24);
+    if (!Number.isFinite(value)) value = 0;
+    if (!Number.isFinite(rate) || rate <= 0) rate = 24;
+    return '<span class="lb-video-tick-time">' + escH(value.toFixed(2) + 's') + '</span>' +
+      '<span class="lb-video-tick-frame">' + escH('f' + String(Math.round(value * rate)).padStart(3, '0')) + '</span>';
+  }
+
   function _hideLightboxVideoEditor() {
     _lbVideoEditorActive = false;
     var els = _videoEditorElements();
@@ -2079,6 +2668,58 @@ function lbNav(dir) {
     var els = _videoEditorElements();
     if (els.exportMenu) els.exportMenu.hidden = true;
     if (els.exportBtn) els.exportBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function _currentLightboxPromptText() {
+    var info = $('#lbInfo');
+    var text = String(info && info.textContent || '').trim();
+    return text === '—' ? '' : text;
+  }
+
+  function _copyTextToClipboard(text) {
+    text = String(text || '');
+    function fallbackCopy() {
+      return new Promise(function(resolve, reject) {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', 'readonly');
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      area.style.top = '0';
+      document.body.appendChild(area);
+      area.select();
+      try {
+        if (!document.execCommand('copy')) throw new Error('copy failed');
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        area.remove();
+      }
+    });
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function() {
+        return fallbackCopy();
+      });
+    }
+    return fallbackCopy();
+  }
+
+  function copyLBPrompt(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    var text = _currentLightboxPromptText();
+    if (!text) {
+      if (window.CW && CW.toast) CW.toast('当前图片没有可复制的提示词', 'info');
+      return false;
+    }
+    _copyTextToClipboard(text).then(function() {
+      if (window.CW && CW.toast) CW.toast('提示词已复制', 'done');
+    }).catch(function() {
+      if (window.CW && CW.toast) CW.toast('提示词复制失败', 'error');
+    });
+    return false;
   }
 
   function toggleLBImageExportMenu(e) {
@@ -2112,12 +2753,16 @@ function lbNav(dir) {
       els.ticks.innerHTML = '';
       return;
     }
-    var count = Math.min(7, Math.max(3, Math.floor(total) + 1));
+    var trackWidth = Number(els.ticks.clientWidth || 0);
+    var widthCap = trackWidth > 0
+      ? (trackWidth < 520 ? 3 : (trackWidth < 760 ? 4 : (trackWidth < 1040 ? 5 : 6)))
+      : 5;
+    var count = Math.min(widthCap, Math.max(3, Math.floor(total) + 1));
     var labels = [];
     for (var i = 0; i < count; i += 1) {
       var t = count === 1 ? 0 : (total * i / (count - 1));
       var pct = count === 1 ? 0 : (100 * i / (count - 1));
-      labels.push('<span class="lb-video-tick" style="left:' + pct.toFixed(4) + '%">' + escH(_formatVideoTimeFrame(t, fps)) + '</span>');
+      labels.push('<span class="lb-video-tick" style="left:' + pct.toFixed(4) + '%">' + _formatVideoTickLabel(t, fps) + '</span>');
     }
     els.ticks.innerHTML = labels.join('');
   }
@@ -2355,10 +3000,13 @@ function lbNav(dir) {
   }
 
   function _setImportedReferenceImage(filename) {
+    filename = String(filename || '').trim();
     var vInput = document.querySelector('#refImageValue');
     var preview = document.querySelector('#refImagePreview');
     var ph = document.querySelector('#refImagePlaceholder');
+    if (!filename || !vInput) return false;
     if (vInput) vInput.value = filename;
+    vInput.dispatchEvent(new Event('input', { bubbles: true }));
     if (preview) {
       preview.src = API + '/api/input-image/' + encodeURIComponent(filename);
       preview.style.display = '';
@@ -2368,6 +3016,7 @@ function lbNav(dir) {
     if (window.CW && typeof CW.syncQwenAngleReferencePreview === 'function') {
       CW.syncQwenAngleReferencePreview();
     }
+    return true;
   }
 
   function _lightboxImageImportName(filename) {
@@ -2408,7 +3057,7 @@ function lbNav(dir) {
       if (!target) throw new Error('没有找到可导入的' + typeText + '工作流');
       var data = await _requestLightboxImageInput();
       if (window.CW && typeof CW.selectWF === 'function') await CW.selectWF(target);
-      _setImportedReferenceImage(data.filename);
+      if (!_setImportedReferenceImage(data.filename)) throw new Error('参考图导入失败，请重新选择图生图工作流');
       if (window.CW && CW.toast) CW.toast('已导入到 ' + typeText + ' 工作流', 'done');
       closeLB();
       var left = document.querySelector('.col-left');
@@ -2432,7 +3081,7 @@ function lbNav(dir) {
       var data = await _requestLightboxVideoFrame({ importInput: true });
       if (!data.input_filename) throw new Error('视频帧导入失败');
       if (window.CW && typeof CW.selectWF === 'function') await CW.selectWF(target);
-      _setImportedReferenceImage(data.input_filename);
+      if (!_setImportedReferenceImage(data.input_filename)) throw new Error('参考图导入失败，请重新选择图生图工作流');
       if (window.CW && CW.toast) CW.toast('已导入到 ' + typeText + ' 工作流', 'done');
       closeLB();
       var left = document.querySelector('.col-left');
@@ -2794,6 +3443,8 @@ function lbNav(dir) {
     opts = opts || {};
     var overlay = $('#lightbox');
     if (!overlay) return;
+    _ensureLightboxImageZoomBound();
+    _resetLightboxImageZoom();
     var fullSrc = opts.fullSrc || '';
     var previewSrc = opts.previewSrc || fullSrc;
     var expectedSize = opts.expectedSize || null;
@@ -2801,6 +3452,7 @@ function lbNav(dir) {
     if (mediaType === 'video') {
       var video = $('#lbVideo');
       var stageVideo = $('#lbStage');
+      _resetLightboxImageZoom();
       _hideLightboxVideoEditor();
       _lbLoadToken += 1;
       _resetLightboxFullLayer();
@@ -2868,6 +3520,7 @@ function lbNav(dir) {
     _resetLightboxVideo();
     var stageImage = $('#lbStage');
     if (stageImage) stageImage.classList.remove('is-video');
+    _resetLightboxImageZoom();
     var hasSourceAnimation = !!(opts.sourceEl && opts.sourceEl.getBoundingClientRect);
     if (hasSourceAnimation) {
       var stage = $('#lbStage');
@@ -2904,7 +3557,7 @@ function renderLB(sourceEl) {
     if (window.__APP__ && Array.isArray(window.__APP__._lbItems)) lbItems = window.__APP__._lbItems;
     if (lbIdx < 0 || lbIdx >= lbItems.length) return;
     const h = _batchCover(lbItems[lbIdx]);
-    _syncLightboxDownload(h.filename);
+    _syncLightboxDownload(h.filename, h.media_type || _mediaType(h));
     _syncLightboxActions(h);
     _syncLightboxCompare(h);
     $('#lbInfo').textContent = h.prompt || h.prompt_preview || '—';
@@ -2944,6 +3597,7 @@ function renderLB(sourceEl) {
     _resetLightboxVideo();
     _resetLightboxFullLayer();
     _clearLightboxDisplaySize();
+    _resetLightboxImageZoom();
     if (overlay) {
       overlay.classList.remove('lb-has-flight');
       overlay.style.removeProperty('--lb-action-right');
@@ -2971,18 +3625,68 @@ function closeLB() {
     document.body.style.overflow = '';
   }
 
+  function _hasNativePhotoSaveBridge() {
+    return !!(
+      window.webkit &&
+      window.webkit.messageHandlers &&
+      window.webkit.messageHandlers.ezSaveImage &&
+      typeof window.webkit.messageHandlers.ezSaveImage.postMessage === 'function'
+    );
+  }
+
+  function _blobToDataUrl(blob) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() { resolve(String(reader.result || '')); };
+      reader.onerror = function() { reject(reader.error || new Error('read failed')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function _nativeSaveImage(dataUrl, filename, mediaType) {
+    window.webkit.messageHandlers.ezSaveImage.postMessage({
+      dataUrl: dataUrl,
+      filename: filename || 'image.png',
+      mediaType: mediaType || 'image'
+    });
+    if (window.CW && CW.toast) CW.toast('正在保存到相册...', 'info');
+  }
+
+  if (!window.__ezNativeSaveImageResultBound) {
+    window.__ezNativeSaveImageResultBound = true;
+    window.addEventListener('ezNativeSaveImageResult', function(event) {
+      var detail = event && event.detail ? event.detail : {};
+      if (window.CW && CW.toast) {
+        CW.toast(detail.ok ? '已保存到相册' : (detail.message || '保存到相册失败'), detail.ok ? 'done' : 'error');
+      }
+    });
+  }
+
 async function downloadLB(e) {
     var link = $('#lbDownload');
     if (!link) return;
     var url = link.dataset.url || link.href;
+    var imageUrl = link.dataset.imageUrl || url;
     var filename = link.dataset.filename || 'image.png';
+    var mediaType = link.dataset.mediaType || _mediaType('', filename);
     var isMobileModal = window.matchMedia && window.matchMedia('(max-width: 765px)').matches;
-    if (!isMobileModal) return;
+    if (!isMobileModal && !_hasNativePhotoSaveBridge()) return;
     if (e) e.preventDefault();
     try {
-      var resp = await fetch(url, { credentials: 'same-origin' });
+      var resp = await fetch(imageUrl, { credentials: 'same-origin' });
       if (!resp.ok) throw new Error('download failed');
       var blob = await resp.blob();
+      if (_hasNativePhotoSaveBridge()) {
+        _nativeSaveImage(await _blobToDataUrl(blob), filename, mediaType);
+        return false;
+      }
+      if (navigator.share && window.File) {
+        var file = new File([blob], filename, { type: blob.type || 'image/png' });
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: filename });
+          return false;
+        }
+      }
       var blobUrl = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = blobUrl;
@@ -2995,13 +3699,14 @@ async function downloadLB(e) {
         URL.revokeObjectURL(blobUrl);
       }, 1200);
     } catch (err) {
-      window.open(url, '_blank', 'noopener');
+      window.location.href = url;
     }
+    return false;
   }
 
 function openJobLB(filename, label, sourceEl, mediaType) {
     // Show a single-item lightbox for a job image
-    _syncLightboxDownload(filename);
+    _syncLightboxDownload(filename, mediaType || _mediaType('', filename));
     _syncLightboxActions(null);
     _syncLightboxCompare(null);
     $('#lbInfo').textContent = label || '';
@@ -3015,9 +3720,19 @@ function openJobLB(filename, label, sourceEl, mediaType) {
     });
   }
 
-function openLB(idx, sourceEl) {
-    if (window.__APP__ && Array.isArray(window.__APP__._lbItems)) lbItems = window.__APP__._lbItems;
-    lbIdx = idx;
+function openLB(idx, sourceEl, key) {
+    var sourceKey = _lightboxKeyFromSource(sourceEl);
+    var keyText = String(sourceKey || key || '');
+    _syncLightboxHistoryItems();
+    if (keyText) {
+      var foundIdx = (lbItems || []).findIndex(function(entry) {
+        var cover = _batchCover(entry);
+        return _histKey(cover) === keyText || _galleryEntryKey(entry) === keyText;
+      });
+      lbIdx = foundIdx >= 0 ? foundIdx : idx;
+    } else {
+      lbIdx = idx;
+    }
     renderLB(sourceEl);
   }
 
@@ -3107,11 +3822,8 @@ function openBatchLB(batchId, sourceEl) {
     if (!removed) return false;
     _pinnedHistoryIds = _pinnedHistoryIds.filter(function(pinId) { return String(pinId) !== String(id); });
     _historyTotal = Math.max(0, _historyTotal - 1);
-    _historyNextOffset = Math.max(0, _historyNextOffset - 1);
-    _historyLoadedAll = _historyNextOffset >= _historyTotal;
-    _historyDataSignature = _historySignature(historyItems, _historyTotal);
-    _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
-    _lastGalleryHash = '';
+    _syncHistoryLoadedAllAfterLocalRemoval();
+    _syncDerivedHistoryState();
     return true;
   }
 
@@ -3147,7 +3859,7 @@ function openBatchLB(batchId, sourceEl) {
           }
         }
         _removeHiddenHistoryItem(id);
-        renderGallery();
+        _galleryStore.schedule('history:hide', { force: true });
         if (wasLightboxCurrent) {
           lbItems = preservedLbItems;
           if (window.__APP__) window.__APP__._lbItems = preservedLbItems;
@@ -3166,8 +3878,8 @@ function openBatchLB(batchId, sourceEl) {
           _lbCurrentItem = Object.assign({}, _lbCurrentItem, { is_hidden: false, hidden_at: '', hidden_by: '' });
           _syncLightboxActions(_lbCurrentItem);
         }
-        _lastGalleryHash = '';
-        renderGallery();
+        _syncDerivedHistoryState();
+        _galleryStore.schedule('history:unhide', { force: true });
       }
       if (window.CW && CW.toast) CW.toast(makeHidden ? '已隐藏，首页不再显示' : '已取消隐藏', 'done');
       if (window.CW && typeof CW.loadWorkflows === 'function') {
@@ -3182,6 +3894,67 @@ function openBatchLB(batchId, sourceEl) {
     }
   }
 
+  function _applyHistoryProtectionState(id, data) {
+    var patch = {
+      protection_status: (data && data.protection_status) || 'safe',
+      protection_score: data && data.protection_score != null ? data.protection_score : 0,
+      protection_reason: (data && data.protection_reason) || '',
+      protection_source: (data && data.protection_source) || 'manual-admin',
+      protection_checked_at: (data && data.protection_checked_at) || ''
+    };
+    function applyToList(list) {
+      if (!Array.isArray(list)) return;
+      for (var i = 0; i < list.length; i += 1) {
+        if (String(list[i] && list[i].id || '') === id) {
+          list[i] = Object.assign({}, list[i], patch);
+        }
+      }
+    }
+    applyToList(historyItems);
+    applyToList(lbItems);
+    if (_historyDetailCache && _historyDetailCache[id]) {
+      _historyDetailCache[id] = Object.assign({}, _historyDetailCache[id], patch);
+    }
+    if (window.__APP__) window.__APP__._lbItems = lbItems;
+    if (_lbCurrentItem && String(_lbCurrentItem.id || '') === id) {
+      _lbCurrentItem = Object.assign({}, _lbCurrentItem, patch);
+      _syncLightboxActions(_lbCurrentItem);
+    }
+    _syncDerivedHistoryState();
+    _patchHistoryProtectionCard(id, patch);
+  }
+
+  async function toggleHistoryProtection(id, makeProtected) {
+    id = String(id || '');
+    if (!id) return false;
+    makeProtected = makeProtected !== false;
+    var item = historyItems.find(function(h) { return String(h && h.id || '') === id; }) || _lbCurrentItem;
+    if (item && !_historyActionState(item).canProtect) {
+      if (window.CW && CW.toast) CW.toast('只有管理员可以修改图片保护标记', 'info');
+      return false;
+    }
+    try {
+      var authHeaders = window.CW && CW.auth && CW.auth.getAuthHeaders ? CW.auth.getAuthHeaders() : {};
+      var r = await fetch(`${API}/api/history/${encodeURIComponent(id)}/protection`, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
+        body: JSON.stringify({ protection_status: makeProtected ? 'protected' : 'safe' }),
+      });
+      if (!r.ok) {
+        var err = {};
+        try { err = await r.json(); } catch (e) {}
+        throw new Error(err.detail || '保护标记更新失败');
+      }
+      var d = await r.json();
+      _applyHistoryProtectionState(id, d);
+      if (window.CW && CW.toast) CW.toast(makeProtected ? '已标记为需要保护' : '已取消图片保护', 'done');
+      return !!(d && d.ok);
+    } catch (e) {
+      if (window.CW && CW.toast) CW.toast(e.message || '保护标记更新失败', 'error');
+      return false;
+    }
+  }
+
   function toggleLBHidden(e) {
     if (e && e.preventDefault) e.preventDefault();
     if (e && e.stopPropagation) e.stopPropagation();
@@ -3189,12 +3962,20 @@ function openBatchLB(batchId, sourceEl) {
     toggleHistoryHidden(_lbCurrentItem.id, !_lbCurrentItem.is_hidden);
   }
 
+  function toggleLBProtection(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!_lbCurrentItem || !_lbCurrentItem.id) return;
+    var isProtected = String(_lbCurrentItem.protection_status || '').toLowerCase() === 'protected';
+    toggleHistoryProtection(_lbCurrentItem.id, !isProtected);
+  }
+
 	  async function deleteCurrentLightboxItem(e) {
 	    if (e && e.preventDefault) e.preventDefault();
 	    if (e && e.stopPropagation) e.stopPropagation();
 	    var btn = $('#lbDeleteBtn');
 	    var id = btn && btn.dataset ? String(btn.dataset.historyId || '') : '';
-	    if (!id || !(_historyActionState(_lbCurrentItem).canDelete)) return;
+	    if (!id || (btn && btn.disabled)) return;
 	    var previousIndex = lbIdx;
 	    var result = await delHist(id);
 	    if (!(result && result.ok)) return;
@@ -3211,15 +3992,10 @@ function openBatchLB(batchId, sourceEl) {
 	    renderLB();
 	  }
 
-async function delHist(id) {
+async function delHist(id, sourceEvent) {
     _clearHistoryDeleteFocus();
-    var scrollSnapshot = _captureHistoryScroll();
     id = String(id || '');
-    var item = historyItems.find(function(h) { return String(h && h.id || '') === id; });
-    var batchKey = _batchKey(item);
-    var items = batchKey
-      ? historyItems.filter(function(h) { return _batchKey(h) === batchKey; })
-      : (item ? [item] : []);
+    var items = _historyItemsForDeleteTarget(id, sourceEvent);
     var deletedEntryKeys = _historyEntryKeysForItems(items);
     var deleteIds = items
       .filter(function(h) { return _canDeleteHistoryItem(h); })
@@ -3235,7 +4011,9 @@ async function delHist(id) {
     _markHistoryIdsDeleted(deleteIds);
     _removeOptimisticHistoryIds(deleteIds);
     // Mark card as deleting immediately
-    var card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
+    var eventTarget = sourceEvent && sourceEvent.target;
+    var card = eventTarget && eventTarget.closest ? eventTarget.closest('.gi[data-hist-id]') : null;
+    if (!card) card = document.querySelector('[data-hist-idx][onclick*="' + id.slice(-6) + '"]') || document.querySelector('[onclick*="' + id.slice(-6) + '"]');
     if (card) { card.classList.add('deleting'); card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
     try {
       var authHeaders = window.CW.auth.getAuthHeaders();
@@ -3253,22 +4031,9 @@ async function delHist(id) {
       }
       _pinnedHistoryIds = _pinnedHistoryIds.filter(function(pinId) { return !deleted.has(String(pinId)); });
       _historyTotal = Math.max(0, _historyTotal - deleted.size);
-      _historyNextOffset = Math.max(0, _historyNextOffset - deleted.size);
-      _historyLoadedAll = _historyNextOffset >= _historyTotal;
-      _historyDataSignature = _historySignature(historyItems, _historyTotal);
-      _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
-      _removeDeletedHistoryCardsFromDom(deletedEntryKeys);
-      _reorderVisibleHistoryCardsFromData();
-      _syncVisibleHistoryCardIndices();
-      var visibleAfterDelete = _groupHistoryForGallery(_hasActiveGalleryFilters() ? _filteredHistory : historyItems).length;
-      if (visibleAfterDelete === 0 && !Object.values(jobs).some(_isJobVisibleToCurrentUser)) {
-        _atomicDeleteRenderBlockUntil = 0;
-        _lastGalleryHash = '';
-        renderGallery();
-      } else {
-        _blockGalleryRenderForAtomicDelete(1800);
-      }
-      _restoreHistoryScroll(scrollSnapshot);
+      _syncHistoryLoadedAllAfterLocalRemoval();
+      _syncDerivedHistoryState();
+      _renderGalleryAfterHistoryRemoval(deletedEntryKeys);
       if (window.CW && typeof CW.loadWorkflows === 'function') {
         Promise.resolve(CW.loadWorkflows()).catch(function(err) {
           console.warn('refresh workflow previews after delete failed:', err && err.message ? err.message : err);
@@ -3285,10 +4050,60 @@ async function delHist(id) {
     }
   }
 
-async function _fetchHistoryPage(offset, limit) {
+  function onHistoryUpdate(update) {
+    update = update || {};
+    var action = String(update.action || '');
+    var ids = Array.isArray(update.ids)
+      ? update.ids.map(function(itemId) { return String(itemId || ''); }).filter(Boolean)
+      : [];
+    if (action === 'protection' && ids.length) {
+      ids.forEach(function(id) {
+        _applyHistoryProtectionState(id, update);
+      });
+      return;
+    }
+    var removeFromGallery = action === 'delete' || action === 'permanent_delete' || action === 'hide';
+    if (removeFromGallery && ids.length) {
+      var deleted = new Set(ids);
+      var localItems = historyItems.filter(function(h) {
+        return deleted.has(String(h && h.id || ''));
+      });
+      if (localItems.length) {
+        var deletedEntryKeys = _historyEntryKeysForItems(localItems);
+        _markHistoryIdsDeleted(ids);
+        for (var idx = historyItems.length - 1; idx >= 0; idx -= 1) {
+          if (deleted.has(String(historyItems[idx] && historyItems[idx].id || ''))) historyItems.splice(idx, 1);
+        }
+        _pinnedHistoryIds = _pinnedHistoryIds.filter(function(pinId) { return !deleted.has(String(pinId)); });
+        _historyTotal = Math.max(0, _historyTotal - localItems.length);
+        _syncHistoryLoadedAllAfterLocalRemoval();
+        _syncDerivedHistoryState();
+        _renderGalleryAfterHistoryRemoval(deletedEntryKeys);
+        if (_lbCurrentItem && deleted.has(String(_lbCurrentItem.id || ''))) closeLB();
+      }
+    }
+    Promise.resolve(loadHistory()).catch(function(err) {
+      console.warn('refresh history after update failed:', err && err.message ? err.message : err);
+    });
+    if (window.CW && typeof CW.loadWorkflows === 'function') {
+      Promise.resolve(CW.loadWorkflows()).catch(function(err) {
+        console.warn('refresh workflow previews after history update failed:', err && err.message ? err.message : err);
+      });
+    }
+  }
+
+async function _fetchHistoryPage(offset, limit, afterId) {
     var authHeaders = window.CW.auth.getAuthHeaders();
     var scope = _currentHistoryScope();
-    var url = `${API}/api/history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit || HISTORY_PAGE_SIZE)}&offset=${encodeURIComponent(offset || 0)}&compact=1`;
+    var params = new URLSearchParams({
+      scope: scope,
+      limit: String(limit || HISTORY_PAGE_SIZE),
+      compact: '1',
+    });
+    if (_galleryFilters.type) params.set('workflow_type', _galleryFilters.type);
+    if (afterId) params.set('after_id', String(afterId || ''));
+    else params.set('offset', String(offset || 0));
+    var url = `${API}/api/history?${params.toString()}`;
     const r = await fetch(url, { headers: Object.assign({}, authHeaders) });
     const d = await _historyJsonOrThrow(r, '加载历史');
     var items = _filterDeletedHistoryItems(d.data || []);
@@ -3300,14 +4115,18 @@ async function _fetchHistoryPage(offset, limit) {
     };
   }
 
-  async function _reloadHistoryWindow(renderAfter) {
-    var limit = Math.min(
-      Math.max(_historyNextOffset || 0, _lastRenderedHistCount || 0, HISTORY_PAGE_SIZE),
-      _historyRefreshWindowLimit()
-    );
+  async function _reloadHistoryWindow(renderAfter, filterToken) {
+    var limit = _galleryFilters.type
+      ? HISTORY_FILTERED_PAGE_SIZE
+      : Math.min(
+        Math.max(_historyNextOffset || 0, _lastRenderedHistCount || 0, HISTORY_PAGE_SIZE),
+        _historyRefreshWindowLimit()
+      );
     var page = await _fetchHistoryPage(0, limit);
+    if (filterToken != null && filterToken !== _historyFilterToken) return false;
     var nextItems = page.items;
     _historyScope = page.scope;
+    _historyWindowType = _galleryFilters.type || '';
     _historyTotal = page.total;
     _historyNextOffset = page.raw_count || nextItems.length;
     _historyLoadedAll = _historyNextOffset >= _historyTotal;
@@ -3329,16 +4148,21 @@ async function _fetchHistoryPage(offset, limit) {
 
   async function _loadMoreHistory(manual) {
     if (_historyLoadingMore || _historyLoadedAll) return;
+    var filterToken = _historyFilterToken;
+    if (!manual && _isAtomicDeleteRenderBlocked()) {
+      _scheduleSentinelRearmAfterAtomicDelete();
+      return;
+    }
     if (!manual && !_canAutoLoadMoreHistory()) return;
     _historyLoadingMore = true;
     _historyLoadError = '';
     if (!manual && _activeHistoryFilterHasNoMatches()) {
       _historyFilterAutoLoads += 1;
     }
-    _lastGalleryHash = '';
-    renderGallery();
+    _syncHistorySentinelState();
     try {
-      var page = await _fetchHistoryPage(_historyNextOffset, HISTORY_PAGE_SIZE);
+      var page = await _fetchHistoryPage(_nextHistoryFetchOffset(), HISTORY_PAGE_SIZE, _lastLoadedHistoryCursorId());
+      if (filterToken !== _historyFilterToken) return;
       if (page.scope !== _historyScope) {
         _historyLoadingMore = false;
         _lastGalleryHash = '';
@@ -3353,6 +4177,7 @@ async function _fetchHistoryPage(offset, limit) {
         historyItems.push(item);
       });
       historyItems.splice(0, historyItems.length, ..._applyPinnedHistoryOrder(_sortHistoryItems(historyItems)));
+      _historyWindowType = _galleryFilters.type || '';
       _historyTotal = page.total;
       _historyNextOffset += page.raw_count || page.items.length;
       _historyLoadedAll = _historyNextOffset >= _historyTotal || (page.raw_count || page.items.length) === 0;
@@ -3367,14 +4192,15 @@ async function _fetchHistoryPage(offset, limit) {
       _histVisibleCount = _clampHistoryVisibleCount(_histVisibleCount, visibleLen);
       _historyLoadingMore = false;
       _lastGalleryHash = '';
-      renderGallery();
+      _appendNewHistoryCards();
+      _syncHistoryCountText();
+      _syncHistorySentinelState();
     } catch (e) {
       console.error('loadMoreHistory:', e);
       _historyLoadingMore = false;
       _historyLoadError = e && e.message ? e.message : '加载失败';
       if (window.CW && CW.toast) CW.toast('历史加载失败，可稍后重试', 'error');
-      _lastGalleryHash = '';
-      renderGallery();
+      _syncHistorySentinelState();
     } finally {
       _historyLoadingMore = false;
     }
@@ -3392,6 +4218,7 @@ async function loadHistory() {
       var page = await _fetchHistoryPage(0, HISTORY_PAGE_SIZE);
       var nextItems = page.items;
       _historyScope = page.scope;
+      _historyWindowType = _galleryFilters.type || '';
       _historyTotal = page.total;
       _historyNextOffset = page.raw_count || nextItems.length;
       _historyLoadedAll = _historyNextOffset >= _historyTotal;
@@ -3438,45 +4265,63 @@ async function loadHistory() {
 
 
 function applyFilters() {
+    var filterToken = _bumpHistoryFilterToken();
     _syncOwnerFilterButtons();
     _syncTypeFilterButtons();
     var el;
     el = document.getElementById("gfStyle");
     _galleryFilters.style = el ? el.value.toLowerCase() : "";
-    _filteredHistory = _filterHistory(historyItems);
-    _historyFilterAutoLoads = 0;
-    _historyLoadError = '';
-    _histVisibleCount = 0;
-    _lastRenderedHistCount = 0;
-    _lastGalleryHash = "";
+    var mustReloadWindow = !!_galleryFilters.type || !!_historyWindowType;
+    _resetHistoryPagingForFilter();
+    _filteredHistory = _applyPinnedHistoryOrder(_filterHistory(historyItems));
+    if (mustReloadWindow) {
+      _historyInitialLoading = true;
+      renderGallery();
+      _reloadHistoryWindow(false, filterToken).then(function(applied) {
+        if (!applied || filterToken !== _historyFilterToken) return;
+        _historyInitialLoading = false;
+        _lastGalleryHash = '';
+        renderGallery();
+      }).catch(function(e) {
+        if (filterToken !== _historyFilterToken) return;
+        console.error('applyFilters:', e);
+        _historyInitialLoading = false;
+        _historyLoadError = e && e.message ? e.message : '加载失败';
+        renderGallery();
+      });
+      return;
+    }
+    _historyInitialLoading = false;
     renderGallery();
   }
 
 function clearFilters() {
+    var filterToken = _bumpHistoryFilterToken();
     _galleryFilters = { owner: "all", type: "", style: "" };
     _syncOwnerFilterButtons();
     _syncTypeFilterButtons();
     var el;
     el = document.getElementById("gfStyle");
     if (el) el.value = "";
-    _filteredHistory = _filterHistory(historyItems);
-    _historyFilterAutoLoads = 0;
-    _historyLoadError = '';
-    _histVisibleCount = 0;
-    _lastRenderedHistCount = 0;
-    _lastGalleryHash = "";
+    _resetHistoryPagingForFilter();
+    _historyInitialLoading = true;
     renderGallery();
+    _reloadHistoryWindow(false, filterToken).then(function(applied) {
+      if (!applied || filterToken !== _historyFilterToken) return;
+      _historyInitialLoading = false;
+      _lastGalleryHash = '';
+      renderGallery();
+    }).catch(function(e) {
+      if (filterToken !== _historyFilterToken) return;
+      console.error('clearFilters:', e);
+      _historyInitialLoading = false;
+      _historyLoadError = e && e.message ? e.message : '加载失败';
+      renderGallery();
+    });
   }
 
 function renderGallery() {
-    if (_atomicDeleteRenderBlockUntil && Date.now() < _atomicDeleteRenderBlockUntil) return;
-    if (_renderTimer) return;
-    _renderTimer = requestAnimationFrame(function() {
-      _renderTimer = null;
-      if (_atomicDeleteRenderBlockUntil && Date.now() < _atomicDeleteRenderBlockUntil) return;
-      _renderGalleryImpl();
-      _scheduleHistoryBackTopSync();
-    });
+    _galleryStore.schedule('renderGallery');
   }
 
   if (!window.CW) window.CW = {};
@@ -3496,6 +4341,7 @@ function renderGallery() {
   window.CW.openJobLB = openJobLB;
   window.CW.closeLB = closeLB;
   window.CW.downloadLB = downloadLB;
+  window.CW.copyLBPrompt = copyLBPrompt;
   window.CW.lbNav = lbNav;
   window.CW.enableLBVideoEditor = enableLBVideoEditor;
   window.CW.toggleLBImageExportMenu = toggleLBImageExportMenu;
@@ -3511,9 +4357,12 @@ function renderGallery() {
 	  window.CW.toggleLBShareHome = toggleLBShareHome;
 	  window.CW.toggleLBHidden = toggleLBHidden;
 	  window.CW.toggleHistoryHidden = toggleHistoryHidden;
+	  window.CW.toggleLBProtection = toggleLBProtection;
+	  window.CW.toggleHistoryProtection = toggleHistoryProtection;
 	  window.CW.deleteCurrentLightboxItem = deleteCurrentLightboxItem;
 	  window.CW.getHistoryDetail = getHistoryDetail;
 	  window.CW.loadHistory = loadHistory;
+  window.CW.onHistoryUpdate = onHistoryUpdate;
   window.CW.scrollHistoryToTop = scrollHistoryToTop;
   // Data-only refresh (no gallery re-render)
   async function loadHistoryNoRender() {
@@ -3521,7 +4370,12 @@ function renderGallery() {
       var authHeaders = window.CW.auth.getAuthHeaders();
       var scope = _currentHistoryScope();
       var summaryLimit = Math.min(Math.max(_historyNextOffset || 0, HISTORY_PAGE_SIZE), _historyRefreshWindowLimit());
-      const summaryResp = await fetch(`${API}/api/history/summary?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(summaryLimit)}`, { headers: Object.assign({}, authHeaders) });
+      var params = new URLSearchParams({
+        scope: scope,
+        limit: String(summaryLimit),
+      });
+      if (_galleryFilters.type) params.set('workflow_type', _galleryFilters.type);
+      const summaryResp = await fetch(`${API}/api/history/summary?${params.toString()}`, { headers: Object.assign({}, authHeaders) });
       const summary = await _historyJsonOrThrow(summaryResp, '检查历史');
       if (summary.signature === _historyDataSignature && Number(summary.total || 0) === _historyTotal) return false;
       await _reloadHistoryWindow(false);
@@ -3533,9 +4387,9 @@ function renderGallery() {
 	  window.CW.loadMoreHistory = _loadMoreHistory;
 	  window.CW.renderGallery = renderGallery;
 	  window.CW.forceGalleryRerender = function() {
-	    _lastGalleryHash = '';
-	    renderGallery();
+	    _galleryStore.schedule('forceGalleryRerender', { force: true });
   };
+  window.CW.galleryStore = _galleryStore;
   window.CW._renderJobCard = _renderJobCard;
   window.CW._patchJobCard = _patchJobCard;
   window.CW._onJobDone = _onJobDone;

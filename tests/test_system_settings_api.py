@@ -31,13 +31,14 @@ class SystemSettingsApiTests(unittest.TestCase):
             {
                 "image_protection": {
                     "enabled": False,
+                    "llm_vision_enabled": True,
                     "prompt_signals_enabled": True,
                     "prompt_context_enabled": False,
                     "detector_threshold": 0.33,
                     "paired_breast_threshold": 0.62,
                     "buttocks_threshold": 0.77,
                     "weak_breast_prompt_threshold": 0.54,
-                    "prompt_patterns": {"strong_nude": "全裸|裸体|bare"},
+                    "prompt_patterns": {"strong_nude": "全裸|裸体|bare", "violence": "血腥|gore"},
                 }
             },
             current_user={"sub": "admin", "role": "admin"},
@@ -46,6 +47,7 @@ class SystemSettingsApiTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         settings = result["data"]["image_protection"]
         self.assertFalse(settings["enabled"])
+        self.assertTrue(settings["llm_vision_enabled"])
         self.assertTrue(settings["prompt_signals_enabled"])
         self.assertFalse(settings["prompt_context_enabled"])
         self.assertAlmostEqual(settings["detector_threshold"], 0.33)
@@ -53,9 +55,11 @@ class SystemSettingsApiTests(unittest.TestCase):
         self.assertAlmostEqual(settings["buttocks_threshold"], 0.77)
         self.assertAlmostEqual(settings["weak_breast_prompt_threshold"], 0.54)
         self.assertEqual(settings["prompt_patterns"]["strong_nude"], "全裸|裸体|bare")
+        self.assertEqual(settings["prompt_patterns"]["violence"], "血腥|gore")
 
         loaded = app.api_system_settings_get(current_user={"sub": "admin", "role": "admin"})
         self.assertEqual(loaded["data"]["image_protection"]["prompt_patterns"]["strong_nude"], "全裸|裸体|bare")
+        self.assertEqual(loaded["data"]["image_protection"]["prompt_patterns"]["violence"], "血腥|gore")
 
     def test_admin_can_manage_llm_api_settings(self):
         result = app.api_system_settings_put(
@@ -75,9 +79,10 @@ class SystemSettingsApiTests(unittest.TestCase):
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["base_url"], "http://10.10.10.75:8080")
         self.assertEqual(settings["model"], "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q5_K_P")
-        self.assertEqual(settings["api_key"], "secret-token")
+        self.assertEqual(settings["api_key"], "secr...oken")
         self.assertEqual(settings["timeout"], 240)
         self.assertEqual(get_llm_client_settings()["base_url"], "http://10.10.10.75:8080")
+        self.assertEqual(get_llm_client_settings(include_api_key=True)["api_key"], "secret-token")
 
         loaded = app.api_system_settings_get(current_user={"sub": "admin", "role": "admin"})
         self.assertEqual(loaded["data"]["llm_api"]["model"], settings["model"])

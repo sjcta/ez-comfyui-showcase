@@ -1,9 +1,10 @@
 {
   "75": {
     "inputs": {
-      "filename_prefix": "video/LTX_2.3_sulphur_fp8_i2v",
+      "filename_prefix": "video/LTX_2.3_i2v",
       "format": "auto",
       "codec": "auto",
+      "video-preview": "",
       "video": [
         "320:310",
         0
@@ -25,7 +26,7 @@
   },
   "320:276": {
     "inputs": {
-      "noise_seed": 42
+      "noise_seed": 428447313759760
     },
     "class_type": "RandomNoise",
     "_meta": {
@@ -34,7 +35,7 @@
   },
   "320:277": {
     "inputs": {
-      "noise_seed": 74971541456789
+      "noise_seed": 230474350218065
     },
     "class_type": "RandomNoise",
     "_meta": {
@@ -59,7 +60,7 @@
   },
   "320:279": {
     "inputs": {
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors"
+      "ckpt_name": "ltx/sulphur_distil_nvfp4mixed.safetensors"
     },
     "class_type": "LTXVAudioVAELoader",
     "_meta": {
@@ -391,7 +392,7 @@
   },
   "320:301": {
     "inputs": {
-      "value": 5
+      "value": 10
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -565,7 +566,7 @@
   },
   "320:313": {
     "inputs": {
-      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan, blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, distorted sound, saturated sound, loud, low frequency background noise, low frequency hum, sub-bass rumble, bass drone, electrical hum, wind rumble, muddy low end, noisy room tone, DC offset, hiss, buzz, crackle, clipping, audio artifacts",
+      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan ,blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, low frequency hum, sub-bass rumble, noisy room tone, audio distortion, audio clipping, distorted sound, saturated sound, loud",
       "clip": [
         "320:317",
         0
@@ -599,29 +600,27 @@
   },
   "320:315": {
     "inputs": {
-      "vae": [
-        "320:316",
-        2
-      ],
-      "latents": [
+      "tile_size": 768,
+      "overlap": 64,
+      "temporal_size": 4096,
+      "temporal_overlap": 4,
+      "samples": [
         "320:309",
         0
       ],
-      "horizontal_tiles": 1,
-      "vertical_tiles": 1,
-      "overlap": 1,
-      "last_frame_fix": true,
-      "working_device": "auto",
-      "working_dtype": "auto"
+      "vae": [
+        "320:316",
+        2
+      ]
     },
-    "class_type": "LTXVTiledVAEDecode",
+    "class_type": "VAEDecodeTiled",
     "_meta": {
       "title": "VAE解码（分块）"
     }
   },
   "320:316": {
     "inputs": {
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors"
+      "ckpt_name": "ltx/sulphur_distil_nvfp4mixed.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -631,7 +630,7 @@
   "320:317": {
     "inputs": {
       "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
-      "ckpt_name": "ltx/sulphur_dev_fp8mixed.safetensors",
+      "ckpt_name": "ltx/sulphur_distil_nvfp4mixed.safetensors",
       "device": "default"
     },
     "class_type": "LTXAVTextEncoderLoader",

@@ -6,6 +6,7 @@ import json
 import math
 import mimetypes
 import os
+import ssl
 import uuid
 import urllib.request
 import urllib.error
@@ -13,7 +14,7 @@ from typing import Any
 
 
 def workflow_load_images(workflow: dict[str, Any]) -> list[str]:
-    """Return unique LoadImage/LoadVideo filenames referenced by a workflow."""
+    """Return unique input media filenames referenced by a workflow."""
     media: list[str] = []
     seen: set[str] = set()
 
@@ -46,7 +47,13 @@ def workflow_load_images(workflow: dict[str, Any]) -> list[str]:
             continue
         class_type = node.get("class_type")
         inputs = node.get("inputs", {})
-        input_name = "image" if class_type == "LoadImage" else "file" if class_type == "LoadVideo" else ""
+        input_name = (
+            "image" if class_type == "LoadImage"
+            else "file" if class_type == "LoadVideo"
+            else "video" if class_type == "VHS_LoadVideo"
+            else "audio" if class_type == "LoadAudio"
+            else ""
+        )
         if input_name:
             add_media(inputs.get(input_name))
         if class_type == "LTXDirector":
@@ -335,7 +342,7 @@ def upload_image_to_comfyui(base_url: str, image_path: str, image_name: str) -> 
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with _urlopen_upload(req, timeout=60) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
@@ -343,6 +350,12 @@ def upload_image_to_comfyui(base_url: str, image_path: str, image_name: str) -> 
         raise RuntimeError(f"HTTP {e.code}: {body[:300] or e.reason}") from e
     except Exception as e:
         raise RuntimeError(str(e)) from e
+
+
+def _urlopen_upload(req: urllib.request.Request, timeout: int = 60):
+    if str(req.full_url).lower().startswith("https://"):
+        return urllib.request.urlopen(req, timeout=timeout, context=ssl._create_unverified_context())
+    return urllib.request.urlopen(req, timeout=timeout)
 
 
 def ensure_workflow_images_available(workflow: dict[str, Any], input_dir: str, base_url: str) -> None:
@@ -354,4 +367,4 @@ def ensure_workflow_images_available(workflow: dict[str, Any], input_dir: str, b
         try:
             upload_image_to_comfyui(base_url, image_path, image_name)
         except Exception as e:
-            raise RuntimeError(f"参考图片同步到 ComfyUI 失败: {image_name}: {e}") from e
+            raise RuntimeError(f"参考媒体同步到 ComfyUI 失败: {image_name}: {e}") from e

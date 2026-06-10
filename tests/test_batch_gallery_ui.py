@@ -52,6 +52,8 @@ class BatchGalleryUiContractTests(unittest.TestCase):
         self.assertIn("CW.delHist", history_js)
         self.assertIn("_batchCanDelete(entry, h)", history_js)
         self.assertIn("_batchDeleteTargetId(entry, h)", history_js)
+        self.assertIn("entry.items.find(function(item) { return _canDeleteHistoryItem(item); })", history_js)
+        self.assertIn("CW.delHist('${escA(deleteTargetId)}', event)", history_js)
 
 
 if __name__ == "__main__":

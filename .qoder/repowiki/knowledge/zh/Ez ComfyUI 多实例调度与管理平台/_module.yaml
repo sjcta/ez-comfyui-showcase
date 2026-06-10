@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: ""
+title: Ez ComfyUI 多实例调度与管理平台
+scope:
+    - README.md
+    - .gitignore
+    - BRANCHING.md
+    - CHANGELOG.md
+    - PROJECT_STANDARDS.md
+    - VERSION
+    - app.log
+    - app.py
+    - i2i-FireRed-Edit-1.1.json
+    - i2i_Qwen_Edit.json
+    - quick-start.sh
+source_files: []
+depends_on: []
+related_to: []

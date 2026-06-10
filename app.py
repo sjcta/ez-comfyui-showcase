@@ -3,7 +3,7 @@
 ComfyUI Web v3 — 三段式布局，GPU 监控，服务管理。
 节点管理支持从 config/nodes.json 动态读取。
 """
-import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3, secrets, zipfile, math
+import asyncio, json, os, glob, random, shutil, subprocess, time, uuid, re, socket, sqlite3, secrets, zipfile, math, shlex
 # Ensure D-Bus session is available for systemctl --user calls in nohup context
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -28,6 +28,10 @@ import bcrypt
 
 # ── V4 refactored module imports (keep inline implementations for backward compat) ──
 from modules.config import NodeCategory, ModelGroup, NODE_STATUS_MAP
+from modules.bernini_workflow import (
+    apply_bernini_mixed_mode_to_workflow,
+    normalize_bernini_field_values,
+)
 from modules.comfyui_upload import apply_qwen_frame_roll_to_workflow, ensure_workflow_images_available
 from modules.image_protection import (
     ImageProtectionResult,
@@ -40,8 +44,8 @@ from modules.image_protection import (
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
-from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path, is_image_output
-from modules.llm_client import LLMVisionUnsupportedError, chat_completion, configure_llm_client, llm_provider_name
+from modules.media_outputs import collect_preferred_history_outputs, output_media_type, output_ref_rel_path, is_image_output
+from modules.llm_client import LLMVisionUnsupportedError, chat_completion, chat_text, configure_llm_client, llm_provider_name
 from modules.prompt_interrogator import (
     prepare_interrogate_image,
     run_llm_expert_image_interrogator,
@@ -324,7 +328,7 @@ JOB_STAGE_TIMEOUTS = {
     "generating": 1200,
     "downloading": 240,
 }
-NON_EXPIRING_JOB_STATUSES = {"queued"}
+NON_EXPIRING_JOB_STATUSES = {"queued", "paused"}
 JOB_STAGE_TIMEOUT_MESSAGES = {
     "dispatching": "任务调度超时",
     "queued": "排队超时",
@@ -435,7 +439,9 @@ def _job_last_activity_ts(job: dict) -> float:
 def _is_video_job(job: dict) -> bool:
     workflow_type = str(job.get("workflow_type") or "")
     workflow = os.path.basename(str(job.get("workflow") or "")).lower()
-    return "视频" in workflow_type or any(token in workflow for token in ("i2v", "t2v", "video", "ltx", "sulphur"))
+    return "视频" in workflow_type or any(
+        token in workflow for token in ("i2v", "t2v", "video", "ltx", "sulphur", "longcat", "avatar")
+    )
 
 
 def _job_stage_timeout(job: dict, status: str) -> int | None:
@@ -981,6 +987,7 @@ _app_loop: asyncio.AbstractEventLoop | None = None
 _job_gpu_activity_watch: dict[str, dict] = {}
 _generation_dispatch_lock: asyncio.Lock | None = None
 _generation_dispatch_lock_loop: asyncio.AbstractEventLoop | None = None
+_external_resource_lock: dict = {}
 
 def _generation_queue_worker_count() -> int:
     """Only one generation dispatcher is allowed so A/B never run concurrently."""
@@ -997,6 +1004,20 @@ def _get_generation_dispatch_lock() -> asyncio.Lock:
         _generation_dispatch_lock_loop = loop
     return _generation_dispatch_lock
 
+
+def _job_pause_epoch(job: dict | None) -> int:
+    try:
+        return int((job or {}).get("pause_epoch") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _job_dispatch_stale_or_paused(job_id: str, pause_epoch: int) -> bool:
+    job = jobs.get(job_id)
+    if not job:
+        return True
+    return job.get("status") == "paused" or _job_pause_epoch(job) != pause_epoch
+
 async def _queue_worker():
     """Global generation dispatcher.
 
@@ -1010,8 +1031,19 @@ async def _queue_worker():
             if job_id not in jobs:
                 _job_queue.task_done()
                 continue
+            pause_epoch = _job_pause_epoch(jobs.get(job_id))
+            if _job_dispatch_stale_or_paused(job_id, pause_epoch):
+                _job_queue.task_done()
+                continue
+            can_run = await _wait_for_external_resource_lock_clear(job_id, pause_epoch=pause_epoch)
+            if not can_run:
+                _job_queue.task_done()
+                continue
             async with _get_generation_dispatch_lock():
                 if job_id not in jobs:
+                    _job_queue.task_done()
+                    continue
+                if _job_dispatch_stale_or_paused(job_id, pause_epoch):
                     _job_queue.task_done()
                     continue
                 if _job_runner:
@@ -1318,6 +1350,12 @@ WF_THUMB_DIR = os.environ.get("WF_THUMB_DIR", os.path.join(_BASE, "data", "thumb
 JOBS_FILE    = os.environ.get("JOBS_FILE", os.path.join(_BASE, "data", "jobs.json"))
 CANCELLED_PROMPTS_FILE = os.environ.get("CANCELLED_PROMPTS_FILE", os.path.join(_BASE, "data", "cancelled_prompts.json"))
 SYSTEM_SETTINGS_FILE = os.environ.get("SYSTEM_SETTINGS_FILE", os.path.join(_BASE, "data", "system_settings.json"))
+LABS_DIR = os.environ.get("LABS_DIR", os.path.join(_BASE, "data", "labs"))
+LABS_MANIFEST_DIR = os.environ.get("LABS_MANIFEST_DIR", os.path.join(LABS_DIR, "manifests"))
+LABS_PROJECT_DIR = os.environ.get("LABS_PROJECT_DIR", os.path.join(LABS_DIR, "projects"))
+LABS_CHECKPOINT_DIR = os.environ.get("LABS_CHECKPOINT_DIR", os.path.join(LABS_DIR, "checkpoints"))
+LABS_RUN_DIR = os.environ.get("LABS_RUN_DIR", os.path.join(LABS_DIR, "runs"))
+EXTERNAL_RESOURCE_LOCK_FILE = os.environ.get("EXTERNAL_RESOURCE_LOCK_FILE", os.path.join(LABS_DIR, "resource_lock.json"))
 PORT = int(os.environ.get("EZ_COMFYUI_PORT", "9091"))
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "200"))
 
@@ -1329,6 +1367,100 @@ def _safe_rel_path(base_dir: str, rel_path: str) -> str:
     if os.path.commonpath([root, path]) != root:
         raise HTTPException(400, "Invalid path")
     return path
+
+
+def _read_json_file_safe(path: str, default):
+    try:
+        if not os.path.isfile(path):
+            return default
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _write_json_file_atomic(path: str, payload) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _load_external_resource_lock() -> dict:
+    global _external_resource_lock
+    if not _external_resource_lock:
+        data = _read_json_file_safe(EXTERNAL_RESOURCE_LOCK_FILE, {})
+        if isinstance(data, dict):
+            _external_resource_lock = data
+    return _external_resource_lock if isinstance(_external_resource_lock, dict) else {}
+
+
+def _persist_external_resource_lock(lock: dict) -> None:
+    global _external_resource_lock
+    _external_resource_lock = dict(lock or {})
+    if _external_resource_lock:
+        _write_json_file_atomic(EXTERNAL_RESOURCE_LOCK_FILE, _external_resource_lock)
+        return
+    try:
+        if os.path.isfile(EXTERNAL_RESOURCE_LOCK_FILE):
+            os.remove(EXTERNAL_RESOURCE_LOCK_FILE)
+    except Exception:
+        pass
+
+
+def _active_external_resource_lock() -> dict:
+    lock = _load_external_resource_lock()
+    if not lock:
+        return {}
+    expires_at = float(lock.get("expires_at") or 0)
+    if expires_at and expires_at <= time.time():
+        _persist_external_resource_lock({})
+        return {}
+    return dict(lock)
+
+
+def _resource_lock_public(lock: dict | None = None) -> dict:
+    lock = dict(lock or _active_external_resource_lock() or {})
+    if not lock:
+        return {"active": False}
+    return {
+        "active": True,
+        "project": lock.get("project", ""),
+        "reason": lock.get("reason", ""),
+        "holder": lock.get("holder", ""),
+        "created_at": lock.get("created_at", ""),
+        "expires_at": lock.get("expires_at", 0),
+        "ttl_sec": lock.get("ttl_sec", 0),
+    }
+
+
+async def _wait_for_external_resource_lock_clear(job_id: str, pause_epoch: int | None = None) -> bool:
+    last_notice = 0.0
+    while job_id in jobs:
+        status = str(jobs.get(job_id, {}).get("status") or "")
+        if jobs.get(job_id, {}).get("cancelled") or status in {"cancelled", "paused"}:
+            return False
+        if pause_epoch is not None and _job_pause_epoch(jobs.get(job_id)) != pause_epoch:
+            return False
+        lock = _active_external_resource_lock()
+        if not lock:
+            return True
+        now = time.time()
+        if now - last_notice >= 5:
+            project = str(lock.get("project") or "外部测试项目")
+            reason = str(lock.get("reason") or "GPU 资源被外部测试占用")
+            jobs[job_id]["status"] = "queued"
+            jobs[job_id]["message"] = f"等待 {project} 释放 GPU 资源..."
+            jobs[job_id]["resource_lock"] = _resource_lock_public(lock)
+            jobs[job_id]["progress"] = {"pct": 0}
+            jobs[job_id]["last_update"] = now
+            save_jobs()
+            await broadcast({"type": "job_update", "job": jobs[job_id]})
+            add_log("info", "queue", f"ComfyUI 队列暂停出队: {reason[:80]}", job_id)
+            last_notice = now
+        await asyncio.sleep(2)
+    return False
 
 
 def _workflow_thumbnail_rel(path: str) -> str:
@@ -1784,7 +1916,7 @@ def _gen_db_to_record(row: dict, compact: bool = False) -> dict:
     deleted_at = row.get("deleted_at", "") or ""
     hidden_at = row.get("hidden_at", "") or ""
     params = {}
-    if not compact and row.get("params"):
+    if row.get("params"):
         try:
             params = json.loads(row["params"])
         except Exception:
@@ -1792,7 +1924,8 @@ def _gen_db_to_record(row: dict, compact: bool = False) -> dict:
     workflow = row["workflow"]
     workflow_type = _workflow_primary_type(workflow)
     prompt = row.get("prompt", "") or ""
-    prompt_preview = _history_prompt_preview(prompt)
+    prompt_preview = infer_generation_label(workflow, params, workflow_type) if params else _history_prompt_preview(prompt)
+    prompt_preview = _history_prompt_preview(prompt_preview)
     record = {
         "id": row["id"],
         "filename": row.get("image_path", ""),
@@ -1848,7 +1981,7 @@ def _backfill_legacy_prompt_protection(conn: sqlite3.Connection | None = None) -
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
     checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    worker = ImageProtectionWorker(load_classifier=lambda: None, load_vision_reviewer=lambda: None)
     updates = []
     for row in rows:
         prompt = row["prompt"] or ""
@@ -1882,7 +2015,7 @@ def _recheck_safe_heuristic_nsfw_risk_rows(conn: sqlite3.Connection | None = Non
              AND COALESCE(protection_source, '') = 'heuristic'""",
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
-    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    worker = ImageProtectionWorker(load_classifier=lambda: None, load_vision_reviewer=lambda: None)
     updates = []
     checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for row in rows:
@@ -1933,7 +2066,7 @@ def _recheck_safe_heuristic_video_rows(conn: sqlite3.Connection | None = None) -
              )""",
         (IMAGE_PROTECTION_SAFE,),
     ).fetchall()
-    worker = ImageProtectionWorker(load_classifier=lambda: None)
+    worker = ImageProtectionWorker(load_classifier=lambda: None, load_vision_reviewer=lambda: None)
     updates = []
     checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for row in rows:
@@ -3779,6 +3912,14 @@ def _is_image_output_file(filename: str) -> bool:
     return is_image_output(filename)
 
 
+def _remote_download_path(output_dir: str, prompt_id: str, rel_path: str) -> str:
+    safe_prompt = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(prompt_id or "unknown")).strip("._") or "unknown"
+    safe_rel = str(rel_path or "").replace("\\", "/").lstrip("/")
+    if not safe_rel:
+        safe_rel = "output"
+    return os.path.join(output_dir, ".remote_downloads", safe_prompt, safe_rel)
+
+
 def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, output_dir: str) -> list:
     """Download preferred output media from remote ComfyUI after generation.
     Returns list of local file paths that were downloaded."""
@@ -3787,8 +3928,7 @@ def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, out
         if not history or prompt_id not in history:
             print(f"[download] No history entry for {prompt_id}")
             return []
-        outputs = history[prompt_id].get("outputs", {})
-        media = collect_preferred_outputs(outputs)
+        media = collect_preferred_history_outputs(history[prompt_id])
         if not media:
             print(f"[download] No output media in history for {prompt_id}")
             return []
@@ -3798,11 +3938,7 @@ def _download_remote_images_sync(job_id: str, prompt_id: str, base_url: str, out
             subfolder = ref.get("subfolder", "")
             media_type = ref.get("type", "output")
             rel_path = output_ref_rel_path(ref)
-            local_path = os.path.join(output_dir, rel_path)
-            # Skip if already exists locally
-            if os.path.isfile(local_path):
-                downloaded.append(local_path)
-                continue
+            local_path = _remote_download_path(output_dir, prompt_id, rel_path)
             query = urllib.parse.urlencode({
                 "filename": filename,
                 "subfolder": subfolder,
@@ -4375,13 +4511,13 @@ def _sync_flux2_scheduler_dimensions(wf: dict, field_values: dict) -> None:
     if width is None and height is None:
         return
     for nid, node in (wf or {}).items():
-        if not isinstance(node, dict) or node.get("class_type") != "Flux2Scheduler":
+        if not isinstance(node, dict) or node.get("class_type") not in {"Flux2Scheduler", "Ideogram4Scheduler"}:
             continue
         inputs = node.get("inputs") or {}
         if width is not None and "width" in inputs:
-            field_values.setdefault(f"{nid}::width", width)
+            field_values[f"{nid}::width"] = width
         if height is not None and "height" in inputs:
-            field_values.setdefault(f"{nid}::height", height)
+            field_values[f"{nid}::height"] = height
 
 
 ERNIE_IMAGE_OFFICIAL_SIZES: tuple[tuple[int, int], ...] = (
@@ -4510,13 +4646,153 @@ def _sync_ltx_video_timing(wf: dict, field_values: dict) -> None:
                 field_values[f"{nid}::value"] = int(round(float(fps)))
             except Exception:
                 field_values[f"{nid}::value"] = fps
-        if length is not None and ct == "VAEDecodeTiled" and "temporal_size" in inputs:
-            field_values[f"{nid}::temporal_size"] = length
-        if width is not None and ct == "VAEDecodeTiled" and "tile_size" in inputs:
+        # VAEDecodeTiled chunk sizes are quality/performance parameters, not
+        # video timing values. Preserve workflow/editor defaults instead of
+        # deriving them from frame count or canvas width.
+
+
+def _probe_audio_duration_seconds(src: str) -> float:
+    ffprobe = _project_ffprobe_bin()
+    if not ffprobe or not src:
+        return 0.0
+    try:
+        result = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=duration:format=duration",
+                "-of",
+                "json",
+                src,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return 0.0
+        data = json.loads(getattr(result, "stdout", "") or "{}")
+        streams = data.get("streams") or []
+        stream = streams[0] if streams and isinstance(streams[0], dict) else {}
+        fmt = data.get("format") or {}
+        duration = 0.0
+        for candidate in (stream.get("duration"), fmt.get("duration")):
             try:
-                field_values[f"{nid}::tile_size"] = max(64, min(512, int(float(width))))
-            except Exception:
+                duration = max(duration, float(candidate or 0))
+            except (TypeError, ValueError):
                 pass
+        return max(0.0, duration)
+    except Exception:
+        return 0.0
+
+
+def _longcat_frame_count(duration_sec: float, fps: float) -> int:
+    try:
+        duration = max(0.0, float(duration_sec or 0.0))
+        frame_rate = max(1.0, float(fps or 25.0))
+    except (TypeError, ValueError):
+        return 81
+    frames = max(1, int(math.ceil(duration * frame_rate)))
+    remainder = (frames - 1) % 4
+    if remainder:
+        frames += 4 - remainder
+    return max(5, frames)
+
+
+def _longcat_cap_frame_count(frames: int, max_frames: int = 256) -> int:
+    try:
+        capped = min(int(frames or 0), int(max_frames or 256))
+    except (TypeError, ValueError):
+        capped = 253
+    capped = max(5, capped)
+    remainder = (capped - 1) % 4
+    if remainder:
+        capped -= remainder
+    return max(5, capped)
+
+
+def _sync_longcat_avatar_audio_timing(wf: dict, field_values: dict) -> None:
+    """Match LongCat Avatar generation length to the uploaded audio duration."""
+    if not any(isinstance(node, dict) and node.get("class_type") == "LongCatAvatarWhisperEmbeds" for node in (wf or {}).values()):
+        return
+
+    audio_name = ""
+    fps = 25.0
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "LoadAudio" and not audio_name:
+            audio_name = str(field_values.get(f"{nid}::audio", inputs.get("audio", "")) or "").strip()
+        elif ct == "LongCatAvatarWhisperEmbeds":
+            raw_fps = field_values.get(f"{nid}::fps", inputs.get("fps", fps))
+            try:
+                fps = float(raw_fps or fps)
+            except (TypeError, ValueError):
+                fps = 25.0
+    if not audio_name:
+        return
+
+    audio_path = _safe_comfy_input_path(audio_name)
+    if not audio_path or not os.path.isfile(audio_path):
+        return
+    audio_duration = _probe_audio_duration_seconds(audio_path)
+    if audio_duration <= 0:
+        return
+
+    max_seconds = 12.0
+    try:
+        max_seconds = max(1.0, float(os.environ.get("EZ_LONGCAT_MAX_AUDIO_SECONDS", "12") or 12))
+    except (TypeError, ValueError):
+        max_seconds = 12.0
+    manual_duration = 0.0
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("class_type") or "") != "TrimAudioDuration":
+            continue
+        try:
+            manual_duration = float(field_values.get(f"{nid}::duration", node.get("inputs", {}).get("duration", 0)) or 0)
+        except (TypeError, ValueError):
+            manual_duration = 0.0
+        break
+
+    requested_duration = manual_duration if manual_duration > 0 else audio_duration
+    target_source_duration = min(requested_duration, max_seconds)
+    raw_frames = _longcat_frame_count(target_source_duration, fps)
+    frames = _longcat_cap_frame_count(raw_frames)
+    target_duration = round(frames / max(1.0, fps), 3)
+
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "TrimAudioDuration" and "duration" in inputs:
+            field_values[f"{nid}::duration"] = target_duration
+        elif ct == "LongCatAvatarWhisperEmbeds":
+            if "num_frames" in inputs:
+                field_values[f"{nid}::num_frames"] = frames
+            if "fps" in inputs:
+                field_values[f"{nid}::fps"] = fps
+        elif ct == "WanVideoLongCatAvatarExtendEmbeds" and "num_frames" in inputs:
+            field_values[f"{nid}::num_frames"] = frames
+        elif ct == "VHS_VideoCombine" and "frame_rate" in inputs:
+            field_values[f"{nid}::frame_rate"] = fps
+
+    field_values["__longcat_audio_duration_sec"] = round(audio_duration, 3)
+    field_values["__longcat_target_duration_sec"] = target_duration
+    field_values["__longcat_target_frames"] = frames
+    field_values["__longcat_timing_mode"] = "manual" if manual_duration > 0 else "audio_auto"
+    if requested_duration > max_seconds:
+        field_values["__longcat_audio_truncated_sec"] = round(max_seconds, 3)
+    if raw_frames != frames:
+        field_values["__longcat_frame_cap"] = frames
 
 
 def _ltx_director_default_segment_prompt(global_prompt: str, index: int, total: int) -> str:
@@ -4592,13 +4868,17 @@ def _sync_ltx_director_segment_coverage(wf: dict, node: dict, field_values: dict
     expected = _ltx_director_expected_frames(wf, node, field_values)
     if expected <= 0 or not segments:
         return
-    total = 0
+    latest_end = 0
     for seg in segments:
+        if not isinstance(seg, dict):
+            continue
         try:
-            total += max(0, int(seg.get("length") or 0))
+            start = max(0, int(seg.get("start") or 0))
+            length = max(0, int(seg.get("length") or 0))
         except (TypeError, ValueError):
-            pass
-    gap = expected - total
+            continue
+        latest_end = max(latest_end, start + length)
+    gap = expected - latest_end
     if gap <= 0:
         return
     last = next((seg for seg in reversed(segments) if isinstance(seg, dict)), None)
@@ -4656,7 +4936,765 @@ def _sync_ltx_director_timeline_prompts(wf: dict, field_values: dict) -> None:
             field_values[guide_strength_key] = ",".join(strengths)
 
 
-def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
+LTX_SULPHUR_DIST_WORKFLOW = "i2v_ltx23_sulphur_fp8.json"
+LTX_SINGULARITY_OMNICINE_WORKFLOW = "i2v_ltx23_singularity_omnicine.json"
+IDEOGRAM4_OFFICIAL_WORKFLOWS = {
+    "ideogram4_uncen_test.json",
+    "t2i_ideogram4_official_nvfp4.json",
+}
+LTX_SINGULARITY_OMNICINE_BASE_MODEL = "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors"
+LTX_SINGULARITY_OMNICINE_LOCKED_FIELDS = {
+    "320:279::vae_name": "LTX23_audio_vae_bf16.safetensors",
+    "320:316::unet_name": LTX_SINGULARITY_OMNICINE_BASE_MODEL,
+    "320:316::weight_dtype": "default",
+    "320:317::clip_name1": "gemma_3_12B_it_fp8_scaled.safetensors",
+    "320:317::clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
+    "320:317::type": "ltxv",
+    "320:317::device": "default",
+    "320:314::cfg": 1,
+    "320:285::lora_name": "ltx/Singularity-LTX-2.3_OmniCine_V1.safetensors",
+    "320:285::strength_model": 1,
+    "320:325::lora_name": "ltx/Singularity-LTX-2.3_OmniCine_V1.safetensors",
+    "320:325::strength_model": 1,
+}
+LTX_SULPHUR_DIST_LOCKED_FIELDS = {
+    "320:279::ckpt_name": "ltx/sulphur_distil_nvfp4mixed.safetensors",
+    "320:316::ckpt_name": "ltx/sulphur_distil_nvfp4mixed.safetensors",
+    "320:317::ckpt_name": "ltx/sulphur_distil_nvfp4mixed.safetensors",
+    "320:317::text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
+    "320:317::device": "default",
+    "320:280::sampler_name": "euler_cfg_pp",
+    "320:291::sampler_name": "euler_ancestral_cfg_pp",
+    "320:281::sigmas": "0.85, 0.7250, 0.4219, 0.0",
+    "320:306::sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0",
+    "320:282::cfg": 1,
+    "320:314::cfg": 1,
+    "320:285::lora_name": "ltx/ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors",
+    "320:285::strength_model": 0.5,
+    "320:315::tile_size": 768,
+    "320:315::overlap": 64,
+    "320:315::temporal_size": 4096,
+    "320:315::temporal_overlap": 4,
+}
+
+
+def _lock_ltx_sulphur_dist_fields(workflow_name: str, field_values: dict) -> None:
+    if os.path.basename(str(workflow_name or "")) != LTX_SULPHUR_DIST_WORKFLOW:
+        return
+    field_values.update(LTX_SULPHUR_DIST_LOCKED_FIELDS)
+
+
+def _lock_ltx_singularity_omnicine_fields(workflow_name: str, field_values: dict) -> None:
+    if os.path.basename(str(workflow_name or "")) != LTX_SINGULARITY_OMNICINE_WORKFLOW:
+        return
+    field_values.update(LTX_SINGULARITY_OMNICINE_LOCKED_FIELDS)
+
+
+def _strip_style_prompt_blocks(prompt: str) -> str:
+    text = str(prompt or "")
+    text = re.sub(
+        r"(^|[\n\r])\s*\[Style Preset:[\s\S]*?\[\s*User Prompt\s*\]\s*",
+        r"\1",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[\n\r]{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _is_official_ideogram4_caption(prompt: str) -> bool:
+    try:
+        data = json.loads(str(prompt or ""))
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get("high_level_description") and isinstance(data.get("compositional_deconstruction"), dict))
+
+
+def _json_object_from_text(text: str) -> dict | None:
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(raw[start:end + 1])
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+_IDEOGRAM4_HEX_COLOR_RE = re.compile(r"^#[0-9A-F]{6}$")
+
+
+def _ideogram4_clean_color_palette(value, limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    colors: list[str] = []
+    for raw in value:
+        color = str(raw or "").strip().upper()
+        if not color:
+            continue
+        if _IDEOGRAM4_HEX_COLOR_RE.match(color):
+            colors.append(color)
+        if len(colors) >= limit:
+            break
+    return colors
+
+
+def _ideogram4_clean_bbox(value) -> list[int] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    try:
+        nums = [float(v) for v in value]
+    except (TypeError, ValueError):
+        return None
+    if all(0 <= n <= 1 for n in nums):
+        nums = [n * 1000 for n in nums]
+    ymin, xmin, ymax, xmax = [max(0, min(1000, int(round(n)))) for n in nums]
+    if ymin > ymax:
+        ymin, ymax = ymax, ymin
+    if xmin > xmax:
+        xmin, xmax = xmax, xmin
+    return [ymin, xmin, ymax, xmax]
+
+
+def _ideogram4_bbox_position_phrase(bbox: list[int] | None) -> str:
+    if not bbox or len(bbox) != 4:
+        return ""
+    ymin, xmin, ymax, xmax = bbox
+    cx = (xmin + xmax) / 2
+    cy = (ymin + ymax) / 2
+    vertical = "upper" if cy < 340 else ("lower" if cy > 660 else "middle")
+    horizontal = "left" if cx < 340 else ("right" if cx > 660 else "center")
+    if vertical == "middle" and horizontal == "center":
+        region = "center"
+    elif vertical == "middle":
+        region = horizontal
+    elif horizontal == "center":
+        region = vertical
+    else:
+        region = f"{vertical}-{horizontal}"
+    return (
+        f"Positioned in the {region} area of the image, roughly "
+        f"x {round(xmin / 10)}-{round(xmax / 10)}%, y {round(ymin / 10)}-{round(ymax / 10)}%."
+    )
+
+
+def _ideogram4_canvas_shapes(canvas_payload) -> list[dict]:
+    if not canvas_payload:
+        return []
+    try:
+        data = json.loads(str(canvas_payload))
+    except Exception:
+        return []
+    shapes = data.get("shapes") if isinstance(data, dict) else []
+    if not isinstance(shapes, list):
+        return []
+    clean: list[dict] = []
+    for item in shapes[:20]:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            x = float(item.get("x") or 0)
+            y = float(item.get("y") or 0)
+            w = float(item.get("w") or 0)
+            h = float(item.get("h") or 0)
+        except (TypeError, ValueError):
+            continue
+        w = max(1.0, min(100.0, w))
+        h = max(1.0, min(100.0, h))
+        x = max(0.0, min(100.0 - w, x))
+        y = max(0.0, min(100.0 - h, y))
+        clean.append({
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+            "kind": "circle" if str(item.get("kind") or "").lower() == "circle" else "rect",
+            "element_type": "text" if str(item.get("elementType") or "").lower() == "text" else "obj",
+            "text": text,
+        })
+    return clean
+
+
+def _ideogram4_canvas_bbox(shape: dict) -> list[int]:
+    y0 = round(float(shape.get("y") or 0) * 10)
+    x0 = round(float(shape.get("x") or 0) * 10)
+    y1 = round((float(shape.get("y") or 0) + float(shape.get("h") or 0)) * 10)
+    x1 = round((float(shape.get("x") or 0) + float(shape.get("w") or 0)) * 10)
+    return [
+        max(0, min(1000, y0)),
+        max(0, min(1000, x0)),
+        max(0, min(1000, y1)),
+        max(0, min(1000, x1)),
+    ]
+
+
+def _ideogram4_canvas_natural_placement(shape: dict) -> str:
+    cx = float(shape.get("x") or 0) + float(shape.get("w") or 0) / 2
+    cy = float(shape.get("y") or 0) + float(shape.get("h") or 0) / 2
+    horizontal = "toward the left side" if cx < 38 else ("toward the right side" if cx > 62 else "near the center")
+    if cy < 34:
+        return f"{horizontal} of the upper background or sky"
+    if cy > 66:
+        return f"{horizontal} of the foreground"
+    return f"{horizontal} of the middle distance"
+
+
+def _ideogram4_canvas_object_note(shape: dict) -> str:
+    note = f"{_ideogram4_canvas_natural_placement(shape)}: {shape.get('text', '')}"
+    if shape.get("kind") == "circle":
+        note += "; treat this as a soft natural cluster in the scene, not a visible circular outline"
+    return note + "."
+
+
+def _ideogram4_canvas_text_desc() -> str:
+    return (
+        "Render the literal text at this precise typography placement as part of the same image. "
+        "The bbox is an invisible placement constraint for glyphs only: only the letter strokes should be visible, "
+        "and the surrounding area must remain the original scene. Do not draw any rectangle, outline, border, textbox, "
+        "caption box, card, panel, white box, translucent fill, frame, or container around the text."
+    )
+
+
+def _ideogram4_style_wants_layout(text: str) -> bool:
+    return bool(re.search(
+        r"海报|版式|排版|信息图|平面设计|设计稿|名片|卡片设计|包装设计|logo|标志|ppt|幻灯片|"
+        r"poster|layout|graphic design|infographic|business card|presentation|slide|flyer|packaging|brand mark",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ))
+
+
+def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, existing_prompt: str = "") -> dict | None:
+    shapes = _ideogram4_canvas_shapes(canvas_payload)
+    if not shapes:
+        return None
+    base = _strip_style_prompt_blocks(raw_prompt or "")
+    parsed = _json_object_from_text(existing_prompt)
+    style_payload = {}
+    if isinstance(parsed, dict) and isinstance(parsed.get("style"), dict):
+        style_payload = parsed.get("style") or {}
+    if not base and isinstance(parsed, dict):
+        prompt_value = parsed.get("prompt") if "prompt" in parsed else parsed
+        if isinstance(prompt_value, dict) and _is_official_ideogram4_caption(json.dumps(prompt_value, ensure_ascii=False)):
+            base = str(prompt_value.get("high_level_description") or "").strip()
+        else:
+            base = _ideogram4_prompt_text(prompt_value)
+    if not base:
+        base = "A coherent realistic image with naturally positioned elements."
+
+    layout_mode = _ideogram4_style_wants_layout(base)
+    object_notes = [_ideogram4_canvas_object_note(shape) for shape in shapes if shape.get("element_type") != "text"]
+    text_elements = [
+        {
+            "type": "text",
+            "bbox": _ideogram4_canvas_bbox(shape),
+            "text": str(shape.get("text") or "").strip(),
+            "desc": _ideogram4_canvas_text_desc(),
+        }
+        for shape in shapes
+        if shape.get("element_type") == "text"
+    ]
+
+    if layout_mode:
+        style_description = {
+            "aesthetics": "unified editorial layout with integrated subjects and precise typography, no visible guide boxes",
+            "lighting": "consistent lighting across all elements",
+            "medium": "graphic_design",
+            "art_style": "single unified composition with precise typography placement",
+            "color_palette": [],
+        }
+    else:
+        style_description = {
+            "aesthetics": "one coherent realistic image, integrated scene composition, no collage, no slide layout, no visible guide boxes",
+            "lighting": "consistent natural lighting across the whole scene",
+            "photo": "single uninterrupted continuous camera shot with consistent perspective, focus, depth, scale, and no dividing seam",
+            "medium": "photograph",
+            "color_palette": [],
+        }
+
+    elements: list[dict] = []
+    if object_notes:
+        elements.append({
+            "type": "obj",
+            "desc": (
+                "One uninterrupted scene that fuses all object modules into the same camera view and physical space. "
+                "Use natural spatial relationships, not separate layout regions: "
+                + " ".join(object_notes)
+                + " Keep one shared perspective, one lighting direction, one foreground/background space, and one atmosphere. "
+                "Do not draw guide rectangles, boxes, outlines, panels, quadrant divisions, split-screen seams, pasted regions, or PPT-style frames."
+            ),
+        })
+    elements.extend(text_elements)
+    if not elements:
+        elements.append({"type": "obj", "desc": base})
+
+    payload = {
+        "high_level_description": (
+            base
+            + " Object modules must be fused into one continuous image. Text modules may use invisible bbox placement for glyph positioning only; do not draw any visible text boxes or borders."
+        ).strip(),
+        "style_description": style_description,
+        "compositional_deconstruction": {
+            "background": (
+                base
+                + " A single continuous environment connects all object content naturally, with no visible layout boxes, borders, cards, panels, quadrant grid, split-screen seam, or inset frames."
+            ).strip(),
+            "elements": elements,
+        },
+    }
+    return _merge_ideogram4_style(payload, style_payload)
+
+
+def _normalize_ideogram4_style_description(style: dict) -> dict:
+    if not isinstance(style, dict):
+        style = {}
+    aesthetics = str(style.get("aesthetics") or style.get("style") or "clean high-quality image").strip()
+    lighting = str(style.get("lighting") or "coherent natural lighting").strip()
+    medium = str(style.get("medium") or "digital image").strip()
+    palette = _ideogram4_clean_color_palette(style.get("color_palette"), 16)
+    is_photo = bool(style.get("photo")) or "photo" in medium.lower() or "photograph" in medium.lower()
+    if is_photo:
+        out = {
+            "aesthetics": aesthetics,
+            "lighting": lighting,
+            "photo": str(style.get("photo") or "natural camera perspective, sharp focus").strip(),
+            "medium": medium if medium else "photograph",
+        }
+    else:
+        out = {
+            "aesthetics": aesthetics,
+            "lighting": lighting,
+            "medium": medium,
+            "art_style": str(style.get("art_style") or style.get("style") or aesthetics).strip(),
+        }
+    if palette:
+        out["color_palette"] = palette
+    return out
+
+
+def _normalize_ideogram4_caption_object(data: dict) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+    high = str(data.get("high_level_description") or data.get("description") or "").strip()
+    comp = data.get("compositional_deconstruction")
+    if not isinstance(comp, dict):
+        comp = {}
+    background = str(comp.get("background") or data.get("background") or high).strip()
+    elements = comp.get("elements")
+    if not isinstance(elements, list):
+        elements = []
+    clean_elements = []
+    for item in elements[:20]:
+        if not isinstance(item, dict):
+            continue
+        desc = str(item.get("desc") or item.get("description") or item.get("text") or "").strip()
+        if not desc:
+            continue
+        bbox = _ideogram4_clean_bbox(item.get("bbox"))
+        position = _ideogram4_bbox_position_phrase(bbox)
+        shape = str(item.get("shape") or "").strip().lower()
+        if position and "roughly x " not in desc:
+            desc = f"{position} {desc}"
+        if shape in {"circle", "ellipse", "oval"} and "soft clustered" not in desc.lower():
+            desc = f"{desc} Arranged as a soft clustered part of the same image rather than as a drawn outline."
+        clean = {"type": "text" if str(item.get("type") or "").lower() == "text" else "obj"}
+        if bbox:
+            clean["bbox"] = bbox
+        if clean["type"] == "text":
+            clean["text"] = str(item.get("text") or desc).strip()
+        clean["desc"] = desc
+        palette = _ideogram4_clean_color_palette(item.get("color_palette"), 5)
+        if palette:
+            clean["color_palette"] = palette
+        clean_elements.append(clean)
+    if not clean_elements and high:
+        clean_elements.append({"type": "obj", "bbox": [120, 180, 880, 820], "desc": high})
+    style_description = _normalize_ideogram4_style_description(data.get("style_description"))
+    if not high or not background:
+        return None
+    return {
+        "high_level_description": high,
+        "style_description": style_description,
+        "compositional_deconstruction": {
+            "background": background,
+            "elements": clean_elements,
+        },
+    }
+
+
+_IDEOGRAM4_CUSTOM_NEGATIVE_KEYS = {
+    "负面提示词",
+    "反向提示词",
+    "negative",
+    "negative_prompt",
+    "negative prompt",
+    "avoid",
+    "排除",
+}
+
+_IDEOGRAM4_CUSTOM_POSITIVE_KEYS = (
+    "正向提示词",
+    "positive_prompt",
+    "positive prompt",
+    "prompt",
+    "description",
+    "描述",
+)
+
+_IDEOGRAM4_CUSTOM_SCENE_KEYS = (
+    "场景",
+    "背景",
+    "地点",
+    "环境",
+    "整体描述",
+    "图片内容",
+    "基本概述",
+)
+
+_IDEOGRAM4_CUSTOM_STYLE_KEYS = (
+    "风格",
+    "氛围风格",
+    "摄影风格",
+    "画质",
+    "光线",
+    "色彩光线风格",
+)
+
+_IDEOGRAM4_CUSTOM_SUBJECT_KEYS = (
+    "主体",
+    "人物",
+    "主角",
+    "主体外貌",
+    "服装妆容",
+    "肢体动作",
+    "构图镜头",
+)
+
+
+_IDEOGRAM4_LLM_CAPTION_CACHE: OrderedDict[str, str] = OrderedDict()
+_IDEOGRAM4_LLM_CAPTION_CACHE_MAX = 32
+
+
+def _ideogram4_is_negative_json_key(key: str) -> bool:
+    lower = str(key or "").strip().lower()
+    return lower in _IDEOGRAM4_CUSTOM_NEGATIVE_KEYS
+
+
+def _ideogram4_clip_text(text: str, limit: int = 1800) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(clean) <= limit:
+        return clean
+    return clean[:limit].rstrip(" ，,。.;；") + "..."
+
+
+def _ideogram4_collect_text(value, limit: int = 1800, depth: int = 0) -> str:
+    if depth > 8 or limit <= 0:
+        return ""
+    if isinstance(value, str):
+        return _ideogram4_clip_text(value, limit)
+    parts: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if _ideogram4_is_negative_json_key(str(key)):
+                continue
+            text = _ideogram4_collect_text(child, limit, depth + 1)
+            if text:
+                parts.append(text)
+            if len("；".join(parts)) >= limit:
+                break
+    elif isinstance(value, list):
+        for child in value:
+            text = _ideogram4_collect_text(child, limit, depth + 1)
+            if text:
+                parts.append(text)
+            if len("；".join(parts)) >= limit:
+                break
+    return _ideogram4_clip_text("；".join(parts), limit)
+
+
+def _ideogram4_find_string_by_keys(value, keys: tuple[str, ...], depth: int = 0) -> str:
+    if depth > 8:
+        return ""
+    keyset = {str(k).lower() for k in keys}
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if _ideogram4_is_negative_json_key(str(key)):
+                continue
+            if str(key).lower() in keyset:
+                text = _ideogram4_collect_text(child)
+                if text:
+                    return text
+        for key, child in value.items():
+            if _ideogram4_is_negative_json_key(str(key)):
+                continue
+            text = _ideogram4_find_string_by_keys(child, keys, depth + 1)
+            if text:
+                return text
+    elif isinstance(value, list):
+        for child in value:
+            text = _ideogram4_find_string_by_keys(child, keys, depth + 1)
+            if text:
+                return text
+    return ""
+
+
+def _custom_ideogram4_caption_object(data: dict) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+    high = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_POSITIVE_KEYS)
+    if not high:
+        high = _ideogram4_find_string_by_keys(data, ("画面描述", "整体描述", "图片内容", "基本概述"))
+    if not high:
+        return None
+    background = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_SCENE_KEYS) or high
+    subject = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_SUBJECT_KEYS) or high
+    aesthetics = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_STYLE_KEYS) or "clean high-quality image"
+    return {
+        "high_level_description": _ideogram4_clip_text(high, 1800),
+        "style_description": {
+            "aesthetics": _ideogram4_clip_text(aesthetics, 900),
+            "lighting": "coherent natural lighting",
+            "medium": "digital image",
+            "art_style": _ideogram4_clip_text(aesthetics, 900),
+            "color_palette": [],
+        },
+        "compositional_deconstruction": {
+            "background": _ideogram4_clip_text(background, 1400),
+            "elements": [
+                {
+                    "type": "obj",
+                    "bbox": [80, 120, 920, 880],
+                    "desc": _ideogram4_clip_text(subject, 1400),
+                }
+            ],
+        },
+    }
+
+
+def _ideogram4_prompt_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        custom = _custom_ideogram4_caption_object(value)
+        if custom:
+            return custom["high_level_description"]
+        for key in ("high_level_description", "description", "prompt", "subject"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value or "").strip()
+
+
+def _merge_ideogram4_style(base: dict, style: dict | None) -> dict:
+    if not isinstance(style, dict) or not style:
+        return base
+    style_description = base.setdefault("style_description", {})
+    if not isinstance(style_description, dict):
+        style_description = {}
+        base["style_description"] = style_description
+    style_bits = [
+        str(style.get("label") or "").strip(),
+        str(style.get("summary") or "").strip(),
+        str(style.get("general_style") or "").strip(),
+        str(style.get("style_lock") or "").strip(),
+        str(style.get("model_family_tuning") or "").strip(),
+    ]
+    style_bits = [bit for bit in style_bits if bit]
+    if style_bits:
+        existing = str(style_description.get("aesthetics") or "").strip()
+        merged_bits = []
+        seen_bits = set()
+        for part in [existing, *style_bits]:
+            for bit in str(part or "").split(";"):
+                clean = bit.strip()
+                if not clean:
+                    continue
+                key = re.sub(r"\s+", " ", clean).casefold()
+                if key in seen_bits:
+                    continue
+                seen_bits.add(key)
+                merged_bits.append(clean)
+        style_description["aesthetics"] = "; ".join(merged_bits)
+    if style.get("preset_id"):
+        style_description["preset_id"] = style.get("preset_id")
+    if style.get("category"):
+        style_description["category"] = style.get("category")
+    return base
+
+
+def _ideogram4_llm_cache_key(prompt_value, style: dict | None) -> str:
+    return json.dumps(
+        {
+            "prompt": prompt_value,
+            "style": style if isinstance(style, dict) else {},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _ideogram4_llm_caption_cache_get(key: str) -> str:
+    if key in _IDEOGRAM4_LLM_CAPTION_CACHE:
+        value = _IDEOGRAM4_LLM_CAPTION_CACHE.pop(key)
+        _IDEOGRAM4_LLM_CAPTION_CACHE[key] = value
+        return value
+    return ""
+
+
+def _ideogram4_llm_caption_cache_put(key: str, value: str) -> None:
+    if not key or not value:
+        return
+    _IDEOGRAM4_LLM_CAPTION_CACHE[key] = value
+    while len(_IDEOGRAM4_LLM_CAPTION_CACHE) > _IDEOGRAM4_LLM_CAPTION_CACHE_MAX:
+        _IDEOGRAM4_LLM_CAPTION_CACHE.popitem(last=False)
+
+
+def _llm_official_ideogram4_caption(prompt_value, style: dict | None = None, *, chat_fn=chat_text) -> str:
+    cache_key = _ideogram4_llm_cache_key(prompt_value, style)
+    cached = _ideogram4_llm_caption_cache_get(cache_key)
+    if cached:
+        return cached
+    style_payload = style if isinstance(style, dict) else {}
+    user_payload = {
+        "prompt": prompt_value,
+        "style": style_payload,
+    }
+    system_prompt = (
+        "Return only one valid JSON object for Ideogram 4 structured captioning. "
+        "Do not output markdown, explanations, arrays, or code fences. "
+        "Use exactly this top-level schema: "
+        '{"high_level_description":"...",'
+        '"style_description":{"aesthetics":"...","lighting":"...","medium":"...","art_style":"...","color_palette":[]},'
+        '"compositional_deconstruction":{"background":"...","elements":[{"type":"obj","bbox":[80,120,920,880],"desc":"..."}]}}. '
+        "Preserve the user's visual intent, subjects, actions, composition, colors, materials, text that should appear, "
+        "camera/framing, and style. Do not translate proper nouns or mixed-language terms unless needed for clarity. "
+        "This is structural reorganization only: do not judge, screen, refuse, or add safety commentary. "
+        "If the input contains custom JSON such as 画面描述 or 正向提示词, extract the positive visual description into the schema. "
+        "If the input contains 负面提示词, negative_prompt, avoid, no, 禁止, 不要, or error lists, do not copy those negative fields into the output. "
+        "Do not repeat the same detail in multiple long blocks; keep each field concise but complete."
+    )
+    raw = chat_fn(
+        [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": json.dumps(user_payload, ensure_ascii=False),
+            },
+        ],
+        temperature=0.05,
+        max_tokens=2200,
+        timeout=120,
+        response_format={"type": "json_object"},
+    )
+    data = _json_object_from_text(raw)
+    normalized = _normalize_ideogram4_caption_object(data or {})
+    if not normalized:
+        raise RuntimeError("LLM returned malformed Ideogram4 caption JSON")
+    normalized = _merge_ideogram4_style(normalized, style_payload)
+    result = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+    _ideogram4_llm_caption_cache_put(cache_key, result)
+    return result
+
+
+def _official_ideogram4_caption_from_plain(prompt: str, *, allow_llm: bool = False, chat_fn=chat_text) -> str:
+    cleaned = _strip_style_prompt_blocks(prompt)
+    parsed = _json_object_from_text(cleaned)
+    if isinstance(parsed, dict):
+        style = parsed.get("style") if isinstance(parsed.get("style"), dict) else {}
+        prompt_value = parsed.get("prompt") if "prompt" in parsed else {k: v for k, v in parsed.items() if k != "style"}
+        if _is_official_ideogram4_caption(json.dumps(prompt_value, ensure_ascii=False)) and isinstance(prompt_value, dict):
+            normalized = _normalize_ideogram4_caption_object(prompt_value) or prompt_value
+            return json.dumps(_merge_ideogram4_style(normalized, style), ensure_ascii=False, separators=(",", ":"))
+        if _is_official_ideogram4_caption(cleaned):
+            normalized = _normalize_ideogram4_caption_object(parsed) or parsed
+            return json.dumps(_merge_ideogram4_style(normalized, style), ensure_ascii=False, separators=(",", ":"))
+        if isinstance(prompt_value, dict):
+            if allow_llm:
+                try:
+                    return _llm_official_ideogram4_caption(prompt_value, style, chat_fn=chat_fn)
+                except Exception as exc:
+                    add_log("warn", "ideogram4_prompt", f"LLM caption rewrite fallback: {str(exc)[:160]}")
+            custom = _custom_ideogram4_caption_object(prompt_value)
+            if custom:
+                return json.dumps(_merge_ideogram4_style(custom, style), ensure_ascii=False, separators=(",", ":"))
+        if allow_llm:
+            try:
+                return _llm_official_ideogram4_caption(prompt_value, style, chat_fn=chat_fn)
+            except Exception as exc:
+                add_log("warn", "ideogram4_prompt", f"LLM caption rewrite fallback: {str(exc)[:160]}")
+        body = _ideogram4_prompt_text(prompt_value)
+    else:
+        style = {}
+        if allow_llm:
+            try:
+                return _llm_official_ideogram4_caption(cleaned, style, chat_fn=chat_fn)
+            except Exception as exc:
+                add_log("warn", "ideogram4_prompt", f"LLM caption rewrite fallback: {str(exc)[:160]}")
+        body = cleaned
+    if not body:
+        body = "A clean, high-quality image with a clear subject and coherent composition."
+    payload = {
+        "high_level_description": body,
+        "style_description": {
+            "aesthetics": "clean high-quality image",
+            "lighting": "coherent natural lighting",
+            "medium": "digital image",
+            "art_style": "clean high-quality digital image",
+            "color_palette": [],
+        },
+        "compositional_deconstruction": {
+            "background": body,
+            "elements": [
+                {
+                    "type": "obj",
+                    "bbox": [80, 120, 920, 880],
+                    "desc": body,
+                }
+            ],
+        },
+    }
+    _merge_ideogram4_style(payload, style)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _normalize_official_ideogram4_prompt(workflow_name: str, field_values: dict, *, allow_llm: bool = False) -> None:
+    if os.path.basename(str(workflow_name or "")) not in IDEOGRAM4_OFFICIAL_WORKFLOWS:
+        return
+    key = "24::text"
+    if key in field_values:
+        canvas_payload = field_values.get("__ideogram4_canvas")
+        canvas_caption = _ideogram4_canvas_caption_from_shapes(
+            field_values.get("__user_prompt") or field_values.get(key, ""),
+            canvas_payload,
+            field_values.get(key, ""),
+        )
+        if canvas_caption:
+            field_values[key] = json.dumps(canvas_caption, ensure_ascii=False, separators=(",", ":"))
+            return
+        field_values[key] = _official_ideogram4_caption_from_plain(field_values.get(key, ""), allow_llm=allow_llm)
+
+
+def _normalize_workflow_field_values(wf: dict, field_values: dict, workflow_name: str = "", *, allow_llm: bool = False) -> dict:
     normalized = dict(field_values or {})
     for key, value in list(normalized.items()):
         if "::" not in key:
@@ -4672,7 +5710,12 @@ def _normalize_workflow_field_values(wf: dict, field_values: dict) -> dict:
         )
     _sync_flux2_scheduler_dimensions(wf, normalized)
     _sync_ltx_video_timing(wf, normalized)
+    _sync_longcat_avatar_audio_timing(wf, normalized)
+    _lock_ltx_sulphur_dist_fields(workflow_name, normalized)
+    _lock_ltx_singularity_omnicine_fields(workflow_name, normalized)
+    _normalize_official_ideogram4_prompt(workflow_name, normalized, allow_llm=allow_llm)
     _sync_ltx_director_timeline_prompts(wf, normalized)
+    normalize_bernini_field_values(wf, normalized, workflow_name)
     return normalized
 
 
@@ -5015,7 +6058,8 @@ def _parse_with_config(path: str, config: dict) -> dict:
             continue
         ct = node.get("class_type", "")
         title = node.get("_meta", {}).get("title", ct)
-        val = node.get("inputs", {}).get(fname)
+        inputs = node.get("inputs", {})
+        val = inputs.get(fname, field_cfg.get("value", ""))
         if isinstance(val, list):
             val = _resolve_link(wf, val)
         ftype = field_cfg.get("type", "")
@@ -5036,6 +6080,7 @@ def _parse_with_config(path: str, config: dict) -> dict:
             if k in field_cfg:
                 fextra[k] = field_cfg[k]
         fields.append({
+            "key": key,
             "node_id": nid, "node_title": title,
             "class_type": ct, "field": fname,
             "value": val,
@@ -5091,6 +6136,35 @@ async def broadcast(data: dict):
     for ws in dead:
         ws_clients.remove(ws)
         ws_client_users.pop(ws, None)
+
+
+def _schedule_broadcast(data: dict) -> bool:
+    coro = broadcast(data)
+    try:
+        asyncio.create_task(coro)
+        return True
+    except RuntimeError:
+        loop = _app_loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return True
+        coro.close()
+        return False
+
+
+def _notify_history_update(action: str, ids: list[str] | tuple[str, ...] | set[str], current_user: dict | None = None, **extra) -> None:
+    clean_ids = [str(item_id) for item_id in ids if str(item_id)]
+    if not clean_ids:
+        return
+    payload = {
+        "type": "history_update",
+        "action": action,
+        "ids": clean_ids,
+        "user_id": _user_id(current_user or {}),
+        "role": (current_user or {}).get("role", ""),
+    }
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    _schedule_broadcast(payload)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -5346,6 +6420,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                     v["inputs"]["seed"] = seed
 
         apply_qwen_frame_roll_to_workflow(wf, field_values, COMFYUI_INPUT)
+        apply_bernini_mixed_mode_to_workflow(wf, field_values, workflow_path)
 
         issues = validate_api_prompt(wf)
         if issues:
@@ -5389,8 +6464,9 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         save_jobs()
         ws_ok = False
         pid = ""
+        track_timeout = _workflow_track_timeout(jobs.get(job_id), workflow_path)
         try:
-            ws_ok, pid = await comfyui_ws_track(job_id, wf, client_id, timeout=900, base_url=inst_url)
+            ws_ok, pid = await comfyui_ws_track(job_id, wf, client_id, timeout=track_timeout, base_url=inst_url)
         except Exception as _ws_err:
             print(f"[WS_TRACK_ERROR] {job_id}: {_ws_err}")
             add_log("error", "wstrack", f"WS error: {_ws_err}", job_id)
@@ -5448,16 +6524,12 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             try:
                 hist = comfyui_get(f"/history/{pid}", base_url=inst_url)
                 if pid in hist:
-                    for ref in collect_preferred_outputs(hist[pid].get("outputs", {})):
+                    for ref in collect_preferred_history_outputs(hist[pid]):
                         filename = ref.get("filename", "")
                         rel_path = output_ref_rel_path(ref)
                         if not filename or not rel_path:
                             continue
                         src = os.path.join(OUTPUT_DIR, rel_path)
-                        if not os.path.isfile(src):
-                            matches = glob.glob(os.path.join(OUTPUT_DIR, "**", filename), recursive=True)
-                            if matches:
-                                src = matches[0]
                         if os.path.isfile(src):
                             sources.append((src, filename, output_media_type(filename)))
             except Exception as e:
@@ -5699,6 +6771,36 @@ def _queued_dispatch_job_ids() -> set[str]:
     return queued_ids
 
 
+def _job_has_blocking_dispatch_task(job_id: str) -> bool:
+    task = _job_tasks.get(job_id)
+    if not task or task.done():
+        return False
+    cancelling = False
+    try:
+        cancelling = bool(task.cancelling())
+    except Exception:
+        cancelling = False
+    return not cancelling
+
+
+def _enqueue_generation_job_from_record(job_id: str, path: str, job: dict) -> bool:
+    if not path or job_id in _queued_dispatch_job_ids() or _job_has_blocking_dispatch_task(job_id):
+        return False
+    _job_queue.put_nowait((
+        job_id,
+        path,
+        job.get("fields") or {},
+        _job_seed_value(job),
+        False,
+        int(job.get("width") or 0),
+        int(job.get("height") or 0),
+        str(job.get("user_id") or ""),
+        str(job.get("preferred_instance") or ""),
+        str(job.get("preferred_node_id") or ""),
+    ))
+    return True
+
+
 def _kick_queued_generation_jobs(reason: str = "") -> list[str]:
     queued_statuses = {"queued", "dispatching", "preparing", "starting_comfyui"}
     already_queued = _queued_dispatch_job_ids()
@@ -5718,18 +6820,7 @@ def _kick_queued_generation_jobs(reason: str = "") -> list[str]:
         job["status"] = "queued"
         job["message"] = f"{reason}恢复排队..." if reason else "恢复排队..."
         job["last_update"] = time.time()
-        _job_queue.put_nowait((
-            job_id,
-            path,
-            job.get("fields") or {},
-            _job_seed_value(job),
-            False,
-            int(job.get("width") or 0),
-            int(job.get("height") or 0),
-            str(job.get("user_id") or ""),
-            str(job.get("preferred_instance") or ""),
-            str(job.get("preferred_node_id") or ""),
-        ))
+        _enqueue_generation_job_from_record(job_id, path, job)
         already_queued.add(job_id)
         requeued.append(job_id)
         add_log("info", "queue", f"{reason}已恢复排队任务" if reason else "已恢复排队任务", job_id)
@@ -6328,6 +7419,491 @@ def api_version():
     return {"version": APP_VERSION}
 
 
+def _request_app_base(request: Request) -> str:
+    prefix = (
+        request.headers.get("x-forwarded-prefix")
+        or request.headers.get("x-script-name")
+        or request.scope.get("root_path")
+        or ""
+    )
+    prefix = str(prefix or "").strip().rstrip("/")
+    if not prefix:
+        path = str(request.url.path or "")
+        marker = "/labs"
+        if path == marker or path.endswith(marker):
+            prefix = path[: -len(marker)]
+        elif marker + "/" in path:
+            prefix = path.split(marker + "/", 1)[0]
+    return "" if prefix == "/" else prefix
+
+
+def _render_labs_html(request: Request) -> HTMLResponse:
+    html_path = Path(__file__).parent / "static" / "labs" / "index.html"
+    if not html_path.is_file():
+        return HTMLResponse("<h1>labs/index.html missing</h1>", 500)
+    base = _request_app_base(request)
+    html = html_path.read_text("utf-8")
+    if base:
+        html = html.replace('href="../static/', f'href="{base}/static/')
+        html = html.replace('src="../static/', f'src="{base}/static/')
+        html = html.replace('href="../labs/', f'href="{base}/labs/')
+        html = html.replace('href="../"', f'href="{base or "/" }"')
+        return HTMLResponse(html)
+
+    path = str(request.url.path or "")
+    is_project_route = "/labs/" in path or path.rstrip("/").count("/") > 1 and path.rstrip("/").endswith(tuple(f"/labs/{name}" for name in ("bernini", "joyai", "hyworld2")))
+    if not is_project_route:
+        html = html.replace('href="../static/', 'href="static/')
+        html = html.replace('src="../static/', 'src="static/')
+        html = html.replace('href="../labs/', 'href="labs/')
+        html = html.replace('href="../"', 'href="./"')
+    return HTMLResponse(html)
+
+
+@app.get("/labs", response_class=HTMLResponse)
+async def labs_index(request: Request, current_user: dict | None = Depends(get_current_user_optional)):
+    return _render_labs_html(request)
+
+
+@app.get("/labs/{project}", response_class=HTMLResponse)
+async def labs_project(project: str, request: Request, current_user: dict | None = Depends(get_current_user_optional)):
+    if project not in {"bernini", "joyai", "hyworld2"}:
+        raise HTTPException(404, "Lab project not found")
+    return _render_labs_html(request)
+
+
+def _lab_manifest_status(manifest: dict) -> dict:
+    project_dir = os.path.join(_BASE, str(manifest.get("local_source", "")).lstrip("/"))
+    checkpoint_paths = []
+    for rel in manifest.get("checkpoint_paths", []) or []:
+        checkpoint_paths.append(os.path.join(_BASE, str(rel).lstrip("/")))
+    return {
+        "source_exists": bool(project_dir and os.path.isdir(project_dir)),
+        "source_path": project_dir,
+        "checkpoint_ready": bool(checkpoint_paths) and all(os.path.exists(path) for path in checkpoint_paths),
+        "checkpoint_paths": checkpoint_paths,
+    }
+
+
+def _load_lab_project_manifests() -> list[dict]:
+    projects = []
+    for path in sorted(glob.glob(os.path.join(LABS_MANIFEST_DIR, "*.json"))):
+        data = _read_json_file_safe(path, {})
+        if not isinstance(data, dict):
+            continue
+        data["manifest_file"] = os.path.relpath(path, _BASE).replace("\\", "/")
+        data["status"] = _lab_manifest_status(data)
+        projects.append(data)
+    return projects
+
+
+def _lab_project_manifest(project: str) -> dict:
+    normalized = "joyai_echo" if project == "joyai" else project
+    path = os.path.join(LABS_MANIFEST_DIR, f"{normalized}.json")
+    data = _read_json_file_safe(path, {})
+    if not isinstance(data, dict) or data.get("id") not in {"bernini", "joyai", "hyworld2"}:
+        raise HTTPException(404, "Lab project not found")
+    data["manifest_file"] = os.path.relpath(path, _BASE).replace("\\", "/")
+    data["status"] = _lab_manifest_status(data)
+    return data
+
+
+def _lab_safe_slug(value: str, fallback: str = "item") -> str:
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip()).strip(".-")
+    return (text or fallback)[:80]
+
+
+def _lab_run_dir(project: str, run_id: str) -> str:
+    safe_project = _lab_safe_slug(project, "project")
+    safe_run = _lab_safe_slug(run_id, "run")
+    return os.path.join(LABS_RUN_DIR, safe_project, safe_run)
+
+
+def _lab_status_file(project: str, run_id: str) -> str:
+    return os.path.join(_lab_run_dir(project, run_id), "status.json")
+
+
+def _write_lab_run_status(project: str, run_id: str, patch: dict) -> dict:
+    status_path = _lab_status_file(project, run_id)
+    os.makedirs(os.path.dirname(status_path), exist_ok=True)
+    current = _read_json_file_safe(status_path, {})
+    if not isinstance(current, dict):
+        current = {}
+    current.update(patch)
+    current["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _write_json_file_atomic(status_path, current)
+    return current
+
+
+def _read_lab_run_status(project: str, run_id: str) -> dict:
+    status = _read_json_file_safe(_lab_status_file(project, run_id), {})
+    if not isinstance(status, dict) or not status:
+        raise HTTPException(404, "Lab run not found")
+    return status
+
+
+def _tail_text(path: str, max_bytes: int = 65536) -> str:
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes), os.SEEK_SET)
+            return f.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _lab_python(project_dir: str) -> str:
+    venv_python = os.path.join(project_dir, ".venv", "bin", "python")
+    return venv_python if os.path.exists(venv_python) else "python"
+
+
+async def _save_lab_uploads(files: list[UploadFile], dest_dir: str, prefix: str, max_bytes: int = 512 * 1024 * 1024) -> list[str]:
+    saved: list[str] = []
+    os.makedirs(dest_dir, exist_ok=True)
+    for idx, upload in enumerate(files or []):
+        if not upload or not upload.filename:
+            continue
+        filename = _lab_safe_slug(upload.filename, f"{prefix}-{idx}")
+        path = os.path.join(dest_dir, f"{idx + 1:02d}-{filename}")
+        total = 0
+        with open(path, "wb") as f:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(413, f"{upload.filename} exceeds lab upload limit")
+                f.write(chunk)
+        saved.append(path)
+    return saved
+
+
+def _lab_mode_config(manifest: dict, mode: str) -> dict:
+    modes = ((manifest.get("playground") or {}).get("modes") or [])
+    for item in modes:
+        if item.get("id") == mode:
+            return item
+    raise HTTPException(400, "Unsupported lab playground mode")
+
+
+def _lab_int(value, default: int, low: int, high: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = default
+    return max(low, min(high, parsed))
+
+
+def _lab_build_bernini_run(manifest: dict, mode_cfg: dict, run_dir: str, prompt: str, image_paths: list[str], video_paths: list[str], params: dict) -> dict:
+    project_dir = os.path.join(_BASE, manifest["local_source"])
+    mode = mode_cfg["id"]
+    requires = mode_cfg.get("requires") or {}
+    min_images = int(requires.get("min_images") or requires.get("images") or 0)
+    min_videos = int(requires.get("min_videos") or requires.get("videos") or 0)
+    if len(image_paths) < min_images:
+        raise HTTPException(400, f"{mode_cfg.get('label', mode)} needs at least {min_images} image upload(s)")
+    if len(video_paths) < min_videos:
+        raise HTTPException(400, f"{mode_cfg.get('label', mode)} needs at least {min_videos} video upload(s)")
+
+    output_ext = "png" if mode in {"t2i", "i2i"} else "mp4"
+    output_path = os.path.join(run_dir, "outputs", f"{mode}.{output_ext}")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    case = {
+        "task_type": mode,
+        "guidance_mode": mode_cfg.get("guidance_mode") or "t2v_apg",
+        "prompt": prompt,
+        "output": output_path,
+    }
+    if mode == "i2i":
+        case["image"] = image_paths[0]
+    elif mode == "v2v":
+        case["video"] = video_paths[0]
+    elif mode == "r2v":
+        case["images"] = image_paths
+    elif mode == "rv2v":
+        case["video"] = video_paths[0]
+        case["images"] = image_paths
+    case_path = os.path.join(run_dir, "case.json")
+    _write_json_file_atomic(case_path, case)
+
+    command = [
+        _lab_python(project_dir),
+        "infer_single_gpu.py",
+        "--config", os.path.join("..", "..", "checkpoints", "Bernini", "Bernini-R-Diffusers"),
+        "--case", case_path,
+        "--num_frames", str(params["frames"]),
+        "--height", str(params["height"]),
+        "--width", str(params["width"]),
+        "--max_image_size", str(max(params["height"], params["width"])),
+        "--num_inference_steps", str(params["steps"]),
+        "--seed", str(params["seed"]),
+        "--fps", str(params["fps"]),
+    ]
+    return {"cwd": project_dir, "command": command, "input_file": case_path, "output_path": output_path}
+
+
+def _lab_build_joyai_run(manifest: dict, mode_cfg: dict, run_dir: str, prompt: str, params: dict) -> dict:
+    project_dir = os.path.join(_BASE, manifest["local_source"])
+    prompts_dir = os.path.join(run_dir, "prompts")
+    output_root = os.path.join(run_dir, "inference_result")
+    os.makedirs(prompts_dir, exist_ok=True)
+    shots = [part.strip() for part in re.split(r"\n\s*\n", prompt or "") if part.strip()]
+    if not shots:
+        shots = [prompt.strip()]
+    prompt_file = os.path.join(prompts_dir, "playground.json")
+    _write_json_file_atomic(prompt_file, {"prompts": shots})
+    config = mode_cfg.get("config") or "configs/ez_lab_inference.yaml"
+    if not os.path.exists(os.path.join(project_dir, config)):
+        config = "configs/inference.yaml"
+    command = [
+        _lab_python(project_dir),
+        "inference.py",
+        "--config", config,
+        "--prompts-dir", prompts_dir,
+        "--prompts-glob", "playground.json",
+        "--output-root", output_root,
+        "--seed", str(params["seed"]),
+        "--num-frames", str(params["frames"]),
+        "--video-height", str(params["height"]),
+        "--video-width", str(params["width"]),
+        "--video-fps", str(params["fps"]),
+    ]
+    return {"cwd": project_dir, "command": command, "input_file": prompt_file, "output_path": output_root}
+
+
+def _lab_build_hyworld2_run(manifest: dict, mode_cfg: dict, run_dir: str, image_paths: list[str], video_paths: list[str], params: dict) -> dict:
+    project_dir = os.path.join(_BASE, manifest["local_source"])
+    requires = mode_cfg.get("requires") or {}
+    min_images = int(requires.get("min_images") or requires.get("images") or 0)
+    min_videos = int(requires.get("min_videos") or requires.get("videos") or 0)
+    if len(image_paths) < min_images and len(video_paths) < min_videos:
+        needs = []
+        if min_images:
+            needs.append(f"{min_images} image upload(s)")
+        if min_videos:
+            needs.append(f"{min_videos} video upload(s)")
+        raise HTTPException(400, f"{mode_cfg.get('label') or mode_cfg.get('id') or 'HY-World'} needs at least {' or '.join(needs)}")
+
+    input_path = ""
+    if video_paths:
+        input_path = video_paths[0]
+    else:
+        image_input_dir = os.path.join(run_dir, "inputs", "images")
+        os.makedirs(image_input_dir, exist_ok=True)
+        for path in image_paths:
+            shutil.copy2(path, os.path.join(image_input_dir, os.path.basename(path)))
+        input_path = image_input_dir
+
+    output_path = os.path.join(run_dir, "outputs", "worldmirror")
+    os.makedirs(output_path, exist_ok=True)
+    checkpoint_root = os.path.join(_BASE, "data", "labs", "checkpoints", "HY-World-2.0")
+    command = [
+        _lab_python(project_dir),
+        "-m", "hyworld2.worldrecon.pipeline",
+        "--input_path", input_path,
+        "--strict_output_path", output_path,
+        "--pretrained_model_name_or_path", checkpoint_root,
+        "--subfolder", "HY-WorldMirror-2.0",
+        "--enable_bf16",
+        "--target_size", str(params["height"]),
+        "--fps", str(params["fps"]),
+        "--video_max_frames", str(params["frames"]),
+        "--save_rendered",
+        "--no_interactive",
+    ]
+    return {"cwd": project_dir, "command": command, "input_file": input_path, "output_path": output_path}
+
+
+def _run_lab_playground_process(project: str, run_id: str) -> None:
+    status = _read_lab_run_status(project, run_id)
+    command = status.get("command") or []
+    cwd = status.get("cwd") or _BASE
+    log_path = status.get("log_path") or os.path.join(_lab_run_dir(project, run_id), "run.log")
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _write_lab_run_status(project, run_id, {"status": "running", "started_at": started_at, "log_path": log_path})
+    try:
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write(f"$ {shlex.join(command)}\n\n")
+            log.flush()
+            env = os.environ.copy()
+            venv_bin = os.path.join(cwd, ".venv", "bin")
+            if os.path.isdir(venv_bin):
+                env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
+            proc = subprocess.Popen(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, text=True, env=env)
+            _write_lab_run_status(project, run_id, {"pid": proc.pid})
+            return_code = proc.wait()
+        final_status = "succeeded" if return_code == 0 else "failed"
+        _write_lab_run_status(
+            project,
+            run_id,
+            {
+                "status": final_status,
+                "return_code": return_code,
+                "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+    except Exception as exc:
+        _write_lab_run_status(
+            project,
+            run_id,
+            {
+                "status": "failed",
+                "error": str(exc),
+                "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+
+
+@app.get("/api/labs/projects")
+def api_labs_projects(current_user: dict = Depends(require_admin)):
+    return {
+        "projects": _load_lab_project_manifests(),
+        "resource_lock": _resource_lock_public(),
+    }
+
+
+@app.post("/api/labs/playground/start")
+async def api_labs_playground_start(
+    bg: BackgroundTasks,
+    project: str = Form(...),
+    mode: str = Form(...),
+    prompt: str = Form(...),
+    seed: int = Form(42),
+    width: int = Form(848),
+    height: int = Form(480),
+    frames: int = Form(1),
+    fps: int = Form(16),
+    steps: int = Form(40),
+    lock_token: str = Form(""),
+    image_files: list[UploadFile] = File(default=[]),
+    video_files: list[UploadFile] = File(default=[]),
+    current_user: dict = Depends(require_admin),
+):
+    manifest = _lab_project_manifest(project)
+    if not manifest.get("status", {}).get("source_exists"):
+        raise HTTPException(400, "Lab source is not ready")
+    if not manifest.get("status", {}).get("checkpoint_ready"):
+        raise HTTPException(400, "Lab checkpoint is not ready")
+    active = _active_external_resource_lock()
+    if active and lock_token and lock_token != str(active.get("token") or ""):
+        raise HTTPException(409, {"message": "resource lock is held by another session", "lock": _resource_lock_public(active)})
+    if active and not lock_token:
+        raise HTTPException(409, {"message": "resource lock is active; acquire it before starting a playground run", "lock": _resource_lock_public(active)})
+
+    mode_cfg = _lab_mode_config(manifest, mode)
+    defaults = mode_cfg.get("defaults") or {}
+    params = {
+        "seed": _lab_int(seed, int(defaults.get("seed") or 42), 0, 2147483647),
+        "width": _lab_int(width, int(defaults.get("width") or 848), 128, 4096),
+        "height": _lab_int(height, int(defaults.get("height") or 480), 128, 4096),
+        "frames": _lab_int(frames, int(defaults.get("frames") or 1), 1, 4096),
+        "fps": _lab_int(fps, int(defaults.get("fps") or 16), 1, 120),
+        "steps": _lab_int(steps, int(defaults.get("steps") or 40), 1, 200),
+    }
+    if not prompt.strip():
+        raise HTTPException(400, "Prompt is required")
+
+    run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    run_dir = _lab_run_dir(manifest["id"], run_id)
+    upload_dir = os.path.join(run_dir, "uploads")
+    image_paths = await _save_lab_uploads(image_files, upload_dir, "image")
+    video_paths = await _save_lab_uploads(video_files, upload_dir, "video", max_bytes=1024 * 1024 * 1024)
+    if manifest["id"] == "bernini":
+        built = _lab_build_bernini_run(manifest, mode_cfg, run_dir, prompt.strip(), image_paths, video_paths, params)
+    elif manifest["id"] == "joyai":
+        built = _lab_build_joyai_run(manifest, mode_cfg, run_dir, prompt.strip(), params)
+    elif manifest["id"] == "hyworld2":
+        built = _lab_build_hyworld2_run(manifest, mode_cfg, run_dir, image_paths, video_paths, params)
+    else:
+        raise HTTPException(400, "Unsupported lab project")
+
+    log_path = os.path.join(run_dir, "run.log")
+    status = _write_lab_run_status(
+        manifest["id"],
+        run_id,
+        {
+            "run_id": run_id,
+            "project": manifest["id"],
+            "mode": mode,
+            "status": "queued",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "created_by": current_user.get("username") or current_user.get("sub") or "admin",
+            "run_dir": run_dir,
+            "upload_dir": upload_dir,
+            "log_path": log_path,
+            "params": params,
+            "input_file": built["input_file"],
+            "output_path": built["output_path"],
+            "cwd": built["cwd"],
+            "command": built["command"],
+            "command_text": shlex.join(built["command"]),
+        },
+    )
+    bg.add_task(_run_lab_playground_process, manifest["id"], run_id)
+    add_log("info", "lab_playground", f"{manifest.get('short_name') or manifest['id']} playground run queued", details=f"run_id={run_id} mode={mode}")
+    return status
+
+
+@app.get("/api/labs/playground/runs/{project}/{run_id}")
+def api_labs_playground_run(project: str, run_id: str, current_user: dict = Depends(require_admin)):
+    manifest = _lab_project_manifest(project)
+    status = _read_lab_run_status(manifest["id"], run_id)
+    status["log_tail"] = _tail_text(status.get("log_path") or "")
+    return status
+
+
+@app.get("/api/resource-lock")
+def api_resource_lock(current_user: dict = Depends(require_admin)):
+    return _resource_lock_public()
+
+
+@app.post("/api/resource-lock/acquire")
+def api_resource_lock_acquire(body: dict, current_user: dict = Depends(require_admin)):
+    project = str(body.get("project") or "external").strip()[:80]
+    reason = str(body.get("reason") or "外部测试项目运行中").strip()[:240]
+    ttl_sec = int(body.get("ttl_sec") or 21600)
+    ttl_sec = max(60, min(ttl_sec, 86400))
+    active = _active_external_resource_lock()
+    renew_token = str(body.get("token") or "")
+    if active and renew_token != str(active.get("token") or ""):
+        raise HTTPException(409, {"message": "resource lock already active", "lock": _resource_lock_public(active)})
+    now = time.time()
+    lock = {
+        "token": renew_token or uuid.uuid4().hex,
+        "project": project,
+        "reason": reason,
+        "holder": current_user.get("username") or current_user.get("sub") or "admin",
+        "owner_id": current_user.get("sub", ""),
+        "created_at": active.get("created_at") if active else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "expires_at": now + ttl_sec,
+        "ttl_sec": ttl_sec,
+    }
+    _persist_external_resource_lock(lock)
+    add_log("warn", "resource_lock", f"{project} 已锁定 GPU 资源，ComfyUI 队列暂停出队", details=reason)
+    public = _resource_lock_public(lock)
+    public["token"] = lock["token"]
+    return public
+
+
+@app.post("/api/resource-lock/release")
+def api_resource_lock_release(body: dict, current_user: dict = Depends(require_admin)):
+    active = _active_external_resource_lock()
+    if not active:
+        return {"active": False, "released": False}
+    token = str(body.get("token") or "")
+    if token and token != str(active.get("token") or ""):
+        raise HTTPException(403, "Invalid resource lock token")
+    project = str(active.get("project") or "external")
+    _persist_external_resource_lock({})
+    add_log("info", "resource_lock", f"{project} 已释放 GPU 资源，ComfyUI 队列恢复出队")
+    return {"active": False, "released": True, "project": project}
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  API: Status & GPU
 # ══════════════════════════════════════════════════════════════════════════
@@ -6390,6 +7966,7 @@ def api_status(
         "instances": instances,
         "comfyui_pid": comfyui_pid(),
         "vllm": vllm_running(),
+        "resource_lock": _resource_lock_public(),
         "workflows": sum(len(glob.glob(os.path.join(d, "**", "*.json"), recursive=True)) for d in _load_wf_dirs()),
         "gpu": get_gpu_stats(),
     }
@@ -6841,6 +8418,7 @@ _UPLOAD_PASSTHROUGH_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 _UPLOAD_NORMALIZE_IMAGE_EXTS = {".tif", ".tiff", ".gif", ".jfif", ".jpe", ".avif", ".heic", ".heif", ""}
 _UPLOAD_ALLOWED_IMAGE_EXTS = _UPLOAD_PASSTHROUGH_IMAGE_EXTS | _UPLOAD_NORMALIZE_IMAGE_EXTS
 _UPLOAD_ALLOWED_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
+_UPLOAD_ALLOWED_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 _UPLOAD_FORMAT_EXTS = {
     "PNG": {".png"},
     "JPEG": {".jpg", ".jpeg"},
@@ -6850,6 +8428,7 @@ _UPLOAD_FORMAT_EXTS = {
 _UPLOAD_SAFE_PASSTHROUGH_MODES = {"RGB", "RGBA", "L", "LA", "P"}
 _UPLOAD_IMAGE_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_IMAGE_MAX_BYTES", str(50 * 1024 * 1024)))
 _UPLOAD_VIDEO_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_VIDEO_MAX_BYTES", str(512 * 1024 * 1024)))
+_UPLOAD_AUDIO_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_AUDIO_MAX_BYTES", str(128 * 1024 * 1024)))
 _UPLOAD_WORKFLOW_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_WORKFLOW_MAX_BYTES", str(10 * 1024 * 1024)))
 _UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
@@ -6966,6 +8545,68 @@ async def api_upload_video(file: UploadFile = File(...), current_user: dict = De
     return {"ok": True, "filename": rel_name, "path": dest}
 
 
+def _normalize_uploaded_audio_content(filename: str, content: bytes) -> bytes:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _UPLOAD_ALLOWED_AUDIO_EXTS:
+        raise HTTPException(400, f"Unsupported audio format: {ext}")
+    ffmpeg = _project_ffmpeg_bin()
+    if not ffmpeg:
+        raise HTTPException(500, "ffmpeg is not configured")
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                "pipe:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
+                "-f",
+                "wav",
+                "pipe:1",
+            ],
+            input=content,
+            capture_output=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(400, "Audio conversion timed out") from e
+    except Exception as e:
+        raise HTTPException(500, f"Audio conversion failed: {e}") from e
+    if result.returncode != 0 or not result.stdout:
+        detail = (result.stderr or b"").decode("utf-8", "ignore").strip()
+        raise HTTPException(400, f"Invalid audio file: {detail or 'ffmpeg conversion failed'}")
+    return result.stdout
+
+
+@app.post("/api/upload-audio")
+async def api_upload_audio(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    content = await _read_upload_limited(file, _UPLOAD_AUDIO_MAX_BYTES, "Audio")
+    if not content:
+        raise HTTPException(400, "Empty file")
+    content = _normalize_uploaded_audio_content(file.filename or "", content)
+    unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}.wav"
+    user_dir = _user_id(current_user) or "anonymous"
+    date_dir = datetime.now().strftime("%Y-%m-%d")
+    rel_name = f"{user_dir}/{date_dir}/{unique_name}"
+    dest = os.path.join(COMFYUI_INPUT, user_dir, date_dir, unique_name)
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(content)
+    except Exception:
+        raise HTTPException(500, "Audio upload failed")
+    return {"ok": True, "filename": rel_name, "path": dest}
+
+
 @app.get("/api/input-image/{filename:path}")
 def api_input_image(filename: str, current_user: dict = Depends(get_current_user)):
     safe = filename.replace("\\", "/").lstrip("/")
@@ -6989,6 +8630,25 @@ def api_input_video(filename: str, current_user: dict = Depends(get_current_user
         ".webm": "video/webm",
         ".mov": "video/quicktime",
         ".m4v": "video/x-m4v",
+    }.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
+
+
+@app.get("/api/input-audio/{filename:path}")
+def api_input_audio(filename: str, current_user: dict = Depends(get_current_user)):
+    safe = filename.replace("\\", "/").lstrip("/")
+    path = _resolve_input_image_path(safe)
+    if not path:
+        raise HTTPException(404)
+    ext = os.path.splitext(path)[1].lower()
+    media = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".flac": "audio/flac",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/ogg",
     }.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
 
@@ -7496,7 +9156,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     try:
         with open(path) as f:
             wf_check = json.load(f)
-        normalized_fields = _normalize_workflow_field_values(wf_check, req.fields)
+        normalized_fields = _normalize_workflow_field_values(wf_check, req.fields, req.workflow, allow_llm=True)
         auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(req.workflow, wf_check, normalized_fields)
         if random_seed_requested:
             _apply_generated_seed_to_seed_fields(wf_check, normalized_fields, seed)
@@ -7510,6 +9170,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
             if isinstance(v, dict) and v.get("class_type") == "KSampler":
                 if "seed" in v.get("inputs", {}):
                     v["inputs"]["seed"] = seed
+        apply_bernini_mixed_mode_to_workflow(wf_check, normalized_fields, req.workflow)
         issues = validate_api_prompt(wf_check)
         if issues:
             detail = describe_api_prompt_issues(issues)
@@ -7564,6 +9225,73 @@ def api_job_status(job_id: str, current_user: dict = Depends(get_current_user)):
     if not _can_access_job(jobs[job_id], current_user):
         raise HTTPException(403, "无权访问他人的任务")
     return _job_with_time_estimate(jobs[job_id])
+
+
+def _can_pause_job(job: dict) -> bool:
+    status = str(job.get("status") or "")
+    if status == "paused":
+        return True
+    if status not in {"queued", "dispatching"}:
+        return False
+    if job.get("prompt_id") or job.get("sem_acquired"):
+        return False
+    return True
+
+
+@app.post("/api/jobs/{job_id}/pause")
+async def api_pause_job(job_id: str, current_user: dict = Depends(get_current_user)):
+    if job_id not in jobs:
+        raise HTTPException(404)
+    job = jobs[job_id]
+    if not _can_access_job(job, current_user):
+        raise HTTPException(403, "只能暂停自己的任务")
+    if not _can_pause_job(job):
+        raise HTTPException(400, "只能暂停还未开始出图的排队任务")
+    if job.get("status") != "paused":
+        task = _job_tasks.get(job_id)
+        if task and not task.done():
+            task.cancel()
+        now = time.time()
+        job["pause_epoch"] = _job_pause_epoch(job) + 1
+        job["status"] = "paused"
+        job["message"] = "已暂停，等待恢复"
+        job["paused_at"] = now
+        job["last_update"] = now
+        job["progress"] = {"pct": 0}
+        job["sem_acquired"] = False
+        job.pop("resource_lock", None)
+        save_jobs()
+        add_log("info", "queue", "任务已暂停，跳过出队", job_id)
+        await broadcast({"type": "job_update", "job": job})
+    return {"ok": True, "job": _job_with_time_estimate(job)}
+
+
+@app.post("/api/jobs/{job_id}/resume")
+async def api_resume_job(job_id: str, current_user: dict = Depends(get_current_user)):
+    if job_id not in jobs:
+        raise HTTPException(404)
+    job = jobs[job_id]
+    if not _can_access_job(job, current_user):
+        raise HTTPException(403, "只能恢复自己的任务")
+    if str(job.get("status") or "") != "paused":
+        raise HTTPException(400, "只能恢复已暂停的任务")
+    if job.get("prompt_id"):
+        raise HTTPException(400, "该任务已提交到出图实例，不能作为队列暂停任务恢复")
+    path = _resolve_workflow(str(job.get("workflow") or ""))
+    if not path:
+        raise HTTPException(404, "Workflow not found")
+    now = time.time()
+    job["status"] = "queued"
+    job["message"] = "排队中..."
+    job["last_update"] = now
+    job["resumed_at"] = now
+    job["progress"] = {"pct": 0}
+    job.pop("paused_at", None)
+    _enqueue_generation_job_from_record(job_id, path, job)
+    save_jobs()
+    add_log("info", "queue", "已恢复排队任务", job_id)
+    await broadcast({"type": "job_update", "job": job})
+    return {"ok": True, "job": _job_with_time_estimate(job)}
 
 
 @app.delete("/api/jobs/{job_id}")
@@ -7654,7 +9382,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     try:
         with open(path) as f:
             wf_check = json.load(f)
-        fields = _normalize_workflow_field_values(wf_check, fields)
+        fields = _normalize_workflow_field_values(wf_check, fields, wf, allow_llm=True)
         _apply_generated_seed_to_seed_fields(wf_check, fields, seed)
         auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(wf, wf_check, fields)
         if auto_w and auto_h:
@@ -7746,6 +9474,25 @@ def _history_where_params(scope: str, status: str, current_user: dict | None) ->
     return where_clause, params
 
 
+def _history_workflow_type_clause(conn: sqlite3.Connection, where_clause: str, params: list, workflow_type: str) -> tuple[str, list]:
+    requested = str(workflow_type or "").strip()
+    if not requested:
+        return "", []
+    prefix = " AND " if where_clause else " WHERE "
+    rows = conn.execute(
+        "SELECT DISTINCT workflow FROM generations" + where_clause,
+        params,
+    ).fetchall()
+    workflows = [
+        str(row["workflow"] if isinstance(row, sqlite3.Row) else row[0])
+        for row in rows
+        if _workflow_primary_type(str(row["workflow"] if isinstance(row, sqlite3.Row) else row[0])) == requested
+    ]
+    if not workflows:
+        return prefix + "1=0", []
+    return prefix + "workflow IN (" + ",".join("?" for _ in workflows) + ")", workflows
+
+
 def _history_signature(rows: list[dict], total: int) -> str:
     parts = [f"total:{int(total or 0)}"]
     for row in rows:
@@ -7767,13 +9514,16 @@ def _history_signature(rows: list[dict], total: int) -> str:
 
 
 @app.get("/api/history/summary")
-def api_history_summary(limit: int = 80, offset: int = 0, status: str = "", scope: str = "gallery", current_user: dict | None = Depends(get_current_user_optional)):
+def api_history_summary(limit: int = 80, offset: int = 0, status: str = "", scope: str = "gallery", workflow_type: str = "", current_user: dict | None = Depends(get_current_user_optional)):
     """Lightweight history signature for polling; does not touch media files."""
     safe_limit = max(1, min(int(limit or 80), 5000))
     safe_offset = max(0, int(offset or 0))
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     where_clause, params = _history_where_params(scope, status, current_user)
+    type_clause, type_params = _history_workflow_type_clause(conn, where_clause, params, workflow_type)
+    where_clause += type_clause
+    params += type_params
     rows = [
         dict(r) for r in conn.execute(
             "SELECT id, image_path, thumb_path, is_public, is_hidden, hidden_at, deleted_at, protection_status, "
@@ -7836,20 +9586,45 @@ def api_workflow_previews(current_user: dict | None = Depends(get_current_user_o
 
 
 @app.get("/api/history")
-def api_history(limit: int = 50, offset: int = 0, status: str = "", scope: str = "gallery", compact: bool = False, current_user: dict | None = Depends(get_current_user_optional)):
+def api_history(limit: int = 50, offset: int = 0, after_id: str = "", status: str = "", scope: str = "gallery", workflow_type: str = "", compact: bool = False, current_user: dict | None = Depends(get_current_user_optional)):
     """Query generation history from SQLite with pagination."""
     safe_limit = max(1, min(int(limit or 50), 5000))
     safe_offset = max(0, int(offset or 0))
+    cursor_id = str(after_id or "").strip()
     compact_mode = bool(compact)
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     where_clause, params = _history_where_params(scope, status, current_user)
+    type_clause, type_params = _history_workflow_type_clause(conn, where_clause, params, workflow_type)
+    where_clause += type_clause
+    params += type_params
+    page_where_clause = where_clause
+    page_params = list(params)
+    use_offset = True
+    if cursor_id:
+        cursor_row = conn.execute(
+            "SELECT datetime(created_at) AS cursor_created, generations.rowid AS history_rowid FROM generations" +
+            where_clause +
+            " AND id = ?",
+            params + [cursor_id],
+        ).fetchone()
+        if cursor_row:
+            page_where_clause += (
+                " AND (datetime(created_at) < ? OR "
+                "(datetime(created_at) = ? AND generations.rowid < ?))"
+            )
+            page_params.extend([
+                cursor_row["cursor_created"],
+                cursor_row["cursor_created"],
+                cursor_row["history_rowid"],
+            ])
+            use_offset = False
     rows = [
         dict(r) for r in conn.execute(
             "SELECT generations.*, generations.rowid AS history_rowid FROM generations" +
-            where_clause +
+            page_where_clause +
             " ORDER BY datetime(created_at) DESC, history_rowid DESC LIMIT ? OFFSET ?",
-            params + [safe_limit, safe_offset],
+            page_params + [safe_limit, safe_offset if use_offset else 0],
         ).fetchall()
     ]
     thumb_updates = []
@@ -7955,6 +9730,12 @@ def api_history_detail(item_id: str, current_user: dict | None = Depends(get_cur
 @app.delete("/api/history/{item_id}")
 def api_history_delete(item_id: str, current_user: dict = Depends(get_current_user)):
     """Soft-delete a generation record while keeping image files untouched."""
+    deleted_at = _soft_delete_history_item(item_id, current_user)
+    _notify_history_update("delete", [item_id], current_user, deleted_at=deleted_at)
+    return {"ok": True, "deleted": True, "deleted_at": deleted_at}
+
+
+def _soft_delete_history_item(item_id: str, current_user: dict) -> str:
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     _history_owner_check(conn, item_id, current_user, allow_deleted=True)
@@ -7972,7 +9753,7 @@ def api_history_delete(item_id: str, current_user: dict = Depends(get_current_us
         item["deleted_at"] = deleted_at
         item["deleted_by"] = current_user.get("sub", "")
         save_history()
-    return {"ok": True, "deleted": True, "deleted_at": deleted_at}
+    return deleted_at
 
 
 @app.post("/api/history/{item_id}/video-frame")
@@ -8137,6 +9918,7 @@ def api_history_restore(item_id: str, current_user: dict = Depends(get_current_u
         item["deleted_at"] = ""
         item["deleted_by"] = ""
         save_history()
+    _notify_history_update("restore", [item_id], current_user)
     return {"ok": True, "restored": True}
 
 
@@ -8149,6 +9931,7 @@ def api_history_permanent_delete(item_id: str, current_user: dict = Depends(get_
     conn.commit()
     conn.close()
     save_history()
+    _notify_history_update("permanent_delete", [item_id], current_user)
     return {"ok": True, "deleted": True}
 
 
@@ -8177,10 +9960,12 @@ def api_history_batch_permanent_delete(body: dict, current_user: dict = Depends(
     conn = sqlite3.connect(GEN_DB)
     conn.row_factory = sqlite3.Row
     deleted = 0
+    deleted_ids = []
     for item_id in ids:
         try:
             _purge_history_record(conn, item_id, current_user)
             deleted += 1
+            deleted_ids.append(item_id)
         except HTTPException as e:
             if e.status_code in (403, 404):
                 continue
@@ -8188,6 +9973,7 @@ def api_history_batch_permanent_delete(body: dict, current_user: dict = Depends(
     conn.commit()
     conn.close()
     save_history()
+    _notify_history_update("permanent_delete", deleted_ids, current_user)
     return {"ok": True, "deleted": deleted}
 
 
@@ -8216,6 +10002,7 @@ def api_history_clear_trash(current_user: dict = Depends(get_current_user)):
         deleted_set = set(deleted_ids)
         history = [h for h in history if h.get("id") not in deleted_set]
         save_history()
+        _notify_history_update("permanent_delete", deleted_ids, current_user)
     return {"ok": True, "deleted": len(deleted_ids)}
 
 
@@ -8249,7 +10036,46 @@ def api_history_hide(item_id: str, body: dict, current_user: dict = Depends(get_
         item["hidden_at"] = hidden_at
         item["hidden_by"] = hidden_by
         save_history()
+    _notify_history_update("hide" if is_hidden else "unhide", [item_id], current_user, hidden_at=hidden_at)
     return {"ok": True, "is_hidden": bool(is_hidden), "hidden_at": hidden_at}
+
+
+@app.post("/api/history/{item_id}/protection")
+def api_history_protection(item_id: str, body: dict, current_user: dict = Depends(require_admin)):
+    if current_user.get("role") != "admin" and _get_user_role(current_user.get("sub", "")) != "admin":
+        raise HTTPException(403, "Admin permission required")
+    status = str(body.get("protection_status") or "").strip().lower()
+    if not status:
+        status = IMAGE_PROTECTION_PROTECTED if body.get("protected") else IMAGE_PROTECTION_SAFE
+    if status not in {IMAGE_PROTECTION_SAFE, IMAGE_PROTECTION_PROTECTED}:
+        raise HTTPException(400, "protection_status must be safe or protected")
+    score = 1.0 if status == IMAGE_PROTECTION_PROTECTED else 0.0
+    reason = str(body.get("reason") or "").strip()
+    if not reason:
+        reason = "admin manual protected" if status == IMAGE_PROTECTION_PROTECTED else "admin manual safe"
+    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(GEN_DB)
+    _history_owner_check(conn, item_id, current_user)
+    conn.close()
+    _update_generation_protection(item_id, status, score, reason, "manual-admin", checked_at)
+    _notify_history_update(
+        "protection",
+        [item_id],
+        current_user,
+        protection_status=status,
+        protection_score=score,
+        protection_reason=reason,
+        protection_source="manual-admin",
+        protection_checked_at=checked_at,
+    )
+    return {
+        "ok": True,
+        "protection_status": status,
+        "protection_score": score,
+        "protection_reason": reason,
+        "protection_source": "manual-admin",
+        "protection_checked_at": checked_at,
+    }
 
 
 @app.post("/api/history/batch-delete")
@@ -8258,14 +10084,18 @@ def api_history_batch_delete(body: dict, current_user: dict = Depends(get_curren
     if not ids:
         raise HTTPException(400, "ids required")
     deleted = 0
+    deleted_ids = []
+    deleted_at = ""
     for item_id in ids:
         try:
-            api_history_delete(item_id, current_user)
+            deleted_at = _soft_delete_history_item(item_id, current_user)
             deleted += 1
+            deleted_ids.append(item_id)
         except HTTPException as e:
             if e.status_code in (403, 404):
                 continue
             raise
+    _notify_history_update("delete", deleted_ids, current_user, deleted_at=deleted_at)
     return {"ok": True, "deleted": deleted}
 
 
@@ -8348,12 +10178,22 @@ def _assert_history_media_visible(rel_path: str, current_user: dict | None):
 
 
 @app.get("/api/images/{filename:path}")
-def api_image(filename: str, current_user: dict | None = Depends(get_current_user_optional)):
+def api_image(
+    filename: str,
+    download: bool = False,
+    current_user: dict | None = Depends(get_current_user_optional),
+):
     """Serve generated media when the owning history record is visible."""
     safe = (filename or "").replace("\\", "/").lstrip("/")
     path = _safe_rel_path(OUTPUT_DIR, safe)
     if os.path.isfile(path):
         _assert_history_media_visible(safe, current_user)
+        if download:
+            return FileResponse(
+                path,
+                media_type=_image_media_type(path, "image/png"),
+                filename=os.path.basename(path),
+            )
         return FileResponse(path, media_type=_image_media_type(path, "image/png"))
     raise HTTPException(404)
 

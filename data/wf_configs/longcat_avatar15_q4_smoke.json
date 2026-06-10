@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "workflow": "longcat_avatar15_q4_smoke.json",
+  "fields": [
+    {
+      "key": "1::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "3::audio",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考音频",
+      "order": 1,
+      "type": "audio"
+    },
+    {
+      "key": "10::positive_prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 2,
+      "type": "textarea"
+    },
+    {
+      "key": "10::negative_prompt",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "15::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "seed",
+      "order": 1,
+      "type": "seed"
+    },
+    {
+      "key": "17::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "filename_prefix",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "2::width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "宽度",
+      "order": 0,
+      "type": "number"
+    },
+    {
+      "key": "2::height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "高度",
+      "order": 1,
+      "type": "number"
+    },
+    {
+      "key": "4::duration",
+      "zone": "user_input",
+      "visible": true,
+      "label": "长度（秒，0=自动）",
+      "order": 3,
+      "type": "number"
+    },
+    {
+      "key": "6::num_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "音频嵌入帧数",
+      "order": 3,
+      "type": "number"
+    },
+    {
+      "key": "6::fps",
+      "zone": "user_input",
+      "visible": true,
+      "label": "帧率",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "13::num_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "生成帧数",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "13::overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "latent overlap",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "14::steps",
+      "zone": "hidden",
+      "visible": false,
+      "label": "steps",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "14::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scheduler",
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "17::frame_rate",
+      "zone": "hidden",
+      "visible": false,
+      "label": "输出帧率",
+      "order": 9,
+      "type": "number"
+    },
+    {
+      "key": "17::crf",
+      "zone": "hidden",
+      "visible": false,
+      "label": "CRF",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "12::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "LongCat 模型",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "9::model_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "T5 文本编码器",
+      "order": 12,
+      "type": "text"
+    },
+    {
+      "key": "5::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Whisper 编码器",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "7::model_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE",
+      "order": 14,
+      "type": "text"
+    }
+  ]
+}

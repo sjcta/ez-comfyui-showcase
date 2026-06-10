@@ -97,7 +97,7 @@
   },
   "76:71": {
     "inputs": {
-      "text": "",
+      "text": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, malformed legs, extra legs, missing legs, fused legs, dislocated knees, misplaced knees, broken leg joints, disconnected thighs and calves, misplaced ankles, wrong sock placement, incorrect stocking cuffs, leg perspective error, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay",
       "clip": [
         "76:62",
         0

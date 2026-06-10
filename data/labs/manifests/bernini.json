@@ -1,0 +1,90 @@
+{
+  "id": "bernini",
+  "name": "Bernini Official Restore Lab",
+  "short_name": "Bernini",
+  "kind": "image-video-renderer",
+  "repo_url": "https://github.com/bytedance/Bernini",
+  "source_commit": "9a366af09c93a94a014e7c6df9782155a67908ef",
+  "local_source": "data/labs/projects/Bernini",
+  "license_note": "See upstream LICENSE. Use this lab for internal official-case validation first.",
+  "checkpoint_paths": [
+    "data/labs/checkpoints/Bernini/Bernini-R-Diffusers"
+  ],
+  "official_cases": [
+    {
+      "name": "Text-to-image corgi painting",
+      "case_file": "assets/testcases/t2i/t2i.json",
+      "output": "assets/testcases/t2i/t2i_out.png",
+      "command": "python infer_single_gpu.py --config ../../checkpoints/Bernini/Bernini-R-Diffusers --case assets/testcases/t2i/t2i.json --num_frames 1"
+    },
+    {
+      "name": "Text-to-video official case",
+      "case_file": "assets/testcases/t2v/t2v.json",
+      "output": "assets/testcases/t2v/t2v_out.mp4",
+      "command": "torchrun --nproc-per-node 8 infer_multi_gpu.py --config ../../checkpoints/Bernini/Bernini-R-Diffusers --ulysses 8 --case assets/testcases/t2v/t2v.json"
+    }
+  ],
+  "setup_commands": [
+    "scripts/labs/prepare_bernini.sh",
+    "hf download ByteDance/Bernini-R-Diffusers --local-dir data/labs/checkpoints/Bernini/Bernini-R-Diffusers"
+  ],
+  "playground": {
+    "summary": "Create a per-run Bernini case JSON from text and uploaded media, then launch the official infer_single_gpu.py runner.",
+    "modes": [
+      {
+        "id": "t2i",
+        "label": "T2I 文生图",
+        "description": "只输入 prompt，输出单张图片。",
+        "guidance_mode": "t2v_apg",
+        "external_workflow": "t2i_bernini_fp8.json",
+        "requires": { "images": 0, "videos": 0 },
+        "defaults": { "width": 848, "height": 480, "frames": 1, "fps": 16, "steps": 40, "seed": 42 }
+      },
+      {
+        "id": "i2i",
+        "label": "I2I 图像编辑",
+        "description": "上传 1 张源图并输入编辑指令，输出单张图片。",
+        "guidance_mode": "v2v",
+        "requires": { "min_images": 1, "videos": 0 },
+        "defaults": { "width": 848, "height": 480, "frames": 1, "fps": 16, "steps": 40, "seed": 42 }
+      },
+      {
+        "id": "t2v",
+        "label": "T2V 文生视频",
+        "description": "只输入 prompt，输出短视频。",
+        "guidance_mode": "t2v_apg",
+        "requires": { "images": 0, "videos": 0 },
+        "defaults": { "width": 848, "height": 480, "frames": 81, "fps": 16, "steps": 40, "seed": 42 }
+      },
+      {
+        "id": "v2v",
+        "label": "V2V 视频编辑",
+        "description": "上传 1 个源视频并输入编辑指令，输出视频。",
+        "guidance_mode": "v2v_apg",
+        "requires": { "images": 0, "min_videos": 1 },
+        "defaults": { "width": 848, "height": 480, "frames": 81, "fps": 16, "steps": 40, "seed": 42 }
+      },
+      {
+        "id": "r2v",
+        "label": "R2V 多参考生视频",
+        "description": "上传 1 张或多张参考图并输入组合/动作描述，输出视频。",
+        "guidance_mode": "r2v_apg",
+        "requires": { "min_images": 1, "videos": 0 },
+        "defaults": { "width": 848, "height": 480, "frames": 81, "fps": 16, "steps": 40, "seed": 42 }
+      },
+      {
+        "id": "rv2v",
+        "label": "RV2V 参考视频编辑",
+        "description": "上传 1 个源视频和 1 张或多张参考图，输出参考驱动的视频编辑结果。",
+        "guidance_mode": "rv2v",
+        "requires": { "min_images": 1, "min_videos": 1 },
+        "defaults": { "width": 848, "height": 480, "frames": 81, "fps": 16, "steps": 40, "seed": 42 }
+      }
+    ]
+  },
+  "resource_lock": {
+    "project": "Bernini",
+    "default_ttl_sec": 21600,
+    "reason": "Bernini official-case validation is using the GPU"
+  }
+}

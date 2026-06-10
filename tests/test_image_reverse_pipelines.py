@@ -31,7 +31,6 @@ class ImageReverseParserTests(unittest.TestCase):
                     },
                 },
                 "最终提示词": "竖图写实摄影，人物位于画面中心偏右，占画面约60%，头部yaw约35度，左肘弯曲约90度。",
-                "负面约束": ["字段名文字", "额外人物"],
             },
             ensure_ascii=False,
         )
@@ -41,7 +40,7 @@ class ImageReverseParserTests(unittest.TestCase):
 
         self.assertIn("人物位于画面中心偏右", structured)
         self.assertIn("头部yaw约35度", output.prompt)
-        self.assertEqual(output.negative_prompt, ["字段名文字", "额外人物"])
+        self.assertEqual(output.negative_prompt, [])
         self.assertNotIn("A_结构化视觉规格书", structured)
         self.assertNotIn("B_最终提示词", structured)
 
@@ -60,7 +59,6 @@ class ImageReverseParserTests(unittest.TestCase):
                     "可见族裔/人种外貌倾向：东亚外貌倾向；肤色：暖白肤色；"
                     "重要物体细节：红色易拉罐位于画面左上区域，罐口朝下。"
                 ),
-                "负面约束": [],
             },
             ensure_ascii=False,
         )
@@ -87,7 +85,6 @@ class ImageReverseParserTests(unittest.TestCase):
                     "不确定项：远处背景文字不可读。"
                     "易错点与禁止项：不要添加额外人物。"
                 ),
-                "负面约束": ["不要出现水印"],
             },
             ensure_ascii=False,
         )
@@ -97,9 +94,7 @@ class ImageReverseParserTests(unittest.TestCase):
         self.assertIn("关键保留点", output.prompt)
         self.assertIn("不确定项", output.prompt)
         self.assertIn("易错点与禁止项", output.prompt)
-        self.assertIn("不要出现水印", output.negative_prompt)
-        self.assertNotIn("不要添加额外人物", output.negative_prompt)
-        self.assertNotIn("不要改变主要光源方向", output.negative_prompt)
+        self.assertEqual(output.negative_prompt, [])
         structured = json.dumps(output.visual_spec, ensure_ascii=False)
         self.assertIn("关键保留点", structured)
         self.assertIn("高优先级", structured)
@@ -121,7 +116,6 @@ class ImageReverseParserTests(unittest.TestCase):
                     },
                 },
                 "最终提示词": "写实摄影，可能是校园场景。人物穿红色上衣。疑似学生身份。",
-                "负面约束": [],
             },
             ensure_ascii=False,
         )
@@ -141,7 +135,6 @@ class ImageReverseParserTests(unittest.TestCase):
                 "主体细节": "人物骨盆位于画面下中区域，胸腔向画面左上旋转，脊柱形成斜向C型趋势；画面左侧手臂从肩部向左上区域抬起，肘部弯曲约90度，手指握住红色易拉罐。",
                 "构图镜头": "高机位俯拍，镜头向下约35度，画面轻微顺时针倾斜。",
                 "final_prompt": "红色主题人物图，人物骨盆位于画面下中区域，胸腔向画面左上旋转。",
-                "negative_prompt": ["文字", "水印"],
             },
             ensure_ascii=False,
         )
@@ -152,7 +145,7 @@ class ImageReverseParserTests(unittest.TestCase):
         self.assertIn("画面描述", output.visual_spec)
         self.assertIn("主体", output.visual_spec["画面描述"])
         self.assertIn("胸腔", output.visual_spec["画面描述"]["主体"])
-        self.assertEqual(output.negative_prompt, ["文字", "水印"])
+        self.assertEqual(output.negative_prompt, [])
 
     def test_parser_keeps_expert_required_detail_fields(self):
         raw = json.dumps(
@@ -163,9 +156,9 @@ class ImageReverseParserTests(unittest.TestCase):
                 "主体细节": "主体人物位于中心偏右区域，身体向画面左侧折转。",
                 "人物外貌": "主体人物呈年轻成人倾向，东亚外貌倾向，暖白肤色，黑色齐肩短发带空气刘海。",
                 "关节角度": "头部yaw向画面右侧约35度，pitch下俯约10度，roll向画面左侧约8度；画面左侧手臂肘部弯曲约90度，画面右下腿部膝盖弯曲约60度，脚尖指向画面右下。",
+                "暴露与情色内容": "主体人物左侧乳头、左侧乳晕、右侧乳头和右侧乳晕都被红色上衣完全覆盖，没有乳头或乳晕可见像素；外阴区域、阴唇轮廓、阴道口和阴蒂被裙摆和大腿遮挡，没有外生殖器可见像素，裙摆边缘露出大腿根部皮肤。",
                 "镜头倾斜角度": "高机位俯拍，镜头向下约35度，画面逆时针roll倾斜约4度，近端腿部有广角透视放大。",
                 "final_prompt": "",
-                "negative_prompt": [],
             },
             ensure_ascii=False,
         )
@@ -176,13 +169,19 @@ class ImageReverseParserTests(unittest.TestCase):
         self.assertIn("主体人物外接框占画面约70%", description["画面比例与主体占比"])
         self.assertIn("东亚外貌倾向", description["人物外貌"])
         self.assertIn("画面左侧手臂肘部弯曲约90度", description["关节角度"])
+        self.assertIn("裙摆边缘露出大腿根部皮肤", description["暴露与情色内容"])
+        self.assertNotIn("乳头", description["暴露与情色内容"])
+        self.assertNotIn("外生殖器", description["暴露与情色内容"])
         self.assertIn("逆时针roll倾斜约4度", description["镜头倾斜角度"])
         self.assertIn("东亚外貌倾向", output.prompt)
         self.assertIn("主体人物外接框占画面约70%", output.prompt)
         self.assertIn("画面左侧手臂肘部弯曲约90度", output.prompt)
+        self.assertIn("裙摆边缘露出大腿根部皮肤", output.prompt)
+        self.assertNotIn("乳头", output.prompt)
+        self.assertNotIn("外生殖器", output.prompt)
         self.assertIn("镜头向下约35度", output.prompt)
 
-    def test_expert_team_visual_json_preserves_model_expert_text(self):
+    def test_expert_team_visual_json_preserves_expert_facts_without_prefix_labels(self):
         raw = json.dumps(
             {
                 "基本概述": "人物位于画面中右至右下区域，头部位于右上区域。",
@@ -202,13 +201,73 @@ class ImageReverseParserTests(unittest.TestCase):
         structured = json.dumps(output.visual_spec, ensure_ascii=False)
         prompt = output.prompt
 
-        self.assertIn("姿态专家", structured)
-        self.assertIn("光影专家", structured)
+        self.assertNotIn("姿态专家", structured)
+        self.assertNotIn("光影专家", structured)
         self.assertIn("人物骨盆位于画面下中区域", structured)
         self.assertIn("右上", structured)
         self.assertIn("中右至右下", structured)
         self.assertIn("中左区域折转约35度", structured)
         self.assertIn("肘部弯曲约90度", prompt)
+
+    def test_parser_drops_template_echo_fragments(self):
+        raw = json.dumps(
+            {
+                "基本概述": "竖版室内人物特写照片。",
+                "主体类型": "person",
+                "主体细节": (
+                    "主体人物位于画面中心偏右，弯腰幅度约90度，臀部朝向镜头；"
+                    "头部yaw/pitch/roll、颈肩胸腰骨盆、肩线胯线脊柱、画面左侧肩肘腕、画面右侧髋膝踝、手指和脚尖方向的近似角度；"
+                    "姿态结构：画面左侧手臂从中左区域向左下延伸，肘部弯曲约70度，手指抓住前方物体。"
+                ),
+                "构图光色": "摄影设备可见迹象、拍摄角度、机位高度、镜头高度、相机俯仰角、画面roll顺/逆时针倾斜角；极低机位仰拍，画面顺时针roll约5度。",
+                "物体背景": "主体持有/接触物、前景和背景的数量、位置、朝向、材质、可见文字；右上区域有三个圆形顶灯。",
+                "final_prompt": "",
+            },
+            ensure_ascii=False,
+        )
+
+        output = parse_reverse_json(raw, mode="expert", provider="test")
+        structured = json.dumps(output.visual_spec, ensure_ascii=False)
+
+        self.assertIn("主体人物位于画面中心偏右", structured)
+        self.assertIn("画面左侧手臂从中左区域向左下延伸", structured)
+        self.assertIn("极低机位仰拍", structured)
+        self.assertIn("右上区域有三个圆形顶灯", structured)
+        self.assertNotIn("头部yaw/pitch/roll、颈肩胸腰骨盆", structured)
+        self.assertNotIn("摄影设备可见迹象", structured)
+        self.assertNotIn("主体持有/接触物", structured)
+        self.assertNotIn("姿态结构：", structured)
+
+    def test_parser_maps_split_pose_expert_dimensions(self):
+        raw = json.dumps(
+            {
+                "基本概述": "低角度人物照片。",
+                "专家观点": [
+                    "头颈视线：头部向画面右侧轻微旋转约35度，pitch下俯约10度，眼神看向镜头。",
+                    "躯干重心：胸腔朝向画面左上，骨盆略微坐在画面中下金属架上，重心落在臀部支撑点。",
+                    "四肢端点：画面左侧膝盖弯曲约90度，画面右侧手腕支撑在金属架边缘，脚尖指向画面左下。",
+                    "暴露与情色内容：肩部与锁骨露出，大腿根部可见，无过度暴露。",
+                ],
+                "final_prompt": "",
+            },
+            ensure_ascii=False,
+        )
+
+        output = parse_reverse_json(raw, mode="expert", provider="test")
+        description = output.visual_spec["画面描述"]
+
+        self.assertIn("头部向画面右侧旋转约35度", description["头部面部"])
+        self.assertIn("胸腔朝向画面左上", description["姿态结构"])
+        self.assertIn("画面左侧膝盖弯曲约90度", description["关节角度"])
+        self.assertIn("肩部与锁骨露出", description["暴露与情色内容"])
+        self.assertIn("脚尖指向画面左下", output.prompt)
+        self.assertNotIn("轻微", output.prompt)
+        self.assertNotIn("略微", output.prompt)
+        self.assertNotIn("无过度暴露", output.prompt)
+        experts = output.expert_interrogate["experts"]
+        self.assertTrue(any(item.startswith("头颈视线：") for item in experts))
+        self.assertTrue(any(item.startswith("暴露与情色内容：") for item in experts))
+        self.assertNotIn("无过度暴露", json.dumps(experts, ensure_ascii=False))
 
     def test_parser_does_not_suppress_coarse_model_observations(self):
         rich_subject = (
@@ -319,6 +378,7 @@ class ImageReversePipelineTests(unittest.TestCase):
                         "主体细节": "人物骨盆位于画面下中区域，胸腔向画面中左区域折转，肩线左高右低，画面左侧手臂与画面右侧手臂位置分明。",
                         "人物外貌": "主体人物呈年轻成人倾向，东亚外貌倾向，暖白肤色。",
                         "关节角度": "头部yaw向画面右侧约35度，左肘弯曲约90度，右膝弯曲约60度。",
+                        "暴露与情色内容": "左侧乳头、左侧乳晕、右侧乳头和右侧乳晕被上衣覆盖；外阴区域、阴唇轮廓、阴道口和阴蒂被裙摆遮挡，没有外生殖器可见像素；裙摆边缘露出大腿皮肤。",
                         "镜头倾斜角度": "高机位俯拍，镜头向下约35度，画面逆时针roll倾斜约4度。",
                         "final_prompt": "高机位人物坐姿照片，骨盆位于画面下中区域，胸腔向画面中左区域折转，画面左侧手臂肘部弯曲约90度。",
                     },
@@ -349,6 +409,7 @@ class ImageReversePipelineTests(unittest.TestCase):
         self.assertIn("专家模式强制补齐三项", prompts[2])
         self.assertIn("肘部弯曲约90度", result["prompt"])
         self.assertIn("东亚外貌倾向", result["prompt"])
+        self.assertIn("暴露与情色内容", prompts[1])
         self.assertIn("画面逆时针roll倾斜约4度", result["prompt"])
         self.assertEqual(result["expert_interrogate"]["mode"], "multi_pass_team")
 
@@ -396,6 +457,99 @@ class ImageReversePipelineTests(unittest.TestCase):
         self.assertNotIn('"反推模式"', result["structured_prompt_json"])
         self.assertNotEqual(result["structured_prompt"]["画面描述"], {"复核": "修正后通过。只输出了复核摘要，没有最终规格。"})
         self.assertIn("修正后通过", json.dumps(result["expert_interrogate"]["review"], ensure_ascii=False))
+
+    def test_expert_team_uses_assembled_prompt_when_review_prompt_is_too_short(self):
+        def fake_chat(messages, **kwargs):
+            prompt_text = messages[1]["content"][0]["text"]
+            if "第3轮" in prompt_text:
+                return json.dumps(
+                    {
+                        "mode": "expert_review",
+                        "最终提示词": "竖版人像照片，年轻女性，红色上衣，坐姿，低角度仰拍。",
+                        "最终规格": {
+                            "画幅与比例": "竖图约9:16，主体占画面高度约85%。",
+                        },
+                        "复核结论": "修正后通过。",
+                    },
+                    ensure_ascii=False,
+                )
+            if "第2轮" in prompt_text:
+                return json.dumps(
+                    {
+                        "mode": "expert_subject",
+                        "整体描述": "竖版人物摄影，主体位于画面中心偏右。",
+                        "主体类型": "person",
+                        "专家观点": [
+                            "构图空间：主体人物头部位于画面右上区域，双脚位于左下和中下区域，形成从右上到左下的对角线。",
+                            "摄影镜头：低机位仰拍，近端红色靴子因广角透视被明显放大。",
+                            "姿态结构：画面左侧膝盖弯曲约90度，画面右侧膝盖弯曲约110度，双脚悬在前景。",
+                            "服装材质：红色挂脖上衣正面有银色拉链，红黑格纹短裙下摆有白色荷叶边，红色高筒靴配白色鞋带。",
+                        ],
+                        "主体细节": "人物黑色齐肩短发带刘海，面部朝向画面左侧，视线看向镜头，手持红色饮料瓶。",
+                        "构图光色": "主色调为红色与灰色，背景为玻璃窗和灰色金属结构。",
+                        "最终提示词": "竖版人像照片，年轻女性，红色上衣，坐姿。",
+                    },
+                    ensure_ascii=False,
+                )
+            if "第1轮" in prompt_text:
+                return json.dumps(
+                    {
+                        "mode": "expert_global",
+                        "主体判定": "主体为人物。",
+                        "专家计划": ["构图空间", "摄影镜头", "姿态结构", "服装材质"],
+                    },
+                    ensure_ascii=False,
+                )
+            return "{}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "a.jpg"
+            _write_jpeg_stub(image)
+            result = run_expert_team_reverse(str(image), chat_fn=fake_chat)
+
+        self.assertIn("低机位仰拍", result["prompt"])
+        self.assertIn("画面左侧膝盖弯曲约90度", result["prompt"])
+        self.assertIn("红色挂脖上衣正面有银色拉链", result["prompt"])
+        self.assertEqual(result["prompt"].count("红色挂脖上衣正面有银色拉链"), 1)
+        self.assertNotEqual(result["prompt"], "竖版人像照片，年轻女性，红色上衣，坐姿，低角度仰拍。")
+
+    def test_final_prompt_filters_role_side_limb_words_without_screen_reference(self):
+        raw = json.dumps(
+            {
+                "基本概述": "竖版人物照片。",
+                "主体细节": "右手持红色饮料瓶，左手支撑于身侧金属架。主体坐在金属架上。",
+                "专家观点": [
+                    "四肢端点：画面左侧手臂弯曲持握红色饮料瓶，画面右侧手掌支撑在金属架边缘。",
+                ],
+                "final_prompt": "竖版人物照片。",
+            },
+            ensure_ascii=False,
+        )
+
+        output = parse_reverse_json(raw, mode="expert", provider="test")
+
+        self.assertIn("画面左侧手臂弯曲持握红色饮料瓶", output.prompt)
+        self.assertNotIn("右手持红色饮料瓶", output.prompt)
+        self.assertNotIn("左手支撑于身侧金属架", output.prompt)
+        structured = json.dumps(output.visual_spec, ensure_ascii=False)
+        self.assertNotIn("右手持红色饮料瓶", structured)
+        self.assertNotIn("左手支撑于身侧金属架", structured)
+
+    def test_final_prompt_compacts_near_duplicate_sentences(self):
+        raw = json.dumps(
+            {
+                "基本概述": "竖版人像照片。",
+                "主体细节": "主体人物为年轻女性，黑色齐肩短发，刘海遮挡部分额头，肤色白皙，眼神直视镜头，嘴唇微张。",
+                "人物外貌": "主体为年轻女性，黑色齐肩短发带刘海，肤色白皙，眼神直视镜头，嘴唇微张，面部妆容清晰。",
+                "final_prompt": "",
+            },
+            ensure_ascii=False,
+        )
+
+        output = parse_reverse_json(raw, mode="expert", provider="test")
+
+        self.assertEqual(output.prompt.count("年轻女性"), 1)
+        self.assertIn("面部妆容清晰", output.prompt)
 
 
 if __name__ == "__main__":

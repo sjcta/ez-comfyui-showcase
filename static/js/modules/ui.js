@@ -200,9 +200,15 @@ function showPromptResultToast(prompt, meta) {
   var elapsed = meta && typeof meta.interrogate_elapsed_seconds === 'number' ? meta.interrogate_elapsed_seconds : null;
   var metaLine = provider || '图片反推提示词';
   if (elapsed !== null && isFinite(elapsed)) metaLine += ' · 耗时 ' + elapsed.toFixed(elapsed >= 10 ? 1 : 2) + 's';
+  var sourceImage = String((meta && (meta._source_image || meta.source_image || meta.image || meta.input_image)) || '').trim();
+  var currentLevel = Number(meta && meta.reverse_level);
+  if (!isFinite(currentLevel)) {
+    var reverseMode = String((meta && meta.reverse_mode) || '').toLowerCase();
+    currentLevel = reverseMode === 'expert' || reverseMode === 'expert_team' ? 2 : (reverseMode === 'advanced' ? 1 : 0);
+  }
+  currentLevel = Math.max(0, Math.min(2, Math.round(currentLevel)));
   var promptEn = String((meta && (meta.prompt_en || meta.english_prompt)) || (_hasChinese(text) ? '' : text) || '').trim();
   var promptZh = _cleanPromptResultChinese(String((meta && (meta.prompt_zh || meta.zh_prompt || meta.chinese_prompt || meta.translated_prompt)) || (_hasChinese(text) ? text : '') || '').trim());
-  var negativePrompt = String((meta && (meta.negative_prompt || meta.negativePrompt)) || '').trim();
   var rawExpertData = meta && meta.expert_interrogate ? meta.expert_interrogate : null;
   var isSinglePassExpert = !!(rawExpertData && rawExpertData.mode === 'single_pass');
   var expertData = rawExpertData && rawExpertData.mode !== 'single_pass' ? rawExpertData : null;
@@ -258,7 +264,7 @@ function showPromptResultToast(prompt, meta) {
     var experts = Array.isArray(data.experts) ? data.experts : [];
     var merged = String((resultMeta && (resultMeta.structured_optimized_prompt || resultMeta.prompt || resultMeta.prompt_zh)) || '').trim();
     var isExpertMode = data.mode === 'staged' || data.mode === 'single_pass_team' || data.mode === 'multi_pass_team';
-    var title = isExpertMode ? '专家反推' : '加强反推';
+    var title = isExpertMode ? '专家反推' : '高级反推';
     var html = '<span class="prompt-result-expert-title">' + escH(title) + '</span>';
     if (merged) {
       html += '<span class="prompt-result-expert-merged"><strong>合并结果</strong><span>' + escH(merged) + '</span></span>';
@@ -305,98 +311,29 @@ function showPromptResultToast(prompt, meta) {
     html += '</span>';
     return html;
   }
-  function parseStructuredText() {
-    var raw = getStructuredText();
-    if (!raw) return null;
-    try { return JSON.parse(raw); } catch (err) { return null; }
-  }
-  function isNegativePromptKey(key) {
-    var normalized = String(key || '').toLowerCase();
-    return normalized === '负面提示词'
-      || normalized === 'negative_prompt'
-      || normalized === 'negative'
-      || normalized.indexOf('negative') >= 0
-      || normalized.indexOf('负面') >= 0;
-  }
-  function cloneWithoutNegative(value) {
-    if (Array.isArray(value)) {
-      var list = [];
-      for (var ai = 0; ai < value.length; ai++) {
-        var cleanedItem = cloneWithoutNegative(value[ai]);
-        if (cleanedItem !== '' && cleanedItem !== null && cleanedItem !== undefined) list.push(cleanedItem);
-      }
-      return list;
-    }
-    if (value && typeof value === 'object') {
-      var out = {};
-      Object.keys(value).forEach(function(key) {
-        if (isNegativePromptKey(key)) return;
-        var cleanedValue = cloneWithoutNegative(value[key]);
-        if (cleanedValue === '' || cleanedValue === null || cleanedValue === undefined) return;
-        if (Array.isArray(cleanedValue) && !cleanedValue.length) return;
-        if (typeof cleanedValue === 'object' && !Array.isArray(cleanedValue) && !Object.keys(cleanedValue).length) return;
-        out[key] = cleanedValue;
-      });
-      return out;
-    }
-    return value;
-  }
-  function collectTextValues(value, output) {
-    if (Array.isArray(value)) {
-      for (var vi = 0; vi < value.length; vi++) collectTextValues(value[vi], output);
-      return;
-    }
-    if (value && typeof value === 'object') {
-      Object.keys(value).forEach(function(key) { collectTextValues(value[key], output); });
-      return;
-    }
-    var item = String(value || '').trim();
-    if (item) output.push(item);
-  }
-  function collectNegativeSections(value, output) {
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) {
-      for (var ni = 0; ni < value.length; ni++) collectNegativeSections(value[ni], output);
-      return;
-    }
-    Object.keys(value).forEach(function(key) {
-      if (isNegativePromptKey(key)) {
-        collectTextValues(value[key], output);
-      } else {
-        collectNegativeSections(value[key], output);
-      }
-    });
-  }
-  function expertFullPromptText() {
-    if (currentFormat === 'json' && getStructuredText()) return getStructuredText();
-    var full = getPromptText();
-    if (negativePrompt) full += '\n\n负面提示词：' + negativePrompt;
-    return full;
-  }
   function expertPositivePromptText() {
-    if (currentFormat === 'json') {
-      var parsed = parseStructuredText();
-      if (parsed) return JSON.stringify(cloneWithoutNegative(parsed), null, 2);
-    }
+    if (currentFormat === 'json' && getStructuredText()) return getStructuredText();
     return getPromptText();
-  }
-  function expertNegativePromptText() {
-    var parsed = currentFormat === 'json' ? parseStructuredText() : null;
-    if (parsed) {
-      var items = [];
-      collectNegativeSections(parsed, items);
-      if (items.length) return Array.from(new Set(items)).join('，');
-    }
-    return negativePrompt;
   }
   function promptCopyControlsHtml() {
     if (expertData) {
-      return ''
-        + '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="replicate-full">复刻完整提示词</button>'
-        + '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="replicate-positive">复刻正向提示词</button>'
-        + '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="replicate-negative">复刻负面提示词</button>';
+      return '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="replicate-positive">复刻正向提示词</button>';
     }
     return '<button class="prompt-result-action is-primary is-copy hidden" type="button" data-action="copy">复制到输入框</button>';
+  }
+  function promptLevelControlsHtml() {
+    if (!sourceImage) return '';
+    var levels = [
+      { level: 0, label: '标准' },
+      { level: 1, label: '高级' },
+      { level: 2, label: '专家' }
+    ];
+    var html = '<span class="prompt-result-level" title="用当前图片切换反推级别重新生成">';
+    for (var li = 0; li < levels.length; li++) {
+      html += '<button class="prompt-result-level-btn' + (levels[li].level === currentLevel ? ' active' : '') + '" type="button" data-level="' + levels[li].level + '">' + escH(levels[li].label) + '</button>';
+    }
+    html += '</span>';
+    return html;
   }
   var currentText = currentFormat === 'json' ? getStructuredText() : getPromptText();
   function langLabel(lang) { return lang === 'zh' ? '中文' : 'English'; }
@@ -407,10 +344,10 @@ function showPromptResultToast(prompt, meta) {
     +   '<span class="prompt-result-panel">'
     +     '<span class="prompt-result-meta">' + escH(metaLine) + '</span>'
     +     '<span class="prompt-result-body" data-lang="' + escA(currentLang) + '" data-format="' + escA(currentFormat) + '">' + escH(currentText) + '</span>'
-    +     '<span class="prompt-result-negative' + (negativePrompt ? '' : ' hidden') + '"><strong>负面提示词</strong><span>' + escH(negativePrompt) + '</span></span>'
     +     '<span class="prompt-result-expert-panel' + (expertData ? '' : ' hidden') + '">' + renderExpertPanel(expertData, meta || {}) + '</span>'
     +     '<span class="prompt-result-controls">'
     +       '<span class="prompt-result-control-left">'
+    +         promptLevelControlsHtml()
     +         '<span class="prompt-result-format' + (hasStructuredJson ? '' : ' hidden') + '">'
     +           '<button class="prompt-result-format-btn' + (currentFormat === 'text' ? ' active' : '') + '" type="button" data-format="text">纯词汇</button>'
     +           '<button class="prompt-result-format-btn' + (currentFormat === 'json' ? ' active' : '') + '" type="button" data-format="json">JSON格式</button>'
@@ -490,6 +427,19 @@ function showPromptResultToast(prompt, meta) {
       setLanguage(this.getAttribute('data-lang'));
     });
   }
+  var levelButtons = t.querySelectorAll('.prompt-result-level-btn');
+  for (var lbi = 0; lbi < levelButtons.length; lbi++) {
+    levelButtons[lbi].addEventListener('click', function () {
+      var nextLevel = Number(this.getAttribute('data-level'));
+      if (!isFinite(nextLevel) || !sourceImage) return;
+      if (nextLevel === currentLevel) return;
+      if (window.CW && typeof CW.rerunPromptInterrogateFromResult === 'function') {
+        CW.rerunPromptInterrogateFromResult(sourceImage, nextLevel);
+      } else if (window.CW && CW.showToast) {
+        CW.showToast('当前页面还未准备好重新反推', 'info');
+      }
+    });
+  }
   if (viewBtn) viewBtn.addEventListener('click', function () {
     t.classList.add('is-expanded');
     t.classList.remove('is-collapsed');
@@ -534,41 +484,11 @@ function showPromptResultToast(prompt, meta) {
     }
     return inputs[0] || null;
   }
-  function findNegativePromptInput(mainInput) {
-    var selectors = [
-      '#quickFormFields textarea',
-      '#quickFormFields input[type="text"]',
-      '#advFields textarea',
-      '#advFields input[type="text"]',
-      'textarea[data-key]',
-      'input[type="text"][data-key]'
-    ];
-    var seen = [];
-    var candidates = document.querySelectorAll(selectors.join(','));
-    for (var i = 0; i < candidates.length; i++) {
-      var el = candidates[i];
-      if (!el || el === mainInput || seen.indexOf(el) >= 0) continue;
-      seen.push(el);
-      if (el.disabled || el.type === 'hidden') continue;
-      if (_isNegativePromptControl(el)) return el;
-    }
-    return null;
-  }
   function replicateExpertPrompt(kind) {
     var positive = expertPositivePromptText();
-    var negative = expertNegativePromptText();
     var mainInput = findMainPromptInput();
-    var negativeInput = findNegativePromptInput(mainInput);
     var wrote = false;
-    if (kind === 'negative') {
-      wrote = setPromptControlValue(negativeInput || mainInput, negative);
-    } else if (kind === 'full') {
-      var fullFallback = negativeInput ? positive : expertFullPromptText();
-      wrote = setPromptControlValue(mainInput, fullFallback);
-      if (negativeInput && negative) wrote = setPromptControlValue(negativeInput, negative) || wrote;
-    } else {
-      wrote = setPromptControlValue(mainInput, positive);
-    }
+    wrote = setPromptControlValue(mainInput, positive);
     if (!wrote) {
       if (window.CW && CW.showToast) CW.showToast('没有可复刻的提示词', 'info');
       return;
@@ -577,22 +497,13 @@ function showPromptResultToast(prompt, meta) {
       CW.registerPromptTranslationPair(promptZh, promptEn);
     }
     if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
-    var focusTarget = (kind === 'negative' && negativeInput) ? negativeInput : mainInput;
-    if (focusTarget && focusTarget.focus) focusTarget.focus();
+    if (mainInput && mainInput.focus) mainInput.focus();
     t.classList.add('is-copied');
     closePromptResultToast();
   }
-  var copyFullBtn = t.querySelector('[data-action="replicate-full"]');
   var copyPositiveBtn = t.querySelector('[data-action="replicate-positive"]');
-  var copyNegativeBtn = t.querySelector('[data-action="replicate-negative"]');
-  if (copyFullBtn) copyFullBtn.addEventListener('click', function () {
-    replicateExpertPrompt('full');
-  });
   if (copyPositiveBtn) copyPositiveBtn.addEventListener('click', function () {
     replicateExpertPrompt('positive');
-  });
-  if (copyNegativeBtn) copyNegativeBtn.addEventListener('click', function () {
-    replicateExpertPrompt('negative');
   });
   if (copyBtn) copyBtn.addEventListener('click', function () {
     var input = findMainPromptInput();

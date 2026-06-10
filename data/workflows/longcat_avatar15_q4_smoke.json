@@ -1,0 +1,300 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "i2v_input.jpg"
+    },
+    "_meta": {
+      "title": "参考图"
+    }
+  },
+  "2": {
+    "class_type": "ImageResizeKJv2",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "width": 480,
+      "height": 832,
+      "upscale_method": "lanczos",
+      "keep_proportion": "crop",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu"
+    },
+    "_meta": {
+      "title": "竖图裁切 480x832"
+    }
+  },
+  "3": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "longcat_smoke_voice.wav"
+    },
+    "_meta": {
+      "title": "测试人声音频"
+    }
+  },
+  "4": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "start_index": 0.0,
+      "duration": 0
+    },
+    "_meta": {
+      "title": "音频截取"
+    }
+  },
+  "5": {
+    "class_type": "WhisperModelLoader",
+    "inputs": {
+      "model": "HuMo/whisper_large_v3_encoder_fp16.safetensors",
+      "base_precision": "fp16",
+      "load_device": "offload_device"
+    },
+    "_meta": {
+      "title": "Whisper large-v3 encoder"
+    }
+  },
+  "6": {
+    "class_type": "LongCatAvatarWhisperEmbeds",
+    "inputs": {
+      "whisper_model": [
+        "5",
+        0
+      ],
+      "audio_1": [
+        "4",
+        0
+      ],
+      "normalize_loudness": true,
+      "num_frames": 81,
+      "fps": 25.0,
+      "audio_scale": 1.0,
+      "audio_cfg_scale": 1.0,
+      "multi_audio_type": "para"
+    },
+    "_meta": {
+      "title": "LongCat 1.5 音频嵌入"
+    }
+  },
+  "7": {
+    "class_type": "WanVideoVAELoader",
+    "inputs": {
+      "model_name": "wan_2.1_vae.safetensors",
+      "precision": "bf16",
+      "use_cpu_cache": false,
+      "verbose": false
+    },
+    "_meta": {
+      "title": "Wan 2.1 VAE"
+    }
+  },
+  "8": {
+    "class_type": "WanVideoEncode",
+    "inputs": {
+      "vae": [
+        "7",
+        0
+      ],
+      "image": [
+        "2",
+        0
+      ],
+      "enable_vae_tiling": false,
+      "tile_x": 272,
+      "tile_y": 272,
+      "tile_stride_x": 144,
+      "tile_stride_y": 128,
+      "noise_aug_strength": 0.0,
+      "latent_strength": 1.0
+    },
+    "_meta": {
+      "title": "参考图编码"
+    }
+  },
+  "9": {
+    "class_type": "LoadWanVideoT5TextEncoder",
+    "inputs": {
+      "model_name": "umt5-xxl-enc-bf16.safetensors",
+      "precision": "bf16",
+      "load_device": "offload_device",
+      "quantization": "disabled"
+    },
+    "_meta": {
+      "title": "UMT5 文本编码器"
+    }
+  },
+  "10": {
+    "class_type": "WanVideoTextEncode",
+    "inputs": {
+      "positive_prompt": "a young woman facing the camera, natural talking motion, subtle head movement, realistic lip sync, stable identity, soft studio lighting",
+      "negative_prompt": "overexposed, blurred, low quality, deformed face, distorted mouth, bad teeth, extra limbs, subtitles, text, watermark, jitter, flicker",
+      "t5": [
+        "9",
+        0
+      ],
+      "force_offload": true,
+      "use_disk_cache": false,
+      "device": "gpu"
+    },
+    "_meta": {
+      "title": "文本条件"
+    }
+  },
+  "11": {
+    "class_type": "WanVideoBlockSwap",
+    "inputs": {
+      "blocks_to_swap": 20,
+      "offload_img_emb": false,
+      "offload_txt_emb": false,
+      "use_non_blocking": false,
+      "vace_blocks_to_swap": 0,
+      "prefetch_blocks": 0,
+      "block_swap_debug": false
+    },
+    "_meta": {
+      "title": "Block swap"
+    }
+  },
+  "12": {
+    "class_type": "WanVideoModelLoader",
+    "inputs": {
+      "model": "LongCat-Avatar-15_comfy-Q4_K_M.gguf",
+      "base_precision": "bf16",
+      "quantization": "disabled",
+      "load_device": "offload_device",
+      "attention_mode": "sdpa",
+      "block_swap_args": [
+        "11",
+        0
+      ],
+      "rms_norm_function": "default"
+    },
+    "_meta": {
+      "title": "LongCat Avatar 1.5 Q4_K_M"
+    }
+  },
+  "13": {
+    "class_type": "WanVideoLongCatAvatarExtendEmbeds",
+    "inputs": {
+      "prev_latents": [
+        "8",
+        0
+      ],
+      "audio_embeds": [
+        "6",
+        0
+      ],
+      "num_frames": 81,
+      "overlap": 1,
+      "frames_processed": 0,
+      "if_not_enough_audio": "pad_with_start",
+      "ref_frame_index": 10,
+      "ref_mask_frame_range": 3,
+      "ref_latent": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "图像+音频条件融合"
+    }
+  },
+  "14": {
+    "class_type": "WanVideoSchedulerv2",
+    "inputs": {
+      "scheduler": "longcat_distill_euler",
+      "steps": 8,
+      "shift": 12.0,
+      "start_step": 0,
+      "end_step": -1,
+      "enhance_hf": false
+    },
+    "_meta": {
+      "title": "LongCat distill 调度"
+    }
+  },
+  "15": {
+    "class_type": "WanVideoSamplerv2",
+    "inputs": {
+      "model": [
+        "12",
+        0
+      ],
+      "image_embeds": [
+        "13",
+        0
+      ],
+      "cfg": 1.0,
+      "seed": 4242424242,
+      "force_offload": true,
+      "scheduler": [
+        "14",
+        0
+      ],
+      "text_embeds": [
+        "10",
+        0
+      ],
+      "add_noise_to_samples": false
+    },
+    "_meta": {
+      "title": "采样"
+    }
+  },
+  "16": {
+    "class_type": "WanVideoDecode",
+    "inputs": {
+      "vae": [
+        "7",
+        0
+      ],
+      "samples": [
+        "15",
+        0
+      ],
+      "enable_vae_tiling": false,
+      "tile_x": 272,
+      "tile_y": 272,
+      "tile_stride_x": 144,
+      "tile_stride_y": 128,
+      "normalization": "default"
+    },
+    "_meta": {
+      "title": "视频解码"
+    }
+  },
+  "17": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "16",
+        0
+      ],
+      "audio": [
+        "6",
+        1
+      ],
+      "frame_rate": 25.0,
+      "loop_count": 0,
+      "filename_prefix": "video/LongCat15_Q4_smoke",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true
+    },
+    "_meta": {
+      "title": "保存 MP4"
+    }
+  }
+}

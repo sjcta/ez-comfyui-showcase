@@ -1,6 +1,6 @@
 import unittest
 
-from modules.media_outputs import collect_preferred_outputs, output_media_type, output_ref_rel_path
+from modules.media_outputs import collect_preferred_history_outputs, collect_preferred_outputs, output_media_type, output_ref_rel_path
 
 
 class MediaOutputsTest(unittest.TestCase):
@@ -42,6 +42,101 @@ class MediaOutputsTest(unittest.TestCase):
         self.assertEqual(selected[0]["filename"], "t2v_ltx23_tattoo_00001_.mp4")
         self.assertEqual(output_media_type(selected[0]["filename"]), "video")
         self.assertEqual(output_ref_rel_path(selected[0]), "video/t2v_ltx23_tattoo_00001_.mp4")
+
+    def test_save_image_output_is_preferred_over_reference_or_preview_images(self):
+        workflow = {
+            "40": {"class_type": "LoadImage"},
+            "41": {"class_type": "PreviewImage"},
+            "9": {"class_type": "SaveImage"},
+        }
+        outputs = {
+            "40": {
+                "images": [
+                    {"filename": "uploaded-reference.png", "subfolder": "", "type": "input"},
+                ],
+            },
+            "41": {
+                "images": [
+                    {"filename": "preview-or-intermediate.png", "subfolder": "", "type": "temp"},
+                ],
+            },
+            "9": {
+                "images": [
+                    {"filename": "i2i-final-output.png", "subfolder": "", "type": "output"},
+                ],
+            },
+        }
+
+        selected = collect_preferred_outputs(outputs, workflow=workflow)
+
+        self.assertEqual([item["filename"] for item in selected], ["i2i-final-output.png"])
+        self.assertEqual(selected[0]["_node_id"], "9")
+
+    def test_history_prompt_graph_is_used_to_prefer_save_node_outputs(self):
+        entry = {
+            "prompt": [
+                1,
+                "prompt-id",
+                {
+                    "40": {"class_type": "LoadImage"},
+                    "9": {"class_type": "SaveImage"},
+                },
+                {},
+                ["9"],
+            ],
+            "outputs": {
+                "40": {
+                    "images": [
+                        {"filename": "reference.png", "subfolder": "", "type": "input"},
+                    ],
+                },
+                "9": {
+                    "images": [
+                        {"filename": "final.png", "subfolder": "", "type": "output"},
+                    ],
+                },
+            },
+        }
+
+        selected = collect_preferred_history_outputs(entry)
+
+        self.assertEqual([item["filename"] for item in selected], ["final.png"])
+
+    def test_history_prompt_graph_detection_skips_extra_data_dicts(self):
+        entry = {
+            "prompt": [
+                7,
+                "prompt-id",
+                {
+                    "40": {"class_type": "LoadImage"},
+                    "41": {"class_type": "PreviewImage"},
+                    "9": {"class_type": "SaveImage"},
+                },
+                {"client_id": "abc123"},
+                ["9"],
+            ],
+            "outputs": {
+                "40": {
+                    "images": [
+                        {"filename": "reference.png", "subfolder": "", "type": "input"},
+                    ],
+                },
+                "41": {
+                    "images": [
+                        {"filename": "preview.png", "subfolder": "", "type": "temp"},
+                    ],
+                },
+                "9": {
+                    "images": [
+                        {"filename": "saved-output.png", "subfolder": "", "type": "output"},
+                    ],
+                },
+            },
+        }
+
+        selected = collect_preferred_history_outputs(entry)
+
+        self.assertEqual([item["filename"] for item in selected], ["saved-output.png"])
 
 
 if __name__ == "__main__":

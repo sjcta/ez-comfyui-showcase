@@ -8,13 +8,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ez ComfyUI Showcase</title>
 <link rel="icon" type="image/png" href="static/icons/ez-site-logo-64.png">
-<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1780506204">
+<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1781000019">
 <script>
 if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1780506204"></script>
+<script src="static/js/module_loader.js?v=1781000019"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -298,6 +298,12 @@ if (location.protocol === 'file:') {
     <div class="col-section-header">
       <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg><span>工作流选择</span>
     </div>
+    <div class="lab-entry-row hidden" id="labEntryRow" data-admin-only="true">
+      <a class="lab-entry-btn" href="labs" title="打开 Bernini、JoyAI-Echo 与 HY-World 2.0 官方案例测试页">
+        <svg class="cw-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-zap"/></svg>
+        <span>测试实验室</span>
+      </a>
+    </div>
     <div class="wf-tabs" id="wfTabs"></div>
     <div class="wf-grid" id="wfGrid"></div>
 
@@ -360,6 +366,9 @@ if (location.protocol === 'file:') {
     </button>
     <button class="lb-action-btn lb-hide" id="lbHideBtn" type="button" title="隐藏" aria-label="隐藏" style="display:none" onclick="if(window.CW&&CW.toggleLBHidden) CW.toggleLBHidden(event)">
       <svg class="cw-icon lb-hide-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-eye"/></svg>
+    </button>
+    <button class="lb-action-btn lb-protection" id="lbProtectionBtn" type="button" title="标记保护" aria-label="标记保护" style="display:none" onclick="if(window.CW&&CW.toggleLBProtection) CW.toggleLBProtection(event)">
+      <svg class="cw-icon lb-protection-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-shield"/></svg>
     </button>
   </div>
   <div class="lb-image-export-wrap">
@@ -427,7 +436,7 @@ if (location.protocol === 'file:') {
   </div>
   <div class="lb-loading" id="lbLoading" style="display:none">加载中...</div>
   <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)" title="下一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></button>
-  <div class="lb-info" id="lbInfo"></div>
+  <div class="lb-info" id="lbInfo" role="button" tabindex="0" title="点击复制提示词" aria-label="复制提示词" onclick="if(window.CW&&CW.copyLBPrompt)CW.copyLBPrompt(event)" onkeydown="if((event.key==='Enter'||event.key===' ')&&window.CW&&CW.copyLBPrompt)CW.copyLBPrompt(event)"></div>
 </div>
 
 <input type="file" id="wfFileInput" accept=".json" style="display:none">

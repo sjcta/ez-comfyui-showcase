@@ -108,19 +108,59 @@
     },
     {
       "key": "320:285::strength_model",
-      "zone": "advanced",
-      "visible": true,
+      "zone": "hidden",
+      "visible": false,
       "label": "蒸馏 LoRA 强度",
       "order": 7,
       "type": "number"
     },
     {
       "key": "320:279::ckpt_name",
-      "zone": "advanced",
-      "visible": true,
-      "label": "Sulphur fp8 模型",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Sulphur distil 模型",
       "order": 8,
       "type": "text"
+    },
+    {
+      "key": "320:281::sigmas",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sigmas",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "320:282::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "320:306::sigmas",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sigmas",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "320:315::overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE 解码重叠",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "320:314::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 16,
+      "type": "number"
     },
     {
       "key": "75::filename_prefix",
@@ -147,27 +187,11 @@
       "type": "text"
     },
     {
-      "key": "320:281::sigmas",
-      "zone": "hidden",
-      "visible": false,
-      "label": "sigmas",
-      "order": 2,
-      "type": "text"
-    },
-    {
-      "key": "320:282::cfg",
-      "zone": "hidden",
-      "visible": false,
-      "label": "cfg",
-      "order": 3,
-      "type": "number"
-    },
-    {
       "key": "320:285::lora_name",
       "zone": "hidden",
       "visible": false,
       "label": "lora_name",
-      "order": 4,
+      "order": 2,
       "type": "text"
     },
     {
@@ -175,7 +199,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "longer_edge",
-      "order": 5,
+      "order": 3,
       "type": "number"
     },
     {
@@ -183,7 +207,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "img_compression",
-      "order": 6,
+      "order": 4,
       "type": "number"
     },
     {
@@ -191,7 +215,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "resize_type",
-      "order": 7,
+      "order": 5,
       "type": "text"
     },
     {
@@ -199,7 +223,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "resize_type.crop",
-      "order": 8,
+      "order": 6,
       "type": "text"
     },
     {
@@ -207,7 +231,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "sampler_name",
-      "order": 9,
+      "order": 7,
       "type": "text"
     },
     {
@@ -215,7 +239,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "scale_method",
-      "order": 10,
+      "order": 8,
       "type": "text"
     },
     {
@@ -223,7 +247,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "batch_size",
-      "order": 11,
+      "order": 9,
       "type": "number"
     },
     {
@@ -231,71 +255,23 @@
       "zone": "hidden",
       "visible": false,
       "label": "batch_size",
-      "order": 12,
+      "order": 10,
       "type": "number"
-    },
-    {
-      "key": "320:306::sigmas",
-      "zone": "hidden",
-      "visible": false,
-      "label": "sigmas",
-      "order": 13,
-      "type": "text"
     },
     {
       "key": "320:311::model_name",
       "zone": "hidden",
       "visible": false,
       "label": "model_name",
-      "order": 14,
+      "order": 11,
       "type": "text"
-    },
-    {
-      "key": "320:314::cfg",
-      "zone": "hidden",
-      "visible": false,
-      "label": "cfg",
-      "order": 15,
-      "type": "number"
-    },
-    {
-      "key": "320:315::horizontal_tiles",
-      "zone": "hidden",
-      "visible": false,
-      "label": "VAE 横向分块数",
-      "order": 16,
-      "type": "number"
-    },
-    {
-      "key": "320:315::overlap",
-      "zone": "hidden",
-      "visible": false,
-      "label": "VAE 解码重叠",
-      "order": 17,
-      "type": "number"
-    },
-    {
-      "key": "320:315::vertical_tiles",
-      "zone": "hidden",
-      "visible": false,
-      "label": "VAE 纵向分块数",
-      "order": 18,
-      "type": "number"
-    },
-    {
-      "key": "320:315::last_frame_fix",
-      "zone": "hidden",
-      "visible": false,
-      "label": "LTX 尾帧修正",
-      "order": 19,
-      "type": "toggle"
     },
     {
       "key": "320:316::ckpt_name",
       "zone": "hidden",
       "visible": false,
       "label": "ckpt_name",
-      "order": 20,
+      "order": 13,
       "type": "text"
     },
     {
@@ -303,7 +279,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "text_encoder",
-      "order": 21,
+      "order": 14,
       "type": "text"
     },
     {
@@ -311,7 +287,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "ckpt_name",
-      "order": 22,
+      "order": 15,
       "type": "text"
     },
     {
@@ -319,7 +295,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "device",
-      "order": 23,
+      "order": 16,
       "type": "text"
     },
     {
@@ -327,7 +303,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 24,
+      "order": 17,
       "type": "text"
     },
     {
@@ -335,7 +311,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 25,
+      "order": 18,
       "type": "text"
     },
     {
@@ -343,7 +319,7 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 26,
+      "order": 19,
       "type": "text"
     },
     {
@@ -351,8 +327,32 @@
       "zone": "hidden",
       "visible": false,
       "label": "expression",
-      "order": 27,
+      "order": 20,
       "type": "text"
+    },
+    {
+      "key": "320:315::tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE 分块尺寸",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "320:315::temporal_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE 时间分块",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "320:315::temporal_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE 时间重叠",
+      "order": 15,
+      "type": "number"
     }
   ]
 }

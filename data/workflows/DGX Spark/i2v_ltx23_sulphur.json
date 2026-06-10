@@ -382,7 +382,7 @@
   },
   "320:300": {
     "inputs": {
-      "value": 25
+      "value": 24
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -391,7 +391,7 @@
   },
   "320:301": {
     "inputs": {
-      "value": 5
+      "value": 8
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -565,7 +565,7 @@
   },
   "320:313": {
     "inputs": {
-      "text": "text, subtitles, watermarks, logos, readable signage, overlay, titles, has blurbox, has subtitles, artifacts around text, unreadable text, incorrect lettering, incorrect slogan, blurry, oversaturated, pixelated, low resolution, grainy, distorted, noise, compression artifacts, jpeg artifacts, glitches, watermark, text, logo, signature, copyright, subtitles, distorted sound, saturated sound, loud, low frequency background noise, low frequency hum, sub-bass rumble, bass drone, electrical hum, wind rumble, muddy low end, noisy room tone, DC offset, hiss, buzz, crackle, clipping, audio artifacts",
+      "text": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay, flicker, jitter, ghosting, temporal artifacts, warped motion, frozen frame, repeated frames, low frequency hum, sub-bass rumble, noisy room tone, audio distortion, audio clipping",
       "clip": [
         "320:317",
         0
@@ -578,9 +578,9 @@
   },
   "320:314": {
     "inputs": {
-      "cfg": 1,
+      "cfg": 3,
       "model": [
-        "320:285",
+        "320:325",
         0
       ],
       "positive": [
@@ -599,22 +599,20 @@
   },
   "320:315": {
     "inputs": {
+      "samples": [
+        "320:309",
+        0
+      ],
       "vae": [
         "320:316",
         2
       ],
-      "latents": [
-        "320:309",
-        0
-      ],
-      "horizontal_tiles": 1,
-      "vertical_tiles": 1,
-      "overlap": 1,
-      "last_frame_fix": true,
-      "working_device": "auto",
-      "working_dtype": "auto"
+      "tile_size": 512,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8
     },
-    "class_type": "LTXVTiledVAEDecode",
+    "class_type": "VAEDecodeTiled",
     "_meta": {
       "title": "VAE解码（分块）"
     }
@@ -679,6 +677,20 @@
     "class_type": "ComfyMathExpression",
     "_meta": {
       "title": "Math Expression (length)"
+    }
+  },
+  "320:325": {
+    "inputs": {
+      "lora_name": "ltx/ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors",
+      "strength_model": 0.28,
+      "model": [
+        "320:316",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "音频净化首段 LoRA"
     }
   }
 }

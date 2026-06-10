@@ -11,11 +11,29 @@
       "type": "textarea"
     },
     {
+      "key": "50::__bernini_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "生成模式",
+      "order": 1,
+      "type": "bernini_mode",
+      "value": "t2i"
+    },
+    {
+      "key": "50::__bernini_refs",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 2,
+      "type": "bernini_refs",
+      "value": "[]"
+    },
+    {
       "key": "50::width",
       "zone": "user_input",
       "visible": true,
       "label": "宽度",
-      "order": 1,
+      "order": 3,
       "type": "number",
       "role": "width",
       "step": 16,
@@ -27,12 +45,12 @@
       "zone": "user_input",
       "visible": true,
       "label": "高度",
-      "order": 2,
+      "order": 4,
       "type": "number",
       "role": "height",
       "step": 16,
       "min": 256,
-      "max": 832
+      "max": 848
     },
     {
       "key": "19::noise_seed",
@@ -85,21 +103,46 @@
       "max": 8
     },
     {
-      "key": "50::length",
+      "key": "50::__bernini_frames",
       "zone": "advanced",
       "visible": true,
-      "label": "帧数",
+      "label": "视频帧数",
       "order": 5,
       "type": "number",
+      "value": 81,
+      "min": 5,
+      "max": 145,
+      "step": 4
+    },
+    {
+      "key": "50::__bernini_fps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "视频帧率",
+      "order": 6,
+      "type": "number",
+      "value": 16,
       "min": 1,
-      "max": 145
+      "max": 60,
+      "step": 1
+    },
+    {
+      "key": "50::ref_max_size",
+      "zone": "advanced",
+      "visible": true,
+      "label": "参考图长边",
+      "order": 7,
+      "type": "number",
+      "min": 512,
+      "max": 1280,
+      "step": 16
     },
     {
       "key": "27::sampler_name",
       "zone": "advanced",
       "visible": true,
       "label": "采样器",
-      "order": 6,
+      "order": 8,
       "type": "select",
       "options": [
         "res_multistep",
@@ -109,20 +152,21 @@
       ]
     },
     {
+      "key": "4::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 9,
+      "type": "textarea",
+      "value": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay"
+    },
+    {
       "key": "100::filename_prefix",
       "zone": "output",
       "visible": true,
       "label": "文件名前缀",
       "order": 0,
       "type": "text"
-    },
-    {
-      "key": "4::text",
-      "zone": "advanced",
-      "visible": true,
-      "label": "负面提示词",
-      "order": 7,
-      "type": "textarea"
     },
     {
       "key": "5::unet_name",
@@ -155,6 +199,14 @@
       "label": "VAE",
       "order": 3,
       "type": "text"
+    },
+    {
+      "key": "50::length",
+      "zone": "hidden",
+      "visible": false,
+      "label": "实际帧数",
+      "order": 4,
+      "type": "number"
     }
   ]
 }

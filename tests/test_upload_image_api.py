@@ -2,6 +2,7 @@ import io
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from fastapi import HTTPException, UploadFile
 
@@ -19,6 +20,12 @@ class UploadImageApiTests(unittest.TestCase):
         upload = UploadFile(io.BytesIO(content), filename=filename)
         return app.asyncio.run(
             app.api_upload_video(upload, current_user={"sub": "u1", "role": "user"})
+        )
+
+    def _upload_audio(self, filename: str, content: bytes):
+        upload = UploadFile(io.BytesIO(content), filename=filename)
+        return app.asyncio.run(
+            app.api_upload_audio(upload, current_user={"sub": "u1", "role": "user"})
         )
 
     def test_tiff_upload_is_converted_to_png_for_browser_and_comfyui(self):
@@ -136,6 +143,44 @@ class UploadImageApiTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("Unsupported video format", str(ctx.exception.detail))
+
+    def test_audio_upload_is_normalized_to_wav(self):
+        old_input = app.COMFYUI_INPUT
+        converted = b"RIFF$\x00\x00\x00WAVEfmt "
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                app.COMFYUI_INPUT = tmp
+                with mock.patch.object(app, "_project_ffmpeg_bin", return_value="/usr/bin/ffmpeg"):
+                    with mock.patch.object(app.subprocess, "run") as run:
+                        run.return_value.returncode = 0
+                        run.return_value.stdout = converted
+                        run.return_value.stderr = b""
+                        result = self._upload_audio("voice.mp3", b"mp3-bytes")
+
+                self.assertTrue(result["filename"].endswith(".wav"))
+                self.assertTrue(os.path.isfile(result["path"]))
+                with open(result["path"], "rb") as f:
+                    self.assertEqual(f.read(), converted)
+                args = run.call_args.args[0]
+                self.assertIn("-ac", args)
+                self.assertEqual(args[args.index("-ac") + 1], "1")
+                self.assertIn("-ar", args)
+                self.assertEqual(args[args.index("-ar") + 1], "16000")
+        finally:
+            app.COMFYUI_INPUT = old_input
+
+    def test_unknown_audio_extension_is_rejected(self):
+        old_input = app.COMFYUI_INPUT
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                app.COMFYUI_INPUT = tmp
+                with self.assertRaises(HTTPException) as ctx:
+                    self._upload_audio("voice.txt", b"not audio")
+        finally:
+            app.COMFYUI_INPUT = old_input
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Unsupported audio format", str(ctx.exception.detail))
 
 
 if __name__ == "__main__":
