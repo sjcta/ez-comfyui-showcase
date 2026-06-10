@@ -3,6 +3,8 @@
  */
 (function () {
   'use strict';
+  try {
+  console.log('[BOOT] app.js IIFE started');
 
   // ── Mobile viewport height fix (100vh includes address bar on iOS) ──
   function setVH() {
@@ -12,16 +14,15 @@
   window.addEventListener('orientationchange', setVH);
   setVH();
 
-  const BASE = location.pathname.replace(/\/+$/, '');
-  const API = BASE;
-
-  let ws = null;
+  const API = window.CW_API_BASE || (location.protocol === 'file:' ? 'http://localhost:18000' : location.pathname.replace(/\/+$/, ''));
   let currentWF = null;
   let advOpen = false;
   let jobs = {};
   let jobFields = {};
   // job_id → fields snapshot
   let historyItems = [];
+  let currentTargetInstance = '';
+  let currentTargetNodeId = '';
   let _histVisibleCount = 0;
   let _lastRenderedHistCount = 0;
 
@@ -42,20 +43,72 @@
     return d.innerHTML;
   }
   function escA(s) {
-    return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+  const MODAL_TRANSITION_MS = 280;
+  function setModalOpen(el, open, opts) {
+    if (!el) return;
+    opts = opts || {};
+    if (el._modalCloseTimer) {
+      clearTimeout(el._modalCloseTimer);
+      el._modalCloseTimer = null;
+    }
+    if (open) {
+      if (opts.beforeOpen) opts.beforeOpen(el);
+      el.classList.remove('modal-closing');
+      el.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(function () {
+        el.classList.add('open');
+      });
+      return;
+    }
+    el.classList.add('modal-closing');
+    el.classList.remove('open');
+    el.setAttribute('aria-hidden', 'true');
+    var delay = opts.duration || MODAL_TRANSITION_MS;
+    el._modalCloseTimer = setTimeout(function () {
+      el.classList.remove('modal-closing');
+      if (opts.removeAfterClose && el.parentNode) el.parentNode.removeChild(el);
+      if (typeof opts.afterClose === 'function') opts.afterClose(el);
+    }, delay);
+  }
+  function initSiteVersionBadge() {
+    const badge = $('#siteVersionBadge');
+    if (!badge) return;
+    fetch(API + '/api/version', { cache: 'no-store' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        const version = data && data.version ? String(data.version).trim() : '';
+        if (version) badge.textContent = version;
+      })
+      .catch(() => {});
   }
   // ── Expose shared state for modules ──
+  console.log('[BOOT] before __APP__');
   window.__APP__ = { $, $$, escH, escA, API, jobs, jobFields, historyItems };
+  console.log('[BOOT] after __APP__');
+  console.log('[BOOT] currentWF before def:', typeof currentWF);
   // Expose currentWF via getter/setter so other IIFE modules can read/write it
   Object.defineProperty(window.__APP__, 'currentWF', {
     get: () => currentWF,
     set: (v) => { currentWF = v; }
   });
+  console.log('[BOOT] currentWF after def');
   // Expose advOpen via getter/setter (used by ui.js)
   Object.defineProperty(window.__APP__, 'advOpen', {
     get: () => advOpen,
     set: (v) => { advOpen = v; }
   });
+  Object.defineProperty(window.__APP__, 'currentTargetInstance', {
+    get: () => currentTargetInstance,
+    set: (v) => { currentTargetInstance = v || ''; }
+  });
+  Object.defineProperty(window.__APP__, 'currentTargetNodeId', {
+    get: () => currentTargetNodeId,
+    set: (v) => { currentTargetNodeId = v || ''; }
+  });
+  window.__APP__.manualTargetInstance = false;
+  console.log('[BOOT] defineProperties done');
 
   function shortSeed(s) {
     if (!s) return '—';
@@ -71,30 +124,24 @@
     if (n.startsWith('t2i') || n.includes('-t2i') || n.includes('_t2i')) return { text: '文生图', cls: 'wf-tag-t2i' };
     return '';
   }
+  function tagClassForText(text, fallback) {
+    const t = String(text || '');
+    if (t === '文生图') return 'wf-tag-t2i';
+    if (t === '图生图') return 'wf-tag-i2i';
+    if (t === '文生视频') return 'wf-tag-t2v';
+    if (t === '图生视频') return 'wf-tag-i2v';
+    if (/视频/.test(t)) return 'wf-tag-video';
+    if (t === '放大') return 'wf-tag-cat';
+    if (/^\d+K$/i.test(t)) return 'wf-tag-res';
+    return fallback && fallback.cls ? fallback.cls : 'wf-tag-res';
+  }
   /** Prefer metadata tags[0] over filename guess, keep CSS class from filename. */
   function wfTag(name, metaTags) {
     const fallback = getWFType(name);
     if (metaTags && metaTags.length > 0) {
-      return { text: metaTags[0], cls: fallback ? fallback.cls : 'wf-tag-res' };
+      return { text: metaTags[0], cls: tagClassForText(metaTags[0], fallback) };
     }
     return fallback;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  WebSocket
-  // ══════════════════════════════════════════════════════════════════════════
-
-  function connectWS() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}${BASE}/ws`);
-    ws.onopen = () => console.log('[WS] ok');
-    ws.onmessage = (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        if (d.type === 'job_update') onJobUpdate(d.job);
-      } catch {}
-    };
-    ws.onclose = () => setTimeout(connectWS, 5000);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -117,7 +164,9 @@
     const totalPend = insts.reduce((s, i) => s + (i.queue_pending || 0), 0);
     const comfyBtn = $('#svcComfyUI');
     const comfyState = $('#comfyState');
-    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off');
+    const runningInst = insts.find(function(i) { return i.up && (i.queue_running || 0) > 0; });
+    var runningPct = runningInst ? Math.max(0, Math.min(100, Math.round(Number(runningInst.progress || 0) || 0))) : 0;
+    if (comfyBtn) comfyBtn.className = 'svc-btn ' + (anyUp ? 'on' : 'off') + (totalRun > 0 ? ' running' : totalPend > 0 ? ' pending' : '');
     if (comfyState) {
       var upCount = insts.filter(function (i) {
         return i.up;
@@ -129,34 +178,38 @@
         return i.up && i.queue_pending > 0;
       }).length;
       if (!anyUp) comfyState.textContent = '全部关闭';
-      else if (busyCount > 0) comfyState.textContent = '出图中(' + busyCount + '/' + upCount + ')';
+      else if (busyCount > 0) comfyState.textContent = '运行中 ' + runningPct + '%';
       else if (pendCount > 0) comfyState.textContent = '排队中(' + pendCount + ')';
       else comfyState.textContent = '待机(' + upCount + ')';
     }
-    var othersBtn = document.querySelector('#svcOthers');
-    var othersState = document.querySelector('#othersState');
-    if (othersBtn) othersBtn.className = 'svc-btn ' + (d.vllm ? 'on' : 'off');
-    if (othersState) othersState.textContent = d.vllm ? 'vLLM' : '-';
   }
 
   function updateGPU(g) {
     if (!g) return;
     const fill = $('#vramFill');
+    if (!fill) return;
     const pct = g.vram_pct || 0;
     const temp = g.temp_c || 0;
     fill.style.width = pct + '%';
-    // State: green=idle, yellow=busy, orange=overloaded (vram>70% or temp>65)
-    const isOverload = pct > 70 || temp > 65;
-    const isBusy = pct > 30 || temp > 50;
+    // State: green=idle, yellow=busy, red=overloaded.
+    // Keep "red" for clearly high pressure so low VRAM usage does not look alarming.
+    const isOverload = pct >= 80 || temp >= 85;
+    const isBusy = !isOverload && (pct >= 50 || temp >= 70);
     fill.className = 'sb-vram-fill' + (isOverload ? ' overload' : isBusy ? ' busy' : '');
     // Also tint the entire statusbar
     const bar = $('#statusbar');
     if (bar) bar.dataset.state = isOverload ? 'overload' : isBusy ? 'busy' : 'idle';
-    $('#vramText').textContent =
-      `${(g.vram_used_mb / 1024).toFixed(1)} / ${(g.vram_total_mb / 1024).toFixed(0)} GB (${pct}%)`;
-    $('#gpuTemp').textContent = `${temp} °C`;
-    $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
-    if (!$('#vramSegments').dataset.done) {
+    var used = Number(g.vram_used_mb || 0);
+    var total = Number(g.vram_total_mb || 0);
+    if ($('#vramText')) {
+      var compactVram = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+      $('#vramText').textContent = total > 0
+        ? `${(used / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} GB${compactVram ? '' : ` (${pct}%)`} · ${temp} °C`
+        : '未获取到 VRAM';
+    }
+    if ($('#gpuTemp')) $('#gpuTemp').textContent = `${temp} °C`;
+    if ($('#gpuUtil')) $('#gpuUtil').textContent = `GPU ${g.util_pct}%`;
+    if ($('#vramSegments') && !$('#vramSegments').dataset.done) {
       [25, 50, 75].forEach((pct) => {
         const seg = document.createElement('div');
         seg.className = 'sb-vram-seg';
@@ -173,7 +226,7 @@
 
   function openInstPopup(mode) {
     var overlay = $('#instPopup');
-    var title = $('#instPopupTitle');
+    var title = $('#v4InstPopupTitle') || $('#instPopupTitle');
     if (!overlay) return;
     overlay.classList.add('open');
     overlay._mode = mode || 'comfyui';
@@ -209,10 +262,24 @@
     try {
       var r = await fetch(API + '/api/comfyui/status');
       var d = await r.json();
-      var html = '<div class="popup-section-title">ComfyUI \u5b9e\u4f8b</div>';
+      var grouped = {};
+      var order = [];
+      for (var gi = 0; gi < (d.instances || []).length; gi++) {
+        var item = d.instances[gi];
+        var nodeKey = item.node_id || item.node_name || 'default';
+        if (!grouped[nodeKey]) {
+          grouped[nodeKey] = { name: item.node_name || item.node_id || '默认设备', items: [] };
+          order.push(nodeKey);
+        }
+        grouped[nodeKey].items.push(item);
+      }
+      var html = '';
       var groupMap = { nunchaku: 'Nunchaku', 'z-image-turbo': 'Z-Image Turbo', seedvr: 'SeedVR' };
-      for (var idx = 0; idx < (d.instances || []).length; idx++) {
-        var inst = d.instances[idx];
+      for (var oi = 0; oi < order.length; oi++) {
+        var group = grouped[order[oi]];
+        html += '<div class="popup-section-title">' + escH(group.name) + ' \u5b9e\u4f8b\u5217\u8868</div>';
+        for (var idx = 0; idx < group.items.length; idx++) {
+        var inst = group.items[idx];
         var statusCls = inst.up ? 'on' : 'off';
         var btnLabel = inst.up ? '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>\u505c\u6b62' : '<svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><polygon points="5,3 22,12 5,21" fill="currentColor"/></svg>\u542f\u52a8';
         var btnCls = inst.up ? 'stop' : 'start';
@@ -267,7 +334,9 @@
           `</span></div>`;
         if (inst.loaded_group) html += '<span class="inst-card-group">' + escH(inst.loaded_group) + '</span>';
         html += '</div>';
+        }
       }
+      if (!html) html = '<div style="color:var(--dim);font-size:12px;padding:8px">\u6682\u65e0 ComfyUI \u5b9e\u4f8b</div>';
       box.innerHTML = html;
     } catch (e) {
       box.innerHTML =
@@ -358,12 +427,11 @@
     var comfyBtn = $('#svcComfyUI');
     if (comfyBtn)
       comfyBtn.addEventListener('click', function () {
-        openInstPopup('comfyui');
-      });
-    var othersBtn = $('#svcOthers');
-    if (othersBtn)
-      othersBtn.addEventListener('click', function () {
-        openInstPopup('others');
+        if (window.CW && window.CW.openInstPopup && window.CW.openInstPopup !== openInstPopup) {
+          window.CW.openInstPopup('comfyui');
+        } else {
+          openInstPopup('comfyui');
+        }
       });
   }
   // ══════════════════════════════════════════════════════════════════════════
@@ -392,6 +460,7 @@
   
 
   // initDropZone removed — upload card is built into loadWorkflows
+  console.log("[BOOT] mid-1");
 
   
 
@@ -414,86 +483,8 @@
   
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  Jobs + Gallery
+  //  Job formatting helpers
   // ══════════════════════════════════════════════════════════════════════════
-
-  async function pollJobs() {
-    try {
-      const r = await fetch(`${API}/api/jobs`);
-      const arr = await r.json();
-      const prevCount = Object.keys(jobs).length;
-      // Client-side safety: cancel jobs stuck in generating for >700s
-      const now = Date.now() / 1000;
-      for (const j of arr) {
-        if (j.status === 'generating' && j.generating_at && now - j.generating_at > 700) {
-          fetch(`${API}/api/jobs/${j.id}`, { method: 'DELETE' });
-        }
-      }
-      let changed = false;
-      for (const j of arr) {
-        const prev = jobs[j.id];
-        if (!prev || prev.status !== j.status || prev.message !== j.message || prev.progress?.pct !== j.progress?.pct) {
-          changed = true;
-        }
-        jobs[j.id] = j;
-      }
-      // Remove stale jobs no longer on server (keep error jobs even if server cleaned them up)
-      const serverIds = new Set(arr.map((j) => j.id));
-      for (const id of Object.keys(jobs)) {
-        if (!serverIds.has(id) && jobs[id]?.status !== 'error') {
-          delete jobs[id];
-          changed = true;
-        }
-      }
-      if (changed && window.CW.renderGallery) window.CW.renderGallery();
-    } catch {}
-  }
-
-  function onJobUpdate(job) {
-    const prev = jobs[job.id];
-    // Toast on status change
-    if (prev && prev.status !== job.status) {
-      var shortId = job.id.slice(-6);
-      var wfTag = getWFType(job.workflow);
-      var typeLabel = wfTag ? wfTag.text : '';
-      try {
-        if (job.status === 'queued') showToast(shortId + ' ' + typeLabel + ' 排队中', 'queued');
-        else if (job.status === 'generating') showToast(shortId + ' ' + typeLabel + ' 出图中', 'generating');
-        else if (job.status === 'done') showToast(shortId + ' ' + typeLabel + ' 完成', 'done');
-        else if (job.status === 'error') showToast(shortId + ' ' + typeLabel + ' 失败', 'error');
-      } catch(e) {}
-    }
-    jobs[job.id] = job;
-    // ── Done: immediate image swap + background history refresh ──
-    if (job.status === 'done' && job.image) {
-      if (!prev || prev.status !== 'done' || !prev.image) {
-        window.CW._onJobDone(job);
-      }
-      return;
-    }
-    // ── Error: remove from active + re-render ──
-    if (job.status === 'error' && (!prev || prev.status !== 'error')) {
-      window.CW._onJobError(job);
-      return;
-    }
-    // ── Status transition (queued→preparing→generating): full rebuild ──
-    if (!prev || prev.status !== job.status) {
-      window.CW.forceGalleryRerender();
-      return;
-    }
-    // ── Same status (progress update): in-place patch, NO flicker ──
-    window.CW._patchJobCard(job);
-  }
-
-  // Live timer ticker — only runs when there are generating jobs
-  function tickTimers() {
-    const hasGenerating = Object.values(jobs).some((j) => j.status === 'generating');
-    if (!hasGenerating) return;
-    $$('.gi-timer').forEach((el) => {
-      const ts = parseFloat(el.dataset.ts);
-      if (ts > 0) el.textContent = formatElapsed(ts);
-    });
-  }
 
   function formatElapsed(startTime) {
     const sec = Math.max(0, Math.floor(Date.now() / 1000 - startTime));
@@ -502,74 +493,11 @@
     return m > 0 ? `${m}m${String(s).padStart(2, '0')}s` : `${s}s`;
   }
 
-
-  // ── Polling fallback: sync active jobs via /api/jobs every 3s ──
-  let _pollTimer = null;
-  function _hasActiveJobs() {
-    return Object.values(jobs).some(j => j.status !== 'done' && j.status !== 'error');
-  }
-  async function _pollActiveJobs() {
-    if (!_hasActiveJobs()) { _pollTimer = null; return; }
-    try {
-      const r = await fetch(API + '/api/jobs');
-      const serverJobList = await r.json(); const serverJobs = {}; for (const j of serverJobList) serverJobs[j.id] = j;
-      // serverJobs is a dict {id: job_obj}
-      let needRerender = false;
-      let historyRefresh = false;
-      let alreadyRefreshed = false;
-      for (const [id, sj] of Object.entries(serverJobs)) {
-        const prev = jobs[id];
-        if (!prev) {
-          jobs[id] = sj;
-          needRerender = true;
-        } else if (prev.status !== sj.status) {
-          jobs[id] = sj;
-          onJobUpdate(sj);
-          // onJobUpdate handles loadHistory for done/error itself
-          if (sj.status === 'done' && sj.image) { alreadyRefreshed = true; }
-          else if (sj.status === 'error') { alreadyRefreshed = true; }
-          else needRerender = true;
-        } else if (sj.status === 'generating' && sj.progress && prev.progress?.pct !== sj.progress.pct) {
-          jobs[id] = sj;
-          window.CW._patchJobCard && window.CW._patchJobCard(sj);
-        }
-      }
-      // Clean up jobs that server no longer tracks (completed while we weren't looking)
-      for (const id of Object.keys(jobs)) {
-        if (!serverJobs[id]) {
-          delete jobs[id];
-          historyRefresh = true;
-        }
-      }
-      if (alreadyRefreshed) {
-        // onJobUpdate already called loadHistory — only do forceGalleryRerender if there's still active jobs
-        if (historyRefresh || needRerender) window.CW.forceGalleryRerender();
-      } else if (historyRefresh) {
-        window.CW.forceGalleryRerender();
-        window.CW.loadHistory();
-      } else if (needRerender) {
-        window.CW.forceGalleryRerender();
-      }
-    } catch {}
-    if (_hasActiveJobs()) _pollTimer = setTimeout(_pollActiveJobs, 3000);
-    else _pollTimer = null;
-  }
-  function _startJobPoll() {
-    if (_pollTimer) return;
-    _pollTimer = setTimeout(_pollActiveJobs, 3000);
+  function formatJobElapsedWithEstimate(startTime, estimateLabel) {
+    const elapsed = formatElapsed(startTime);
+    return estimateLabel ? `${elapsed} (${estimateLabel})` : elapsed;
   }
 
-  // Patch onJobUpdate to start polling when active jobs exist
-  const _origOnJobUpdate = onJobUpdate;
-  onJobUpdate = function(job) {
-    var _prev = jobs[job.id];
-    _origOnJobUpdate(job);
-    // Status changed → re-render gallery immediately
-    if (_prev && _prev.status !== job.status && job.status !== 'done' && job.status !== 'error') {
-      if (window.CW.renderGallery) window.CW.renderGallery();
-    }
-    if (job.status !== 'done' && job.status !== 'error') _startJobPoll();
-  };
 
   // ══════════════════════════════════════════════════════════════════════════
   //  Gallery Filters
@@ -608,10 +536,13 @@
   async function cancelJob(jobId) {
     var j = jobs[jobId];
     if (!j) return;
-    var label = j.status === 'generating' ? '终止本次出图？' : '删除这张卡片？';
+    if (j.status === 'error' || j.status === 'retrying') {
+      return dismissJob(jobId);
+    }
+    var label = '终止本次出图？';
     if (!confirm(label)) return;
     try {
-      await fetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
+      await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}`, { method: 'DELETE' });
       delete jobs[jobId];
       window.CW.renderGallery();
     } catch (e) {
@@ -619,13 +550,66 @@
     }
   }
 
+  async function pauseJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    try {
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/pause`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || r.status);
+      if (d.job) jobs[jobId] = d.job;
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      else if (window.CW.renderGallery) window.CW.renderGallery();
+    } catch (e) {
+      alert('暂停失败: ' + e.message);
+    }
+  }
+
+  async function resumeJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    try {
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/resume`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || r.status);
+      if (d.job) jobs[jobId] = d.job;
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      else if (window.CW.renderGallery) window.CW.renderGallery();
+    } catch (e) {
+      alert('恢复失败: ' + e.message);
+    }
+  }
+
+  async function dismissJob(jobId) {
+    var j = jobs[jobId];
+    if (!j) return;
+    if (!confirm('删除这条失败记录？')) return;
+    try {
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/dismiss`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || r.status);
+      }
+      delete jobs[jobId];
+      window.CW.renderGallery();
+    } catch (e) {
+      console.error('dismissJob:', e);
+    }
+  }
+
   async function retryJob(jobId) {
     try {
-      const r = await fetch(`${API}/api/jobs/${jobId}/retry`, { method: 'POST' });
+      const r = await window.CW.auth.apiFetch(`${API}/api/jobs/${jobId}/retry`, { method: 'POST' });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         alert('重试失败: ' + (d.detail || r.status));
+        return;
       }
+      const d = await r.json().catch(() => ({}));
+      const dismissedId = d.dismissed_job_id || jobId;
+      if (dismissedId && jobs[dismissedId]) delete jobs[dismissedId];
+      if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
+      else if (window.CW.renderGallery) window.CW.renderGallery();
     } catch (e) {
       alert('重试失败: ' + e.message);
     }
@@ -674,45 +658,105 @@
 
 
 function init() {
-    pollStatus();
-    setInterval(pollStatus, 5000);
-    setInterval(() => {
-      if (ws && ws.readyState === 1) ws.send('ping');
-    }, 30000);
-    window.CW.loadWfMeta && window.CW.loadWfMeta();
-    window.CW.loadHistory && window.CW.loadHistory();
-    pollJobs();
-    setInterval(pollJobs, 5000);
-    connectWS();
+  if (window.CW.__appInitDone) return;
+  window.CW.__appInitDone = true;
+  console.log("[BOOT] init function");
+    initSiteVersionBadge();
+    var statusPoller = (window.CW && window.CW.pollStatus && window.CW.pollStatus !== pollStatus)
+      ? window.CW.pollStatus
+      : pollStatus;
+    statusPoller();
+    setInterval(statusPoller, 5000);
     initServiceToggles();
     window.CW.initAdvToggle && window.CW.initAdvToggle();
     window.CW.initRatioGrid && window.CW.initRatioGrid();
     window.CW.initOverlayUpload && window.CW.initOverlayUpload();
     window.CW.initResizeHandle && window.CW.initResizeHandle();
-    setInterval(tickTimers, 1000);
     if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
   // Clear button clears prompt and focuses input
   // (always visible — toggled in HTML)
-  $('#btnGenerate').addEventListener('click', function() { if (window.CW.doGenerate) window.CW.doGenerate(); });
-    $('#lightbox').addEventListener('click', (e) => {
+  (()=>{var el=$('#btnGenerate');if(el)el.addEventListener('click',function(){if(window.CW.doGenerate)window.CW.doGenerate();});})();
+    ($('#lightbox')||{})['addEventListener']('click', (e) => {
+      var stage = $('#lbStage');
+      if (e.target === $('#lbImg') && stage && stage.classList.contains('lb-image-zoomed')) return;
       if (e.target === $('#lightbox') || e.target === $('#lbImg')) { if (window.CW.closeLB) window.CW.closeLB(); }
     });
+    (() => {
+      var lb = $('#lightbox');
+      if (!lb || lb.dataset.swipeBound) return;
+      lb.dataset.swipeBound = '1';
+      var startX = 0;
+      var startY = 0;
+      var suppressLightboxNavUntil = 0;
+      function suppressLightboxNav(ms) {
+        suppressLightboxNavUntil = Math.max(suppressLightboxNavUntil, Date.now() + (ms || 650));
+      }
+      function isLightboxNavSuppressed() {
+        return Date.now() < suppressLightboxNavUntil;
+      }
+      function resetLightboxSwipeStart() {
+        startX = 0;
+        startY = 0;
+      }
+      lb.addEventListener('click', function(e) {
+        var nav = e.target && e.target.closest ? e.target.closest('.lb-nav') : null;
+        if (!nav || !isLightboxNavSuppressed()) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, true);
+      lb.addEventListener('touchstart', function(e) {
+        if (!e.touches || !e.touches.length) return;
+        if (e.touches.length > 1) {
+          suppressLightboxNav(800);
+          resetLightboxSwipeStart();
+          return;
+        }
+        if (e.target && e.target.closest && e.target.closest('.lb-nav')) {
+          resetLightboxSwipeStart();
+          return;
+        }
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+      }, { passive: true });
+      lb.addEventListener('touchmove', function(e) {
+        if (e.touches && e.touches.length > 1) {
+          suppressLightboxNav(800);
+          resetLightboxSwipeStart();
+        }
+      }, { passive: true });
+      lb.addEventListener('touchend', function(e) {
+        if (isLightboxNavSuppressed()) {
+          resetLightboxSwipeStart();
+          return;
+        }
+        if (!startX || !e.changedTouches || !e.changedTouches.length) return;
+        var dx = e.changedTouches[0].clientX - startX;
+        var dy = e.changedTouches[0].clientY - startY;
+        resetLightboxSwipeStart();
+        if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+        if (window.CW && CW.lbNav) CW.lbNav(dx < 0 ? 1 : -1);
+      }, { passive: true });
+      lb.addEventListener('touchcancel', function() {
+        suppressLightboxNav(800);
+        resetLightboxSwipeStart();
+      }, { passive: true });
+    })();
     // Workflow management overlay
-    $('#tbWfMgrBtn').addEventListener('click', function() { if (window.CW.openWfMgr) window.CW.openWfMgr(); });
-    $('#wfOverlayClose').addEventListener('click', function() { if (window.CW.closeWfMgr) window.CW.closeWfMgr(); });
-    $('#wfEditClose').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
-    $('#wfEditTagInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && window.CW.onAddWfTag) { window.CW.onAddWfTag(e.target.value); e.target.value = ''; } });
-    $('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });
-    $('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });
-    $('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });
-    $('#wfEditThumbInput').addEventListener('change', function() { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(); });
+    try{$('#tbWfMgrBtn').addEventListener('click', function() { if (window.CW.openWfMgr) window.CW.openWfMgr(); });}catch(e){}
+    try{$('#wfOverlayClose').addEventListener('click', function() { if (window.CW.closeWfMgr) window.CW.closeWfMgr(); });}catch(e){}
+    try{$('#wfEditClose').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });}catch(e){}
+    try{$('#wfEditTagInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && window.CW.onAddWfTag) { window.CW.onAddWfTag(e.target.value); e.target.value = ''; } });}catch(e){}
+    try{$('#wfEditCancel').addEventListener('click', function() { if (window.CW.closeWfEdit) window.CW.closeWfEdit(); });}catch(e){}
+    try{$('#wfEditSave').addEventListener('click', function() { if (window.CW.saveWfEdit) window.CW.saveWfEdit(); });}catch(e){}
+    try{$('#wfEditThumb').addEventListener('click', function() { var el = $('#wfEditThumbInput'); if (el) el.click(); });}catch(e){}
+    try{$('#wfEditThumbInput').addEventListener('change', function(e) { if (window.CW.onWfThumbUpload) window.CW.onWfThumbUpload(e); });}catch(e){}
 
-    $('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });
-    $('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });
-    $('#nodeEditorClose').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
-    $('#nodeEditorCancel').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });
-    $('#nodeEditorSave').addEventListener('click', function() { if (window.CW.saveNodeConfig) window.CW.saveNodeConfig(); });
-    $('#nodeEditorReset').addEventListener('click', function() { if (window.CW.resetNodeConfig) window.CW.resetNodeConfig(); });
+    try{$('#wfDelCancel').addEventListener('click', function() { if (window.CW.closeWfDel) window.CW.closeWfDel(); });}catch(e){}
+    try{$('#wfDelConfirm').addEventListener('click', function() { if (window.CW.confirmWfDel) window.CW.confirmWfDel(); });}catch(e){}
+    try{$('#nodeEditorClose').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });}catch(e){}
+    try{$('#nodeEditorCancel').addEventListener('click', function() { if (window.CW.closeNodeEditor) window.CW.closeNodeEditor(); });}catch(e){}
+    try{$('#nodeEditorSave').addEventListener('click', function() { if (window.CW.saveNodeConfig) window.CW.saveNodeConfig(); });}catch(e){}
+    try{$('#nodeEditorReset').addEventListener('click', function() { if (window.CW.resetNodeConfig) window.CW.resetNodeConfig(); });}catch(e){}
   }
 
   // ── Workflow Management ──
@@ -805,20 +849,40 @@ function init() {
   }
 
   function rndSeed(btnEl) {
-    var input = btnEl ? btnEl.parentElement.querySelector('input') : null;
+    var input = btnEl ? btnEl.parentElement.querySelector('input[type="number"]') : null;
     if (input) input.value = Math.floor(Math.random() * Math.pow(2, 53));
   }
 
   // ═══ End Node Editor ═════════════════════════════════════════════════
 
+  console.log('[BOOT] before init, window.CW=', typeof window.CW);
   if (!window.CW) window.CW = {};
+  console.log('[BOOT] after window.CW init');
+  // DEBUG: verify function exists before Object.assign
+  console.log('[DEBUG] getWFType exists:', typeof getWFType !== 'undefined');
+  console.log('[DEBUG] cancelJob exists:', typeof cancelJob !== 'undefined');
+  console.log('[DEBUG] window.CW keys:', Object.keys(window.CW).length);
+  function logWorkflowClass(workflowType, jobId) {
+    if (!jobId) return 'log-system';
+    if (workflowType === '文生图') return 'log-flow log-flow-t2i';
+    if (workflowType === '图生图') return 'log-flow log-flow-i2i';
+    if (workflowType === '文生视频') return 'log-flow log-flow-t2v';
+    if (workflowType === '图生视频') return 'log-flow log-flow-i2v';
+    if (workflowType === '放大') return 'log-flow log-flow-cat';
+    if (workflowType) return 'log-flow log-flow-other';
+    return 'log-task';
+  }
   window.CW._logEntries = [];
   window.CW._onLog = function(entry) {
     window.CW._logEntries.push(entry);
     var body = document.getElementById('logBody');
     if (!body) return;
+    var filter = document.getElementById('logLevelFilter');
+    var activeLevel = filter ? filter.value : '';
+    if (activeLevel && entry.level !== activeLevel) return;
     var el = document.createElement('div');
-    el.className = 'log-entry';
+    el.className = 'log-entry ' + logWorkflowClass(entry.workflow_type || '', entry.job_id || '');
+    if (entry.workflow) el.title = entry.workflow;
     var ts = new Date(entry.ts * 1000).toLocaleTimeString();
     el.innerHTML = '<span class="log-time">' + ts + '</span>'
       + '<span class="log-level ' + entry.level + '">' + entry.level.toUpperCase() + '</span>'
@@ -827,12 +891,14 @@ function init() {
       + (entry.details ? '<div class="log-details">' + entry.details + '</div>' : '');
     body.appendChild(el);
     body.scrollTop = body.scrollHeight;
+    var countEl = document.getElementById('logCount');
+    if (countEl) countEl.textContent = String((window.CW._logEntries || []).length);
   };
   window.CW.toggleLog = function() {
     var panel = document.getElementById('logPanel');
     if (!panel) return;
-    if (panel.style.display === 'none') {
-      panel.style.display = 'flex';
+    if (!panel.classList.contains('open')) {
+      panel.classList.add('open');
       fetch(API + '/api/logs').then(function(r) { return r.json(); }).then(function(entries) {
         window.CW._logEntries = entries;
         var body = document.getElementById('logBody');
@@ -842,24 +908,53 @@ function init() {
         }
       }).catch(function(e) {});
     } else {
-      panel.style.display = 'none';
+      panel.classList.remove('open');
     }
   };
   window.CW.closeLog = function() {
     var panel = document.getElementById('logPanel');
-    if (panel) panel.style.display = 'none';
+    if (panel) panel.classList.remove('open');
   };
+  console.log('[BOOT] before Object.assign');
   Object.assign(window.CW, {
     cancelJob,
+    pauseJob,
+    resumeJob,
+    dismissJob,
     retryJob,
     rndSeed,
     wfUploadOverlay,
-    getWFType, wfTag,
+    setModalOpen,
+    MODAL_TRANSITION_MS,
+    getWFType, wfTag, tagClassForText,
     formatElapsed,
+    formatJobElapsedWithEstimate,
     shortSeed,
-    onJobUpdate,
   });
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  console.log('[BOOT] after Object.assign');
+  console.log('[BOOT] getWFType=', typeof getWFType);
+  window.CW = window.CW || {};
+  window.CW.refreshForAuthChange = function() {
+    window.__APP__.currentTargetInstance = '';
+    window.__APP__.currentTargetNodeId = '';
+    window.__APP__.manualTargetInstance = false;
+    if (window.CW.loadWfMeta) window.CW.loadWfMeta();
+    if (window.CW.loadWorkflows) window.CW.loadWorkflows();
+    if (window.CW.loadHistory) window.CW.loadHistory();
+    if (window.CW.pollStatus) window.CW.pollStatus();
+    if (window.CW.pollManager && window.CW.pollManager.reconnect) window.CW.pollManager.reconnect();
+  };
+  window.CW._bootApp = function() {
+    if (window.CW.__appBooted) return;
+    window.CW.__appBooted = true;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+  };
+  if (!window.CW.__skipAutoBoot) window.CW._bootApp();
+  console.log('[BOOT] init queued');
+} catch(e) {
+  console.error('[FATAL] app.js IIFE error:', e.message, e.stack);
+  throw e;
+}
 })();

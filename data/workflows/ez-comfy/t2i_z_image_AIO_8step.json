@@ -1,0 +1,141 @@
+{
+  "9": {
+    "inputs": {
+      "filename_prefix": "z-image-base",
+      "images": [
+        "76:65",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "76:67": {
+    "inputs": {
+      "text": "\"整体描述\": \"竖版人物时尚杂志封面照片\"。\n\"背景\": \"画面右上及后方为大面积落地窗，窗外可见模糊的绿色植被，画面中左区域有一张白色沙发，沙发上有白色靠垫，地面为浅色反光地板。\"。\n\"前景\": \"画面下方可见人物脚部及高跟鞋，地面有轻微倒影。\"。\n\"主体\": \"主体人物为长发女性，身穿黑色两件式比基尼，脚踩黑色尖头细高跟鞋，鞋底为红色。\"。\n\"构图镜头\": \"画幅方向为竖图，近似比例约3:4，主体人物位于画面中右至右下区域，主体外接框约占画面面积的50%，主体占据画面宽度约40%，高度约90%，主体为头到脚全身照，脚部接近画面底边，头顶接近画面上边，机位高度为平视。\"。\n\"细节\": \"主体人物身体重心在画面右侧腿部，画面左侧腿部向后延伸，呈现侧身站立姿态，人物头部位于画面右上区域，面部朝向镜头，人物双臂自然下垂，黑色比基尼上衣为挂脖款式，下装为系带式，黑色高跟鞋鞋跟细长，室内光线明亮，人物身体右侧受光明显，左侧有阴影，画面左上角有金色大号文字“170 BEAUTY”，画面左侧有竖排日文说明文字，画面右下角有金色圆形徽章及紫色圆形图案。\"。\n\"可见文字\": \"画面左上角有金色大号文字“170 BEAUTY”，画面左侧有竖排日文说明文字，画面右下角有金色圆形徽章及紫色圆形图案。\"。",
+      "clip": [
+        "76:62",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "76:68": {
+    "inputs": {
+      "width": 720,
+      "height": 1280,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "空Latent图像（SD3）"
+    }
+  },
+  "76:63": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "76:62": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "76:65": {
+    "inputs": {
+      "samples": [
+        "76:69",
+        0
+      ],
+      "vae": [
+        "76:63",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "76:70": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "76:66",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "76:66": {
+    "inputs": {
+      "unet_name": "Z-Image-Base-8steps-White_Marble-AIO_v2-fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "76:71": {
+    "inputs": {
+      "text": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, malformed legs, extra legs, missing legs, fused legs, dislocated knees, misplaced knees, broken leg joints, disconnected thighs and calves, misplaced ankles, wrong sock placement, incorrect stocking cuffs, leg perspective error, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay",
+      "clip": [
+        "76:62",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "76:69": {
+    "inputs": {
+      "seed": 797740430603514,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "76:70",
+        0
+      ],
+      "positive": [
+        "76:67",
+        0
+      ],
+      "negative": [
+        "76:71",
+        0
+      ],
+      "latent_image": [
+        "76:68",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  }
+}

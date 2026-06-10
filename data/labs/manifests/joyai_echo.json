@@ -1,0 +1,52 @@
+{
+  "id": "joyai",
+  "name": "JoyAI-Echo Official Restore Lab",
+  "short_name": "JoyAI-Echo",
+  "kind": "long-audio-video-generation",
+  "repo_url": "https://github.com/jd-opensource/JoyAI-Echo",
+  "model_url": "https://huggingface.co/jdopensource/JoyAI-Echo",
+  "source_commit": "218df69fb84c937159928f5a230634c0885f6212",
+  "local_source": "data/labs/projects/JoyAI-Echo",
+  "license_note": "Academic research and non-commercial use only per upstream model card and license notes.",
+  "checkpoint_paths": [
+    "data/labs/checkpoints/JoyAI-Echo/JoyAI-Echo-release.safetensors",
+    "data/labs/checkpoints/JoyAI-Echo/gemma-3-12b"
+  ],
+  "official_cases": [
+    {
+      "name": "Single prompt file from upstream test_001",
+      "case_file": "prompts/test_001.json",
+      "output": "inference_result/outputs/test_001/inference_<timestamp>/combined_shots.mp4",
+      "command": "python inference.py --config configs/ez_lab_inference.yaml --prompts-glob test_001.json --num-frames 121 --video-height 480 --video-width 832"
+    },
+    {
+      "name": "Small smoke test from copied prompt",
+      "case_file": "prompts/test_001.json",
+      "output": "inference_result/outputs/<prompt>/inference_<timestamp>/combined_shots.mp4",
+      "command": "python inference.py --config configs/ez_lab_inference.yaml --prompts-dir ../../runs/JoyAI-Echo/prompts --prompts-glob '*.json' --seed 42 --num-frames 121 --video-height 480 --video-width 832"
+    }
+  ],
+  "setup_commands": [
+    "scripts/labs/prepare_joyai_echo.sh",
+    "hf download jdopensource/JoyAI-Echo --include JoyAI-Echo-release.safetensors --local-dir data/labs/checkpoints/JoyAI-Echo",
+    "hf download google/gemma-3-12b-it --local-dir data/labs/checkpoints/JoyAI-Echo/gemma-3-12b"
+  ],
+  "playground": {
+    "summary": "Create a prompt JSON from one or more shot descriptions, then launch the official inference.py runner.",
+    "modes": [
+      {
+        "id": "multishot",
+        "label": "多镜头音视频",
+        "description": "输入 1 条或多条镜头描述；用空行分隔多镜头，输出带音频的视频。",
+        "config": "configs/ez_lab_inference.yaml",
+        "requires": { "images": 0, "videos": 0 },
+        "defaults": { "width": 832, "height": 480, "frames": 121, "fps": 25, "steps": 9, "seed": 42 }
+      }
+    ]
+  },
+  "resource_lock": {
+    "project": "JoyAI-Echo",
+    "default_ttl_sec": 21600,
+    "reason": "JoyAI-Echo long-video validation is using the GPU"
+  }
+}

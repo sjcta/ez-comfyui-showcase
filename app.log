@@ -1,0 +1,1753 @@
+INFO:     Started server process [20175]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:9091 (Press CTRL+C to quit)
+🎨 ComfyUI Web v4: http://0.0.0.0:9091
+INFO:     127.0.0.1:55557 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-z-image.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-z-image.json/fields HTTP/1.1" 200 OK
+/Users/ai/projects/ez-comfyui-showcase/app.py:41: RuntimeWarning: coroutine 'broadcast' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+INFO:     10.10.10.10:0 - "POST /api/generate HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-z-image.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-z-image.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-z-image.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-z-image.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57423 - "GET /api/comfyui/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57470 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+/Users/ai/projects/ez-comfyui-showcase/app.py:480: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+INFO:     127.0.0.1:57513 - "POST /auth/login HTTP/1.1" 200 OK
+/Users/ai/projects/ez-comfyui-showcase/app.py:41: RuntimeWarning: coroutine 'broadcast' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+INFO:     127.0.0.1:57515 - "POST /api/generate HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57608 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57702 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57964 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57965 - "DELETE /api/jobs/job_1778769955987_4116 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57966 - "DELETE /api/jobs/job_1778770029433_3280 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58014 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+/Users/ai/projects/ez-comfyui-showcase/app.py:480: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+INFO:     127.0.0.1:58017 - "POST /auth/login HTTP/1.1" 200 OK
+/Users/ai/projects/ez-comfyui-showcase/app.py:41: RuntimeWarning: coroutine 'broadcast' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+INFO:     127.0.0.1:58018 - "POST /api/generate HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58052 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58063 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58081 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58101 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58106 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58129 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58146 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58161 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58182 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58196 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_154919_9956e7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150400_ba6b5d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150510_7f4b95_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_183757_6c8324_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145226_b0ea73_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145602_8d328e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_142029_f1cc0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131940_769a1b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131528_ccf181_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_130410_3e2a14_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_111358_1c86f8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_234324_a15762_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_000717_2a9b0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_212256_82a541_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_214747_29c0c5_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_212048_f4e5d5_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_205554_013ccb_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_203822_133e28_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_201136_7556d0_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_200712_f3773c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_181707_f71fe6_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_192404_a41130_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_181343_d6552e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_181227_354b94_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_180950_ea443a_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_180218_0409cc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_180638_41f1b4_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_180837_5cbf4c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_173910_d2980d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_175315_f8da49_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_180116_dd936e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_174050_10ca9f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_175615_97ef81_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_171631_06880e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_151130_4da08e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_150939_a21278_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034334_9f58a4_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_131113_b16c9a_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_150650_5320e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_155547_b6c2c4_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_223828_0c87b9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_223743_ba9adb_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_031303_a9fa3b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_033547_a360df_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_204737_a3aef3_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_193748_ca9ee0_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_194109_1a41d4_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_014138_1217e6_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_012426_c1b249_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_012701_0e9a0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_201829_acc278_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_011332_0371f7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_010909_2aab1e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_005850_09acd9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260509_004830_9276c3_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_223401_85ea28_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_222014_1f7d41_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_153527_8752f0_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_153249_a1dfea_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_204455_3ac98b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_161602_8b0437_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_154403_a19a24_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_164706_920618_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_151325_27c7f4_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_114539_7ff39f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_114938_47ad81_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_114800_bbe177_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_113832_ce7fa8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_114220_7af559_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_113315_4f663f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_100700_19dee3_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225613_b56ad8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225819_bd6689_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260508_112844_813125_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_230918_88048d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225406_0b4e19_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_224753_ddca02_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225152_f8833a_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225135_d2c15e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225226_96dce7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_225042_793081_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_224722_2d538e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_222220_bd039b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_223626_a835cc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_220303_ecda0d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_221303_d424e4_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_213058_8481d8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_201208_19a199_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_212327_d0b638_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_201352_de1f72_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_201446_a78ae7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_212213_9bc1a6_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_201103_e34858_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_200629_730dc8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_200531_d611b2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_200305_afa8bb_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_200414_9e4088_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_195733_e605c9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_195515_b4eeb1_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/comfyui/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/nodes HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "POST /api/nodes/local/disconnect HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/comfyui/status HTTP/1.1" 200 OK
+[download] Failed to download t2i-z-xxx_00170_.png: [Errno 45] Operation not supported: '/home/sjcta'
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59045 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /%23logoG HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-nunchaku-z-image-turbo-highSD.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /%23logoG HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-nunchaku-z-image-turbo-highSD.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /%23logoG HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-nunchaku-z-image-turbo-highSD.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /status HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /status HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=1 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/comfyui/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/card_manager.js?v=1747355600 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/poll_manager.js?v=1747355600 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /%23logoG HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_183757_6c8324_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_154919_9956e7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150510_7f4b95_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150400_ba6b5d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145602_8d328e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145226_b0ea73_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_142029_f1cc0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131940_769a1b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131528_ccf181_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_130410_3e2a14_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_111358_1c86f8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_000717_2a9b0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_234324_a15762_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_214747_29c0c5_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-nunchaku-z-image-turbo-highSD.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_034225_94b4e2_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+/Users/ai/projects/ez-comfyui-showcase/app.py:41: RuntimeWarning: coroutine 'broadcast' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+INFO:     10.10.10.10:0 - "POST /api/generate HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=1 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+[download] Failed to download t2i-z-xxx_00171_.png: [Errno 45] Operation not supported: '/home/sjcta'
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=1 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/comfyui/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 304 Not Modified
+INFO:     10.10.10.10:0 - "GET /static/js/modules/poll_manager.js?v=1747355600 HTTP/1.1" 304 Not Modified
+INFO:     10.10.10.10:0 - "GET /static/js/modules/card_manager.js?v=1747355600 HTTP/1.1" 304 Not Modified
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 304 Not Modified
+INFO:     10.10.10.10:0 - "GET /%23logoG HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/t2i-nunchaku-z-image-turbo-highSD.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260507_190915_6f23c6_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /ws HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET / HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/css/style.css?v=1778690000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/app.js?v=1778735876 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/node-editor.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/ui.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/icons.js HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/status.js?v=1778750000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/card_manager.js?v=1747355600 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/workflows.js?v=1778680200 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/poll_manager.js?v=1747355600 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/generate.js?v=1778735548 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/auth.js?v=1778735423 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/history.js?v=1778609784 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /static/js/modules/nodes.js?v=1778688000 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /%23logoG HTTP/1.1" 404 Not Found
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=0 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=50 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_183757_6c8324_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=100 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_154919_9956e7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150510_7f4b95_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/i2i-FireRed-Edit-8step.json/fields HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150400_ba6b5d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145602_8d328e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_142029_f1cc0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145226_b0ea73_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/history?limit=50&offset=150 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131940_769a1b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131528_ccf181_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_130410_3e2a14_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows/meta HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_111358_1c86f8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_000717_2a9b0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_234324_a15762_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/workflows HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_214747_29c0c5_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150510_7f4b95_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_154919_9956e7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_131113_b16c9a_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234842_9475cf_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_205304_cf22dc_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_234705_b6226e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_111501_13e7db_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_192104_f40e89_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_183757_6c8324_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150400_ba6b5d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145602_8d328e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145226_b0ea73_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_142029_f1cc0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131940_769a1b_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_131528_ccf181_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193400_7ff659_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161511_230470_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101937_887b8e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_193331_58c3c7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_192838_14052c_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_101703_e27e46_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260512_161951_231cba_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235418_364ce9_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_130410_3e2a14_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_111358_1c86f8_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_154919_9956e7_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150510_7f4b95_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_183757_6c8324_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_000717_2a9b0f_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_234324_a15762_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_214747_29c0c5_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_235137_9fd64e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_150400_ba6b5d_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260510_131113_b16c9a_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145226_b0ea73_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/thumbs/20260511_145602_8d328e_thumb.jpg HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     ('10.10.10.10', 0) - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     10.10.10.10:0 - "GET /api/comfyui/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/jobs/job_1778777493656_6910 HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     10.10.10.10:0 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     connection closed
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [20175]

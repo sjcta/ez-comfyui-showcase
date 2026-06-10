@@ -1,0 +1,94 @@
+from pathlib import Path
+import re
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _css_block(css, selector):
+    pattern = re.compile(r"%s\s*\{([^}]*)\}" % re.escape(selector), re.MULTILINE)
+    return "\n".join(match.group(1) for match in pattern.finditer(css))
+
+
+class JobCardLayoutContractTests(unittest.TestCase):
+    def test_job_cards_share_history_card_height(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        history_block = _css_block(css, ".gi:not(.job-card)")
+        job_block = _css_block(css, ".gi.job-card")
+
+        self.assertIn("height: 280px", history_block)
+        self.assertIn("height: 280px", job_block)
+        self.assertIn("overflow: hidden", job_block)
+
+    def test_job_placeholders_do_not_use_content_height(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        masonry_img_block = _css_block(css, ".masonry .gi.job-card .gi-img")
+        placeholder_block = _css_block(css, ".gi.job-card .gi-img.job-placeholder")
+        error_placeholder_block = _css_block(css, ".gi.job-card.error .gi-img.job-placeholder")
+        info_block = _css_block(css, ".gi.job-card .gi-info")
+
+        self.assertIn("min-height: 0", masonry_img_block)
+        self.assertIn("aspect-ratio: auto", placeholder_block)
+        self.assertIn("box-sizing: border-box", placeholder_block)
+        self.assertIn("padding: 36px 10px 92px", placeholder_block)
+        self.assertIn("padding: 46px 12px 104px", error_placeholder_block)
+        self.assertIn("position: absolute", info_block)
+        self.assertIn("bottom: 0", info_block)
+
+    def test_error_job_card_actions_use_stacked_layout(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        error_overlay_block = _css_block(css, ".gi.job-card.error .job-status-overlay")
+        error_retry_block = _css_block(css, ".gi.job-card.error .gi-retry-row")
+        error_delete_block = _css_block(css, ".gi.job-card.error .gi-del")
+        error_icon_block = _css_block(css, ".gi.job-card.error .gi-img.job-placeholder::before")
+
+        self.assertIn("position: static", error_overlay_block)
+        self.assertIn("order: 2", error_overlay_block)
+        self.assertIn("order: 3", error_retry_block)
+        self.assertIn("pointer-events: auto", error_retry_block)
+        self.assertIn("top: 8px", error_delete_block)
+        self.assertIn("right: 8px", error_delete_block)
+        self.assertIn("order: 1", error_icon_block)
+
+    def test_status_text_wraps_long_recovery_failures(self):
+        css = (ROOT / "static/css/style.css").read_text()
+
+        base_block = _css_block(css, ".job-status-text")
+        error_block = _css_block(css, ".job-status-text.error")
+        queued_block = _css_block(css, ".job-status-text.queued")
+        preparing_block = _css_block(css, ".job-status-text.preparing")
+        submitting_block = _css_block(css, ".job-status-text.submitting")
+
+        self.assertIn("white-space: nowrap", base_block)
+        self.assertIn("white-space: normal", error_block)
+        self.assertIn("overflow-wrap: anywhere", error_block)
+        self.assertIn("text-overflow: clip", error_block)
+        self.assertIn("white-space: normal", queued_block)
+        self.assertIn("overflow-wrap: anywhere", queued_block)
+        self.assertIn("text-overflow: clip", queued_block)
+        self.assertIn("white-space: normal", preparing_block)
+        self.assertIn("overflow-wrap: anywhere", preparing_block)
+        self.assertIn("text-overflow: clip", preparing_block)
+        self.assertIn("white-space: normal", submitting_block)
+        self.assertIn("overflow-wrap: anywhere", submitting_block)
+        self.assertIn("text-overflow: clip", submitting_block)
+
+    def test_zero_progress_generating_card_keeps_visible_activity_bar(self):
+        css = (ROOT / "static/css/style.css").read_text()
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+        card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()
+
+        unknown_block = _css_block(css, ".gi-progress-top.progress-unknown .gi-progress-fill")
+        self.assertIn("min-width: 34%", unknown_block)
+        self.assertIn("animation: gi-progress-unknown", unknown_block)
+        self.assertIn("_jobProgressClass(j)", history_js)
+        self.assertIn("classList.toggle('progress-unknown'", history_js)
+        self.assertNotIn("_jobProgressClass(j)", card_manager)
+
+
+if __name__ == "__main__":
+    unittest.main()

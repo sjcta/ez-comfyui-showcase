@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "workflow": "nunchaku-z-image-turbo-high.json",
+  "fields": [
+    {
+      "key": "39::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "39::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "39::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "40::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "41::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "width",
+      "order": 4,
+      "type": "number",
+      "step": 64,
+      "min": 256,
+      "max": 8192
+    },
+    {
+      "key": "41::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "height",
+      "order": 5,
+      "type": "number",
+      "step": 64,
+      "min": 256,
+      "max": 8192
+    },
+    {
+      "key": "41::batch_size",
+      "zone": "user_input",
+      "visible": true,
+      "label": "batch_size",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "44::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "seed",
+      "order": 7,
+      "type": "seed"
+    },
+    {
+      "key": "44::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "steps",
+      "order": 8,
+      "type": "number"
+    },
+    {
+      "key": "44::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "cfg",
+      "order": 9,
+      "type": "number"
+    },
+    {
+      "key": "44::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "sampler_name",
+      "order": 10,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "44::scheduler",
+      "zone": "advanced",
+      "visible": true,
+      "label": "scheduler",
+      "order": 11,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "44::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "denoise",
+      "order": 12,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "45::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "text",
+      "order": 13,
+      "type": "textarea"
+    },
+    {
+      "key": "47::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "58::model_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model_name",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "62::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 16,
+      "type": "select",
+      "options": [
+        "nearest-exact",
+        "bilinear",
+        "bicubic",
+        "lanczos",
+        "area"
+      ]
+    },
+    {
+      "key": "62::scale_by",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scale_by",
+      "order": 17,
+      "type": "number"
+    },
+    {
+      "key": "64::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "filename_prefix",
+      "order": 18,
+      "type": "text"
+    },
+    {
+      "key": "65::stack_enabled",
+      "zone": "hidden",
+      "visible": false,
+      "label": "stack_enabled",
+      "order": 19,
+      "type": "toggle"
+    }
+  ]
+}

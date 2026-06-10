@@ -1,0 +1,523 @@
+# Ez ComfyUI v4.0 — 出图 Pipeline 重构设计
+
+> 编写日期: 2026-05-15
+> 状态: 设计阶段
+> 目标版本: v4.0 (重构后)
+
+---
+
+## 1. 设计目标
+
+### 1.1 消灭三重冷启动
+当前一个出图任务最多可能等待 **660 秒** 的冷启动时间却没有实质性进展。重构后冷启动只发生 **一次**。
+
+### 1.2 实例并行化
+移除全局信号量，以实例级别信号量控制并发，做到 A/B 实例真正并行出图。
+
+### 1.3 前端无闪烁
+将卡片状态切换从 "全量 rebuild" 改为 "数据驱动 + 局部 patch"，消除每次状态变化的闪屏。
+
+### 1.4 统一决策链
+实例健康检查、冷启动触发、空闲回收收敛到单一管理器。
+
+---
+
+## 2. 架构全景
+
+```
+┌──────────────────────────────────────────────────┐
+│                  Client (Browser)                 │
+│  doGenerate() → POST /api/generate               │
+│  onJobUpdate() ← WS push ← server                │
+│  _pollActiveJobs() ← GET /api/jobs (fallback)     │
+└───────────────┬──────────────────────┬────────────┘
+                │                      │
+                ▼                      ▼
+┌──────────────────────┐  ┌─────────────────────────┐
+│  /api/generate       │  │  WebSocket /ws          │
+│  → _job_queue.put()  │  │  → broadcast job_update  │
+└──────────┬───────────┘  └─────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────┐
+│              _queue_worker (单协程)               │
+│  while True:  _job_queue.get() → _run_job()      │
+└──────────────────┬───────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────┐
+│  _run_job(job_id, wf, fields, seed, ...)            │
+│                                                     │
+│  ① pick_best_instance(wf_name)                      │
+│     — 纯选择，不做 cold-start                        │
+│     — 工作流亲和 → 空闲亲和 → 最短队列                 │
+│                                                     │
+│  ② decide_stop_vllm(instance)                       │
+│     — 若 vLLM 运行中且实例需要显存 → stop_vllm        │
+│     — 标记 vllm_was_running                          │
+│                                                     │
+│  ③ inst_mgr.ensure_running(instance, timeout=300)    │
+│     — 唯一冷启动入口                                  │
+│     — 已 running → 立即返回                           │
+│     — 未 running → systemctl start + 轮询 /system_stats│
+│     — 自带去重锁，同实例并发请求合并等待                  │
+│                                                     │
+│  ④ acquire(instance_sem[name])                      │
+│     — 等实例就绪后，独占该实例                           │
+│                                                     │
+│  ⑤ submit + WS track / HTTP fallback                │
+│                                                     │
+│  ⑥ release(instance_sem[name])                      │
+│                                                     │
+│  ⑦ inst_mgr.mark_active(name)                       │
+│     — 更新时间戳，供空闲回收使用                        │
+│                                                     │
+│  ⑧ if vllm_was_running: start_vllm()                │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. 模块拆分与变更
+
+### 3.1 `InstanceManager`（新增类）
+
+```python
+class InstanceManager:
+    """
+    集中管理所有 ComfyUI 实例的生命周期。
+    单例（模块级实例），通过 lifespan 初始化。
+    """
+
+    # ── 状态缓存 ──
+    _health: dict[str, InstanceHealth]
+    # { name: { up: bool, checked_at: float, model_group: str, pid: int } }
+
+    _start_locks: dict[str, asyncio.Lock]
+    # 同实例并发冷启动时的去重锁
+
+    _start_grace: dict[str, float]
+    # 最近一次触发 start 的时间戳，用于防御误判死实例
+
+    _last_active: dict[str, float]
+    # 最近一次出图完成的时间戳
+
+    # ── 核心方法 ──
+
+    async def ensure_running(self, instance: dict, timeout: int = 300) -> bool
+        """
+        确保实例处于运行状态。
+        - 已 running → 立即返回 True
+        - grace period 内 → 等待 health 变为 up
+        - 未 running → systemctl start + 轮询 /system_stats
+        - 超时 → raise TimeoutError
+        - 同实例并发调用会被 start_lock 合并
+        """
+
+    async def health(self, instance: dict, force: bool = False) -> bool
+        """
+        获取实例健康状态。
+        - force=True 实时检查（不走缓存）
+        - 默认缓存 15 秒
+        - 检查 /system_stats (3s timeout)
+        """
+
+    def mark_active(self, name: str) -> None
+        """更新 last_active 时间戳，出图完成后调用。"""
+
+    def is_grace(self, name: str) -> bool
+        """检查是否在 grace period 内（>=90s）。"""
+
+    # ── Watchdogs ──
+
+    async def _dead_check_loop(self):
+        """60s 间隔，检查 systemd active 但 health 挂掉的实例 → restart"""
+        # 跳过 grace period 内的实例
+        # 跳过 startup_lock 中的实例
+
+    async def _idle_reap_loop(self):
+        """60s 间隔，停止 last_active > 900s 且无活跃任务的实例"""
+```
+
+**删除/替代的旧代码：**
+- 删除现有的 `comfyui_up()` 函数（方法内联到 `InstanceManager.health()`）
+- 删除现有的 `_dead_instance_watcher()` 协程
+- 删除现有的 `_idle_instance_watcher()` 协程
+- 删除现有的 `_check_service_active()` 函数
+- 删除模块级 `_instance_start_grace`, `_instance_last_active` 等散落字典
+
+### 3.2 `_run_job()`（新函数，替代 `_dispatch_and_run`）
+
+```python
+async def _run_job(job_id, workflow_path, field_values, seed,
+                   vllm_was_running, img_w, img_h, user_id):
+    """
+    单出一图的核心流程。由 _queue_worker 依次调用。
+    与旧 _dispatch_and_run 的区别：
+    1. 纯选择 + 只一次冷启动
+    2. 无 global sem
+    3. vLLM 提前决策好
+    """
+    inst = pick_best_instance(workflow_name)  # 纯选择
+
+    # 标记实例
+    jobs[job_id]["instance"] = inst["name"]
+
+    # vLLM 决策
+    was_vllm = vllm_was_running
+    if was_vllm and needs_vram(workflow_name):
+        stop_vllm()
+        await asyncio.sleep(2)
+
+    # 唯一冷启动
+    await inst_mgr.ensure_running(inst)
+
+    # 获取实例锁
+    async with instance_sem(inst["name"]):
+        jobs[job_id]["status"] = "preparing"
+        ...
+
+        # 提交 + WS track (与现有 generate_task 类似)
+        ok, pid = await submit_and_track(job_id, wf, ...)
+
+        # 下载图片
+        ...
+
+    # 标记活跃
+    inst_mgr.mark_active(inst["name"])
+
+    # 恢复 vLLM
+    if was_vllm:
+        start_vllm()
+```
+
+**删除/替代的旧代码：**
+- 删除 `_dispatch_and_run()` 整体
+- 删除 `_global_sem` 全局信号量
+- 删除 `_dispatch_and_run` 中所有重复的 `comfyui_up` + `_run_instance_action` 检查
+
+### 3.3 `pick_best_instance()` 精简
+
+```python
+async def pick_best_instance(workflow_name: str = "") -> dict:
+    """
+    纯选择函数，不启动、不检查 health。
+    原有 cold-start 逻辑全部移除。
+    """
+    # T2I → A, I2I → B（硬路由，仅偏好，不保证 up）
+    # 工作流亲和 → 空闲亲和 → 最短队列
+    # 如果所有实例都 down → raise RuntimeError("No instances available")
+```
+
+**变更：**
+- 移除所有 `await asyncio.to_thread(comfyui_up, ...)` 调用
+- 移除所有 `_run_instance_action(node, chosen, "start")` 调用
+- 移除所有轮询等待循环
+- 如果无可用实例直接抛错，不代行启动
+
+### 3.4 正确计算 Workflow Steps（进度条核心算法）
+
+当前进度条的计算位于 `comfyui_ws_track()` 内部，存在若干系统性缺陷。重构后应当使用 **`StepCalculator`** 模块统一计算 `total_units` 和 `completed_units`，保证进度条单调递增、不突变、不卡死。
+
+#### 3.4.1 当前代码的五个系统性缺陷
+
+**缺陷 A：VAEDecode 被完全排除**
+```python
+# 初始计数（约 L1440）:
+if cls != "VAEDecode":
+    non_sampler_cnt += 1
+
+# 运行时计数（约 L1506）:
+if cls not in SAMPLER_NODES and cls not in UPSCALE_ACT_NODES and cls != "VAEDecode":
+    completed_units += 1.0
+```
+VAEDecode 在两端都被排除，consistent but invisible。用户看到采样 `20/20` 进度的瞬间，进度条卡在 ~95%，然后 VAE 解码时不动，最后突然跳到 100%。
+
+**修复：** 将 VAEDecode 计入 `non_sampler_cnt` 和 `completed_units`，让它占据应有的 1 个 unit。
+
+**缺陷 B：Sampler 初始化占用 1 unit 但未计入 total**
+```python
+# executing 事件处理（约 L1510）:
+completed_units += 1.0  # sampler 开始执行时加 1 unit
+```
+total_units 只加了 `steps` 的数量（例如 20），但 sampler 启动时额外消耗了 1 个 unit。结果：**进度超过 100%**（21/20 = 105%），前端被迫 clamp 在 100%，看起来很怪。
+
+**修复：** 每个 sampler/upscaler 的 `sampler_steps_total` 加上 1（初始化 unit）：
+```python
+sampler_steps_total += int(v) + 1  # +1 给初始化事件
+```
+
+**缺陷 C：`denoise` 影响实际步数但未考虑**
+```python
+# 约 L1425:
+v = inp.get("steps", 8 if cls in SAMPLER_NODES else 4)
+sampler_steps_total += int(v)
+```
+若 `steps=20` 且 `denoise=0.5`，ComfyUI 实际只执行 10-12 步。total_units 按 20+1 算，但 progress 事件只发 10 次，导致进度条只走到一半就跳到下一个阶段。
+
+**修复：**
+```python
+raw_steps = inp.get("steps", 8)
+denoise = inp.get("denoise", 1.0)
+if isinstance(denoise, list): denoise = 1.0  # linked node, 无法提前解析
+if isinstance(raw_steps, (int, float)) and denoise < 1.0:
+    effective_steps = max(1, int(raw_steps * denoise))
+else:
+    effective_steps = int(raw_steps)
+# +1 给初始化
+sampler_steps_total += effective_steps + 1
+```
+
+**缺陷 D：`steps` 参数链接到其他节点时解析不完整**
+```python
+# 约 L1427:
+elif isinstance(v, list) and len(v) >= 1:
+    ln = workflow.get(str(v[0]), {}).get("inputs", {})
+    for k in ("value", "INT"):
+        if k in ln and isinstance(ln[k], (int, float)):
+            sampler_steps_total += int(ln[k])
+```
+只检查直接链路的 `value`/`INT`，遇到 ComfySwitchNode、多层链路时走 fallback（8），导致不准确。
+
+**修复：** 使用递归链路解析器 `_resolve_steps_link(workflow, node_id, depth=0)`，至多跟 5 层，找到具体数值为止：
+- PrimitiveInt → `inputs.value`
+- ComfySwitchNode → 检查 on_true/on_false 分支
+- 其他 → 逐层 follow
+- 超 5 层 → fallback 8
+
+**缺陷 E：N 图并行出图（`batch_size>1` 或 `n>1`）**
+某些 workflow 每次生成 N 张图（重复 KSampler 或 latent_image 的 batch_size）。当前代码按
+// 单一渲染函数，不再区分 job vs history
+function _renderCard(data) {
+    // data 格式：
+    // { id, status, image, prompt_preview, workflow, width, height,
+    //   seed, progress, generating_at, queued_at, elapsed, time,
+    //   instance, message }
+    // status: 'queued' | 'preparing' | 'generating' | 'downloading'
+    //         | 'done' | 'error' | 'history'
+    //         | 'starting_comfyui' (新增)
+}
+```
+
+- 移除 `_renderJobCard()` 和 `_renderHistCard()` 两个函数，合并为 `_renderCard()`
+- 移除 `_onJobDone()` 中的 DOM 手动换图逻辑，改为纯状态变更
+- 移除 `_onJobError()` 中的 `delete jobs[job.id]`，改为保留 error 状态卡片
+
+#### 3.4.2 状态机驱动的卡片
+
+```
+queued ──→ preparing ──→ generating ──→ downloading ──→ done ──→ history
+            │               │               │
+            └────────────── error ←──────────┘
+```
+
+- `done` 状态的 job 保留在 `jobs[]` 中 **5 秒**，之后转移到 `history[]`（自动从 `jobs` 删除）
+- `error` 状态的 job 保留 **60 秒**，之后自动从 `jobs` 删除
+
+#### 3.4.3 渲染策略
+
+```
+状态变更 → 更新 jobs[id] → debounce 100ms → _renderGallery()
+progress 更新 → _patchJobCard() (in-place, 不触发全量渲染)
+```
+
+- 使用 `requestAnimationFrame` + 防抖
+- 同一个 tick 内的多次状态变更合并为一次渲染
+- 仅 progress 类更新走 patch 路径
+
+#### 3.4.4 合并轮询
+
+- **删除** `pollJobs()` (5s 全量)
+- **保留** `_pollActiveJobs()` (3s 增量)
+- 删除客户端安全逻辑（700s generating 自动 cancel），信任服务端 `_stuck_job_watcher()`
+
+#### 3.4.5 loading 与 starting_comfyui 状态
+
+新增后端状态：
+
+| 状态 | 含义 | 前端展示 |
+|------|------|---------|
+| `starting_comfyui` | 实例冷启动中 | 旋转动画 + "启动 ComfyUI..." |
+| `preparing` | 准备 workflow + 传参 | "准备中..." |
+| `generating` | WS track 中 | 进度条 + 当前 node 名 |
+| `downloading` | SCP/HTTP 拉图 | "正在拉取图片..." |
+| `done` | 出图完成 | 显示图片 |
+| `error` | 出图失败 | 显示失败信息 + 重试按钮 |
+
+---
+
+## 4. 后端 API 变更
+
+### 4.1 新增 / 保持
+
+| API | 方法 | 说明 |
+|-----|------|------|
+| `/api/generate` | POST | 不变，入队列 |
+| `/api/jobs` | GET | 返回 `jobs{}` 全部值 |
+| `/api/jobs/{id}` | GET | 单个 job 状态 |
+| `/api/jobs/{id}` | DELETE | 取消/删除 job |
+| `/api/jobs/{id}/retry` | POST | 重试失败 job |
+| `/api/status` | GET | 实例状态，新增 `starting` 字段 |
+| `/api/comfyui/{name}/start` | POST | 手动启动实例 |
+| `/api/comfyui/{name}/stop` | POST | 手动停止实例 |
+
+### 4.2 `/api/comfyui/status` 返回格式扩展
+
+```json
+{
+  "instances": [
+    {
+      "name": "A",
+      "up": true,
+      "starting": false,
+      "service": "comfyui-a",
+      "queue_running": 1,
+      "queue_pending": 0,
+      "progress": 45,
+      "current_workflow": "t2i-z-xxx",
+      "current_prompt": "少女...",
+      "pending_workflows": [],
+      "loaded_group": "z-image-turbo",
+      "port": "8190"
+    }
+  ]
+}
+```
+
+新增字段：**`starting`** — 实例正在冷启动中（`InstanceManager.is_grace()` 返回 true 且 health 为 false 时）
+
+---
+
+## 5. 前端 JS 模块变更
+
+### 5.1 `app.js`
+
+| 变更 | 说明 |
+|------|------|
+| 删除 `pollJobs()` | 不再全量拉取 jobs |
+| 保留 `_pollActiveJobs()` | 3s 增量更新，只拉 `/api/jobs` |
+| 简化 `onJobUpdate()` | 只做数据更新 + 触发 debounced render |
+| 移除客户端 700s timeout | 信任服务端 `_stuck_job_watcher()` |
+| `_patchJobCard()` | 保留，仅用于 progress 更新 |
+
+### 5.2 `history.js`
+
+| 变更 | 说明 |
+|------|------|
+| 合并 `_renderJobCard()` + `_renderHistCard()` → `_renderCard()` | 统一渲染 |
+| `_onJobDone()` | 不再 DOM 手动换图，改为状态变更 |
+| `_onJobError()` | 不再 `delete jobs[job.id]`，保留 error 卡片 |
+| 新增 `_autoCleanupLoop()` | 每 10s 清除过期 error/done job 卡片 |
+| `_renderGalleryImpl()` | 不再分 activeJobs + errorJobs + history，统一数据源 |
+
+### 5.3 `generate.js`
+
+| 变更 | 说明 |
+|------|------|
+| `doGenerate()` | 无重大变更，提交前 snapshot 保持 |
+| `restoreJob()` | 无重大变更 |
+
+---
+
+## 6. 关键 Flow 对比
+
+### 6.1 当前（v3.9）
+
+```
+user click
+  → api_generate → _job_queue
+    → _queue_worker → _dispatch_and_run
+      → pick_best_instance (cold start 1, wait 300s)
+      → global sem
+      → comfyui_up (cold start 2, wait 180s)
+      → instance sem
+      → generate_task
+        → comfyui_up (cold start 3, wait 180s)
+        → stop_vllm
+        → WS track
+        → download
+      → release instance sem
+      → release global sem
+      → start_vllm
+```
+
+### 6.2 重构后（v4.0）
+
+```
+user click
+  → api_generate → _job_queue
+    → _queue_worker → _run_job
+      → pick_best_instance (纯选择, 0ms)
+      → decide_vllm (stop if needed)
+      → inst_mgr.ensure_running (统一 cold start, wait 300s MAX, 实际 ~30s)
+      → instance sem
+      → submit + WS track
+      → download
+      → release instance sem
+      → inst_mgr.mark_active
+      → start_vllm (if was running)
+```
+
+**关键差异：**
+- 冷启动从「最多 660s」降为「最多 300s」，实际通常 20-40s
+- 冷启动从「3-4 次」降为「1 次」
+- Global sem 移除，A/B 实例真正并行
+- vLLM 决策提前到冷启动之前
+
+---
+
+## 7. 实施顺序
+
+| Phase | 模块 | 内容 | 预计行数变化 |
+|-------|------|------|------------|
+| 1 | `InstanceManager` | 新建类 + 替换 watchers | +200 / -100 |
+| 2 | 后端 pipeline | 新建 `_run_job()` + 删 `_dispatch_and_run` + 删 global sem | +150 / -200 |
+| 3 | 缩减 `pick_best_instance` | 移除所有 cold-start 代码 | -30 |
+| 4 | 前端渲染合并 | 合并 `_renderJobCard`/`_renderHistCard` → `_renderCard` | +100 / -120 |
+| 5 | 前端轮询合并 | 删除 `pollJobs()`，保留 `_pollActiveJobs` | -40 |
+| 6 | 前端状态机 | done/error 卡片保留 + 自动 cleanup | +60 / -20 |
+
+---
+
+## 8. 边界条件与防御
+
+### 8.1 冷启动去重
+同实例同时收到多个任务请求，`InstanceManager.ensure_running()` 通过 `asyncio.Lock` 确保只启动一次，其他人等待。
+
+### 8.2 Grace Period
+`ensure_running()` 成功启动后 90 秒内，`_dead_check_loop` 不会误判重启。
+如果 90 秒后仍未 up，会触发 restart。
+
+### 8.3 空闲回收不打断活跃任务
+`_idle_reap_loop` 在 stop 前检查 `instance_sem[name].locked()`，如果锁被占用则跳过该实例。
+
+### 8.4 前端 polling 不与 WS 冲突
+WS 推送优先，3s polling 作为 fallback。
+Polling 仅更新 `jobs[]` 数据，不直接操作 DOM。
+渲染由 `onJobUpdate`（来自 WS）或 `_pollActiveJobs` 的回调触发，两者公用一条渲染队列。
+
+### 8.5 前端 error 卡片保留
+出图失败不删卡片，保留 error 状态 + 重试按钮，用户可手动删除或重试。
+60 秒后自动清理，避免堆积。
+
+---
+
+## 9. 回滚策略
+
+每个 Phase 按 git commit 独立提交，方便按 commit revert。
+
+```bash
+# 备份当前 v3.9
+git tag v3.9-before-refactor
+
+# Phase 1: InstanceManager
+git commit -m "v4.0-p1: Add InstanceManager singleton"
+
+# Phase 2: pipeline
+git commit -m "v4.0-p2: Replace _dispatch_and_run with _run_job"
+
+# ...
+
+# 如有需要
+git revert v4.0-p1..v4.0-p6
+```

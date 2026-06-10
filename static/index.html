@@ -7,282 +7,192 @@
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ez ComfyUI Showcase</title>
-<link rel="stylesheet" href="static/css/style.css?v=1778500923">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
-<script src="static/js/app.js?v=1778500923"></script>
-<script src="static/js/modules/icons.js"></script>
-<script src="static/js/modules/status.js?v=1778500923"></script>
-<script src="static/js/modules/node-editor.js?v=1778500923"></script>
-<script src="static/js/modules/ui.js?v=1778500923"></script>
-<script src="static/js/modules/workflows.js?v=1778500923"></script>
-<script src="static/js/modules/history.js?v=1778500923"></script>
-<script src="static/js/modules/generate.js?v=1778500923"></script>
+<link rel="icon" type="image/png" href="static/icons/ez-site-logo-64.png">
+<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1781000019">
+<script>
+if (location.protocol === 'file:') {
+  location.replace('http://localhost:18000/');
+}
+</script>
+<script src="static/js/module_loader.js?v=1781000019"></script>
 </head>
-<body>
-<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
-<symbol id="icon-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <polygon points="5 3 19 12 5 21 5 3"/>
-  </symbol>
-<symbol id="icon-dice-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2" y="2" width="20" height="20" rx="2"/>
-    <circle cx="12" cy="12" r="1.5"/>
-  </symbol>
-<symbol id="icon-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-  </symbol>
-<symbol id="icon-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z"/>
-    <path d="m14.5 12.5 2-2"/>
-    <path d="m11.5 9.5 2-2"/>
-    <path d="m8.5 6.5 2-2"/>
-    <path d="m17.5 15.5 2-2"/>
-  </symbol>
-<symbol id="icon-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="10"/>
-    <polyline points="12 6 12 12 16 14"/>
-  </symbol>
-<symbol id="icon-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M7 20h10"/>
-    <path d="M10 20c5.5-2.5 8-8 6-14.5C14 4 9.5 3 7 7c-2.5 4-1 9.5 3 13"/>
-    <path d="M10.5 12.5c2.5-2.5 6.5-3 8-1.5"/>
-  </symbol>
-<symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-  </symbol>
-<symbol id="icon-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-    <circle cx="9" cy="9" r="2"/>
-    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
-  </symbol>
-<symbol id="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
-    <circle cx="12" cy="12" r="3"/>
-  </symbol>
-<symbol id="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
-    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>
-    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>
-    <line x1="2" x2="22" y1="2" y2="22"/>
-  </symbol>
-<symbol id="icon-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-    <path d="m9 11 3 3L22 4"/>
-  </symbol>
-<symbol id="icon-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="10"/>
-    <path d="m15 9-6 6"/>
-    <path d="m9 9 6 6"/>
-  </symbol>
-<symbol id="icon-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="13.5" cy="6.5" r=".5"/>
-    <circle cx="17.5" cy="10.5" r=".5"/>
-    <circle cx="8.5" cy="7.5" r=".5"/>
-    <circle cx="6.5" cy="12.5" r=".5"/>
-    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
-  </symbol>
-<symbol id="icon-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-    <path d="m15 5 4 4"/>
-  </symbol>
-<symbol id="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-    <circle cx="12" cy="12" r="3"/>
-  </symbol>
-<symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-    <polyline points="7 10 12 15 17 10"/>
-    <line x1="12" x2="12" y1="15" y2="3"/>
-  </symbol>
-<symbol id="icon-trash-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3 6h18"/>
-    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-    <line x1="10" x2="10" y1="11" y2="17"/>
-    <line x1="14" x2="14" y1="11" y2="17"/>
-  </symbol>
-<symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
-    <circle cx="12" cy="13" r="3"/>
-  </symbol>
-<symbol id="icon-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
-    <path d="M12 9v4"/>
-    <path d="M12 17h.01"/>
-  </symbol>
-<symbol id="icon-settings-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M20 7h-9"/>
-    <path d="M14 17H5"/>
-    <circle cx="17" cy="17" r="3"/>
-    <circle cx="7" cy="7" r="3"/>
-  </symbol>
-<symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M18 6 6 18"/>
-    <path d="m6 6 12 12"/>
-  </symbol>
-<symbol id="icon-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="10" x2="14" y1="2" y2="2"/>
-    <line x1="12" x2="15" y1="14" y2="11"/>
-    <circle cx="12" cy="14" r="8"/>
-  </symbol>
-<symbol id="icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-    <polyline points="17 8 12 3 7 8"/>
-    <line x1="12" x2="12" y1="3" y2="15"/>
-  </symbol>
-<symbol id="icon-folder-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>
-  </symbol>
-<symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="20 6 9 17 4 12"/>
-  </symbol>
-<symbol id="icon-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="12" x2="12" y1="2" y2="6"/>
-    <line x1="12" x2="12.01" y1="18" y2="22"/>
-    <line x1="4.93" x2="7.76" y1="4.93" y2="7.76"/>
-    <line x1="16.24" x2="19.07" y1="16.24" y2="19.07"/>
-    <line x1="2" x2="6" y1="12" y2="12"/>
-    <line x1="18" x2="22" y1="12" y2="12"/>
-    <line x1="4.93" x2="7.76" y1="19.07" y2="16.24"/>
-    <line x1="16.24" x2="17.76" y1="4.93" y2="7.76"/>
-  </symbol>
-<symbol id="icon-refresh-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-    <path d="M21 3v5h-5"/>
-    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-    <path d="M8 16H3v5"/>
-  </symbol>
-<symbol id="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="22" x2="11" y1="2" y2="13"/>
-    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-  </symbol>
-<symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
-  </symbol>
-<symbol id="icon-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
-    <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
-    <path d="M10 9H8"/>
-    <path d="M16 13H8"/>
-    <path d="M16 17H8"/>
-  </symbol>
-<symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="11" cy="11" r="8"/>
-    <path d="m21 21-4.3-4.3"/>
-  </symbol>
-<symbol id="icon-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="21" x2="14" y1="4" y2="4"/>
-    <line x1="10" x2="3" y1="4" y2="4"/>
-    <line x1="21" x2="12" y1="12" y2="12"/>
-    <line x1="8" x2="3" y1="12" y2="12"/>
-    <line x1="21" x2="16" y1="20" y2="20"/>
-    <line x1="12" x2="3" y1="20" y2="20"/>
-    <line x1="14" x2="14" y1="2" y2="6"/>
-    <line x1="8" x2="8" y1="10" y2="14"/>
-    <line x1="16" x2="16" y1="18" y2="22"/>
-  </symbol>
-</svg>
+<body data-theme="crypto">
+<div id="cw-sprite-slot"></div>
 
 
 
 <!-- ═══ 标题栏 ═══ -->
 <header class="titlebar">
-  <div class="logo"><span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-palette"/></svg></span> Ez ComfyUI Showcase</div>
+  <div class="logo"><span class="site-logo-wrap"><img class="site-logo-image" src="static/icons/ez-site-logo-64.png" alt="EZ ComfyUI logo"></span><span class="site-logo-text">Ez ComfyUI</span><span class="site-version-badge" id="siteVersionBadge" aria-label="当前版本"></span></div>
   <div class="titlebar-right">
+    <button class="tb-wf-mgr-btn" id="tbDeviceBtn" onclick="if(window.CW&&CW.openDeviceMgr)CW.openDeviceMgr()" title="设备管理"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-monitor-cog"/></svg>设备管理</button>
+    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" onclick="if(window.CW&&CW.openWfMgr)CW.openWfMgr()" title="工作流管理"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg>工作流管理</button>
     <button class="tb-log-btn" id="tbLogBtn" onclick="CW.toggleLog()" title="日志"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>日志</button>
-    <button class="tb-wf-mgr-btn" id="tbWfMgrBtn" onclick="if(window.CW&&CW.openWfMgr)CW.openWfMgr()" title="工作流管理"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流管理</button>
+    <div id="authContainer" class="auth-container"></div>
   </div>
 </header>
 
 <!-- ═══ 工作流管理覆盖层 ═══ -->
-<div class="wf-overlay" id="wfOverlay">
+<div class="v4-overlay page" id="wfOverlay">
   <div class="wf-overlay-inner">
-    <div class="wf-overlay-header">
-      <div class="wf-overlay-tabs">
-        <button class="tab-btn active" id="wfTabBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>工作流 <span class="wf-overlay-count" id="wfOverlayCount"></span></button>
-      </div>
-      <button class="wf-overlay-close" id="wfOverlayClose" onclick="if(window.CW&&CW.closeWfMgr)CW.closeWfMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+    <div class="v4-header wf-mgr-grad-header">
+      <span class="v4-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg> 工作流管理</span>
+      <span class="wf-overlay-count" id="wfOverlayCount"></span>
+      <button class="v4-close" id="wfOverlayClose" onclick="if(window.CW&&CW.closeWfMgr)CW.closeWfMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <!-- ═══ 工具栏：分类筛选 + 排序 ═══ -->
-    <div class="wf-mgr-toolbar">
+    <!-- ═══ 工具栏：设备选择 + 搜索 + 分类筛选 + 排序 ═══ -->
+    <div class="glass-toolbar">
+      <div class="wf-mgr-device-select">
+        <label class="wf-mgr-device-label"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-server"/></svg> 选择设备：</label>
+        <select id="wfMgrDeviceSelect" class="wf-mgr-device-select-input" onchange="if(window.CW&&CW.onWfMgrDeviceChange)CW.onWfMgrDeviceChange(this.value)">
+          <option value="">— 请先选择设备 —</option>
+        </select>
+        <button class="wf-mgr-btn wf-mgr-sync-btn" id="wfMgrSyncBtn" onclick="if(window.CW&&CW.manualSyncWorkflows)CW.manualSyncWorkflows()" disabled="disabled">
+          <svg class="cw-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-refresh-cw"/></svg>
+          手动同步
+        </button>
+        <span class="wf-mgr-sync-status" id="wfMgrSyncStatus"></span>
+      </div>
+      <div class="wf-mgr-search">
+        <svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-search"/></svg>
+        <input type="text" id="wfMgrSearchInput" placeholder="搜索工作流..." oninput="if(window.CW&&CW.setMgrFilter)CW.setMgrFilter(this.value)">
+      </div>
       <div class="wf-mgr-filter-tabs" id="wfMgrFilterTabs"></div>
       <div class="wf-mgr-sort">
         <input type="hidden" id="wfMgrSortBy" value="manual">
       </div>
     </div>
-    <div class="wf-overlay-grid" id="wfOverlayGrid"></div>
-    <div class="wf-overlay-empty" id="wfOverlayEmpty" style="display:none">暂无工作流</div>
-    <div class="wf-bottom-actions">
-      <div class="wf-overlay-upload" id="wfOverlayUpload">
-        <div class="wf-upload-zone" id="wfUploadZone">
-          <div class="wf-upload-icon"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-folder-open"/></svg></div>
-          <div class="wf-upload-text">拖入 workflow JSON 文件到此处</div>
-          <div class="wf-upload-hint">或 <label class="wf-upload-btn" for="wfUploadInput">选择文件</label></div>
-          <input type="file" id="wfUploadInput" accept=".json" multiple style="display:none">
+    <!-- ═══ Bento Box 布局 ═══ -->
+    <div class="wf-mgr-layout">
+      <!-- 左侧：统计面板 -->
+      <div class="wf-mgr-sidebar">
+        <button class="wf-mgr-gold-btn" onclick="document.getElementById('wfUploadInput').click()">
+          <svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-upload"/></svg>
+          上传工作流
+        </button>
+        <div class="wf-upload-section">
+          <div class="wf-upload-drop-zone" id="wfUploadZone">
+            <div class="wf-upload-icon"><svg class="cw-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-folder-open"/></svg></div>
+            <div class="wf-upload-text">拖入 workflow JSON 文件到此处</div>
+            <div class="wf-upload-hint">或 <label class="wf-upload-btn" for="wfUploadInput">选择文件</label></div>
+            <input type="file" id="wfUploadInput" accept=".json" multiple style="display:none">
+          </div>
         </div>
       </div>
-      <div class="wf-dirs-section" id="wfDirsSection">
-        <div class="wf-dirs-header">
-          <span class="wf-dirs-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-folder"/></svg> 工作流目录</span>
-          <button class="wf-dirs-add-btn" onclick="CW.showAddDir()" title="添加目录">＋ 新增目录</button>
-        </div>
-        <div class="wf-dirs-list" id="wfDirsList"></div>
-        <div class="wf-dirs-add" id="wfDirsAdd" style="display:none">
-          <input type="text" id="wfDirInput" placeholder="/path/to/workflows" class="wf-dir-input">
-          <button class="wf-dir-add-confirm" onclick="CW.addWfDir()">添加</button>
-          <button class="wf-dir-add-cancel" onclick="CW.hideAddDir()">取消</button>
-        </div>
+      <!-- 右侧：卡片网格 -->
+      <div class="wf-mgr-main">
+        <div class="wf-overlay-grid" id="wfOverlayGrid"></div>
+        <div class="wf-overlay-empty" id="wfOverlayEmpty" style="display:none">暂无工作流</div>
       </div>
     </div>
+
+  </div>
+</div>
+
+<!-- ═══ 设备管理覆盖层 ═══ -->
+<div class="v4-overlay page" id="deviceMgr">
+  <div class="wf-overlay-inner">
+    <div class="v4-header device-grad-header">
+      <span class="v4-title" id="deviceMgrTitle"></span>
+
+      <button class="v4-close" onclick="CW.closeDeviceMgr()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+    </div>
+    <!-- ═══ Bento Box 布局 ═══ -->
+    <div class="device-mgr-layout">
+
+      <!-- 右侧：设备卡片网格 -->
+      <div class="device-mgr-main" id="devicePane">
+        <div class="device-mgr-toolbar">
+          <div class="dmt-left">
+            <span class="dmt-label">已注册设备</span>
+          </div>
+          <div class="dmt-right">
+            <button class="wf-mgr-gold-btn" onclick="CW.openDeviceEditor('')"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#icon-plus"/></svg> 添加设备</button>
+            <button class="wf-mgr-btn" onclick="CW.refreshAllDevices()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#icon-refresh-cw"/></svg> 刷新</button>
+          </div>
+        </div>
+        <div class="device-list" id="deviceListContainer"></div>
+      </div>
+      <div id="deviceToast" class="device-toast"></div>
+    </div>
+
   </div>
 </div>
 
 <!-- ═══ 编辑弹窗 ═══ -->
-<div class="wf-edit-modal" id="wfEditModal">
-  <div class="wf-edit-card">
-    <div class="wf-edit-header">
-      <span class="wf-edit-title" id="wfEditTitle">编辑工作流</span>
-      <button class="wf-edit-close" id="wfEditClose" onclick="if(window.CW&&CW.closeWfEdit)CW.closeWfEdit()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+<div class="v4-overlay" id="wfEditModal">
+  <div class="v4-card wf-edit-card">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title" id="wfEditTitle">编辑工作流</span>
+        <p class="modal-hero-subtitle">整理名称、标签、预览图与版本，保证普通用户看到的是清晰可用的工作流卡片。</p>
+      </div>
+      <button class="v4-close" id="wfEditClose" onclick="if(window.CW&&CW.closeWfEdit)CW.closeWfEdit()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div class="wf-edit-body">
-      <div class="wf-edit-row">
-        <label>名称</label>
-        <input type="text" id="wfEditName" placeholder="工作流名称">
-      </div>
-      <div class="wf-edit-row">
-        <label>标签</label>
-        <div class="wf-edit-tags" id="wfEditTags"></div>
-        <div class="wf-edit-tag-add">
-          <input type="text" id="wfEditTagInput" list="wfEditTagSuggest" placeholder="输入或选择标签，回车添加" style="flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;outline:none">
-          <datalist id="wfEditTagSuggest">
-            <option value="文生图">
-            <option value="图生图">
-            <option value="文生视频">
-            <option value="图生视频">
-            <option value="2K">
-            <option value="4K">
-            <option value="8K">
-          </datalist>
+    <div class="v4-body wf-edit-body">
+      <div class="modal-two-panel wf-edit-layout">
+        <div class="modal-main-stack">
+          <section class="modal-section-card modal-section-card-accent">
+            <div class="modal-section-head">
+              <div>
+                <h3>封面与基础信息</h3>
+                <p>把工作流名称、标签和封面放在同一个视图里处理，减少来回切换。</p>
+              </div>
+            </div>
+            <div class="wf-edit-core-grid">
+              <div class="wf-edit-preview-panel wf-edit-preview-panel-inline">
+                <div class="wf-edit-thumb" id="wfEditThumb" title="点击上传缩略图">
+                  <img id="wfEditThumbImg" alt="工作流缩略图" style="display:none">
+                  <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-camera"/></svg><span>点击上传缩略图</span></div>
+                </div>
+                <div class="wf-edit-preview-actions">
+                  <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
+                  <span class="wf-edit-side-note">建议使用横向封面，列表与共享卡片里的展示会更稳定。</span>
+                </div>
+              </div>
+              <div class="modal-form-stack wf-edit-core-form">
+                <div class="wf-edit-row">
+                  <label>工作流名称</label>
+                  <input type="text" id="wfEditName" placeholder="工作流名称">
+                </div>
+                <div class="wf-edit-row">
+                  <label>标签</label>
+                  <div class="wf-edit-tags" id="wfEditTags"></div>
+                  <div class="wf-edit-tag-add">
+                    <input type="text" id="wfEditTagInput" list="v4WfEditTagSuggest" class="wf-edit-tag-input" placeholder="输入或选择标签，回车添加">
+                    <datalist id="wfEditTagSuggest">
+                      <option value="文生图">
+                      <option value="图生图">
+                      <option value="文生视频">
+                      <option value="图生视频">
+                      <option value="2K">
+                      <option value="4K">
+                      <option value="8K">
+                    </datalist>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-      </div>
-      <div class="wf-edit-row wf-edit-versions-row">
-        <label>版本管理</label>
-        <div class="wf-edit-versions">
-          <div class="wf-edit-version-upload">
-            <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
-            <button class="wf-mgr-btn" id="wfEditVersionBtn" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传版本</button>
-            <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
-          </div>
-          <div class="wf-edit-version-list" id="wfEditVersionList"></div>
-        </div>
-      </div>
-      <div class="wf-edit-row">
-        <label>缩略图</label>
-        <div class="wf-edit-thumb" id="wfEditThumb" title="点击上传缩略图">
-          <img id="wfEditThumbImg" src="" alt="">
-          <div class="wf-edit-thumb-placeholder" id="wfEditThumbPlaceholder"><svg class="cw-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-camera"/></svg></div>
-        </div>
-        <input type="file" id="wfEditThumbInput" accept="image/*" style="display:none">
+        <aside class="modal-side-stack">
+          <section class="modal-section-card">
+            <div class="modal-section-head">
+              <div>
+                <h3>版本管理</h3>
+                <p>保留历史版本，方便回滚和对比。</p>
+              </div>
+            </div>
+            <div class="wf-edit-versions">
+              <div class="wf-edit-version-list" id="wfEditVersionList"></div>
+              <div class="wf-edit-version-upload">
+                <input type="file" id="wfEditVersionFile" accept=".json" style="display:none">
+                <button class="wf-mgr-btn" id="wfEditVersionBtn" type="button" onclick="document.getElementById('wfEditVersionFile').click()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-upload"/></svg> 上传版本</button>
+                <span class="wf-edit-version-hint" id="wfEditVersionHint">上传将保留旧版本</span>
+              </div>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
     <div class="wf-edit-footer">
@@ -293,29 +203,37 @@
 </div>
 
 <!-- ═══ 节点编辑器 ═══ -->
-<div class="ne-modal" id="nodeEditorModal">
-  <div class="ne-card">
-    <div class="ne-header">
-      <span class="ne-title" id="nodeEditorTitle">节点编辑</span>
-      <button class="ne-close" id="nodeEditorClose"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+<div class="v4-overlay" id="nodeEditorModal">
+  <div class="v4-card wide">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title" id="nodeEditorTitle">节点编辑</span>
+      </div>
+      <button class="v4-close" id="nodeEditorClose"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div class="ne-body">
-      <div class="ne-instructions">拖拽节点卡片到不同区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye"/></svg> 切换可见性</div>
+    <div class="v4-body compact node-editor-body">
+      <div class="node-editor-overview">
+        <div class="ne-instructions">拖拽字段卡片到目标区域，点击 <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye"/></svg> 切换可见性，修改输入框文案可直接影响前台显示名称。</div>
+        <div class="node-editor-stats" id="nodeEditorStats">
+          <span class="node-editor-stat"><strong id="neStatTotal">0</strong><span>字段总数</span></span>
+          <span class="node-editor-stat"><strong id="neStatVisible">0</strong><span>当前可见</span></span>
+        </div>
+      </div>
       <div class="ne-zones" id="neZones">
         <div class="ne-zone" data-zone="user_input">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 用户输入</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 用户输入</div><span class="ne-zone-meta">首屏关键参数</span></div>
           <div class="ne-zone-cards" id="neZoneUserInput"></div>
         </div>
         <div class="ne-zone" data-zone="advanced">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-settings"/></svg> 高级参数</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-settings"/></svg> 高级参数</div><span class="ne-zone-meta">进阶控制项</span></div>
           <div class="ne-zone-cards" id="neZoneAdvanced"></div>
         </div>
         <div class="ne-zone" data-zone="output">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-send"/></svg> 输出</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-send"/></svg> 输出</div><span class="ne-zone-meta">生成结果相关</span></div>
           <div class="ne-zone-cards" id="neZoneOutput"></div>
         </div>
         <div class="ne-zone" data-zone="hidden">
-          <div class="ne-zone-title"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye-off"/></svg> 隐藏</div>
+          <div class="ne-zone-title"><div><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-eye-off"/></svg> 隐藏</div><span class="ne-zone-meta">保留但不展示</span></div>
           <div class="ne-zone-cards" id="neZoneHidden"></div>
         </div>
       </div>
@@ -330,10 +248,15 @@
 </div>
 
 <!-- ═══ 删除确认弹窗 ═══ -->
-<div class="wf-del-modal" id="wfDelModal">
-  <div class="wf-del-card">
-    <div class="wf-del-title">确认删除？</div>
-    <div class="wf-del-msg" id="wfDelMsg"></div>
+<div class="v4-overlay" id="wfDelModal">
+  <div class="v4-card narrow">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">确认删除</span>
+        <p class="modal-hero-subtitle">删除后工作流与版本记录将无法恢复。</p>
+      </div>
+    </div>
+    <div class="v4-body" id="wfDelMsg"></div>
     <div class="wf-del-actions">
       <button class="btn wf-del-cancel" id="wfDelCancel">取消</button>
       <button class="btn btn-danger wf-del-confirm" id="wfDelConfirm">删除</button>
@@ -363,12 +286,6 @@
       <span class="svc-label">ComfyUI</span>
       <span class="svc-state" id="comfyState">ON</span>
     </button>
-    <button class="svc-btn off" id="svcOthers" title="其他 GPU 进程">
-      <span class="svc-led"></span>
-      <span class="svc-label">其他</span>
-      <span class="svc-state" id="othersState">-</span>
-    </button>
-    
   </div>
 </div>
 
@@ -379,123 +296,327 @@
   <div class="col-left" id="colLeft"><div class="col-left-scroll" id="colLeftScroll">
 
     <div class="col-section-header">
-      <span>工作流选择</span>
+      <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-workflow"/></svg><span>工作流选择</span>
+    </div>
+    <div class="lab-entry-row hidden" id="labEntryRow" data-admin-only="true">
+      <a class="lab-entry-btn" href="labs" title="打开 Bernini、JoyAI-Echo 与 HY-World 2.0 官方案例测试页">
+        <svg class="cw-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-zap"/></svg>
+        <span>测试实验室</span>
+      </a>
     </div>
     <div class="wf-tabs" id="wfTabs"></div>
     <div class="wf-grid" id="wfGrid"></div>
 
 
-    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-zap"/></svg> 快速出图 <span class="gen-arrow" id="genArrow">▴</span></div>
+    <div class="col-section-header clickable" id="genTitle" onclick="CW.toggleGenForm()" style="display:none"><span class="gen-title-main"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-zap"/></svg><span id="genTitleText">快速出图</span></span><span class="gen-arrow" id="genArrow" aria-hidden="true">▴</span></div>
     <div class="gen-form" id="genForm" style="display:none">
             <div id="quickFormFields"></div>
-      <button class="adv-toggle" id="advToggle"><span class="arrow">▶</span> 详细参数</button>
+      <button class="adv-toggle" id="advToggle"><svg class="cw-icon adv-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-settings-2"/></svg><span>详细参数</span><svg class="cw-icon arrow adv-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-chevron-right"/></svg></button>
       <div class="adv-body" id="advBody"><div id="advFields"></div></div>
     </div>
     
 </div><div class="gen-footer" style="display:none">
-      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-play"/></svg> 出图</button>
+      <button class="btn btn-primary" id="btnGenerate"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-play"/></svg> 开始生成</button>
     </div>
   </div>
 
   <!-- 拖拽分隔条 -->
   <div class="resize-handle" id="resizeHandle"></div>
 
-  <!-- 右列：出图中 + 历史（瀑布流） -->
+  <!-- 中列：出图中 + 历史（瀑布流） -->
   <div class="col-center" id="colCenter">
     <div class="col-header">
-      <span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
+      <span class="col-title history-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-image"/></svg> 出图历史</span>
       <span class="ch-count" id="histCount"></span>
       <input class="gf-search" id="gfStyle" type="text" placeholder="搜索..." oninput="CW.applyFilters()">
     </div>
     <div class="gallery-filters" id="galleryFilters">
-      <select id="gfType" onchange="CW.applyFilters()">
-        <option value="">全部类型</option>
-        <option value="文生图">文生图</option>
-        <option value="图生图">图生图</option>
-        <option value="文生视频">文生视频</option>
-        <option value="图生视频">图生视频</option>
-      </select>
+      <div class="gf-segment" role="group" aria-label="图片归属筛选">
+        <button class="gf-segment-btn active" type="button" data-owner-filter="all" onclick="CW.setHistoryOwnerFilter('all')">所有图片</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="mine" onclick="CW.setHistoryOwnerFilter('mine')">我的图片</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="favorite" onclick="CW.setHistoryOwnerFilter('favorite')">我的收藏</button>
+        <button class="gf-segment-btn" type="button" data-owner-filter="other" onclick="CW.setHistoryOwnerFilter('other')">其他</button>
+      </div>
       <span class="gf-sep"></span>
-      <select id="gfSize" onchange="CW.applyFilters()">
-        <option value="">全部尺寸</option>
-      </select>
-      <span class="gf-sep"></span>
-      <select id="gfWF" onchange="CW.applyFilters()">
-        <option value="">全部工作流</option>
-      </select>
-      <button class="gf-clear" onclick="CW.clearFilters()" title="清除"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+      <div class="gf-segment gf-type-segment" role="group" aria-label="图片类型筛选">
+        <button class="gf-segment-btn active" type="button" data-type-filter="" onclick="CW.setHistoryTypeFilter('')">全部类型</button>
+      </div>
     </div>
     <div class="masonry" id="gallery"></div>
       </div>
 
-</div>
+  <!-- 右列：日志面板（吸附时显示） -->
+  <div class="col-right" id="colRight"></div>
 
-<!-- ═══ Lightbox ═══ -->
-<div class="lightbox" id="lightbox">
-  <button class="lb-close" onclick="CW.closeLB()">×</button>
-  <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)">‹</button>
-  <img id="lbImg" src="" alt="">
-  <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)">›</button>
-  <div class="lb-info" id="lbInfo"></div>
+</div>
+<button class="history-back-top" id="historyBackTop" type="button" title="返回顶部" aria-label="返回顶部" aria-hidden="true" onclick="if(window.CW&&CW.scrollHistoryToTop)CW.scrollHistoryToTop()"><svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-arrow-up"/></svg></button>
+
+	<!-- ═══ Lightbox ═══ -->
+	<div class="lightbox" id="lightbox">
+	  <button class="lb-close" onclick="CW.closeLB()" title="关闭"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+	  <button class="lb-action-btn lb-delete" id="lbDeleteBtn" type="button" title="删除" aria-label="删除" style="display:none" onclick="if(window.CW&&CW.deleteCurrentLightboxItem) CW.deleteCurrentLightboxItem(event)">
+	    <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-trash-2"/></svg>
+	  </button>
+	  <div class="lb-actions" id="lbActions">
+    <button class="lb-action-btn lb-fav" id="lbFavoriteBtn" type="button" title="收藏" onclick="if(window.CW&&CW.toggleLBFavorite) CW.toggleLBFavorite()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 20.2-.7-.63C6.2 14.96 3 12.03 3 8.43 3 5.5 5.24 3.2 8.1 3.2c1.62 0 3.18.78 4.1 2 0 0 .02.03.04.05.92-1.27 2.5-2.05 4.16-2.05C19.26 3.2 21.5 5.5 21.5 8.43c0 3.6-3.2 6.53-8.3 11.14l-.7.63Z"/></svg>
+    </button>
+    <button class="lb-action-btn lb-share-home" id="lbImageShareHomeBtn" type="button" title="分享到首页列表" aria-label="分享到首页列表" onclick="if(window.CW&&CW.toggleLBShareHome)CW.toggleLBShareHome(event)">
+      <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-globe"/></svg>
+    </button>
+    <button class="lb-action-btn lb-hide" id="lbHideBtn" type="button" title="隐藏" aria-label="隐藏" style="display:none" onclick="if(window.CW&&CW.toggleLBHidden) CW.toggleLBHidden(event)">
+      <svg class="cw-icon lb-hide-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-eye"/></svg>
+    </button>
+    <button class="lb-action-btn lb-protection" id="lbProtectionBtn" type="button" title="标记保护" aria-label="标记保护" style="display:none" onclick="if(window.CW&&CW.toggleLBProtection) CW.toggleLBProtection(event)">
+      <svg class="cw-icon lb-protection-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-shield"/></svg>
+    </button>
+  </div>
+  <div class="lb-image-export-wrap">
+    <button class="lb-action-btn lb-share lb-image-export-toggle" id="lbShareBtn" type="button" title="导出" aria-label="导出" aria-expanded="false" onclick="if(window.CW&&CW.toggleLBImageExportMenu) CW.toggleLBImageExportMenu(event)">
+      <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-upload"/></svg>
+    </button>
+    <div class="lb-image-export-menu" id="lbImageExportMenu" hidden>
+      <button class="lb-action-btn lb-image-export-item" type="button" title="导出到图生图" aria-label="导出到图生图" onclick="if(window.CW&&CW.importLBImage)CW.importLBImage('图生图', event)">
+        <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-edit"/></svg>
+      </button>
+      <button class="lb-action-btn lb-image-export-item" type="button" title="导出到视频制作" aria-label="导出到视频制作" onclick="if(window.CW&&CW.importLBImage)CW.importLBImage('视频制作', event)">
+        <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><use href="#icon-video"/></svg>
+      </button>
+      <button class="lb-action-btn lb-image-export-item" type="button" title="导出到放大" aria-label="导出到放大" onclick="if(window.CW&&CW.importLBImage)CW.importLBImage('放大', event)">
+        <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-scaleup"/></svg>
+      </button>
+    </div>
+  </div>
+  <a class="lb-download" id="lbDownload" download title="下载原图" onclick="if(window.CW&&CW.downloadLB) return CW.downloadLB(event)">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+  </a>
+  <button class="lb-action-btn lb-compare" id="lbCompareBtn" type="button" title="图片对比" aria-label="图片对比" style="display:none" onclick="if(window.CW&&CW.toggleLBCompareImage) CW.toggleLBCompareImage(event)">
+    <svg class="cw-icon lb-compare-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-compare"/></svg>
+  </button>
+  <button class="lb-action-btn lb-video-edit" id="lbVideoEditBtn" type="button" title="编辑视频帧" aria-label="编辑视频帧" style="display:none" onclick="if(window.CW&&CW.enableLBVideoEditor) CW.enableLBVideoEditor(event)">
+    <svg class="cw-icon lb-video-edit-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-clapperboard"/></svg>
+  </button>
+  <button class="lb-nav lb-prev" id="lbPrev" onclick="CW.lbNav(-1)" title="上一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+  <div class="lb-stage" id="lbStage">
+    <img id="lbImg" src="" alt="">
+    <img id="lbFullImg" src="" alt="" aria-hidden="true">
+    <video id="lbVideo" controls playsinline preload="metadata"></video>
+  </div>
+  <div class="lb-video-editor" id="lbVideoEditor" hidden>
+    <div class="lb-video-editor-toolbar">
+      <button class="lb-video-btn lb-video-icon-btn" type="button" id="lbVideoCoverBtn" title="设为封面" aria-label="设为封面" onclick="if(window.CW&&CW.setLBVideoCover)CW.setLBVideoCover(event)">
+        <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-camera"/></svg>
+      </button>
+      <div class="lb-video-export-wrap">
+        <button class="lb-video-btn lb-video-icon-btn lb-video-export-toggle" type="button" id="lbVideoExportBtn" aria-expanded="false" title="导出" aria-label="导出" onclick="if(window.CW&&CW.toggleLBVideoExportMenu)CW.toggleLBVideoExportMenu(event)">
+          <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-upload"/></svg>
+        </button>
+        <div class="lb-video-export-menu" id="lbVideoExportMenu" hidden>
+          <button class="lb-video-btn lb-video-icon-btn" type="button" title="导出到图生图" aria-label="导出到图生图" onclick="if(window.CW&&CW.importLBVideoFrame)CW.importLBVideoFrame('图生图', event)">
+            <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-edit"/></svg>
+          </button>
+          <button class="lb-video-btn lb-video-icon-btn" type="button" title="导出到视频制作" aria-label="导出到视频制作" onclick="if(window.CW&&CW.importLBVideoFrame)CW.importLBVideoFrame('视频制作', event)">
+            <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><use href="#icon-video"/></svg>
+          </button>
+          <button class="lb-video-btn lb-video-icon-btn" type="button" title="导出到放大" aria-label="导出到放大" onclick="if(window.CW&&CW.importLBVideoFrame)CW.importLBVideoFrame('放大', event)">
+            <svg class="cw-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-scaleup"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="lb-video-timeline-panel">
+      <div class="lb-video-timeline-row">
+        <div class="lb-video-track">
+          <input id="lbVideoTimeline" class="lb-video-timeline" type="range" min="0" max="0" step="0.0416667" value="0" aria-label="视频时间轴">
+          <div class="lb-video-ticks" id="lbVideoTicks" aria-hidden="true"></div>
+        </div>
+        <span class="lb-video-time" id="lbVideoTime">0.00s</span>
+      </div>
+    </div>
+  </div>
+  <div class="lb-loading" id="lbLoading" style="display:none">加载中...</div>
+  <button class="lb-nav lb-next" id="lbNext" onclick="CW.lbNav(1)" title="下一张"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+  <div class="lb-info" id="lbInfo" role="button" tabindex="0" title="点击复制提示词" aria-label="复制提示词" onclick="if(window.CW&&CW.copyLBPrompt)CW.copyLBPrompt(event)" onkeydown="if((event.key==='Enter'||event.key===' ')&&window.CW&&CW.copyLBPrompt)CW.copyLBPrompt(event)"></div>
 </div>
 
 <input type="file" id="wfFileInput" accept=".json" style="display:none">
 
 
-<div class="inst-popup-overlay" id="instPopup" onclick="if(event.target===this)CW.closeInstPopup()">
-  <div class="inst-popup">
-    <div class="inst-popup-header">
-      <h3 id="instPopupTitle">ComfyUI 实例管理</h3>
-      <button class="inst-popup-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+<div class="v4-overlay" id="instPopup" onclick="if(event.target===this)CW.closeInstPopup()">
+  <div class="inst-popup wf-overlay-inner">
+    <div class="v4-header device-grad-header">
+      <span class="v4-title"><svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-server"/></svg><span id="v4InstPopupTitle">ComfyUI 实例管理</span></span>
+      <button class="v4-close" onclick="CW.closeInstPopup()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div id="instCards"></div>
+    <div class="inst-popup-body">
+      <div id="instCards"></div>
+    </div>
   </div>
 </div>
-<div id="logPanel" class="log-panel" style="display:none">
-  <div class="log-header"><span>📋 日志</span><button class="log-close-btn" onclick="CW.closeLog()">&#10005;</button></div>
-  <div class="log-body" id="logBody"></div>
+<div class="confirm-modal" id="confirmModal">
+  <div class="confirm-overlay" onclick="CW._confirmResolve(false)"></div>
+  <div class="confirm-box">
+    <div class="confirm-text" id="confirmText">确认？</div>
+    <div class="confirm-btns">
+      <button class="btn-cancel" onclick="CW._confirmResolve(false)">取消</button>
+      <button class="btn-ok" onclick="CW._confirmResolve(true)">确定</button>
+    </div>
+  </div>
 </div>
-<!-- ═══ 节点编辑器弹窗 ═══ -->
-<div class="ne-modal" id="nodeEditModal">
-  <div class="ne-card" style="max-width:520px">
-    <div class="ne-header">
-      <span class="ne-title" id="nodeEditorTitle">编辑节点</span>
-      <button class="ne-close" onclick="CW.closeNodeEditor()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+<div id="logPanel" class="log-panel log-panel--hidden">
+  <div class="log-header" id="logHeader">
+    <span><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> 日志</span>
+    <div class="log-header-actions">
+      <button class="log-dock-btn" id="logDockBtn" onclick="CW.toggleLogDock()" title="吸附到右侧"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
+      <button class="log-close-btn" onclick="CW.closeLog()">&#10005;</button>
     </div>
-    <div class="ne-body">
-      <form id="nodeEditorForm">
-        <div class="ne-field"><label>名称</label><input type="text" name="name" style="flex:1" required></div>
-        <div class="ne-field"><label>主机地址</label><input type="text" name="host" style="flex:1" required></div>
-        <div class="ne-field"><label>连接方式</label><select name="connection" onchange="CW.onNodeConnChange()" style="flex:1"><option value="local">本地</option><option value="remote-ssh">SSH</option><option value="remote-http">HTTP</option></select></div>
-        <div class="ne-field"><label>标签</label><input type="text" name="labels" style="flex:1" placeholder="本地,高性能"></div>
-        <div class="ne-field"><label>扫描端口段</label><input type="text" name="scan_range" value="8188-8195" style="flex:1" placeholder="8188-8195"></div>
-        <div class="ne-field"><label>排序权重</label><input type="number" name="sort_order" value="99" style="width:80px"></div>
-        <div class="ne-field"><label>已登记实例</label><span id="nodeEditInstances" class="dim-tag">暂无</span></div>
-        <div id="sshConfigSection" style="display:none;border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
-          <div class="ne-field"><label>SSH 用户</label><input type="text" name="ssh_user" style="flex:1"></div>
-          <div class="ne-field"><label>SSH 端口</label><input type="number" name="ssh_port" value="22" style="width:80px"></div>
-          <div class="ne-field"><label>认证方式</label><select name="ssh_auth" style="flex:1"><option value="password">密码</option><option value="key">密钥</option></select></div>
-          <div class="ne-field" id="sshPwField"><label>密码</label><input type="password" name="ssh_password" style="flex:1" placeholder="留空不修改"></div>
-          <div class="ne-field" id="sshKeyField" style="display:none"><label>密钥路径</label><input type="text" name="ssh_key_path" style="flex:1" placeholder="~/.ssh/id_rsa"></div>
+  </div>
+  <div class="log-toolbar">
+    <span class="log-filter-label">过滤:</span>
+    <select id="logLevelFilter" onchange="CW.applyLogFilter()">
+      <option value="">全部</option>
+      <option value="info">INFO</option>
+      <option value="warn">WARN</option>
+      <option value="error">ERROR</option>
+    </select>
+    <span class="log-count" id="logCount">0</span>
+    <button class="log-clear-btn" onclick="CW.clearLog()">清空</button>
+  </div>
+  <div class="log-body" id="logBody"></div>
+  <div class="log-resize-handle" id="logResizeHandle"></div>
+</div>
+<!-- ═══ 设备编辑弹窗 (V4 Glass) ═══ -->
+<div class="v4-overlay" id="deviceEditModal">
+  <div class="v4-card dev-edit-glass-card">
+    <div class="v4-header dev-edit-grad-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title" id="v4DeviceEditTitle">
+          <svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#icon-server"/></svg>
+          添加设备
+        </span>
+        <p class="modal-hero-subtitle">把连接方式、访问入口、实例预设和共享权限拆分管理，手机端也能更顺畅地填写。</p>
+      </div>
+      <button class="v4-close" onclick="CW.closeDeviceEditor()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+    </div>
+    <form id="v4DeviceEditForm" class="v4-body de-form-body">
+      <div class="modal-two-panel de-layout">
+        <div class="modal-main-stack">
+          <section class="de-glass-section">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-file-text"/></svg> 设备身份</div>
+            <div class="de-glass-body de-field-grid">
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">设备名称</label>
+                <input type="text" name="name" class="de-field-input" placeholder="例如：DGX Spark" required>
+              </div>
+              <div class="de-field-block">
+                <label class="de-field-label">主机地址</label>
+                <input type="text" name="host" class="de-field-input" placeholder="IP 地址或域名" required>
+              </div>
+              <div class="de-field-block">
+                <label class="de-field-label">连接方式</label>
+                <select name="connection" class="de-field-input de-field-select" onchange="CW.onDevConnChange()">
+                  <option value="remote-ssh">SSH - 本地网络</option>
+                  <option value="remote-http">HTTP - 远端</option>
+                  <option value="local">本机</option>
+                </select>
+              </div>
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">标签</label>
+                <input type="text" name="labels" class="de-field-input" placeholder="GPU,高性能,测试">
+              </div>
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">共享设置</label>
+                <label class="de-check-card"><input type="checkbox" name="shared"> <span><strong>共享设备</strong><small>允许其他用户调用这个设备</small></span></label>
+              </div>
+            </div>
+          </section>
+
+          <section class="de-glass-section" id="devSshSection">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-lock"/></svg> SSH 连接配置</div>
+            <div class="de-glass-body de-field-grid">
+              <div class="de-field-block">
+                <label class="de-field-label">SSH 用户</label>
+                <input type="text" name="ssh_user" class="de-field-input" value="root" placeholder="ssh 登录用户名">
+              </div>
+              <div class="de-field-block">
+                <label class="de-field-label">SSH 端口</label>
+                <input type="number" name="ssh_port" class="de-field-input" value="22" min="1" max="65535">
+              </div>
+              <div class="de-field-block de-field-block-span">
+                <label class="de-field-label">认证方式</label>
+                <select name="ssh_auth" class="de-field-input de-field-select" onchange="CW.onDevSshAuthChange()">
+                  <option value="password">密码</option>
+                  <option value="key">密钥文件</option>
+                </select>
+              </div>
+              <div class="de-field-block de-field-block-span" id="devSshPwRow">
+                <label class="de-field-label">密码</label>
+                <input type="password" name="ssh_password" class="de-field-input" placeholder="SSH 登录密码">
+              </div>
+              <div class="de-field-block de-field-block-span" id="devSshKeyRow" style="display:none">
+                <label class="de-field-label">密钥路径</label>
+                <input type="text" name="ssh_key_path" class="de-field-input" placeholder="~/.ssh/id_rsa">
+              </div>
+            </div>
+          </section>
         </div>
-      </form>
-    </div>
-    <div class="ne-footer">
-      <button class="btn" onclick="CW.closeNodeEditor()">取消</button>
-      <button class="btn btn-primary" onclick="CW.saveNode()">保存</button>
+        <aside class="modal-side-stack">
+          <section class="de-glass-section">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-globe"/></svg> 访问入口</div>
+            <div class="de-glass-body">
+              <div class="de-field-block">
+                <label class="de-field-label">访问 URL 模板</label>
+                <input type="text" name="access_url" class="de-field-input" placeholder="http://{host}:{port}" value="http://{host}:{port}">
+              </div>
+              <div class="de-hint-glass">输入主机地址后自动填写，<code>{port}</code> 会被替换为实例端口。</div>
+            </div>
+          </section>
+
+          <section class="de-glass-section">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-sliders"/></svg> 实例预设</div>
+            <div class="de-glass-body">
+              <div class="de-field-block">
+                <label class="de-field-label">默认端口列表</label>
+                <input type="text" name="preset_ports" class="de-field-input" placeholder="8188,8190,8189" value="8190,8189">
+              </div>
+              <div class="de-hint-glass">逗号分隔，添加设备后会自动扫描这些端口。</div>
+              <div class="de-field-block">
+                <label class="de-field-label">工作流目录</label>
+                <input type="text" name="preset_wf_dirs" class="de-field-input" placeholder="/path/to/workflows">
+              </div>
+              <div class="de-hint-glass">远程工作流 JSON 文件目录，多个路径用逗号分隔。</div>
+            </div>
+          </section>
+
+          <section class="de-glass-section" id="devInstSection" style="display:none">
+            <div class="de-glass-section-title"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-server"/></svg> 已登记实例</div>
+            <div class="de-glass-body">
+              <div class="de-side-note">这里只展示当前已登记的实例，保存后会继续沿用。</div>
+              <div id="deviceEditInstances" class="de-inst-glass-list"></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </form>
+    <div class="de-glass-footer">
+      <button class="btn" onclick="CW.closeDeviceEditor()">取消</button>
+      <button class="btn btn-primary" onclick="CW.saveDevice()">保存设备</button>
     </div>
   </div>
 </div>
 
 <!-- ═══ 扫描结果弹窗 ═══ -->
-<div class="ne-modal" id="scanResultModal">
-  <div class="ne-card" style="max-width:400px">
-    <div class="ne-header">
-      <span class="ne-title">扫描结果</span>
-      <button class="ne-close" onclick="CW.closeScanModal()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+<div class="v4-overlay" id="scanResultModal">
+  <div class="v4-card narrow">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">扫描结果</span>
+        <p class="modal-hero-subtitle">选择要登记为实例的端口，未选中的结果不会写入设备配置。</p>
+      </div>
+      <button class="v4-close" onclick="CW.closeScanModal()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
     </div>
-    <div class="ne-body">
-      <div id="scanResultList"></div>
+    <div class="v4-body compact">
+      <div id="scanResultList" class="result-list-stack"></div>
     </div>
     <div class="ne-footer">
       <button class="btn" onclick="CW.closeScanModal()">取消</button>
@@ -504,6 +625,43 @@
   </div>
 </div>
 
-<script src="static/js/modules/nodes.js?v=1778518005"></script>
+<!-- ═══ 节点测试结果弹窗 ═══ -->
+<div class="v4-overlay" id="testResultModal">
+  <div class="v4-card narrow">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">连通测试</span>
+        <p class="modal-hero-subtitle">查看 HTTP、SSH、systemd 与实例状态，快速判断节点是否可用。</p>
+      </div>
+      <button class="v4-close" onclick="CW.closeTestResult()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+    </div>
+    <div class="v4-body compact">
+      <div id="testResultContent" class="modal-content-body"></div>
+    </div>
+    <div class="ne-footer">
+      <button class="btn btn-primary" onclick="CW.closeTestResult()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SSH 连接信息弹窗 ═══ -->
+<div class="v4-overlay" id="sshInfoModal" style="display:none">
+  <div class="v4-card narrow">
+    <div class="v4-header modal-hero-header">
+      <div class="modal-hero-copy">
+        <span class="v4-title">SSH 连接信息</span>
+        <p class="modal-hero-subtitle">用于排障或手动登录设备，可直接复制命令行。</p>
+      </div>
+      <button class="v4-close" onclick="CW.closeSshInfo()"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ><use href="#icon-x"/></svg></button>
+    </div>
+    <div class="v4-body compact">
+      <div id="sshInfoContent" class="modal-content-body"></div>
+    </div>
+    <div class="ne-footer">
+      <button class="btn btn-primary" onclick="CW.closeSshInfo()">确定</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

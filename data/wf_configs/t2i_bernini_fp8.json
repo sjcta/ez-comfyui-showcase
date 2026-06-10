@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "workflow": "t2i_bernini_fp8.json",
+  "fields": [
+    {
+      "key": "3::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "50::__bernini_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "生成模式",
+      "order": 1,
+      "type": "bernini_mode",
+      "value": "t2i"
+    },
+    {
+      "key": "50::__bernini_refs",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 2,
+      "type": "bernini_refs",
+      "value": "[]"
+    },
+    {
+      "key": "50::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 3,
+      "type": "number",
+      "role": "width",
+      "step": 16,
+      "min": 256,
+      "max": 848
+    },
+    {
+      "key": "50::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 4,
+      "type": "number",
+      "role": "height",
+      "step": 16,
+      "min": 256,
+      "max": 848
+    },
+    {
+      "key": "19::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "18::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 1,
+      "type": "number",
+      "min": 2,
+      "max": 60
+    },
+    {
+      "key": "17::step",
+      "zone": "advanced",
+      "visible": true,
+      "label": "高低模型切换步",
+      "order": 2,
+      "type": "number",
+      "min": 1,
+      "max": 40
+    },
+    {
+      "key": "19::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "HIGH Guidance",
+      "order": 3,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 8
+    },
+    {
+      "key": "15::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "LOW Guidance",
+      "order": 4,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 8
+    },
+    {
+      "key": "50::__bernini_frames",
+      "zone": "advanced",
+      "visible": true,
+      "label": "视频帧数",
+      "order": 5,
+      "type": "number",
+      "value": 81,
+      "min": 5,
+      "max": 145,
+      "step": 4
+    },
+    {
+      "key": "50::__bernini_fps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "视频帧率",
+      "order": 6,
+      "type": "number",
+      "value": 16,
+      "min": 1,
+      "max": 60,
+      "step": 1
+    },
+    {
+      "key": "50::ref_max_size",
+      "zone": "advanced",
+      "visible": true,
+      "label": "参考图长边",
+      "order": 7,
+      "type": "number",
+      "min": 512,
+      "max": 1280,
+      "step": 16
+    },
+    {
+      "key": "27::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样器",
+      "order": 8,
+      "type": "select",
+      "options": [
+        "res_multistep",
+        "euler",
+        "dpmpp_2m",
+        "uni_pc"
+      ]
+    },
+    {
+      "key": "4::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 9,
+      "type": "textarea",
+      "value": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay"
+    },
+    {
+      "key": "100::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "5::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "HIGH 模型",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "12::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "LOW 模型",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "9::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "CLIP",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "7::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "50::length",
+      "zone": "hidden",
+      "visible": false,
+      "label": "实际帧数",
+      "order": 4,
+      "type": "number"
+    }
+  ]
+}

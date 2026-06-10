@@ -1,0 +1,228 @@
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class PromptReuseUiContractTests(unittest.TestCase):
+    def test_reused_prompt_updates_prompt_action_state(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _setPromptInputValue", generate_js)
+        self.assertIn("pi.dispatchEvent(new Event('input', { bubbles: true }))", generate_js)
+        self.assertIn("CW.syncClearPromptButton", generate_js)
+        self.assertIn("function _promptFromReusableFields", generate_js)
+        self.assertIn("function _historyRecordNeedsDetailForReuse(item)", generate_js)
+        self.assertIn("let h = _historyItemByKey(key) || historyItems[idx];", generate_js)
+        self.assertIn("if (_historyRecordNeedsDetailForReuse(h) && window.CW && typeof window.CW.getHistoryDetail === 'function')", generate_js)
+        self.assertIn("h = await window.CW.getHistoryDetail(h) || h;", generate_js)
+        self.assertIn("var reusedPrompt = _promptFromReusableFields(h.field_values || {}, reuseFieldsMeta)", generate_js)
+        detail_pos = generate_js.index("h = await window.CW.getHistoryDetail(h) || h;")
+        reuse_pos = generate_js.index("var reusedPrompt = _promptFromReusableFields(h.field_values || {}, reuseFieldsMeta)")
+        self.assertLess(detail_pos, reuse_pos)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentControls(reusedPrompt || h.prompt));", generate_js)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentControls(snap.prompt))", generate_js)
+        self.assertIn("var jobReusedPrompt = _promptFromReusableFields(j.fields || {}, jobReuseFieldsMeta);", generate_js)
+        self.assertIn("_setPromptInputValue(_preparePromptForCurrentControls(jobReusedPrompt || j.prompt || j.prompt_preview));", generate_js)
+        self.assertIn("var withoutMarkers = _stripExistingQwenAngleMarkers(prompt)", generate_js)
+        self.assertIn("return _preparePromptForCurrentStyle(_preparePromptForCurrentQwenAngle(prompt));", generate_js)
+        self.assertNotIn("_setPromptInputValue(h.prompt)", generate_js)
+        self.assertNotIn("if (pi) pi.value = h.prompt", generate_js)
+        self.assertNotIn("if (pi) pi.value = j.prompt_preview", generate_js)
+
+    def test_job_card_reuse_prefers_full_prompt_fields_over_preview(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        restore_start = generate_js.index("async function restoreJob(jobId)")
+        restore_end = generate_js.index("async function doGenerate", restore_start)
+        restore_body = generate_js[restore_start:restore_end]
+
+        self.assertIn("jobReuseFieldsMeta = await _getSubmitFieldsMeta();", restore_body)
+        self.assertIn("var jobReusedPrompt = _promptFromReusableFields(j.fields || {}, jobReuseFieldsMeta);", restore_body)
+        self.assertIn("jobReusedPrompt || j.prompt || j.prompt_preview", restore_body)
+        self.assertLess(
+            restore_body.index("var jobReusedPrompt = _promptFromReusableFields(j.fields || {}, jobReuseFieldsMeta);"),
+            restore_body.index("if (jobReusedPrompt || j.prompt || j.prompt_preview)"),
+        )
+        self.assertNotIn("_setPromptInputValue(_preparePromptForCurrentControls(j.prompt_preview))", restore_body)
+
+    def test_reused_prompt_input_strips_generated_style_and_camera_blocks(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _stripExistingStylePromptBlocks", generate_js)
+        self.assertIn("function _stripExistingQwenAngleMarkers", generate_js)
+        self.assertIn(".replace(/(^|[\\n\\r])\\s*\\[Style Preset:[\\s\\S]*?\\[\\s*User Prompt\\s*\\]\\s*/gi", generate_js)
+        self.assertIn(".replace(/(^|[\\n\\r])\\s*<sks>[^\\n\\r。！？!?;；]*(?:[。！？!?;；])?/gi", generate_js)
+        self.assertIn("if (!_currentQwenAnglePrompt())", generate_js)
+        self.assertIn("return withoutMarkers", generate_js)
+
+    def test_prompt_optimization_variant_tabs_live_in_prompt_title_row(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn("promptGroup.querySelector('.prompt-label-row')", generate_js)
+        self.assertIn("labelRow.appendChild(panel)", generate_js)
+        self.assertNotIn("actions.appendChild(panel)", generate_js)
+        self.assertIn(".prompt-label-row label", css)
+        self.assertIn("text-overflow: ellipsis", css)
+        self.assertIn("margin-left: auto", css)
+        self.assertIn("gap: 0", css)
+        self.assertIn("border-radius: 999px", css)
+
+    def test_seed_random_button_mode_governs_generate_payload_and_reuse(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn("function _isSeedRandomEnabled", generate_js)
+        self.assertIn("function _getManualSeedValue", generate_js)
+        self.assertIn("if (!_isSeedRandomEnabled()) requestBody.seed = manualSeed", generate_js)
+        self.assertIn("data-seed-random", generate_js)
+        self.assertIn("aria-pressed=\"true\"", generate_js)
+        self.assertIn("title=\"随机种子\"", generate_js)
+        self.assertIn("oninput=\"CW.setSeedRandomEnabled(false)\"", generate_js)
+        self.assertIn("function _hasRestorableSeedFieldValues", generate_js)
+        self.assertIn("if (h.seed && !_hasRestorableSeedFieldValues(h.field_values || {}))", generate_js)
+        self.assertIn("if (j.seed && !_hasRestorableSeedFieldValues(j.fields || {}))", generate_js)
+        self.assertIn("_numberAttr('max', f.max)", generate_js)
+        self.assertNotIn("_setSeedRandomEnabled(false);\n      return;", generate_js)
+        self.assertIn("body: JSON.stringify(requestBody)", generate_js)
+        self.assertIn(".seed-group .btn-dice.is-active", css)
+
+    def test_generate_uses_cached_workflow_fields_and_blocks_missing_prompt_field(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+        workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
+
+        self.assertIn("function _getSubmitFieldsMeta", generate_js)
+        self.assertIn("function _isPromptSubmitField", generate_js)
+        self.assertIn("if (_hasCurrentFieldCache()) return A._wfFieldMeta", generate_js)
+        self.assertIn("promptFieldCount += 1", generate_js)
+        self.assertIn("未找到可提交的提示词字段", generate_js)
+        self.assertIn("window.__APP__._wfFieldWorkflow = name", workflows_js)
+        self.assertIn("zone: f.zone,", workflows_js)
+        self.assertNotIn("zone: f.zone || 'advanced'", generate_js)
+        self.assertNotIn("zone: f.zone || 'advanced'", workflows_js)
+
+    def test_quick_form_starts_with_empty_prompt_and_no_style_on_fresh_render(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertNotIn("var defaultPromptValue = ''", generate_js)
+        self.assertNotIn("defaultPromptValue = String(f.value || '')", generate_js)
+        self.assertIn('<textarea id="promptInput" placeholder="', generate_js)
+        self.assertIn("...\"></textarea>' + styleControlHtml", generate_js)
+        self.assertNotIn("preferWorkflowDefaultPrompt", generate_js)
+        self.assertNotIn("/SkinTest/i.test(String(A.currentWF || ''))", generate_js)
+        self.assertIn("_setStylePresetValue(_savedStylePreset || '')", generate_js)
+        self.assertIn("// Restore only text the user had already typed before this DOM rebuild.", generate_js)
+
+    def test_style_preset_control_uses_stable_sidebar_layout(self):
+        css = (ROOT / "static/css/style.css").read_text()
+        summary_block = css.split(".style-preset-summary {", 1)[1].split("}", 1)[0]
+
+        self.assertIn(".style-preset-row", css)
+        self.assertIn("grid-template-columns: auto minmax(0, 1fr)", css)
+        self.assertIn(".style-preset-family {\n  display: none;", css)
+        self.assertIn(".style-preset-summary {\n  grid-column: 1 / -1;", css)
+        self.assertNotIn("grid-template-columns: auto minmax(156px, 220px) auto minmax(0, 1fr)", css)
+        self.assertNotIn("overflow-wrap: anywhere", summary_block)
+
+    def test_generate_syncs_flux2_scheduler_dimensions(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _isFlux2SchedulerSizeField", generate_js)
+        self.assertIn("_isFlux2SchedulerSizeField(f, 'width')", generate_js)
+        self.assertIn("_isFlux2SchedulerSizeField(f, 'height')", generate_js)
+        self.assertIn("role: f.role", generate_js)
+        self.assertIn("if (f && f.role === dim) return true", generate_js)
+        workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
+        self.assertIn("role: f.role", workflows_js)
+
+    def test_flux2_ratio_presets_are_limited_by_total_pixels(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("var FLUX2_MAX_PIXELS = 2048 * 2048", generate_js)
+        self.assertIn("class_type === 'Flux2Scheduler'", generate_js)
+        self.assertIn("maxPixels: FLUX2_MAX_PIXELS", generate_js)
+        self.assertIn("[2160, 3840, '9:16'", generate_js)
+        self.assertIn("_applyCurrentSizeLimit()", generate_js)
+        self.assertIn("width * height > limits.maxPixels", generate_js)
+
+    def test_model_family_ratio_presets_use_recommended_dimensions(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("var QWEN_IMAGE_RATIO_PRESETS", generate_js)
+        self.assertIn("[1328, 1328, '1:1'", generate_js)
+        self.assertIn("[1664, 928, '16:9'", generate_js)
+        self.assertIn("[928, 1664, '9:16'", generate_js)
+        self.assertIn("var Z_IMAGE_RATIO_PRESETS", generate_js)
+        self.assertIn("[1024, 1024, '1:1'", generate_js)
+        self.assertIn("[1280, 720, '16:9'", generate_js)
+        self.assertIn("[720, 1280, '9:16'", generate_js)
+        self.assertIn("var ERNIE_IMAGE_RATIO_PRESETS", generate_js)
+        self.assertIn("[1024, 1024, '1:1'", generate_js)
+        self.assertIn("[1376, 768, '16:9'", generate_js)
+        self.assertIn("[768, 1376, '9:16'", generate_js)
+        self.assertIn("presets: ERNIE_IMAGE_RATIO_PRESETS", generate_js)
+        self.assertIn("inputMax: 1376", generate_js)
+        self.assertIn("_ratioPresetsForLimits(limits)", generate_js)
+
+    def test_generate_waits_for_pending_reference_image_upload(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("var _refImageUploadPromise = null", generate_js)
+        self.assertIn("await _waitForRefImageUpload()", generate_js)
+        self.assertIn("valueInput.value = ''", generate_js)
+        self.assertIn("data-uploading", generate_js)
+        self.assertIn("参考图仍在上传", generate_js)
+        self.assertIn("delete fields[key];", generate_js)
+        self.assertIn("throw new Error(_isVideoI2VMode() ? '图生视频需要先上传参考图' : '需要先上传参考图');", generate_js)
+
+    def test_text_area_restore_preserves_video_reference_image(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _restoreRefImageFromFieldValues", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(snap.adv || {})", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(j.fields, jobReuseFieldsMeta)", generate_js)
+        self.assertIn("_restoreRefImageFromFieldValues(h.field_values, reuseFieldsMeta)", generate_js)
+        self.assertIn("snapshot.adv[key] = refVal", generate_js)
+        self.assertIn("workflow: A.currentWF", generate_js)
+        self.assertIn("await window.CW.selectWF(snap.workflow)", generate_js)
+        self.assertIn("f.class_type === 'LoadImage' && f.field === 'image'", generate_js)
+
+    def test_video_mode_controls_reference_image_requirement(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn("function _isVideoI2VMode", generate_js)
+        self.assertIn("function setVideoMode", generate_js)
+        self.assertIn("function _isLatentDimensionField", generate_js)
+        self.assertIn("cls.indexOf('LatentVideo') >= 0", generate_js)
+        self.assertIn("name: 'ltx-video'", generate_js)
+        self.assertIn("minWidth: 256", generate_js)
+        self.assertIn("minHeight: 192", generate_js)
+        self.assertIn("data-type=\"video_mode\"", generate_js)
+        self.assertIn("文生视频", generate_js)
+        self.assertIn("图生视频", generate_js)
+        self.assertIn("图生视频需要先上传参考图", generate_js)
+        self.assertIn("$$('#quickFormFields [data-key]')", generate_js)
+        self.assertIn("class=\"fg quick-number-fg\"", generate_js)
+        self.assertIn("_numberAttr('step', f.step || 1)", generate_js)
+        self.assertIn("window.CW.setVideoMode = setVideoMode", generate_js)
+        self.assertIn(".video-mode-control", css)
+        self.assertIn(".ref-image-section.is-required label::after", css)
+
+    def test_image_file_inputs_accept_extended_formats(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif", generate_js)
+
+    def test_generate_does_not_send_manual_instance_target(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("preferred_instance: ''", generate_js)
+        self.assertIn("preferred_node_id: ''", generate_js)
+        self.assertNotIn("A.manualTargetInstance ? (A.currentTargetInstance || '') : ''", generate_js)
+
+
+if __name__ == "__main__":
+    unittest.main()

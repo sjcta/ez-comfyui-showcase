@@ -10,6 +10,261 @@
   var _nodeEditorConfig = null;
   var _nodeEditorData = null;
   var _nodeEditorFname = '';
+  var _nodeEditorCompactMobile = false;
+  var _draggingNodeKey = '';
+  var _pointerDrag = null;
+
+  function updateNodeEditorStats() {
+    var cards = document.querySelectorAll('#nodeEditorModal .ne-field');
+    var total = cards.length;
+    var visible = 0;
+    for (var i = 0; i < cards.length; i++) {
+      if (!cards[i].classList.contains('hidden-field')) visible += 1;
+    }
+    var totalEl = document.getElementById('neStatTotal');
+    var visibleEl = document.getElementById('neStatVisible');
+    if (totalEl) totalEl.textContent = String(total);
+    if (visibleEl) visibleEl.textContent = String(visible);
+  }
+
+  function updateNodeCompactState() {
+    _nodeEditorCompactMobile = !!(window.matchMedia && window.matchMedia('(max-width: 765px)').matches);
+    var modal = document.getElementById('nodeEditorModal');
+    if (!modal) return;
+    modal.classList.toggle('node-editor-mobile-compact', _nodeEditorCompactMobile);
+  }
+
+  function getDropTarget(container, y, draggingCard) {
+    var cards = Array.from(container.querySelectorAll('.ne-field:not(.dragging)'));
+    var closest = null;
+    var closestOffset = Number.NEGATIVE_INFINITY;
+    for (var i = 0; i < cards.length; i++) {
+      var box = cards[i].getBoundingClientRect();
+      var offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closestOffset) {
+        closestOffset = offset;
+        closest = cards[i];
+      }
+    }
+    return closest;
+  }
+
+  function zoneIdForName(zone) {
+    return {
+      user_input: 'neZoneUserInput',
+      advanced: 'neZoneAdvanced',
+      output: 'neZoneOutput',
+      hidden: 'neZoneHidden',
+    }[zone] || 'neZoneHidden';
+  }
+
+  function zoneNameForContainer(container) {
+    var zone = container && container.closest ? container.closest('.ne-zone') : null;
+    return zone ? (zone.dataset.zone || 'hidden') : 'hidden';
+  }
+
+  function compactNodeTitle(title) {
+    return String(title || '').split('(')[0].trim();
+  }
+
+  function formatNodeMeta(f) {
+    var nodeTitle = compactNodeTitle(f && f.node_title);
+    var classType = String((f && f.class_type) || '').trim();
+    if (nodeTitle && classType && nodeTitle !== classType) return nodeTitle + ' [' + classType + ']';
+    return nodeTitle || classType || 'Node';
+  }
+
+  function formatFieldTitle(f) {
+    var label = String((f && (f.label || f.field)) || '').trim();
+    var nodeTitle = compactNodeTitle(f && f.node_title);
+    if (label && nodeTitle) return label + ' [' + nodeTitle + ']';
+    return label || nodeTitle || '';
+  }
+
+  function formatFieldName(f) {
+    return String((f && (f.label || f.field)) || '').trim();
+  }
+
+  function formatNodeSubline(f) {
+    var nodeTitle = compactNodeTitle(f && f.node_title);
+    return nodeTitle ? '[' + nodeTitle + ']' : '';
+  }
+
+  function sortFieldsBySavedConfig(fields, config) {
+    if (!config || !config.fields || !config.fields.length) return fields;
+    var zoneRank = { user_input: 0, advanced: 1, output: 2, hidden: 3 };
+    var cfgMap = {};
+    for (var i = 0; i < config.fields.length; i++) {
+      var cfg = config.fields[i] || {};
+      if (!cfg.key) continue;
+      var order = Number(cfg.order != null ? cfg.order : i);
+      if (!Number.isFinite(order)) order = i;
+      cfgMap[cfg.key] = {
+        index: i,
+        zone: cfg.zone || 'hidden',
+        order: order,
+      };
+    }
+    fields.sort(function (a, b) {
+      var ca = cfgMap[a.key] || {};
+      var cb = cfgMap[b.key] || {};
+      var za = zoneRank[ca.zone || a.zone || 'hidden'];
+      var zb = zoneRank[cb.zone || b.zone || 'hidden'];
+      za = za == null ? 99 : za;
+      zb = zb == null ? 99 : zb;
+      if (za !== zb) return za - zb;
+      var oa = ca.order != null ? ca.order : 9999;
+      var ob = cb.order != null ? cb.order : 9999;
+      if (oa !== ob) return oa - ob;
+      return (ca.index != null ? ca.index : 9999) - (cb.index != null ? cb.index : 9999);
+    });
+    return fields;
+  }
+
+  function refreshCurrentWorkflowFields() {
+    if (!_nodeEditorFname || !A || A.currentWF !== _nodeEditorFname) return Promise.resolve();
+    return fetch(API + '/api/workflows/' + encodeURIComponent(_nodeEditorFname) + '/fields')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.fields) return;
+        var fields = d.fields || [];
+        A._wfFieldWorkflow = _nodeEditorFname;
+        A._wfFieldMeta = fields.map(function (f) {
+          return {
+            key: f.node_id + '::' + f.field,
+            node_id: f.node_id,
+            class_type: f.class_type,
+            field: f.field,
+            zone: f.zone,
+            visible: f.visible !== false,
+            type: f.type,
+            label: f.label,
+            value: f.value,
+            options: f.options,
+            step: f.step,
+            min: f.min,
+            max: f.max,
+            order: f.order,
+          };
+        });
+        window.__APP__._wfFieldWorkflow = A._wfFieldWorkflow;
+        window.__APP__._wfFieldMeta = A._wfFieldMeta;
+        if (window.CW && CW.renderAdvFields) CW.renderAdvFields(fields);
+        if (window.CW && CW.renderQuickForm) CW.renderQuickForm(fields);
+      })
+      .catch(function (e) {
+        console.warn('refresh workflow fields after node config save failed:', e && e.message ? e.message : e);
+      });
+  }
+
+  function syncCardZoneState(card, zone) {
+    if (!card) return;
+    zone = zone || zoneNameForContainer(card.parentElement);
+    var hidden = zone === 'hidden';
+    if (!hidden) card.dataset.prevZone = zone;
+    card.dataset.zone = zone;
+    card.classList.toggle('hidden-field', hidden);
+    var btn = card.querySelector('.ne-field-vis');
+    if (btn) {
+      btn.innerHTML = hidden ? CW.icon('eye-off') : CW.icon('eye');
+      btn.title = hidden ? '当前不可见，点击设为可见' : '当前可见，点击设为不可见';
+    }
+  }
+
+  function moveCardToPoint(card, x, y) {
+    var target = document.elementFromPoint(x, y);
+    var container = target && target.closest ? target.closest('#nodeEditorModal .ne-zone-cards') : null;
+    if (!container) {
+      var zone = target && target.closest ? target.closest('#nodeEditorModal .ne-zone') : null;
+      container = zone ? zone.querySelector('.ne-zone-cards') : null;
+    }
+    if (!container) return;
+    var zoneName = zoneNameForContainer(container);
+    var before = getDropTarget(container, y, card);
+    if (before && before !== card) container.insertBefore(card, before);
+    else if (!before && card.parentElement !== container) container.appendChild(card);
+    else if (!before) container.appendChild(card);
+    syncCardZoneState(card, zoneName);
+  }
+
+  function startPointerDrag(card, ev) {
+    if (ev.button !== 0) return;
+    if (ev.target && ev.target.closest('.ne-field-vis, .ne-field-label-input, input, textarea, select, button')) return;
+    _pointerDrag = {
+      card: card,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      active: false,
+    };
+    _draggingNodeKey = card.dataset.key || '';
+  }
+
+  function startTouchDrag(card, ev) {
+    if (!ev.touches || ev.touches.length !== 1) return;
+    if (ev.target && ev.target.closest('.ne-field-vis, .ne-field-label-input, input, textarea, select, button')) return;
+    var touch = ev.touches[0];
+    _pointerDrag = {
+      card: card,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      active: false,
+      touchId: touch.identifier,
+    };
+    _draggingNodeKey = card.dataset.key || '';
+  }
+
+  function onPointerMove(ev) {
+    if (!_pointerDrag || !_pointerDrag.card) return;
+    var dx = ev.clientX - _pointerDrag.startX;
+    var dy = ev.clientY - _pointerDrag.startY;
+    if (!_pointerDrag.active) {
+      if (Math.abs(dx) + Math.abs(dy) < 6) return;
+      _pointerDrag.active = true;
+      _pointerDrag.card.classList.add('dragging', 'pointer-dragging');
+      document.body.classList.add('node-dragging-active');
+    }
+    ev.preventDefault();
+    moveCardToPoint(_pointerDrag.card, ev.clientX, ev.clientY);
+  }
+
+  function onTouchMove(ev) {
+    if (!_pointerDrag || !_pointerDrag.card || !ev.touches || !ev.touches.length) return;
+    var touch = null;
+    for (var i = 0; i < ev.touches.length; i++) {
+      if (ev.touches[i].identifier === _pointerDrag.touchId) {
+        touch = ev.touches[i];
+        break;
+      }
+    }
+    if (!touch) return;
+    var dx = touch.clientX - _pointerDrag.startX;
+    var dy = touch.clientY - _pointerDrag.startY;
+    if (!_pointerDrag.active) {
+      if (Math.abs(dx) + Math.abs(dy) < 10) return;
+      _pointerDrag.active = true;
+      _pointerDrag.card.classList.add('dragging', 'pointer-dragging');
+      document.body.classList.add('node-dragging-active');
+    }
+    ev.preventDefault();
+    moveCardToPoint(_pointerDrag.card, touch.clientX, touch.clientY);
+  }
+
+  function endPointerDrag() {
+    if (!_pointerDrag) return;
+    var card = _pointerDrag.card;
+    if (card) {
+      card.classList.remove('dragging', 'pointer-dragging');
+      syncCardZoneState(card, zoneNameForContainer(card.parentElement));
+      if (_pointerDrag.active) {
+        card._dragJustEnded = true;
+        setTimeout(function() { card._dragJustEnded = false; }, 0);
+      }
+    }
+    document.body.classList.remove('node-dragging-active');
+    _draggingNodeKey = '';
+    _pointerDrag = null;
+    updateNodeEditorStats();
+  }
 
 function resetNodeConfig() {
     if (!_nodeEditorFname) return;
@@ -70,7 +325,7 @@ function saveNodeConfig() {
       body: JSON.stringify(config),
     }).then(function (r) {
       if (r.ok) {
-        closeNodeEditor();
+        refreshCurrentWorkflowFields().then(closeNodeEditor);
       }
     });
   }
@@ -106,6 +361,7 @@ function renderNodeEditor(analyze, config) {
           }
         }
       }
+      sortFieldsBySavedConfig(allFields, config);
     }
     var zoneMap = {
       user_input: 'neZoneUserInput',
@@ -119,29 +375,43 @@ function renderNodeEditor(analyze, config) {
     }
     for (var i = 0; i < allFields.length; i++) {
       var f = allFields[i];
-      var container = document.getElementById(zoneMap[f.zone] || 'neZoneHidden');
+      var originalZone = f.zone || 'hidden';
+      var effectiveZone = f.visible === false ? 'hidden' : originalZone;
+      var container = document.getElementById(zoneMap[effectiveZone] || 'neZoneHidden');
       if (!container) continue;
       var card = document.createElement('div');
       card.className = 'ne-field' + (f.visible ? '' : ' hidden-field');
-      card.draggable = true;
+      card.draggable = false;
       card.dataset.key = f.key;
+      card.dataset.zone = effectiveZone;
+      card.dataset.prevZone = originalZone !== 'hidden' ? originalZone : 'advanced';
       var valPreview = f.value !== undefined && f.value !== null ? String(f.value).substring(0, 80) : '';
       var visIcon = f.visible ? CW.icon('eye') : CW.icon('eye-off');
+      var nodeMeta = formatNodeMeta(f);
+      var fieldTitle = formatFieldTitle(f);
+      var fieldName = formatFieldName(f);
+      var nodeSubline = formatNodeSubline(f);
+      var fieldTitleAttr = (f.field || '') + (fieldTitle ? ' · ' + fieldTitle : '');
       card.innerHTML =
         '<div class="ne-field-top">' +
+        '<div class="ne-field-text">' +
         '<span class="ne-field-node" title="' +
-        escA(f.node_title) +
+        escA('[' + f.node_id + '] ' + f.class_type + (f.node_title ? ' · ' + f.node_title : '')) +
         '">[' +
         escH(f.node_id) +
         '] ' +
-        escH(f.class_type) +
+        escH(nodeMeta) +
         '</span>' +
-        '<button class="ne-field-vis" title="切换可见性">' +
+        '<div class="ne-field-name" title="' +
+        escA(fieldTitleAttr) +
+        '">' +
+        escH(fieldName || f.field) +
+        '</div>' +
+        (nodeSubline ? '<div class="ne-field-subline">' + escH(nodeSubline) + '</div>' : '') +
+        '</div>' +
+        '<button class="ne-field-vis" title="' + (f.visible ? '当前可见，点击设为不可见' : '当前不可见，点击设为可见') + '">' +
         visIcon +
         '</button>' +
-        '</div>' +
-        '<div class="ne-field-name">' +
-        escH(f.field) +
         '</div>' +
         '<input class="ne-field-label-input" value="' +
         escA(f.label) +
@@ -152,17 +422,58 @@ function renderNodeEditor(analyze, config) {
           ? '<div class="ne-field-value" title="' + escA(valPreview) + '">' + escH(valPreview) + '</div>'
           : '');
       (function (card, f) {
+        card.addEventListener('mousedown', function(ev) {
+          startPointerDrag(card, ev);
+        });
+        card.addEventListener('touchstart', function(ev) {
+          startTouchDrag(card, ev);
+        }, { passive: true });
         card.addEventListener('dragstart', function (ev) {
+          ev.preventDefault();
+          if (_nodeEditorCompactMobile) {
+            return;
+          }
           ev.dataTransfer.setData('text/plain', f.key);
           ev.dataTransfer.effectAllowed = 'move';
+          _draggingNodeKey = f.key;
           card.style.opacity = '.4';
+          card.classList.add('dragging');
         });
         card.addEventListener('dragend', function () {
+          endPointerDrag();
+          _draggingNodeKey = '';
           card.style.opacity = '';
+          card.classList.remove('dragging');
+          syncCardZoneState(card, zoneNameForContainer(card.parentElement));
+          updateNodeEditorStats();
+        });
+        card.addEventListener('click', function(ev) {
+          if (card._dragJustEnded) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+          }
+          if (!_nodeEditorCompactMobile) return;
+          if (ev.target && (ev.target.closest('.ne-field-vis') || ev.target.closest('.ne-field-label-input'))) return;
+          card.classList.toggle('expanded');
         });
         card.querySelector('.ne-field-vis').addEventListener('click', function () {
           var isHidden = card.classList.toggle('hidden-field');
           this.innerHTML = isHidden ? CW.icon('eye-off') : CW.icon('eye');
+          this.title = isHidden ? '当前不可见，点击设为可见' : '当前可见，点击设为不可见';
+          if (isHidden) {
+            var currentZone = zoneNameForContainer(card.parentElement);
+            if (currentZone !== 'hidden') card.dataset.prevZone = currentZone;
+            var hiddenContainer = document.getElementById('neZoneHidden');
+            if (hiddenContainer && card.parentElement !== hiddenContainer) hiddenContainer.appendChild(card);
+            syncCardZoneState(card, 'hidden');
+          } else {
+            var targetZone = card.dataset.prevZone && card.dataset.prevZone !== 'hidden' ? card.dataset.prevZone : 'advanced';
+            var targetContainer = document.getElementById(zoneIdForName(targetZone));
+            if (targetContainer && card.parentElement !== targetContainer) targetContainer.appendChild(card);
+            syncCardZoneState(card, targetZone);
+          }
+          updateNodeEditorStats();
         });
       })(card, f);
       container.appendChild(card);
@@ -172,24 +483,48 @@ function renderNodeEditor(analyze, config) {
         var el = document.getElementById(id);
         if (!el) return;
         var parent = el.parentElement;
-        parent.addEventListener('dragover', function (ev) {
+        function allowDrop(ev) {
+          if (_nodeEditorCompactMobile) return;
           ev.preventDefault();
           ev.dataTransfer.dropEffect = 'move';
           parent.classList.add('drag-over');
-        });
+          var key = _draggingNodeKey || ev.dataTransfer.getData('text/plain');
+          var card = key ? document.querySelector('.ne-field[data-key="' + CSS.escape(key) + '"]') : null;
+          if (!card) card = document.querySelector('#nodeEditorModal .ne-field.dragging');
+          if (!card) return;
+          var before = getDropTarget(el, ev.clientY, card);
+          if (before && before !== card) el.insertBefore(card, before);
+          else if (!before && card.parentElement !== el) el.appendChild(card);
+          else if (!before) el.appendChild(card);
+          syncCardZoneState(card, zone);
+        }
+        parent.addEventListener('dragover', allowDrop);
+        el.addEventListener('dragover', allowDrop);
         parent.addEventListener('dragleave', function () {
           parent.classList.remove('drag-over');
         });
-        parent.addEventListener('drop', function (ev) {
+        function handleDrop(ev) {
+          if (_nodeEditorCompactMobile) return;
           ev.preventDefault();
           parent.classList.remove('drag-over');
-          var key = ev.dataTransfer.getData('text/plain');
+          var key = _draggingNodeKey || ev.dataTransfer.getData('text/plain');
           if (!key) return;
           var card = document.querySelector('.ne-field[data-key="' + CSS.escape(key) + '"]');
-          if (card) el.appendChild(card);
-        });
+          if (card) {
+            var before = getDropTarget(el, ev.clientY, card);
+            if (before && before !== card) el.insertBefore(card, before);
+            else if (!before) el.appendChild(card);
+            syncCardZoneState(card, zone);
+          }
+          _draggingNodeKey = '';
+          updateNodeEditorStats();
+        }
+        parent.addEventListener('drop', handleDrop);
+        el.addEventListener('drop', handleDrop);
       })(zone, zoneMap[zone]);
     }
+    updateNodeEditorStats();
+    setTimeout(updateNodeEditorStats, 0);
   }
 function closeNodeEditor() {
     $('#nodeEditorModal').classList.remove('open');
@@ -198,7 +533,8 @@ function closeNodeEditor() {
   }
 function openNodeEditor(fname) {
     _nodeEditorFname = fname;
-    $('#nodeEditorTitle').textContent = '节点编辑: ' + fname.replace('.json', '');
+    var displayName = window.CW && CW.workflowDisplayName ? CW.workflowDisplayName(fname) : fname.replace(/\.json$/i, '');
+    $('#nodeEditorTitle').textContent = '节点编辑: ' + displayName;
     Promise.all([
       fetch(API + '/api/workflows/' + encodeURIComponent(fname) + '/analyze').then(function (r) {
         return r.json();
@@ -213,8 +549,10 @@ function openNodeEditor(fname) {
     ]).then(function (results) {
       _nodeEditorData = results[0];
       _nodeEditorConfig = results[1];
+      updateNodeCompactState();
       renderNodeEditor(results[0], results[1]);
       $('#nodeEditorModal').classList.add('open');
+      setTimeout(updateNodeEditorStats, 0);
     });
   }
 
@@ -224,4 +562,12 @@ function openNodeEditor(fname) {
   window.CW.closeNodeEditor = closeNodeEditor;
   window.CW.saveNodeConfig = saveNodeConfig;
   window.CW.resetNodeConfig = resetNodeConfig;
+  window.addEventListener('resize', updateNodeCompactState);
+  document.addEventListener('mousemove', onPointerMove, true);
+  document.addEventListener('mouseup', endPointerDrag, true);
+  document.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
+  document.addEventListener('touchend', endPointerDrag, true);
+  document.addEventListener('touchcancel', endPointerDrag, true);
+  window.addEventListener('mouseup', endPointerDrag, true);
+  window.addEventListener('blur', endPointerDrag);
 })();

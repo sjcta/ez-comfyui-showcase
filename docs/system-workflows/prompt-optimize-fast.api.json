@@ -1,0 +1,40 @@
+{
+  "description": "Fast text-only prompt optimization workflow. Replace __PROMPT_TEXT__ before submitting to ComfyUI. The output is a strict JSON object containing keyword_prompt and structured_prompt.",
+  "provider": "comfyui-qwen3-vl-4b-4bit",
+  "output_mapping": {
+    "optimized_prompt": "json.loads(outputs[\"2\"].text[0])[\"keyword_prompt\"]",
+    "structured_prompt": "json.loads(outputs[\"2\"].text[0])[\"structured_prompt\"]"
+  },
+  "workflow": {
+    "1": {
+      "inputs": {
+        "text": "You are a text-to-image prompt optimizer. Convert the user request into one concise image generation prompt. Remove request words such as help me, generate, draw, please, image, picture. Preserve the visual subject, style, composition, quantities, colors, and constraints. Preserve proper nouns, cultural titles, IP names, character names, brand names, and place names in their original language. Do not literally translate cultural references; add short explanatory visual descriptors after the original name when useful. Apply this model-aware image prompt guide: Use a Nano Banana / GPT Image style prompt-improvement checklist internally, but do not output the checklist or labels. Preserve the user's intent and all specified subjects, quantities, colors, text, names, style references, aspect ratio hints, and constraints. First remove request boilerplate, then enrich only missing visual information. Cover these elements when relevant: subject/action, context/setting, composition/framing, lighting/atmosphere, materials/textures, color palette, mood, intended use, and constraints. For GPT Image-like needs such as UI mockups, brand assets, posters, slides, product images, or readable text, think in Scene / Subject / Important Details / Use Case / Constraints and quote exact visible text. For Nano Banana-like needs, prefer natural prose with explicit real-world or cultural anchors, spatial relationships, and reference roles; avoid unnecessary camera-number jargon. Use positive framing instead of negative wording, avoid vague praise such as stunning/epic/masterpiece, avoid tag soup, and do not invent major new concepts. The plain-text variant should be one fluent generation prompt in the user's language, with no markdown, headings, bullets, or explanation. Do not describe the user request itself. Return only a valid JSON object with this exact top-level shape: {\"keyword_prompt\":\"...\",\"structured_prompt\":{\"version\":\"ez-prompt-json-v1\",\"language\":\"zh or en\",\"intent\":\"...\",\"prompt\":\"...\",\"subject\":\"...\",\"action\":\"...\",\"scene\":\"...\",\"composition\":\"...\",\"lighting\":\"...\",\"style\":\"...\",\"color_palette\":\"...\",\"materials_textures\":[],\"important_details\":[],\"visible_text\":[],\"constraints\":[],\"negative_prompt\":[]}}. The keyword_prompt is the compact plain prompt. The structured_prompt is the JSON prompt that can be copied directly to an image model. Use empty strings or empty arrays for unknown fields. Keep the user's language unless the user explicitly asks otherwise. Do not output markdown or explanation.\n\nUser request: __PROMPT_TEXT__",
+        "model": "Qwen3-VL-4B-Instruct",
+        "quantization": "4bit",
+        "keep_model_loaded": true,
+        "temperature": 0.2,
+        "max_new_tokens": 384,
+        "min_pixels": 3136,
+        "max_pixels": 200704,
+        "seed": 1,
+        "attention": "sdpa"
+      },
+      "class_type": "Qwen3_VQA",
+      "_meta": {
+        "title": "Qwen Prompt Optimizer"
+      }
+    },
+    "2": {
+      "inputs": {
+        "text": [
+          "1",
+          0
+        ]
+      },
+      "class_type": "ShowText|pysssss",
+      "_meta": {
+        "title": "Optimized Prompt"
+      }
+    }
+  }
+}

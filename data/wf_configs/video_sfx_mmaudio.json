@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "workflow": "video_sfx_mmaudio.json",
+  "fields": [
+    {
+      "key": "91::video",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考视频",
+      "order": 0,
+      "type": "video"
+    },
+    {
+      "key": "92::prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "音效提示词",
+      "order": 1,
+      "type": "textarea",
+      "value": "cinematic natural foley matching the visible motion, realistic ambience, clean synchronized sound effects"
+    },
+    {
+      "key": "106::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "保留原声",
+      "order": 2,
+      "type": "toggle"
+    },
+    {
+      "key": "92::negative_prompt",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面音效提示词",
+      "order": 0,
+      "type": "textarea",
+      "value": "speech, dialogue, music, singing, distorted audio, clipping, noise, hum, hiss, low quality"
+    },
+    {
+      "key": "92::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样步数",
+      "order": 1,
+      "type": "number",
+      "min": 4,
+      "max": 80,
+      "step": 1
+    },
+    {
+      "key": "92::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "提示词强度",
+      "order": 2,
+      "type": "number",
+      "min": 1,
+      "max": 12,
+      "step": 0.1
+    },
+    {
+      "key": "92::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "音效种子",
+      "order": 3,
+      "type": "seed"
+    },
+    {
+      "key": "91::frame_load_cap",
+      "zone": "advanced",
+      "visible": true,
+      "label": "最多加载帧数",
+      "order": 4,
+      "type": "number",
+      "min": 0,
+      "max": 720,
+      "step": 1
+    },
+    {
+      "key": "91::force_rate",
+      "zone": "advanced",
+      "visible": true,
+      "label": "强制帧率",
+      "order": 5,
+      "type": "number",
+      "min": 0,
+      "max": 60,
+      "step": 1
+    },
+    {
+      "key": "97::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "85::mmaudio_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "MMAudio模型",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "85::base_precision",
+      "zone": "hidden",
+      "visible": false,
+      "label": "模型精度",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "91::force_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "force_size",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "91::custom_width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "custom_width",
+      "order": 3,
+      "type": "number"
+    },
+    {
+      "key": "91::custom_height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "custom_height",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "91::skip_first_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "skip_first_frames",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "91::select_every_nth",
+      "zone": "hidden",
+      "visible": false,
+      "label": "select_every_nth",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "92::mask_away_clip",
+      "zone": "hidden",
+      "visible": false,
+      "label": "mask_away_clip",
+      "order": 7,
+      "type": "toggle"
+    },
+    {
+      "key": "92::force_offload",
+      "zone": "hidden",
+      "visible": false,
+      "label": "force_offload",
+      "order": 8,
+      "type": "toggle"
+    },
+    {
+      "key": "97::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "97::pix_fmt",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pix_fmt",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "97::crf",
+      "zone": "hidden",
+      "visible": false,
+      "label": "crf",
+      "order": 11,
+      "type": "number"
+    },
+    {
+      "key": "97::save_output",
+      "zone": "hidden",
+      "visible": false,
+      "label": "save_output",
+      "order": 12,
+      "type": "toggle"
+    },
+    {
+      "key": "102::vae_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE模型",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "102::synchformer_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "同步模型",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "102::clip_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "CLIP模型",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "102::mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "音频模式",
+      "order": 16,
+      "type": "text"
+    },
+    {
+      "key": "102::precision",
+      "zone": "hidden",
+      "visible": false,
+      "label": "特征精度",
+      "order": 17,
+      "type": "text"
+    }
+  ]
+}

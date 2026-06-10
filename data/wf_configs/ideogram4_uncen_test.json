@@ -1,0 +1,123 @@
+{
+  "fields": [
+    {
+      "key": "24::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词 / 布局画布（Ideogram4 JSON）",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "11::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 1,
+      "type": "number",
+      "role": "width",
+      "step": 16,
+      "min": 256,
+      "max": 2048
+    },
+    {
+      "key": "11::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 2,
+      "type": "number",
+      "role": "height",
+      "step": 16,
+      "min": 256,
+      "max": 2048
+    },
+    {
+      "key": "18::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "156::choice",
+      "zone": "advanced",
+      "visible": true,
+      "label": "官方模式",
+      "order": 1,
+      "type": "select",
+      "options": [
+        "Quality",
+        "Default",
+        "Turbo"
+      ]
+    },
+    {
+      "key": "155::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "DualModel CFG（同源负向测试）",
+      "order": 2,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 20
+    },
+    {
+      "key": "157::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFGOverride CFG",
+      "order": 3,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 20
+    },
+    {
+      "key": "157::start_percent",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFGOverride Start",
+      "order": 4,
+      "type": "number",
+      "step": 0.001,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "157::end_percent",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFGOverride End",
+      "order": 5,
+      "type": "number",
+      "step": 0.001,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "17::width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Scheduler width",
+      "order": 0,
+      "type": "number"
+    },
+    {
+      "key": "17::height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Scheduler height",
+      "order": 1,
+      "type": "number"
+    }
+  ],
+  "required_models": [
+    "diffusion_models/ideogram4_nvfp4_mixed.safetensors",
+    "text_encoders/qwen3vl_8b_nvfp4.safetensors",
+    "vae/flux2-vae.safetensors"
+  ],
+  "notes": "Test-only NVFP4 sibling derived from the official Ideogram4 workflow. It defaults to the official Quality sampler preset, preserves the app-standard size controls and CFGOverride flow, supports the Ideogram4 layout canvas JSON caption path, and shares the backend canvas repair that fuses object modules while keeping text modules precisely positioned with invisible bbox placement. It routes DualModelGuider model_negative to the same main model branch instead of the separate unconditional UNET so false-positive/noise behavior can be compared against the official baseline."
+}

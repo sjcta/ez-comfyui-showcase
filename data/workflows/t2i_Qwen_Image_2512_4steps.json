@@ -1,0 +1,266 @@
+{
+  "60": {
+    "inputs": {
+      "filename_prefix": "Qwen-Image",
+      "images": [
+        "76:8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "76:39": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "76:38": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "76:58": {
+    "inputs": {
+      "width": 1328,
+      "height": 1328,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "空Latent图像（SD3）"
+    }
+  },
+  "76:66": {
+    "inputs": {
+      "shift": 3.1000000000000005,
+      "model": [
+        "76:78",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "76:37": {
+    "inputs": {
+      "unet_name": "qwen_image_2512_fp8_e4m3fn.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "76:6": {
+    "inputs": {
+      "text": "\"Close-up of a convenience store shelf in Japan, filled with a variety of colorful packaged snacks, drinks, and groceries. Realistic lighting, high detail, vibrant colors. Modern Japanese packaging design with a mix of English and Japanese labels. Each item has price tags, barcodes, nutritional info, and shelf tags in Japanese. Products include: \"Mochi Bites もちスナック\" – pastel-colored mochi snack in a clear bag, \"Yama Chips やまチップス\" – seaweed-flavored potato chips with green packaging……",
+      "clip": [
+        "76:38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "76:7": {
+    "inputs": {
+      "text": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay",
+      "clip": [
+        "76:38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "76:8": {
+    "inputs": {
+      "samples": [
+        "76:3",
+        0
+      ],
+      "vae": [
+        "76:39",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "76:73": {
+    "inputs": {
+      "lora_name": "Qwen-Image-fp8-e4m3fn-Lightning-4steps-V1.0-bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "76:37",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "76:3": {
+    "inputs": {
+      "seed": 642398911377858,
+      "steps": [
+        "76:82",
+        0
+      ],
+      "cfg": [
+        "76:83",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "76:66",
+        0
+      ],
+      "positive": [
+        "76:6",
+        0
+      ],
+      "negative": [
+        "76:7",
+        0
+      ],
+      "latent_image": [
+        "76:58",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "76:78": {
+    "inputs": {
+      "switch": [
+        "76:86",
+        0
+      ],
+      "on_false": [
+        "76:37",
+        0
+      ],
+      "on_true": [
+        "76:73",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Model)"
+    }
+  },
+  "76:79": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "76:81": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "CFG"
+    }
+  },
+  "76:82": {
+    "inputs": {
+      "switch": [
+        "76:86",
+        0
+      ],
+      "on_false": [
+        "76:84",
+        0
+      ],
+      "on_true": [
+        "76:79",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Steps)"
+    }
+  },
+  "76:83": {
+    "inputs": {
+      "switch": [
+        "76:86",
+        0
+      ],
+      "on_false": [
+        "76:85",
+        0
+      ],
+      "on_true": [
+        "76:81",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (CFG)"
+    }
+  },
+  "76:84": {
+    "inputs": {
+      "value": 20
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "76:85": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "CFG"
+    }
+  },
+  "76:86": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Enable Lightning LoRA"
+    }
+  }
+}

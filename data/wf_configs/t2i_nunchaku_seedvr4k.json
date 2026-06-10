@@ -1,0 +1,426 @@
+{
+  "version": 1,
+  "workflow": "t2i_nunchaku_seedvr4k.json",
+  "fields": [
+    {
+      "key": "45::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "41::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 1,
+      "type": "number",
+      "step": 64,
+      "min": 256,
+      "max": 4096
+    },
+    {
+      "key": "41::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 2,
+      "type": "number",
+      "step": 64,
+      "min": 256,
+      "max": 4096
+    },
+    {
+      "key": "41::batch_size",
+      "zone": "advanced",
+      "visible": true,
+      "label": "batch_size",
+      "order": 0,
+      "type": "number"
+    },
+    {
+      "key": "44::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 1,
+      "type": "seed"
+    },
+    {
+      "key": "44::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 2,
+      "type": "number",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "44::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 3,
+      "type": "number",
+      "step": 0.5,
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "59::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "超分种子",
+      "order": 4,
+      "type": "seed"
+    },
+    {
+      "key": "59::resolution",
+      "zone": "advanced",
+      "visible": true,
+      "label": "超分分辨率",
+      "order": 5,
+      "type": "number",
+      "step": 64,
+      "min": 512,
+      "max": 8192
+    },
+    {
+      "key": "59::max_resolution",
+      "zone": "advanced",
+      "visible": true,
+      "label": "max_resolution",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "59::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "59::uniform_batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量模式",
+      "order": 8,
+      "type": "toggle"
+    },
+    {
+      "key": "59::color_correction",
+      "zone": "advanced",
+      "visible": true,
+      "label": "color_correction",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "59::temporal_overlap",
+      "zone": "advanced",
+      "visible": true,
+      "label": "temporal_overlap",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "59::prepend_frames",
+      "zone": "advanced",
+      "visible": true,
+      "label": "prepend_frames",
+      "order": 11,
+      "type": "number"
+    },
+    {
+      "key": "59::input_noise_scale",
+      "zone": "advanced",
+      "visible": true,
+      "label": "input_noise_scale",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "59::latent_noise_scale",
+      "zone": "advanced",
+      "visible": true,
+      "label": "latent_noise_scale",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "59::offload_device",
+      "zone": "advanced",
+      "visible": true,
+      "label": "offload_device",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "59::enable_debug",
+      "zone": "advanced",
+      "visible": true,
+      "label": "enable_debug",
+      "order": 15,
+      "type": "toggle"
+    },
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "39::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "39::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "39::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "40::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "47::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "58::model_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model_name",
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "60::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model",
+      "order": 6,
+      "type": "text"
+    },
+    {
+      "key": "60::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "60::blocks_to_swap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "blocks_to_swap",
+      "order": 8,
+      "type": "number"
+    },
+    {
+      "key": "60::swap_io_components",
+      "zone": "hidden",
+      "visible": false,
+      "label": "swap_io_components",
+      "order": 9,
+      "type": "toggle"
+    },
+    {
+      "key": "60::offload_device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "offload_device",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "60::cache_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cache_model",
+      "order": 11,
+      "type": "toggle"
+    },
+    {
+      "key": "60::attention_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "attention_mode",
+      "order": 12,
+      "type": "text"
+    },
+    {
+      "key": "61::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "61::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "61::encode_tiled",
+      "zone": "hidden",
+      "visible": false,
+      "label": "encode_tiled",
+      "order": 15,
+      "type": "toggle"
+    },
+    {
+      "key": "61::encode_tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "encode_tile_size",
+      "order": 16,
+      "type": "number"
+    },
+    {
+      "key": "61::encode_tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "encode_tile_overlap",
+      "order": 17,
+      "type": "number"
+    },
+    {
+      "key": "61::decode_tiled",
+      "zone": "hidden",
+      "visible": false,
+      "label": "decode_tiled",
+      "order": 18,
+      "type": "toggle"
+    },
+    {
+      "key": "61::decode_tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "decode_tile_size",
+      "order": 19,
+      "type": "number"
+    },
+    {
+      "key": "61::decode_tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "decode_tile_overlap",
+      "order": 20,
+      "type": "number"
+    },
+    {
+      "key": "61::tile_debug",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_debug",
+      "order": 21,
+      "type": "text"
+    },
+    {
+      "key": "61::offload_device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "offload_device",
+      "order": 22,
+      "type": "text"
+    },
+    {
+      "key": "61::cache_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cache_model",
+      "order": 23,
+      "type": "toggle"
+    },
+    {
+      "key": "44::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "采样器",
+      "order": 24,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "44::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "调度器",
+      "order": 25,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "44::denoise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "降噪",
+      "order": 26,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    }
+  ]
+}

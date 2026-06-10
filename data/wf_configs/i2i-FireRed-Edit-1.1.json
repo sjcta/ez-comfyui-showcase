@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "workflow": "i2i-FireRed-Edit-1.1.json",
+  "fields": [
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "filename_prefix",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "115::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "115::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "115::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "116::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "118::prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "prompt",
+      "order": 5,
+      "type": "textarea"
+    },
+    {
+      "key": "120::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "123::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 7,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "130::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "seed",
+      "order": 8,
+      "type": "seed"
+    },
+    {
+      "key": "130::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "steps",
+      "order": 9,
+      "type": "number"
+    },
+    {
+      "key": "130::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "cfg",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "130::sampler_name",
+      "zone": "advanced",
+      "visible": true,
+      "label": "sampler_name",
+      "order": 11,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "130::scheduler",
+      "zone": "advanced",
+      "visible": true,
+      "label": "scheduler",
+      "order": 12,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "130::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "denoise",
+      "order": 13,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "143::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "image",
+      "order": 14,
+      "type": "image"
+    },
+    {
+      "key": "143::upload",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upload",
+      "order": 15,
+      "type": "image"
+    },
+    {
+      "key": "151::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 16,
+      "type": "text"
+    },
+    {
+      "key": "151::strength_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength_model",
+      "order": 17,
+      "type": "text"
+    },
+    {
+      "key": "153::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 18,
+      "type": "toggle"
+    },
+    {
+      "key": "154::switch",
+      "zone": "hidden",
+      "visible": false,
+      "label": "switch",
+      "order": 19,
+      "type": "toggle"
+    },
+    {
+      "key": "155::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 20,
+      "type": "toggle"
+    },
+    {
+      "key": "156::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 21,
+      "type": "toggle"
+    },
+    {
+      "key": "157::switch",
+      "zone": "hidden",
+      "visible": false,
+      "label": "switch",
+      "order": 22,
+      "type": "toggle"
+    },
+    {
+      "key": "162::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 23,
+      "type": "toggle"
+    },
+    {
+      "key": "163::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 24,
+      "type": "toggle"
+    },
+    {
+      "key": "164::switch",
+      "zone": "hidden",
+      "visible": false,
+      "label": "switch",
+      "order": 25,
+      "type": "toggle"
+    },
+    {
+      "key": "166::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 26,
+      "type": "text"
+    }
+  ]
+}

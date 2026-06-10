@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "workflow": "i2i-Qwen-Rapid-seedVR2-4k.json",
+  "fields": [
+    {
+      "key": "78::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "115:111::prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 1,
+      "type": "textarea"
+    },
+    {
+      "key": "92::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量",
+      "order": 0,
+      "type": "number"
+    },
+    {
+      "key": "115:3::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 1,
+      "type": "seed"
+    },
+    {
+      "key": "96::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "88::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "88::largest_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "largest_size",
+      "order": 1,
+      "type": "number"
+    },
+    {
+      "key": "89::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Rapid v23 模型",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "93::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "93::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "93::blocks_to_swap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "blocks_to_swap",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "93::swap_io_components",
+      "zone": "hidden",
+      "visible": false,
+      "label": "swap_io_components",
+      "order": 6,
+      "type": "toggle"
+    },
+    {
+      "key": "93::offload_device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "offload_device",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "93::cache_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cache_model",
+      "order": 8,
+      "type": "toggle"
+    },
+    {
+      "key": "93::attention_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "attention_mode",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "94::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "94::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "94::encode_tiled",
+      "zone": "hidden",
+      "visible": false,
+      "label": "encode_tiled",
+      "order": 12,
+      "type": "toggle"
+    },
+    {
+      "key": "94::encode_tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "encode_tile_size",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "94::encode_tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "encode_tile_overlap",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "94::decode_tiled",
+      "zone": "hidden",
+      "visible": false,
+      "label": "decode_tiled",
+      "order": 15,
+      "type": "toggle"
+    },
+    {
+      "key": "94::decode_tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "decode_tile_size",
+      "order": 16,
+      "type": "number"
+    },
+    {
+      "key": "94::decode_tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "decode_tile_overlap",
+      "order": 17,
+      "type": "number"
+    },
+    {
+      "key": "94::tile_debug",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_debug",
+      "order": 18,
+      "type": "text"
+    },
+    {
+      "key": "94::offload_device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "offload_device",
+      "order": 19,
+      "type": "text"
+    },
+    {
+      "key": "94::cache_model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cache_model",
+      "order": 20,
+      "type": "toggle"
+    },
+    {
+      "key": "115:38::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 21,
+      "type": "text"
+    },
+    {
+      "key": "115:38::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 22,
+      "type": "text"
+    },
+    {
+      "key": "115:38::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 23,
+      "type": "text"
+    },
+    {
+      "key": "115:39::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 24,
+      "type": "text"
+    },
+    {
+      "key": "115:66::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 25,
+      "type": "number"
+    },
+    {
+      "key": "115:75::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 26,
+      "type": "number"
+    },
+    {
+      "key": "92::seed",
+      "zone": "hidden",
+      "visible": false,
+      "label": "超分种子",
+      "order": 27,
+      "type": "seed",
+      "min": 0,
+      "max": 4294967295
+    },
+    {
+      "key": "92::resolution",
+      "zone": "hidden",
+      "visible": false,
+      "label": "超分分辨率",
+      "order": 28,
+      "type": "number",
+      "step": 64,
+      "min": 512,
+      "max": 8192
+    },
+    {
+      "key": "92::max_resolution",
+      "zone": "hidden",
+      "visible": false,
+      "label": "max_resolution",
+      "order": 29,
+      "type": "number"
+    },
+    {
+      "key": "92::uniform_batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "SeedVR2 内部批量模式",
+      "order": 30,
+      "type": "toggle"
+    },
+    {
+      "key": "92::color_correction",
+      "zone": "hidden",
+      "visible": false,
+      "label": "color_correction",
+      "order": 31,
+      "type": "text"
+    },
+    {
+      "key": "92::temporal_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "temporal_overlap",
+      "order": 32,
+      "type": "number"
+    },
+    {
+      "key": "92::prepend_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "prepend_frames",
+      "order": 33,
+      "type": "number"
+    },
+    {
+      "key": "92::input_noise_scale",
+      "zone": "hidden",
+      "visible": false,
+      "label": "input_noise_scale",
+      "order": 34,
+      "type": "number"
+    },
+    {
+      "key": "92::latent_noise_scale",
+      "zone": "hidden",
+      "visible": false,
+      "label": "latent_noise_scale",
+      "order": 35,
+      "type": "number"
+    },
+    {
+      "key": "92::offload_device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "offload_device",
+      "order": 36,
+      "type": "text"
+    },
+    {
+      "key": "92::enable_debug",
+      "zone": "hidden",
+      "visible": false,
+      "label": "enable_debug",
+      "order": 37,
+      "type": "toggle"
+    },
+    {
+      "key": "115:3::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "CFG",
+      "order": 38,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 4
+    },
+    {
+      "key": "115:3::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "采样器",
+      "order": 39,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_sde",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "115:3::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "调度器",
+      "order": 40,
+      "type": "select",
+      "options": [
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "simple",
+        "ddim_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "115:3::denoise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "降噪",
+      "order": 41,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "115:3::steps",
+      "zone": "hidden",
+      "visible": false,
+      "label": "步数",
+      "order": 42,
+      "type": "number",
+      "min": 1,
+      "max": 8
+    },
+    {
+      "key": "910::horizontal_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "水平角度",
+      "order": 2,
+      "type": "number",
+      "step": 1,
+      "min": 0,
+      "max": 360
+    },
+    {
+      "key": "910::vertical_angle",
+      "zone": "user_input",
+      "visible": true,
+      "label": "俯仰角度",
+      "order": 3,
+      "type": "number",
+      "step": 1,
+      "min": -30,
+      "max": 60
+    },
+    {
+      "key": "910::zoom",
+      "zone": "user_input",
+      "visible": true,
+      "label": "镜头距离",
+      "order": 4,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "910::default_prompts",
+      "zone": "hidden",
+      "visible": false,
+      "label": "默认角度词",
+      "order": 100,
+      "type": "toggle"
+    },
+    {
+      "key": "910::camera_view",
+      "zone": "hidden",
+      "visible": false,
+      "label": "相机视角",
+      "order": 101,
+      "type": "toggle"
+    }
+  ]
+}

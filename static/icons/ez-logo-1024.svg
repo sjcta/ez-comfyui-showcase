@@ -1,0 +1,61 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="96" x2="912" y2="944" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.55" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(252 220) rotate(47.8) scale(683 706)">
+      <stop stop-color="#2DD4BF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(836 820) rotate(180) scale(530 530)">
+      <stop stop-color="#F59E0B" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#F59E0B" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="strokeMain" x1="276" y1="276" x2="764" y2="764" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="0.28" stop-color="#FBBF24"/>
+      <stop offset="0.68" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+    <linearGradient id="strokeEcho" x1="288" y1="302" x2="758" y2="748" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="0.42" stop-color="#FDE68A" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#67E8F9" stop-opacity="0.35"/>
+    </linearGradient>
+    <filter id="softShadow" x="156" y="174" width="740" height="676" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="18"/>
+      <feGaussianBlur stdDeviation="30"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0117647 0 0 0 0 0.0235294 0 0 0 0 0.0784314 0 0 0 0.36 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="24" y="24" width="976" height="976" rx="208" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+  <circle cx="228" cy="228" r="320" fill="url(#glowA)"/>
+  <circle cx="826" cy="814" r="252" fill="url(#glowB)"/>
+
+  <g opacity="0.8">
+    <path d="M216 774C334 692 492 648 674 642" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="18" stroke-linecap="round"/>
+    <path d="M322 232C520 208 700 278 830 402" stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="12" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <path d="M286 304H714" stroke="url(#strokeMain)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M286 304H714" stroke="url(#strokeEcho)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M286 304H330L572 304L328 720H714" stroke="url(#strokeMain)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M286 304H330L572 304L328 720H714" stroke="url(#strokeEcho)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M742 334H462L742 334L462 690H742" stroke="url(#strokeMain)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M742 334H462L742 334L462 690H742" stroke="url(#strokeEcho)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <rect x="56" y="56" width="912" height="912" rx="180" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="4"/>
+</svg>

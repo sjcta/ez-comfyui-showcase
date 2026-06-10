@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "workflow": "i2i_ernie_image.json",
+  "fields": [
+    {
+      "key": "40::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "6::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "编辑提示词",
+      "order": 1,
+      "type": "textarea"
+    },
+    {
+      "key": "41::width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "自动宽度",
+      "order": 2,
+      "type": "number",
+      "step": 64,
+      "min": 512,
+      "max": 1376
+    },
+    {
+      "key": "41::height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "自动高度",
+      "order": 3,
+      "type": "number",
+      "step": 64,
+      "min": 512,
+      "max": 1376
+    },
+    {
+      "key": "70::denoise",
+      "zone": "user_input",
+      "visible": true,
+      "label": "重绘强度",
+      "order": 4,
+      "type": "number",
+      "step": 0.05,
+      "min": 0.1,
+      "max": 0.95
+    },
+    {
+      "key": "70::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "70::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 1,
+      "type": "number",
+      "min": 1,
+      "max": 60
+    },
+    {
+      "key": "70::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 2,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 20
+    },
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "66::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "62::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "63::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 2,
+      "type": "text"
+    }
+  ]
+}

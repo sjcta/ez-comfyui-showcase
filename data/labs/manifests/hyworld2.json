@@ -1,0 +1,57 @@
+{
+  "id": "hyworld2",
+  "name": "Tencent HY-World 2.0 WorldMirror Lab",
+  "short_name": "HY-World 2.0",
+  "kind": "3d-world-reconstruction",
+  "repo_url": "https://github.com/Tencent-Hunyuan/HY-World-2.0",
+  "model_url": "https://huggingface.co/tencent/HY-World-2.0",
+  "source_commit": "main",
+  "local_source": "data/labs/projects/HY-World-2.0",
+  "license_note": "Tencent HY-WORLD 2.0 Community License; internal lab validation only before legal/use-policy review.",
+  "checkpoint_paths": [
+    "data/labs/checkpoints/HY-World-2.0/HY-WorldMirror-2.0/model.safetensors",
+    "data/labs/checkpoints/HY-World-2.0/HY-WorldMirror-2.0/config.json"
+  ],
+  "official_cases": [
+    {
+      "name": "WorldMirror multi-view reconstruction",
+      "case_file": "examples/worldrecon",
+      "output": "runs/HY-World-2.0/<run_id>/outputs/worldmirror",
+      "command": "python -m hyworld2.worldrecon.pipeline --input_path path/to/images --pretrained_model_name_or_path ../../checkpoints/HY-World-2.0 --subfolder HY-WorldMirror-2.0 --enable_bf16"
+    },
+    {
+      "name": "WorldMirror Gradio preview",
+      "case_file": "uploaded images or video",
+      "output": "browser 3DGS / point cloud / depth preview",
+      "command": "python -m hyworld2.worldrecon.gradio_app --ckpt_path ../../checkpoints/HY-World-2.0/HY-WorldMirror-2.0/model.safetensors"
+    }
+  ],
+  "setup_commands": [
+    "scripts/labs/prepare_hyworld2_worldmirror.sh",
+    "hf download tencent/HY-World-2.0 --include 'HY-WorldMirror-2.0/*' --local-dir data/labs/checkpoints/HY-World-2.0"
+  ],
+  "playground": {
+    "summary": "Upload multi-view images or a short video and run HY-World 2.0 WorldMirror reconstruction into 3DGS, point cloud, depth, normal, and camera outputs.",
+    "modes": [
+      {
+        "id": "worldrecon-images",
+        "label": "多图重建",
+        "description": "上传同一场景的多张图片，输出 3DGS、点云、深度、法线和相机参数。",
+        "requires": { "min_images": 2, "videos": 0 },
+        "defaults": { "width": 952, "height": 952, "frames": 32, "fps": 1, "steps": 1, "seed": 42 }
+      },
+      {
+        "id": "worldrecon-video",
+        "label": "视频重建",
+        "description": "上传一个短视频，抽帧后输出 3DGS、点云、深度、法线和相机参数。",
+        "requires": { "images": 0, "min_videos": 1 },
+        "defaults": { "width": 952, "height": 952, "frames": 32, "fps": 1, "steps": 1, "seed": 42 }
+      }
+    ]
+  },
+  "resource_lock": {
+    "project": "HY-World 2.0",
+    "default_ttl_sec": 21600,
+    "reason": "HY-World 2.0 WorldMirror reconstruction is using the GPU"
+  }
+}

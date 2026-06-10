@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>测试实验室 · Ez ComfyUI</title>
+  <link rel="icon" type="image/png" href="../static/icons/ez-site-logo-64.png">
+  <link rel="stylesheet" href="../static/labs/lab.css?v=1780705001">
+</head>
+<body>
+  <header class="lab-topbar">
+    <a class="lab-brand" href="../">
+      <img src="../static/icons/ez-site-logo-64.png" alt="">
+      <span>Ez ComfyUI</span>
+    </a>
+    <nav class="lab-nav" aria-label="测试项目">
+      <a href="../labs/bernini" data-project-link="bernini">Bernini</a>
+      <a href="../labs/joyai" data-project-link="joyai">JoyAI-Echo</a>
+      <a href="../labs/hyworld2" data-project-link="hyworld2">HY-World 2.0</a>
+    </nav>
+    <a class="lab-back" href="../">返回主界面</a>
+  </header>
+
+  <main class="lab-shell">
+    <section class="lab-hero">
+      <div class="lab-hero-copy">
+        <p class="lab-kicker">Official Restore Lab</p>
+        <h1 id="labTitle">模型测试 Playground</h1>
+        <p id="labSubtitle">上传素材、输入 prompt，并用官方 runner 快速验证实验模型能力。</p>
+      </div>
+      <div class="lab-lock-panel" id="lockPanel">
+        <span class="lab-lock-dot"></span>
+        <div>
+          <strong id="lockTitle">资源锁状态</strong>
+          <span id="lockText">读取中...</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="lab-grid" id="projectGrid" aria-live="polite"></section>
+  </main>
+
+  <template id="projectTemplate">
+    <article class="project-card">
+      <div class="project-media"></div>
+      <div class="project-body">
+        <div class="project-heading">
+          <div>
+            <p class="project-kind"></p>
+            <h2></h2>
+          </div>
+          <span class="project-status"></span>
+        </div>
+        <p class="project-license"></p>
+        <dl class="project-facts"></dl>
+        <div class="project-actions">
+          <button type="button" data-action="lock">锁定 GPU</button>
+          <button type="button" data-action="release">释放资源</button>
+          <a target="_blank" rel="noreferrer">官方仓库</a>
+        </div>
+        <div class="project-section">
+          <h3>Playground</h3>
+          <form class="playground-form">
+            <div class="form-row">
+              <label>
+                <span>模式</span>
+                <select name="mode"></select>
+              </label>
+              <label>
+                <span>Seed</span>
+                <input name="seed" type="number" min="0" step="1">
+              </label>
+            </div>
+            <label class="prompt-field">
+              <span>Prompt / 镜头描述</span>
+              <textarea name="prompt" rows="8" placeholder="输入测试 prompt。JoyAI-Echo 多镜头可用空行分隔。"></textarea>
+            </label>
+            <div class="upload-row">
+              <label class="upload-field" data-upload="images">
+                <span>图片输入</span>
+                <input name="image_files" type="file" accept="image/*" multiple>
+                <small></small>
+              </label>
+              <label class="upload-field" data-upload="videos">
+                <span>视频输入</span>
+                <input name="video_files" type="file" accept="video/*" multiple>
+                <small></small>
+              </label>
+            </div>
+            <div class="param-grid">
+              <label>
+                <span>宽</span>
+                <input name="width" type="number" min="128" step="8">
+              </label>
+              <label>
+                <span>高</span>
+                <input name="height" type="number" min="128" step="8">
+              </label>
+              <label>
+                <span>帧数</span>
+                <input name="frames" type="number" min="1" step="1">
+              </label>
+              <label>
+                <span>FPS</span>
+                <input name="fps" type="number" min="1" step="1">
+              </label>
+              <label>
+                <span>Steps</span>
+                <input name="steps" type="number" min="1" step="1">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button type="submit" data-action="start">启动测试</button>
+              <span class="mode-note"></span>
+            </div>
+          </form>
+          <div class="run-panel" hidden>
+            <div class="run-head">
+              <strong>本次测试</strong>
+              <span class="run-status"></span>
+            </div>
+            <dl class="run-facts"></dl>
+            <pre class="run-command"></pre>
+            <pre class="run-log"></pre>
+          </div>
+        </div>
+        <div class="project-section">
+          <h3>官方案例参考</h3>
+          <div class="case-list"></div>
+        </div>
+        <div class="project-section">
+          <h3>部署命令</h3>
+          <pre class="setup-commands"></pre>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="../static/labs/lab.js?v=1780705002"></script>
+</body>
+</html>

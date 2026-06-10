@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "workflow": "SeedVR2_video_upscale_2k.json",
+  "fields": [
+    {
+      "key": "21::file",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考视频",
+      "order": 0,
+      "type": "video"
+    },
+    {
+      "key": "10::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "超分种子",
+      "order": 1,
+      "type": "seed"
+    },
+    {
+      "key": "10::resolution",
+      "zone": "advanced",
+      "visible": true,
+      "label": "目标分辨率",
+      "order": 2,
+      "type": "number",
+      "step": 64,
+      "min": 512,
+      "max": 8192
+    },
+    {
+      "key": "10::batch_size",
+      "zone": "advanced",
+      "visible": true,
+      "label": "批处理帧数",
+      "order": 3,
+      "type": "number",
+      "step": 4,
+      "min": 1,
+      "max": 129
+    },
+    {
+      "key": "10::temporal_overlap",
+      "zone": "advanced",
+      "visible": true,
+      "label": "时间重叠帧",
+      "order": 4,
+      "type": "number",
+      "step": 1,
+      "min": 0,
+      "max": 32
+    },
+    {
+      "key": "10::color_correction",
+      "zone": "advanced",
+      "visible": true,
+      "label": "色彩校正",
+      "order": 5,
+      "type": "select",
+      "options": [
+        "lab",
+        "wavelet",
+        "wavelet_adaptive",
+        "hsv",
+        "adain",
+        "none"
+      ]
+    },
+    {
+      "key": "23::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 6,
+      "type": "text"
+    },
+    {
+      "key": "10::max_resolution",
+      "zone": "hidden",
+      "visible": false,
+      "label": "max_resolution",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "10::uniform_batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "uniform_batch_size",
+      "order": 11,
+      "type": "toggle"
+    },
+    {
+      "key": "10::prepend_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "prepend_frames",
+      "order": 12,
+      "type": "number"
+    },
+    {
+      "key": "10::input_noise_scale",
+      "zone": "hidden",
+      "visible": false,
+      "label": "input_noise_scale",
+      "order": 13,
+      "type": "number"
+    },
+    {
+      "key": "10::latent_noise_scale",
+      "zone": "hidden",
+      "visible": false,
+      "label": "latent_noise_scale",
+      "order": 14,
+      "type": "number"
+    },
+    {
+      "key": "10::offload_device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "offload_device",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "10::enable_debug",
+      "zone": "hidden",
+      "visible": false,
+      "label": "enable_debug",
+      "order": 16,
+      "type": "toggle"
+    },
+    {
+      "key": "14::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "DiT模型",
+      "order": 20,
+      "type": "text"
+    },
+    {
+      "key": "13::model",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VAE模型",
+      "order": 21,
+      "type": "text"
+    },
+    {
+      "key": "23::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 30,
+      "type": "text"
+    },
+    {
+      "key": "23::codec",
+      "zone": "hidden",
+      "visible": false,
+      "label": "codec",
+      "order": 31,
+      "type": "text"
+    }
+  ]
+}
