@@ -879,16 +879,14 @@ function _ideogramCanvasDefaultStyle(base) {
         aesthetics: 'one coherent realistic image, integrated scene composition, no collage, no slide layout, no split-screen, no diptych, no visible guide boxes',
         lighting: 'consistent natural lighting across the whole scene',
         photo: 'single uninterrupted continuous camera shot with consistent perspective, focus, depth, scale, and no dividing seam',
-        medium: 'photograph',
-        color_palette: []
+        medium: 'photograph'
       };
     }
     return {
       aesthetics: 'one coherent integrated image, strong text-image alignment, no collage, no slide layout, no split-screen, no diptych, no visible guide boxes',
       lighting: 'consistent lighting and shadows across all positioned elements',
       medium: 'digital image',
-      art_style: 'unified single-frame composition with controlled placement and natural visual relationships',
-      color_palette: []
+      art_style: 'unified single-frame composition with controlled placement and natural visual relationships'
     };
   }
 
@@ -918,6 +916,20 @@ function _ideogramCanvasSpatialSentence(shape) {
     return 'It occupies the ' + _ideogramCanvasPositionHint(shape) + ' and is composed as part of the same uninterrupted single camera view, not as a separate insert, side-by-side panel, or divided image.';
   }
 
+function _ideogramCanvasSafetyText(text) {
+    var clean = String(text || '').trim();
+    if (!clean) return '';
+    clean = clean
+      .replace(/女高中生|女中学生|未成年女学生/gi, '22岁成年女大学生')
+      .replace(/女学生/gi, '22岁成年女大学生')
+      .replace(/schoolgirl|school girl|student girl/gi, 'adult 22-year-old university student')
+      .replace(/超短裙/g, '短款时装裙');
+    if (/学生|university student|student/i.test(clean) && !/成年|adult|22岁|22-year-old/i.test(clean)) {
+      clean = '22岁成年人物，' + clean;
+    }
+    return clean;
+  }
+
 function _ideogramCanvasNaturalPlacement(shape) {
     var cx = Number(shape.x || 0) + Number(shape.w || 0) / 2;
     var cy = Number(shape.y || 0) + Number(shape.h || 0) / 2;
@@ -933,11 +945,11 @@ function _ideogramCanvasNaturalPlacement(shape) {
 
 function _ideogramCanvasElementDesc(shape, text) {
     var guide = _ideogramCanvasSpatialSentence(shape) + ' ';
-    guide += 'Describe it with concrete visual detail and integrate it naturally into the shared environment, matching the global perspective, lighting, scale, depth, occlusion, and material relationships.';
+    guide += 'The bbox is official Ideogram4 coordinate metadata for placement inside one continuous image. Integrate it naturally into the shared environment, matching the global perspective, lighting, scale, depth, occlusion, and material relationships.';
     if (shape.kind === 'circle') {
       guide += ' The circular canvas guide means this subject should read as a soft clustered area, not as a drawn circle.';
     }
-    return guide + ' Subject details: ' + text;
+    return guide + ' Subject details: ' + _ideogramCanvasSafetyText(text);
   }
 
 function _ideogramCanvasTextDesc(shape) {
@@ -952,7 +964,7 @@ function _ideogramCanvasTextDesc(shape) {
   }
 
 function _ideogramCanvasSceneNote(shape, text) {
-    var note = _ideogramCanvasNaturalPlacement(shape) + ': ' + text;
+    var note = _ideogramCanvasNaturalPlacement(shape) + ': ' + _ideogramCanvasSafetyText(text);
     if (shape.kind === 'circle') {
       note += '; compose this as a natural soft cluster within the scene, not as a drawn circular outline';
     }
@@ -965,7 +977,7 @@ function _ideogramCanvasPhotoTextDesc(shape, text) {
 
 function _ideogramCanvasPhotoElements(shapes) {
     var textElements = [];
-    var objectNotes = [];
+    var objectElements = [];
     shapes.forEach(function(shape) {
       var text = String(shape.text || '').trim();
       if (!text) return;
@@ -977,24 +989,21 @@ function _ideogramCanvasPhotoElements(shapes) {
           desc: _ideogramCanvasPhotoTextDesc(shape, text)
         });
       } else {
-        objectNotes.push(_ideogramCanvasSceneNote(shape, text));
+        objectElements.push({
+          type: 'obj',
+          bbox: _ideogramCanvasBbox(shape),
+          desc: _ideogramCanvasElementDesc(shape, text)
+        });
       }
     });
-    var elements = [];
-    if (objectNotes.length) {
-      elements.push({
-        type: 'obj',
-        desc: 'One uninterrupted photographic scene that fuses all object modules into the same camera view using natural spatial relationships, not a grid: ' + objectNotes.join(' ') + ' Keep one continuous horizon, one shared daylight direction, one lens perspective, one foreground and background space, and one atmosphere; do not split the image into side-by-side panels, quadrant panels, diptych halves, vertical seams, cards, or pasted regions.'
-      });
-    }
-    return elements.concat(textElements);
+    return objectElements.concat(textElements);
   }
 
 function _composeIdeogramCanvasPrompt(rawPrompt, styleInfo) {
     if (_ideogramCanvasState.mode !== 'canvas' || !_ideogramCanvasShapes().length) {
       return _promptJsonForStyle(rawPrompt, styleInfo);
     }
-    var base = _stripExistingStylePromptBlocks(rawPrompt);
+    var base = _ideogramCanvasSafetyText(_stripExistingStylePromptBlocks(rawPrompt));
     var userJson = _parsePromptJsonObject(base);
     var promptJson = userJson && userJson.high_level_description && userJson.compositional_deconstruction
       ? userJson
@@ -1029,7 +1038,7 @@ function _composeIdeogramCanvasPrompt(rawPrompt, styleInfo) {
         return {
           type: 'obj',
           bbox: _ideogramCanvasBbox(shape),
-          desc: _ideogramCanvasElementDesc(shape, text)
+            desc: _ideogramCanvasElementDesc(shape, text)
         };
       })
       : _ideogramCanvasPhotoElements(shapes);

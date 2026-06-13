@@ -459,13 +459,14 @@ class SeedFieldDetectionTests(unittest.TestCase):
         payload = json.loads(normalized["24::text"])
         elements = payload["compositional_deconstruction"]["elements"]
 
-        self.assertEqual([el["type"] for el in elements], ["obj", "text"])
-        self.assertNotIn("bbox", elements[0])
-        self.assertIn("fuses all object modules", elements[0]["desc"])
-        self.assertIn("霓虹闪烁的商业大楼", elements[0]["desc"])
-        self.assertEqual(elements[1]["bbox"], [495, 580, 735, 1000])
-        self.assertEqual(elements[1]["text"], "静静地\n我在等你")
-        self.assertIn("only the letter strokes should be visible", elements[1]["desc"])
+        self.assertEqual([el["type"] for el in elements], ["obj", "obj", "text"])
+        self.assertEqual(elements[0]["bbox"], [328, 116, 974, 503])
+        self.assertIn("official Ideogram4 coordinate metadata", elements[0]["desc"])
+        self.assertIn("22岁成年女大学生", elements[0]["desc"])
+        self.assertIn("霓虹闪烁的商业大楼", elements[1]["desc"])
+        self.assertEqual(elements[2]["bbox"], [495, 580, 735, 1000])
+        self.assertEqual(elements[2]["text"], "静静地\n我在等你")
+        self.assertIn("only the letter strokes should be visible", elements[2]["desc"])
         self.assertNotIn("Rectangular bounded layout region", json.dumps(payload, ensure_ascii=False))
 
     def test_official_ideogram_prompt_strips_style_block_and_wraps_json_caption(self):
@@ -498,6 +499,8 @@ class SeedFieldDetectionTests(unittest.TestCase):
         prompt = json.loads(fields["24::text"])
         self.assertIn("3D", prompt["style_description"]["aesthetics"])
         self.assertIn("High-end 3D render aesthetic", prompt["style_description"]["aesthetics"])
+        self.assertNotIn("preset_id", prompt["style_description"])
+        self.assertNotIn("category", prompt["style_description"])
         self.assertIn("橙色猫形机器人", prompt["high_level_description"])
         self.assertNotIn("[Style Preset:", fields["24::text"])
         self.assertIn("__style_preset_id", fields)
@@ -547,7 +550,8 @@ class SeedFieldDetectionTests(unittest.TestCase):
         self.assertEqual(prompt["compositional_deconstruction"]["background"], "霓虹街道")
         self.assertIn("cinematic", prompt["style_description"]["aesthetics"])
         self.assertIn("PBR render", prompt["style_description"]["aesthetics"])
-        self.assertEqual(prompt["style_description"]["preset_id"], "premium_3d")
+        self.assertNotIn("preset_id", prompt["style_description"])
+        self.assertNotIn("category", prompt["style_description"])
 
     def test_official_ideogram_style_merge_deduplicates_existing_bits(self):
         caption = app._official_ideogram4_caption_from_plain(

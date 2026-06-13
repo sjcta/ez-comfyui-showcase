@@ -1,0 +1,264 @@
+{
+  "version": 1,
+  "workflow": "i2v_ltx23_msr_test.json",
+  "fields": [
+    {
+      "key": "269::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "主体参考 1",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "270::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "主体参考 2",
+      "order": 1,
+      "type": "image"
+    },
+    {
+      "key": "271::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "主体参考 3",
+      "order": 2,
+      "type": "image"
+    },
+    {
+      "key": "272::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "背景参考",
+      "order": 3,
+      "type": "image"
+    },
+    {
+      "key": "320:319::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 4,
+      "type": "text",
+      "value": "Cinematic one-second test shot using multiple subject references. Keep the identities, clothing colors, and background composition from the reference images. A calm subject turns slightly toward camera, soft daylight, stable motion, natural ambience."
+    },
+    {
+      "key": "320:312::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 5,
+      "type": "number"
+    },
+    {
+      "key": "320:299::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "320:301::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "长度（秒）",
+      "order": 7,
+      "type": "number"
+    },
+    {
+      "key": "320:300::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "帧率",
+      "order": 8,
+      "type": "number"
+    },
+    {
+      "key": "320:276::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "noise_seed",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "320:313::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 1,
+      "type": "textarea",
+      "value": "low quality, worst quality, blurry, distorted, inconsistent identity, face change, costume change, extra limbs, bad hands, jitter, flicker, ghosting, repeated frames, watermark, logo, subtitles, audio distortion, audio clipping"
+    },
+    {
+      "key": "320:288::strength",
+      "zone": "advanced",
+      "visible": true,
+      "label": "MSR 指导强度",
+      "order": 2,
+      "type": "number"
+    },
+    {
+      "key": "320:285::strength_model",
+      "zone": "advanced",
+      "visible": true,
+      "label": "MSR LoRA 强度",
+      "order": 3,
+      "type": "number"
+    },
+    {
+      "key": "75::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "filename_prefix",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "75::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "75::codec",
+      "zone": "hidden",
+      "visible": false,
+      "label": "codec",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "320:280::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sampler_name",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "320:281::sigmas",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sigmas",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "320:282::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 4,
+      "type": "number"
+    },
+    {
+      "key": "320:285::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "320:286::frame_count",
+      "zone": "hidden",
+      "visible": false,
+      "label": "frame_count",
+      "order": 6,
+      "type": "number"
+    },
+    {
+      "key": "320:288::crop",
+      "zone": "hidden",
+      "visible": false,
+      "label": "crop",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "320:288::use_tiled_encode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "use_tiled_encode",
+      "order": 8,
+      "type": "toggle"
+    },
+    {
+      "key": "320:288::tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_size",
+      "order": 9,
+      "type": "number"
+    },
+    {
+      "key": "320:288::tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_overlap",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "320:316::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "320:316::weight_dtype",
+      "zone": "hidden",
+      "visible": false,
+      "label": "weight_dtype",
+      "order": 12,
+      "type": "text"
+    },
+    {
+      "key": "320:317::clip_name1",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name1",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "320:317::clip_name2",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name2",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "320:317::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "320:279::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 16,
+      "type": "text"
+    },
+    {
+      "key": "320:324::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 17,
+      "type": "text"
+    }
+  ]
+}

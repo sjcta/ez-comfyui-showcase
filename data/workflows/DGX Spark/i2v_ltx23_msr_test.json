@@ -1,0 +1,535 @@
+{
+  "75": {
+    "inputs": {
+      "video": [
+        "320:310",
+        0
+      ],
+      "filename_prefix": "video/LTX_2.3_MSR_test",
+      "format": "auto",
+      "codec": "auto"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "269": {
+    "inputs": {
+      "image": "example.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "主体参考 1"
+    }
+  },
+  "270": {
+    "inputs": {
+      "image": "i2v_input.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "主体参考 2"
+    }
+  },
+  "271": {
+    "inputs": {
+      "image": "images.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "主体参考 3"
+    }
+  },
+  "272": {
+    "inputs": {
+      "image": "woman-enjoying-the-sunset-by-the-sea-free-photo.webp"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "背景参考"
+    }
+  },
+  "320:276": {
+    "inputs": {
+      "noise_seed": 424242424242
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "320:278": {
+    "inputs": {
+      "video_latent": [
+        "320:288",
+        2
+      ],
+      "audio_latent": [
+        "320:305",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "LTXVConcatAVLatent"
+    }
+  },
+  "320:279": {
+    "inputs": {
+      "vae_name": "LTX23_audio_vae_bf16.safetensors",
+      "device": "main_device",
+      "weight_dtype": "bf16"
+    },
+    "class_type": "VAELoaderKJ",
+    "_meta": {
+      "title": "LTX23 音频 VAE"
+    }
+  },
+  "320:280": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "320:281": {
+    "inputs": {
+      "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+    },
+    "class_type": "ManualSigmas",
+    "_meta": {
+      "title": "自定义Sigmas"
+    }
+  },
+  "320:282": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "320:285",
+        0
+      ],
+      "positive": [
+        "320:288",
+        0
+      ],
+      "negative": [
+        "320:288",
+        1
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFG引导器"
+    }
+  },
+  "320:283": {
+    "inputs": {
+      "noise": [
+        "320:276",
+        0
+      ],
+      "guider": [
+        "320:282",
+        0
+      ],
+      "sampler": [
+        "320:280",
+        0
+      ],
+      "sigmas": [
+        "320:281",
+        0
+      ],
+      "latent_image": [
+        "320:278",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "320:284": {
+    "inputs": {
+      "positive": [
+        "320:288",
+        0
+      ],
+      "negative": [
+        "320:288",
+        1
+      ],
+      "latent": [
+        "320:309",
+        0
+      ]
+    },
+    "class_type": "LTXVCropGuides",
+    "_meta": {
+      "title": "LTXV裁剪指导"
+    }
+  },
+  "320:285": {
+    "inputs": {
+      "model": [
+        "320:316",
+        0
+      ],
+      "lora_name": "ltx/LTX-2.3-Licon-MSR-V1.safetensors",
+      "strength_model": 1
+    },
+    "class_type": "LTXICLoRALoaderModelOnly",
+    "_meta": {
+      "title": "MSR IC-LoRA 加载器"
+    }
+  },
+  "320:286": {
+    "inputs": {
+      "1": [
+        "269",
+        0
+      ],
+      "2": [
+        "270",
+        0
+      ],
+      "3": [
+        "271",
+        0
+      ],
+      "background": [
+        "272",
+        0
+      ],
+      "width": [
+        "320:312",
+        0
+      ],
+      "height": [
+        "320:299",
+        0
+      ],
+      "frame_count": 25
+    },
+    "class_type": "LiconMSR",
+    "_meta": {
+      "title": "Licon MSR 多参考图"
+    }
+  },
+  "320:288": {
+    "inputs": {
+      "positive": [
+        "320:304",
+        0
+      ],
+      "negative": [
+        "320:304",
+        1
+      ],
+      "vae": [
+        "320:324",
+        0
+      ],
+      "latent": [
+        "320:295",
+        0
+      ],
+      "image": [
+        "320:286",
+        0
+      ],
+      "frame_idx": 0,
+      "strength": 1,
+      "latent_downscale_factor": [
+        "320:285",
+        1
+      ],
+      "crop": "center",
+      "use_tiled_encode": false,
+      "tile_size": 256,
+      "tile_overlap": 64
+    },
+    "class_type": "LTXAddVideoICLoRAGuide",
+    "_meta": {
+      "title": "添加 MSR IC-LoRA 指导"
+    }
+  },
+  "320:295": {
+    "inputs": {
+      "width": [
+        "320:312",
+        0
+      ],
+      "height": [
+        "320:299",
+        0
+      ],
+      "length": [
+        "320:323",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLTXVLatentVideo",
+    "_meta": {
+      "title": "空Latent视频（LTXV）"
+    }
+  },
+  "320:297": {
+    "inputs": {
+      "samples": [
+        "320:309",
+        1
+      ],
+      "audio_vae": [
+        "320:279",
+        0
+      ]
+    },
+    "class_type": "LTXVAudioVAEDecode",
+    "_meta": {
+      "title": "LTXV音频VAE解码"
+    }
+  },
+  "320:298": {
+    "inputs": {
+      "expression": "a",
+      "values.a": [
+        "320:300",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "帧率转接"
+    }
+  },
+  "320:299": {
+    "inputs": {
+      "value": 768
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "320:300": {
+    "inputs": {
+      "value": 24
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Frame Rate"
+    }
+  },
+  "320:301": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Duration"
+    }
+  },
+  "320:303": {
+    "inputs": {
+      "text": [
+        "320:319",
+        0
+      ],
+      "clip": [
+        "320:317",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "正面提示词编码"
+    }
+  },
+  "320:304": {
+    "inputs": {
+      "frame_rate": [
+        "320:298",
+        0
+      ],
+      "positive": [
+        "320:303",
+        0
+      ],
+      "negative": [
+        "320:313",
+        0
+      ]
+    },
+    "class_type": "LTXVConditioning",
+    "_meta": {
+      "title": "LTXV条件"
+    }
+  },
+  "320:305": {
+    "inputs": {
+      "frames_number": [
+        "320:323",
+        1
+      ],
+      "frame_rate": [
+        "320:298",
+        1
+      ],
+      "batch_size": 1,
+      "audio_vae": [
+        "320:279",
+        0
+      ]
+    },
+    "class_type": "LTXVEmptyLatentAudio",
+    "_meta": {
+      "title": "LTXV 空音频潜空间"
+    }
+  },
+  "320:307": {
+    "inputs": {
+      "av_latent": [
+        "320:283",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "LTXV分离音视频潜空间"
+    }
+  },
+  "320:309": {
+    "inputs": {
+      "av_latent": [
+        "320:283",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "LTXV分离音视频潜空间"
+    }
+  },
+  "320:310": {
+    "inputs": {
+      "images": [
+        "320:315",
+        0
+      ],
+      "fps": [
+        "320:298",
+        0
+      ],
+      "audio": [
+        "320:297",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "320:312": {
+    "inputs": {
+      "value": 512
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Width"
+    }
+  },
+  "320:313": {
+    "inputs": {
+      "text": "low quality, worst quality, blurry, distorted, inconsistent identity, face change, costume change, extra limbs, bad hands, jitter, flicker, ghosting, repeated frames, watermark, logo, subtitles, audio distortion, audio clipping",
+      "clip": [
+        "320:317",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "负面提示词编码"
+    }
+  },
+  "320:315": {
+    "inputs": {
+      "samples": [
+        "320:284",
+        2
+      ],
+      "vae": [
+        "320:324",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "320:316": {
+    "inputs": {
+      "unet_name": "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "LTX2.3 MSR Base"
+    }
+  },
+  "320:317": {
+    "inputs": {
+      "clip_name1": "gemma_3_12B_it_fp8_scaled.safetensors",
+      "clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
+      "type": "ltxv"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "LTX2.3 Dual CLIP"
+    }
+  },
+  "320:319": {
+    "inputs": {
+      "value": "Cinematic one-second test shot using multiple subject references. Keep the identities, clothing colors, and background composition from the reference images. A calm subject turns slightly toward camera, soft daylight, stable motion, natural ambience."
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "320:323": {
+    "inputs": {
+      "expression": "a * b + 1",
+      "values.a": [
+        "320:301",
+        0
+      ],
+      "values.b": [
+        "320:300",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "帧数计算"
+    }
+  },
+  "320:324": {
+    "inputs": {
+      "vae_name": "LTX23_video_vae_bf16.safetensors",
+      "device": "main_device",
+      "weight_dtype": "bf16"
+    },
+    "class_type": "VAELoaderKJ",
+    "_meta": {
+      "title": "LTX23 Video VAE"
+    }
+  }
+}

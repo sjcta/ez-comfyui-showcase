@@ -592,5 +592,21 @@
     "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/z-image_loras.json",
     "thumbnail": "DGX Spark/z-image_loras.png",
     "sort_order": 17
+  },
+  "i2v_ltx23_msr_test.json": {
+    "name": "LTX2.3 MSR 多参考测试版",
+    "tags": [
+      "视频制作",
+      "图生视频",
+      "测试",
+      "LTX2.3",
+      "MSR"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": false,
+    "source": "DGX Spark",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/i2v_ltx23_msr_test.json",
+    "thumbnail": "DGX Spark/i2v_ltx23_sulphur.png",
+    "sort_order": 35
   }
 }

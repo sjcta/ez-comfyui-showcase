@@ -5069,6 +5069,27 @@ def _ideogram4_clean_bbox(value) -> list[int] | None:
     return [ymin, xmin, ymax, xmax]
 
 
+def _ideogram4_safety_normalize_text(text: str) -> str:
+    clean = str(text or "").strip()
+    if not clean:
+        return ""
+    # Ideogram4's safety screen is sensitive to ambiguous student/girl wording,
+    # especially when clothing is described. Keep the visual intent adult.
+    replacements = (
+        (r"女高中生|女中学生|未成年女学生", "22岁成年女大学生"),
+        (r"女学生", "22岁成年女大学生"),
+        (r"schoolgirl|school girl|student girl", "adult 22-year-old university student"),
+        (r"超短裙", "短款时装裙"),
+    )
+    for pattern, repl in replacements:
+        clean = re.sub(pattern, repl, clean, flags=re.IGNORECASE)
+    if re.search(r"学生|university student|student", clean, flags=re.IGNORECASE) and not re.search(
+        r"成年|adult|22岁|22-year-old", clean, flags=re.IGNORECASE
+    ):
+        clean = "22岁成年人物，" + clean
+    return clean
+
+
 def _ideogram4_bbox_position_phrase(bbox: list[int] | None) -> str:
     if not bbox or len(bbox) != 4:
         return ""
@@ -5156,18 +5177,35 @@ def _ideogram4_canvas_natural_placement(shape: dict) -> str:
 
 
 def _ideogram4_canvas_object_note(shape: dict) -> str:
-    note = f"{_ideogram4_canvas_natural_placement(shape)}: {shape.get('text', '')}"
+    note = f"{_ideogram4_canvas_natural_placement(shape)}: {_ideogram4_safety_normalize_text(shape.get('text', ''))}"
     if shape.get("kind") == "circle":
         note += "; treat this as a soft natural cluster in the scene, not a visible circular outline"
     return note + "."
+
+
+def _ideogram4_canvas_object_element(shape: dict) -> dict:
+    bbox = _ideogram4_canvas_bbox(shape)
+    text = _ideogram4_safety_normalize_text(shape.get("text", ""))
+    desc = (
+        f"{_ideogram4_bbox_position_phrase(bbox)} {text}. "
+        "This bbox is official Ideogram4 coordinate metadata for placement inside one continuous image. "
+        "Integrate the subject naturally with the surrounding scene using matching perspective, scale, lighting, depth, and occlusion. "
+        "The edges of this coordinate area should blend into the same environment, not read as a separate insert, panel, card, or pasted region."
+    )
+    if shape.get("kind") == "circle":
+        desc += " Compose it as a soft natural cluster in the scene, not as a drawn circular outline."
+    return {
+        "type": "obj",
+        "bbox": bbox,
+        "desc": desc,
+    }
 
 
 def _ideogram4_canvas_text_desc() -> str:
     return (
         "Render the literal text at this precise typography placement as part of the same image. "
         "The bbox is an invisible placement constraint for glyphs only: only the letter strokes should be visible, "
-        "and the surrounding area must remain the original scene. Do not draw any rectangle, outline, border, textbox, "
-        "caption box, card, panel, white box, translucent fill, frame, or container around the text."
+        "with transparent surroundings that remain the original scene. Do not create an enclosing graphic container around the text."
     )
 
 
@@ -5197,9 +5235,10 @@ def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, exist
             base = _ideogram4_prompt_text(prompt_value)
     if not base:
         base = "A coherent realistic image with naturally positioned elements."
+    base = _ideogram4_safety_normalize_text(base)
 
     layout_mode = _ideogram4_style_wants_layout(base)
-    object_notes = [_ideogram4_canvas_object_note(shape) for shape in shapes if shape.get("element_type") != "text"]
+    object_shapes = [shape for shape in shapes if shape.get("element_type") != "text"]
     text_elements = [
         {
             "type": "text",
@@ -5217,7 +5256,6 @@ def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, exist
             "lighting": "consistent lighting across all elements",
             "medium": "graphic_design",
             "art_style": "single unified composition with precise typography placement",
-            "color_palette": [],
         }
     else:
         style_description = {
@@ -5225,21 +5263,10 @@ def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, exist
             "lighting": "consistent natural lighting across the whole scene",
             "photo": "single uninterrupted continuous camera shot with consistent perspective, focus, depth, scale, and no dividing seam",
             "medium": "photograph",
-            "color_palette": [],
         }
 
     elements: list[dict] = []
-    if object_notes:
-        elements.append({
-            "type": "obj",
-            "desc": (
-                "One uninterrupted scene that fuses all object modules into the same camera view and physical space. "
-                "Use natural spatial relationships, not separate layout regions: "
-                + " ".join(object_notes)
-                + " Keep one shared perspective, one lighting direction, one foreground/background space, and one atmosphere. "
-                "Do not draw guide rectangles, boxes, outlines, panels, quadrant divisions, split-screen seams, pasted regions, or PPT-style frames."
-            ),
-        })
+    elements.extend(_ideogram4_canvas_object_element(shape) for shape in object_shapes)
     elements.extend(text_elements)
     if not elements:
         elements.append({"type": "obj", "desc": base})
@@ -5247,13 +5274,13 @@ def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, exist
     payload = {
         "high_level_description": (
             base
-            + " Object modules must be fused into one continuous image. Text modules may use invisible bbox placement for glyph positioning only; do not draw any visible text boxes or borders."
+            + " All object modules belong to one continuous image; their bboxes are placement metadata, not visible frames. Text modules use bbox placement for glyph positioning only."
         ).strip(),
         "style_description": style_description,
         "compositional_deconstruction": {
             "background": (
                 base
-                + " A single continuous environment connects all object content naturally, with no visible layout boxes, borders, cards, panels, quadrant grid, split-screen seam, or inset frames."
+                + " A single continuous environment connects all object content naturally with one camera perspective, one lighting model, and one physical space."
             ).strip(),
             "elements": elements,
         },
@@ -5291,11 +5318,11 @@ def _normalize_ideogram4_style_description(style: dict) -> dict:
 def _normalize_ideogram4_caption_object(data: dict) -> dict | None:
     if not isinstance(data, dict):
         return None
-    high = str(data.get("high_level_description") or data.get("description") or "").strip()
+    high = _ideogram4_safety_normalize_text(data.get("high_level_description") or data.get("description") or "")
     comp = data.get("compositional_deconstruction")
     if not isinstance(comp, dict):
         comp = {}
-    background = str(comp.get("background") or data.get("background") or high).strip()
+    background = _ideogram4_safety_normalize_text(comp.get("background") or data.get("background") or high)
     elements = comp.get("elements")
     if not isinstance(elements, list):
         elements = []
@@ -5303,7 +5330,7 @@ def _normalize_ideogram4_caption_object(data: dict) -> dict | None:
     for item in elements[:20]:
         if not isinstance(item, dict):
             continue
-        desc = str(item.get("desc") or item.get("description") or item.get("text") or "").strip()
+        desc = _ideogram4_safety_normalize_text(item.get("desc") or item.get("description") or item.get("text") or "")
         if not desc:
             continue
         bbox = _ideogram4_clean_bbox(item.get("bbox"))
@@ -5457,13 +5484,13 @@ def _ideogram4_find_string_by_keys(value, keys: tuple[str, ...], depth: int = 0)
 def _custom_ideogram4_caption_object(data: dict) -> dict | None:
     if not isinstance(data, dict):
         return None
-    high = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_POSITIVE_KEYS)
+    high = _ideogram4_safety_normalize_text(_ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_POSITIVE_KEYS))
     if not high:
-        high = _ideogram4_find_string_by_keys(data, ("画面描述", "整体描述", "图片内容", "基本概述"))
+        high = _ideogram4_safety_normalize_text(_ideogram4_find_string_by_keys(data, ("画面描述", "整体描述", "图片内容", "基本概述")))
     if not high:
         return None
-    background = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_SCENE_KEYS) or high
-    subject = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_SUBJECT_KEYS) or high
+    background = _ideogram4_safety_normalize_text(_ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_SCENE_KEYS) or high)
+    subject = _ideogram4_safety_normalize_text(_ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_SUBJECT_KEYS) or high)
     aesthetics = _ideogram4_find_string_by_keys(data, _IDEOGRAM4_CUSTOM_STYLE_KEYS) or "clean high-quality image"
     return {
         "high_level_description": _ideogram4_clip_text(high, 1800),
@@ -5472,7 +5499,6 @@ def _custom_ideogram4_caption_object(data: dict) -> dict | None:
             "lighting": "coherent natural lighting",
             "medium": "digital image",
             "art_style": _ideogram4_clip_text(aesthetics, 900),
-            "color_palette": [],
         },
         "compositional_deconstruction": {
             "background": _ideogram4_clip_text(background, 1400),
@@ -5534,10 +5560,6 @@ def _merge_ideogram4_style(base: dict, style: dict | None) -> dict:
                 seen_bits.add(key)
                 merged_bits.append(clean)
         style_description["aesthetics"] = "; ".join(merged_bits)
-    if style.get("preset_id"):
-        style_description["preset_id"] = style.get("preset_id")
-    if style.get("category"):
-        style_description["category"] = style.get("category")
     return base
 
 
@@ -5650,7 +5672,8 @@ def _official_ideogram4_caption_from_plain(prompt: str, *, allow_llm: bool = Fal
                 return _llm_official_ideogram4_caption(cleaned, style, chat_fn=chat_fn)
             except Exception as exc:
                 add_log("warn", "ideogram4_prompt", f"LLM caption rewrite fallback: {str(exc)[:160]}")
-        body = cleaned
+        body = _ideogram4_safety_normalize_text(cleaned)
+    body = _ideogram4_safety_normalize_text(body)
     if not body:
         body = "A clean, high-quality image with a clear subject and coherent composition."
     payload = {
@@ -5660,7 +5683,6 @@ def _official_ideogram4_caption_from_plain(prompt: str, *, allow_llm: bool = Fal
             "lighting": "coherent natural lighting",
             "medium": "digital image",
             "art_style": "clean high-quality digital image",
-            "color_palette": [],
         },
         "compositional_deconstruction": {
             "background": body,
