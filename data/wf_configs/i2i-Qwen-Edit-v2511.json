@@ -3,11 +3,31 @@
   "workflow": "i2i-Qwen-Edit-v2511.json",
   "fields": [
     {
+      "key": "41::__image_reference_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图模式",
+      "order": 0,
+      "type": "image_reference_mode",
+      "value": "single"
+    },
+    {
+      "key": "41::__multi_reference_images",
+      "zone": "user_input",
+      "visible": true,
+      "label": "多参考图片",
+      "order": 2,
+      "type": "multi_image_refs",
+      "value": "[]",
+      "min": 2,
+      "max": 3
+    },
+    {
       "key": "41::image",
       "zone": "user_input",
       "visible": true,
-      "label": "image",
-      "order": 0,
+      "label": "参考图片",
+      "order": 1,
       "type": "image"
     },
     {
@@ -15,7 +35,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "prompt",
-      "order": 1,
+      "order": 3,
       "type": "textarea"
     },
     {
@@ -230,7 +250,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "水平角度",
-      "order": 2,
+      "order": 4,
       "type": "number",
       "step": 1,
       "min": 0,
@@ -241,7 +261,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "俯仰角度",
-      "order": 3,
+      "order": 5,
       "type": "number",
       "step": 1,
       "min": -30,
@@ -252,7 +272,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "镜头距离",
-      "order": 4,
+      "order": 6,
       "type": "number",
       "step": 0.1,
       "min": 0,

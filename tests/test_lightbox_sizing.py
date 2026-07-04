@@ -40,8 +40,8 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s*\{[^}]*position:\s*fixed", re.S)
         self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s*\{[^}]*width:\s*100vw\s*!important", re.S)
         self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s*\{[^}]*height:\s*calc\(var\(--vh,\s*1vh\)\s*\*\s*100\)\s*!important", re.S)
-        self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s+#lbImg,\s*\.lb-stage\.lb-image-zoomed\s+#lbFullImg\s*\{[^}]*position:\s*absolute", re.S)
-        self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s+#lbImg,\s*\.lb-stage\.lb-image-zoomed\s+#lbFullImg\s*\{[^}]*transform:\s*translate\(-50%,\s*-50%\)\s*translate3d\(var\(--lb-image-pan-x\),\s*var\(--lb-image-pan-y\),\s*0\)\s*scale\(var\(--lb-image-zoom\)\)", re.S)
+        self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s+#lbImg,[^{]*\.lb-stage\.lb-image-zoomed\s+#lbFullImg[^{]*\{[^}]*position:\s*absolute", re.S)
+        self.assertRegex(css, r"\.lb-stage\.lb-image-zoomed\s+#lbImg,[^{]*\.lb-stage\.lb-image-zoomed\s+#lbFullImg[^{]*\{[^}]*transform:\s*translate\(-50%,\s*-50%\)\s*translate3d\(var\(--lb-image-pan-x\),\s*var\(--lb-image-pan-y\),\s*0\)\s*scale\(var\(--lb-image-zoom\)\)", re.S)
         self.assertNotRegex(css, r"\.lightbox\.lb-image-zoomed", re.S)
         self.assertNotRegex(css, r"\.lb-actions[^}]*var\(--lb-image-zoom\)", re.S)
 
@@ -159,12 +159,14 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertRegex(css, r"\.lb-image-export-wrap\s*\{[^}]*right:\s*max\(var\(--lb-round-edge-offset\),\s*env\(safe-area-inset-right\)\)", re.S)
         self.assertRegex(css, r"\.lb-image-export-wrap\s*\{[^}]*bottom:\s*calc\(max\(var\(--lb-round-edge-offset\),\s*env\(safe-area-inset-bottom\)\)\s*\+\s*var\(--lb-round-bottom-offset\)\s*\+\s*var\(--lb-round-step\)\)", re.S)
 
-    def test_lightbox_round_buttons_are_reduced_by_one_third(self):
+    def test_lightbox_pc_round_buttons_are_doubled_and_mobile_size_is_preserved(self):
         css = pathlib.Path("static/css/style.css").read_text()
 
-        self.assertIn("--lb-round-btn-size: 29px;", css)
-        self.assertIn("--lb-round-nav-size: 32px;", css)
-        self.assertIn("--lb-round-gap: 8px;", css)
+        self.assertIn("--lb-round-btn-size: 58px;", css)
+        self.assertIn("--lb-round-nav-size: 64px;", css)
+        self.assertIn("--lb-round-icon-size: 26px;", css)
+        self.assertIn("--lb-round-close-icon-size: 38px;", css)
+        self.assertIn("--lb-round-gap: 12px;", css)
         self.assertIn("--lb-round-step: calc(var(--lb-round-btn-size) + var(--lb-round-gap));", css)
         self.assertRegex(css, r"\.lb-action-btn\s*\{[^}]*width:\s*var\(--lb-round-btn-size\)", re.S)
         self.assertRegex(css, r"\.lb-download\s*\{[^}]*width:\s*var\(--lb-round-btn-size\)", re.S)
@@ -173,7 +175,43 @@ class LightboxSizingTest(unittest.TestCase):
         self.assertRegex(css, r"\.lb-nav\s*\{[^}]*width:\s*var\(--lb-round-nav-size\)", re.S)
         self.assertIn("--lb-round-btn-size: 45px;", css)
         self.assertIn("--lb-round-nav-size: 45px;", css)
-        self.assertIn("--lb-round-gap: 12px;", css)
+        self.assertRegex(css, r"@media \(max-width: 765px\)\s*\{[^}]*--lb-round-btn-size:\s*45px", re.S)
+
+    def test_lightbox_pc_zoom_controls_scale_image_without_resizing_stage(self):
+        js = pathlib.Path("static/js/modules/history.js").read_text()
+        css = pathlib.Path("static/css/style.css").read_text()
+        html = pathlib.Path("static/index.html").read_text()
+        sprite = pathlib.Path("static/icons/sprite.svg").read_text()
+
+        self.assertIn('id="lbZoomControls"', html)
+        self.assertIn('id="lbZoomRange"', html)
+        self.assertIn("CW.setLBImageZoom", html)
+        self.assertIn("CW.adjustLBImageZoom", html)
+        self.assertIn("CW.resetLBImageZoom", html)
+        self.assertIn('href="#icon-minus"', html)
+        self.assertIn('href="#icon-plus"', html)
+        self.assertIn('id="icon-minus"', sprite)
+
+        self.assertIn("function setLBImageZoom", js)
+        self.assertIn("function adjustLBImageZoom", js)
+        self.assertIn("function resetLBImageZoom", js)
+        self.assertIn("window.CW.setLBImageZoom = setLBImageZoom", js)
+        self.assertIn("window.CW.adjustLBImageZoom = adjustLBImageZoom", js)
+        self.assertIn("window.CW.resetLBImageZoom = resetLBImageZoom", js)
+        self.assertIn("_lbZoomState.mode = 'control';", js)
+        self.assertIn("_lbZoomState.mode = 'touch';", js)
+        self.assertIn("stage.classList.toggle('lb-image-control-zoomed'", js)
+        self.assertIn("stage.classList.toggle('lb-image-zoomed', isZoomed && !isControlZoom)", js)
+
+        self.assertRegex(css, r"\.lb-stage\.lb-image-control-zoomed\s*\{[^}]*overflow:\s*hidden", re.S)
+        control_rule = re.search(r"\.lb-stage\.lb-image-control-zoomed\s*\{(?P<body>[^}]*)\}", css, re.S)
+        self.assertIsNotNone(control_rule)
+        self.assertNotIn("position: fixed", control_rule.group("body"))
+        self.assertIn(".lb-stage.lb-image-control-zoomed #lbImg", css)
+        self.assertIn(".lb-stage.lb-image-control-zoomed #lbFullImg", css)
+        self.assertIn("transform: translate(-50%, -50%) translate3d(var(--lb-image-pan-x), var(--lb-image-pan-y), 0) scale(var(--lb-image-zoom));", css)
+        self.assertRegex(css, r"\.lb-zoom-controls\s*\{[^}]*position:\s*absolute", re.S)
+        self.assertIn(".lb-zoom-controls {\n    display: none !important;\n  }", css)
 
     def test_lightbox_exposes_permission_gated_delete_action_on_left_axis(self):
         js = pathlib.Path("static/js/modules/history.js").read_text()

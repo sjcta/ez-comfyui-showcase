@@ -6,7 +6,10 @@
         "9",
         0
       ],
-      "text": "Van Gogh style painting. A cute, happy Corgi with fluffy golden and white fur, short sturdy legs, and a wide open mouth with its pink tongue hanging out. The dog is captured mid-leap above a grassy park, frozen in the air as it reaches toward a small red ball suspended just ahead of it, its large ears swept backward. The background features thick, expressive, swirling oil brushstrokes. The sky above is a vibrant, clear deep blue filled with swirling patterns, transitioning into bright orange and yellow sunset hues near the horizon. Green trees with twisted trunks and tall yellow flowers lean to one side as if caught in the wind."
+      "text": "A cinematic portrait with rich detail, natural light, and expressive motion"
+    },
+    "_meta": {
+      "title": "Prompt"
     }
   },
   "4": {
@@ -16,20 +19,28 @@
         "9",
         0
       ],
-      "text": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay"
+      "text": "low quality, blurry, distorted, text, watermark"
+    },
+    "_meta": {
+      "title": "Negative Prompt"
     }
   },
   "5": {
-    "class_type": "UNETLoader",
+    "class_type": "UnetLoaderGGUF",
     "inputs": {
-      "unet_name": "Wan22_Bernini_HIGH_fp8_e4m3fn_scaled.safetensors",
-      "weight_dtype": "default"
+      "unet_name": "gguf/bernini_r_high_noise_14B-Q4_K_M.gguf"
+    },
+    "_meta": {
+      "title": "Bernini HIGH Q4_K_M"
     }
   },
   "7": {
     "class_type": "VAELoader",
     "inputs": {
       "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Wan VAE"
     }
   },
   "9": {
@@ -38,13 +49,18 @@
       "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
       "type": "wan",
       "device": "default"
+    },
+    "_meta": {
+      "title": "UMT5"
     }
   },
   "12": {
-    "class_type": "UNETLoader",
+    "class_type": "UnetLoaderGGUF",
     "inputs": {
-      "unet_name": "Wan22_Bernini_LOW_fp8_e4m3fn_scaled.safetensors",
-      "weight_dtype": "default"
+      "unet_name": "gguf/bernini_r_low_noise_14B-Q4_K_M.gguf"
+    },
+    "_meta": {
+      "title": "Bernini LOW Q4_K_M"
     }
   },
   "13": {
@@ -56,6 +72,9 @@
       ],
       "sage_attention": "auto",
       "allow_compile": false
+    },
+    "_meta": {
+      "title": "HIGH Sage Attention"
     }
   },
   "14": {
@@ -67,6 +86,9 @@
       ],
       "sage_attention": "auto",
       "allow_compile": false
+    },
+    "_meta": {
+      "title": "LOW Sage Attention"
     }
   },
   "15": {
@@ -77,7 +99,7 @@
         0
       ],
       "add_noise": false,
-      "noise_seed": 1222436314,
+      "noise_seed": 42,
       "cfg": 4.0,
       "positive": [
         "50",
@@ -99,6 +121,9 @@
         "19",
         0
       ]
+    },
+    "_meta": {
+      "title": "LOW Sampler"
     }
   },
   "16": {
@@ -112,6 +137,9 @@
         "7",
         0
       ]
+    },
+    "_meta": {
+      "title": "Decode"
     }
   },
   "17": {
@@ -122,6 +150,9 @@
         0
       ],
       "step": 35
+    },
+    "_meta": {
+      "title": "HIGH/LOW Split"
     }
   },
   "18": {
@@ -134,6 +165,9 @@
       "scheduler": "simple",
       "steps": 40,
       "denoise": 1.0
+    },
+    "_meta": {
+      "title": "Scheduler"
     }
   },
   "19": {
@@ -144,7 +178,7 @@
         0
       ],
       "add_noise": true,
-      "noise_seed": 1222436314,
+      "noise_seed": 42,
       "cfg": 4.0,
       "positive": [
         "50",
@@ -166,12 +200,18 @@
         "50",
         2
       ]
+    },
+    "_meta": {
+      "title": "HIGH Sampler"
     }
   },
   "27": {
     "class_type": "KSamplerSelect",
     "inputs": {
       "sampler_name": "res_multistep"
+    },
+    "_meta": {
+      "title": "Sampler"
     }
   },
   "50": {
@@ -194,6 +234,9 @@
       "length": 1,
       "batch_size": 1,
       "ref_max_size": 848
+    },
+    "_meta": {
+      "title": "Bernini Conditioning"
     }
   },
   "100": {
@@ -203,7 +246,27 @@
         "16",
         0
       ],
-      "filename_prefix": "bernini_fp8/Bernini_t2i"
+      "filename_prefix": "bernini_q4/Bernini_t2i"
+    },
+    "_meta": {
+      "title": "Bernini Image Output"
+    }
+  },
+  "900": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "",
+      "force_rate": 16,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 81,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "Wan",
+      "force_size": "Disabled"
+    },
+    "_meta": {
+      "title": "Bernini Source Video"
     }
   }
 }

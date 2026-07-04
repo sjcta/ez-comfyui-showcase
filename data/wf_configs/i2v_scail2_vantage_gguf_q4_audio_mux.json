@@ -1,0 +1,785 @@
+{
+  "version": 1,
+  "workflow": "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+  "fields": [
+    {
+      "key": "1::video",
+      "zone": "user_input",
+      "visible": true,
+      "label": "驱动视频",
+      "order": 0,
+      "type": "video"
+    },
+    {
+      "key": "2::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考角色图",
+      "order": 1,
+      "type": "image"
+    },
+    {
+      "key": "6::__scail2_model_variant",
+      "zone": "user_input",
+      "visible": true,
+      "label": "主模型版本",
+      "order": 2,
+      "type": "select",
+      "options": [
+        "FP16",
+        "FP8",
+        "Q4 GGUF",
+        "MXFP8",
+        "NVFP4"
+      ],
+      "value": "NVFP4",
+      "help": "提交时自动切换 GGUF 或 safetensors loader；FP16/FP8/MXFP8 来自 Comfy-Org，NVFP4 来自社区 V2 转换版并作为当前默认。"
+    },
+    {
+      "key": "4::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 3,
+      "type": "textarea"
+    },
+    {
+      "key": "17::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 4,
+      "type": "number",
+      "min": 256,
+      "max": 1536,
+      "step": 32,
+      "role": "width"
+    },
+    {
+      "key": "17::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 5,
+      "type": "number",
+      "min": 256,
+      "max": 1536,
+      "step": 32,
+      "role": "height"
+    },
+    {
+      "key": "1::__output_duration_sec",
+      "zone": "user_input",
+      "visible": true,
+      "label": "输出时长（秒）",
+      "order": 6,
+      "type": "number",
+      "value": 3.375,
+      "min": 0.1,
+      "max": 60,
+      "step": 0.01
+    },
+    {
+      "key": "40::fps",
+      "zone": "user_input",
+      "visible": true,
+      "label": "帧率 FPS",
+      "order": 7,
+      "type": "number",
+      "min": 1,
+      "max": 60,
+      "step": 0.01
+    },
+    {
+      "key": "42::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "合成原视频音频",
+      "order": 8,
+      "type": "toggle",
+      "value": true
+    },
+    {
+      "key": "16::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "SAM追踪对象提示词",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "20::replacement_mode",
+      "zone": "advanced",
+      "visible": true,
+      "label": "替换模式",
+      "order": 1,
+      "type": "toggle"
+    },
+    {
+      "key": "5::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 2,
+      "type": "textarea"
+    },
+    {
+      "key": "22::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 3,
+      "type": "seed"
+    },
+    {
+      "key": "10::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 4,
+      "type": "number",
+      "min": 1,
+      "max": 40,
+      "step": 1
+    },
+    {
+      "key": "22::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 5,
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 0.1
+    },
+    {
+      "key": "21::pose_strength",
+      "zone": "advanced",
+      "visible": true,
+      "label": "驱动强度",
+      "order": 6,
+      "type": "number",
+      "min": 0,
+      "max": 3,
+      "step": 0.05
+    },
+    {
+      "key": "18::detection_threshold",
+      "zone": "advanced",
+      "visible": true,
+      "label": "驱动检测阈值",
+      "order": 7,
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0.01
+    },
+    {
+      "key": "19::detection_threshold",
+      "zone": "advanced",
+      "visible": true,
+      "label": "参考检测阈值",
+      "order": 8,
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0.01
+    },
+    {
+      "key": "18::max_objects",
+      "zone": "advanced",
+      "visible": true,
+      "label": "驱动最大对象数",
+      "order": 9,
+      "type": "number",
+      "min": 1,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "key": "19::max_objects",
+      "zone": "advanced",
+      "visible": true,
+      "label": "参考最大对象数",
+      "order": 10,
+      "type": "number",
+      "min": 1,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "key": "20::object_indices",
+      "zone": "advanced",
+      "visible": true,
+      "label": "对象索引",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "20::sort_by",
+      "zone": "advanced",
+      "visible": true,
+      "label": "颜色排序",
+      "order": 12,
+      "type": "select",
+      "options": [
+        "left_to_right",
+        "area",
+        "none"
+      ]
+    },
+    {
+      "key": "1::skip_first_frames",
+      "zone": "advanced",
+      "visible": true,
+      "label": "跳过开头帧",
+      "order": 13,
+      "type": "number",
+      "min": 0,
+      "max": 10000,
+      "step": 1
+    },
+    {
+      "key": "1::select_every_nth",
+      "zone": "advanced",
+      "visible": true,
+      "label": "每 N 帧取 1 帧",
+      "order": 15,
+      "type": "number",
+      "min": 1,
+      "max": 60,
+      "step": 1
+    },
+    {
+      "key": "8::strength_model",
+      "zone": "advanced",
+      "visible": true,
+      "label": "LightX2V LoRA 强度",
+      "order": 16,
+      "type": "number",
+      "min": 0,
+      "max": 2,
+      "step": 0.05
+    },
+    {
+      "key": "9::shift",
+      "zone": "advanced",
+      "visible": true,
+      "label": "采样 Shift",
+      "order": 17,
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 0.1
+    },
+    {
+      "key": "21::previous_frame_count",
+      "zone": "advanced",
+      "visible": true,
+      "label": "重叠锚定帧数",
+      "order": 18,
+      "type": "number",
+      "min": 1,
+      "max": 33,
+      "step": 4
+    },
+    {
+      "key": "41::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "1::custom_width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "custom_width",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "1::custom_height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "custom_height",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "1::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 2,
+      "type": "text"
+    },
+    {
+      "key": "3::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 3,
+      "type": "text"
+    },
+    {
+      "key": "3::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "3::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "6::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 6,
+      "type": "text",
+      "value": "wan2.1_14B_SCAIL_2_nvfp4_comfy_V2.safetensors",
+      "help": "实际主模型文件名由“主模型版本”下拉在提交时映射。"
+    },
+    {
+      "key": "7::chunks",
+      "zone": "hidden",
+      "visible": false,
+      "label": "chunks",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "7::dim_threshold",
+      "zone": "hidden",
+      "visible": false,
+      "label": "dim_threshold",
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "8::lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "lora_name",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "10::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scheduler",
+      "order": 10,
+      "type": "text"
+    },
+    {
+      "key": "10::denoise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "denoise",
+      "order": 11,
+      "type": "text"
+    },
+    {
+      "key": "11::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sampler_name",
+      "order": 12,
+      "type": "text"
+    },
+    {
+      "key": "12::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 13,
+      "type": "text"
+    },
+    {
+      "key": "13::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 14,
+      "type": "text"
+    },
+    {
+      "key": "14::crop",
+      "zone": "hidden",
+      "visible": false,
+      "label": "crop",
+      "order": 15,
+      "type": "text"
+    },
+    {
+      "key": "15::ckpt_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ckpt_name",
+      "order": 16,
+      "type": "text"
+    },
+    {
+      "key": "17::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 17,
+      "type": "text"
+    },
+    {
+      "key": "17::keep_proportion",
+      "zone": "hidden",
+      "visible": false,
+      "label": "keep_proportion",
+      "order": 18,
+      "type": "text"
+    },
+    {
+      "key": "17::pad_color",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pad_color",
+      "order": 19,
+      "type": "text"
+    },
+    {
+      "key": "17::crop_position",
+      "zone": "hidden",
+      "visible": false,
+      "label": "crop_position",
+      "order": 20,
+      "type": "text"
+    },
+    {
+      "key": "17::divisible_by",
+      "zone": "hidden",
+      "visible": false,
+      "label": "divisible_by",
+      "order": 21,
+      "type": "text"
+    },
+    {
+      "key": "17::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 22,
+      "type": "text"
+    },
+    {
+      "key": "18::detect_interval",
+      "zone": "hidden",
+      "visible": false,
+      "label": "detect_interval",
+      "order": 23,
+      "type": "text"
+    },
+    {
+      "key": "19::detect_interval",
+      "zone": "hidden",
+      "visible": false,
+      "label": "detect_interval",
+      "order": 24,
+      "type": "text"
+    },
+    {
+      "key": "21::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "batch_size",
+      "order": 25,
+      "type": "text"
+    },
+    {
+      "key": "21::pose_start",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pose_start",
+      "order": 26,
+      "type": "text"
+    },
+    {
+      "key": "21::pose_end",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pose_end",
+      "order": 27,
+      "type": "text"
+    },
+    {
+      "key": "21::video_frame_offset",
+      "zone": "hidden",
+      "visible": false,
+      "label": "video_frame_offset",
+      "order": 28,
+      "type": "text"
+    },
+    {
+      "key": "21::replacement_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "replacement_mode",
+      "order": 29,
+      "type": "text"
+    },
+    {
+      "key": "22::add_noise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "add_noise",
+      "order": 30,
+      "type": "text"
+    },
+    {
+      "key": "25::value",
+      "zone": "hidden",
+      "visible": false,
+      "label": "value",
+      "order": 31,
+      "type": "text"
+    },
+    {
+      "key": "26::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 32,
+      "type": "text"
+    },
+    {
+      "key": "27::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 33,
+      "type": "text"
+    },
+    {
+      "key": "28::comparison",
+      "zone": "hidden",
+      "visible": false,
+      "label": "comparison",
+      "order": 34,
+      "type": "text"
+    },
+    {
+      "key": "30::expression",
+      "zone": "hidden",
+      "visible": false,
+      "label": "expression",
+      "order": 35,
+      "type": "text"
+    },
+    {
+      "key": "31::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "batch_size",
+      "order": 36,
+      "type": "text"
+    },
+    {
+      "key": "31::pose_strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pose_strength",
+      "order": 37,
+      "type": "text"
+    },
+    {
+      "key": "31::pose_start",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pose_start",
+      "order": 38,
+      "type": "text"
+    },
+    {
+      "key": "31::pose_end",
+      "zone": "hidden",
+      "visible": false,
+      "label": "pose_end",
+      "order": 39,
+      "type": "text"
+    },
+    {
+      "key": "31::previous_frame_count",
+      "zone": "hidden",
+      "visible": false,
+      "label": "previous_frame_count",
+      "order": 40,
+      "type": "text"
+    },
+    {
+      "key": "31::replacement_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "replacement_mode",
+      "order": 41,
+      "type": "text"
+    },
+    {
+      "key": "32::add_noise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "add_noise",
+      "order": 42,
+      "type": "text"
+    },
+    {
+      "key": "32::noise_seed",
+      "zone": "hidden",
+      "visible": false,
+      "label": "noise_seed",
+      "order": 43,
+      "type": "text"
+    },
+    {
+      "key": "32::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 44,
+      "type": "text"
+    },
+    {
+      "key": "34::start_index",
+      "zone": "hidden",
+      "visible": false,
+      "label": "start_index",
+      "order": 45,
+      "type": "text"
+    },
+    {
+      "key": "34::num_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "num_frames",
+      "order": 46,
+      "type": "text"
+    },
+    {
+      "key": "35::start_index",
+      "zone": "hidden",
+      "visible": false,
+      "label": "start_index",
+      "order": 47,
+      "type": "text"
+    },
+    {
+      "key": "35::num_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "num_frames",
+      "order": 48,
+      "type": "text"
+    },
+    {
+      "key": "36::method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "method",
+      "order": 49,
+      "type": "text"
+    },
+    {
+      "key": "36::source_stats",
+      "zone": "hidden",
+      "visible": false,
+      "label": "source_stats",
+      "order": 50,
+      "type": "text"
+    },
+    {
+      "key": "36::strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "strength",
+      "order": 51,
+      "type": "text"
+    },
+    {
+      "key": "41::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 52,
+      "type": "text"
+    },
+    {
+      "key": "41::codec",
+      "zone": "hidden",
+      "visible": false,
+      "label": "codec",
+      "order": 53,
+      "type": "text"
+    },
+    {
+      "key": "21::width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "width",
+      "order": 54,
+      "type": "text"
+    },
+    {
+      "key": "1::frame_load_cap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "输出总帧数 Total Frames",
+      "order": 55,
+      "type": "number",
+      "min": 1,
+      "max": 501,
+      "step": 1
+    },
+    {
+      "key": "21::height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "height",
+      "order": 55,
+      "type": "text"
+    },
+    {
+      "key": "1::force_rate",
+      "zone": "hidden",
+      "visible": false,
+      "label": "驱动视频重采样 FPS（自动）",
+      "order": 56,
+      "type": "number",
+      "min": 1,
+      "max": 60,
+      "step": 0.01
+    },
+    {
+      "key": "31::width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "width",
+      "order": 56,
+      "type": "text"
+    },
+    {
+      "key": "31::height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "height",
+      "order": 57,
+      "type": "text"
+    }
+  ],
+  "summary": "SCAIL2 unified model selector"
+}

@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from modules.step_calculator import StepCalculator
+from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator
 from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
 
@@ -74,7 +74,7 @@ class ProgressCalculationTests(unittest.TestCase):
             node_types={nid: node["class_type"] for nid, node in workflow.items()},
             progress_callback=lambda progress: progress_events.append(progress),
         )
-        tracker.PROMPT_START_TIMEOUT = 0.01
+        tracker._prompt_start_timeout = 0.01
         tracker.WS_SILENT_TIMEOUT = 10
 
         class QuietWS:
@@ -101,6 +101,80 @@ class ProgressCalculationTests(unittest.TestCase):
         submitting = [event for event in progress_events if event.get("message") == "提交工作流..."]
         self.assertTrue(submitting)
         self.assertEqual(submitting[-1]["pct"], 0)
+
+    def test_unfinished_progress_never_displays_as_100_percent(self):
+        tracker = WSTracker(
+            job_id="job-display-pct-test",
+            workflow={"1": {"class_type": "SaveImage", "inputs": {}}},
+            step_info=StepInfo(total_units=100.0, node_weights={"1": 100.0}),
+            instance_url="http://127.0.0.1:8190",
+            node_types={"1": "SaveImage"},
+        )
+        tracker._completed_units = 100.0
+
+        self.assertEqual(tracker._calc_pct(), 99.0)
+        self.assertEqual(tracker._build_status_message(99.8), "99%...")
+
+        tracker._workflow_done = True
+        self.assertEqual(tracker._calc_pct(), 100.0)
+        self.assertEqual(tracker._build_status_message(100.0), "100%...")
+
+    def test_resume_tracker_can_seed_existing_progress(self):
+        tracker = WSTracker(
+            job_id="job-resume-seed-test",
+            workflow={"1": {"class_type": "SaveImage", "inputs": {}}},
+            step_info=StepInfo(total_units=100.0, node_weights={"1": 100.0}),
+            instance_url="http://127.0.0.1:8190",
+            node_types={"1": "SaveImage"},
+        )
+
+        tracker.seed_progress_pct(62)
+
+        self.assertEqual(tracker._calc_pct(), 62.0)
+        self.assertEqual(tracker._build_status_message(62), "62%...")
+
+    def test_expanded_loop_node_ids_log_readable_titles(self):
+        workflow = {
+            "31": {
+                "class_type": "WanSCAILToVideo",
+                "_meta": {"title": "SCAIL-2 Loop Chunk"},
+                "inputs": {},
+            },
+            "32": {
+                "class_type": "SamplerCustom",
+                "_meta": {"title": "Sample Loop Chunk"},
+                "inputs": {},
+            },
+            "38": {
+                "class_type": "easy forLoopEnd",
+                "_meta": {"title": "SCAIL Segment Loop End"},
+                "inputs": {},
+            },
+        }
+        logs = []
+        progress_events = []
+        tracker = WSTracker(
+            job_id="job-loop-log-test",
+            workflow=workflow,
+            step_info=StepInfo(total_units=10.0, node_weights={"32": 6.0, "38": 0.0}),
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+            progress_callback=lambda progress: progress_events.append(progress),
+            log_callback=lambda level, phase, msg, job_id: logs.append((phase, msg)),
+        )
+
+        asyncio.run(tracker._handle_executing(
+            {"node": "38.0.0.3.0.0.32"},
+            total_units=10,
+            node_weights={"32": 6.0, "38": 0.0},
+        ))
+
+        self.assertTrue(logs)
+        self.assertEqual(logs[-1][0], "node")
+        self.assertIn("SCAIL Segment Loop End / Sample Loop Chunk", logs[-1][1])
+        self.assertNotIn("[]", logs[-1][1])
+        self.assertNotIn("38.0.0.3.0.0.32", logs[-1][1])
+        self.assertEqual(progress_events[-1]["current_node"], "SamplerCustom")
 
     def test_flux2_sampler_uses_scheduler_steps_so_setup_nodes_do_not_frontload_progress(self):
         workflow_path = (
@@ -141,6 +215,49 @@ class ProgressCalculationTests(unittest.TestCase):
 
         self.assertEqual(pct_by_node["10"], 0)
         self.assertLess(pct_by_node["38"], 10)
+
+    def test_scail2_loop_sampler_progress_is_divided_by_loop_count(self):
+        workflow_path = (
+            Path(__file__).resolve().parents[1]
+            / "data"
+            / "workflows"
+            / "DGX Spark"
+            / "i2v_scail2_vantage_gguf_q4_quality_test.json"
+        )
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow["1"]["inputs"]["frame_load_cap"] = 501
+        workflow["10"]["inputs"]["steps"] = 6
+        step_info = StepCalculator().calculate(workflow)
+
+        self.assertEqual(step_info.node_repeats["32"], 6)
+
+        tracker = WSTracker(
+            job_id="job-scail-loop-progress-test",
+            workflow=workflow,
+            step_info=step_info,
+            instance_url="http://127.0.0.1:8190",
+            node_types={nid: node["class_type"] for nid, node in workflow.items()},
+        )
+
+        async def run_two_loop_sampler_passes():
+            sampler_node = "38.0.0.3.0.0.32"
+            for _ in range(2):
+                await tracker._handle_executing(
+                    {"node": sampler_node},
+                    step_info.total_units,
+                    step_info.node_weights,
+                )
+                await tracker._handle_progress(
+                    {"node": sampler_node, "value": 6, "max": 6},
+                    step_info.total_units,
+                    step_info.node_weights,
+                )
+            return tracker._completed_units
+
+        completed = asyncio.run(run_two_loop_sampler_passes())
+        expected = step_info.node_weights["32"] / 6 * 2
+        self.assertAlmostEqual(completed, expected, places=4)
+        self.assertLess(tracker._calc_pct(), step_info.node_weights["32"])
 
     def test_sampler_and_upscale_share_ninety_percent_budget(self):
         workflow = {
@@ -255,7 +372,7 @@ class ProgressCalculationTests(unittest.TestCase):
             instance_url="http://127.0.0.1:8190",
             node_types={nid: node["class_type"] for nid, node in workflow.items()},
         )
-        tracker.PROMPT_START_TIMEOUT = 0.01
+        tracker._prompt_start_timeout = 0.01
         tracker.WS_SILENT_TIMEOUT = 10
         tracker._start_time = 0
         tracker._prompt_id = "prompt-stalled"

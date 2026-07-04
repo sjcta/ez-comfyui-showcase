@@ -125,6 +125,24 @@ class PromptLabelTests(unittest.TestCase):
         )
         self.assertEqual(label, "4K 放大")
 
+    def test_upscale_custom_workflow_name_wins_when_prompt_is_empty(self):
+        label = infer_generation_label(
+            "i2i_z_image_tile_seedvr2_upscale_v2.json",
+            {"77::resolution": 2048},
+            "放大",
+            "Z-Image 分块重绘放大",
+        )
+        self.assertEqual(label, "Z-Image 分块重绘放大")
+
+    def test_prompt_text_still_wins_over_upscale_custom_workflow_name(self):
+        label = infer_generation_label(
+            "i2i_z_image_tile_seedvr2_upscale_v2.json",
+            {"77::resolution": 2048, "28::text": "restore this product photo"},
+            "放大",
+            "Z-Image 分块重绘放大",
+        )
+        self.assertEqual(label, "restore this product photo")
+
 
 if __name__ == "__main__":
     unittest.main()

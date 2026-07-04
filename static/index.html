@@ -8,13 +8,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ez ComfyUI Showcase</title>
 <link rel="icon" type="image/png" href="static/icons/ez-site-logo-64.png">
-<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1781000019">
+<link id="cwStyleLink" rel="stylesheet" href="static/css/style.css?v=1783213201">
 <script>
 if (location.protocol === 'file:') {
   location.replace('http://localhost:18000/');
 }
 </script>
-<script src="static/js/module_loader.js?v=1781000019"></script>
+<script src="static/js/module_loader.js?v=1783213201"></script>
 </head>
 <body data-theme="crypto">
 <div id="cw-sprite-slot"></div>
@@ -401,6 +401,18 @@ if (location.protocol === 'file:') {
     <img id="lbImg" src="" alt="">
     <img id="lbFullImg" src="" alt="" aria-hidden="true">
     <video id="lbVideo" controls playsinline preload="metadata"></video>
+  </div>
+  <div class="lb-zoom-controls" id="lbZoomControls" hidden aria-label="图片缩放控制">
+    <button class="lb-zoom-btn" id="lbZoomOut" type="button" title="缩小图片" aria-label="缩小图片" onclick="if(window.CW&&CW.adjustLBImageZoom)CW.adjustLBImageZoom(-0.25,event)">
+      <svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-minus"/></svg>
+    </button>
+    <input class="lb-zoom-range" id="lbZoomRange" type="range" min="1" max="4" step="0.25" value="1" aria-label="图片缩放比例" oninput="if(window.CW&&CW.setLBImageZoom)CW.setLBImageZoom(this.value,event)">
+    <button class="lb-zoom-reset" id="lbZoomReset" type="button" title="重置缩放" aria-label="重置缩放" onclick="if(window.CW&&CW.resetLBImageZoom)CW.resetLBImageZoom(event)">
+      <span id="lbZoomValue">100%</span>
+    </button>
+    <button class="lb-zoom-btn" id="lbZoomIn" type="button" title="放大图片" aria-label="放大图片" onclick="if(window.CW&&CW.adjustLBImageZoom)CW.adjustLBImageZoom(0.25,event)">
+      <svg class="cw-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#icon-plus"/></svg>
+    </button>
   </div>
   <div class="lb-video-editor" id="lbVideoEditor" hidden>
     <div class="lb-video-editor-toolbar">

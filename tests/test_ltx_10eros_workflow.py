@@ -8,6 +8,8 @@ WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros.json"
 CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros.json"
 DIRECTOR_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_director.json"
 DIRECTOR_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros_director.json"
+OFFICIAL_DIRECTOR_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_director_official.json"
+OFFICIAL_DIRECTOR_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_director_official.json"
 ANTIFLICKER_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_antiflicker.json"
 ANTIFLICKER_CONFIG = ROOT / "data/wf_configs/i2v_ltx23_10eros_antiflicker.json"
 AUDIO_CLEAN_WORKFLOW = ROOT / "data/workflows/DGX Spark/i2v_ltx23_10eros_antiflicker_audio_clean_test.json"
@@ -145,23 +147,47 @@ class Ltx10ErosWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["320:340"]["inputs"]["model"], ["320:285", 0])
         self.assertEqual(workflow["320:340"]["inputs"]["clip"], ["320:317", 0])
         self.assertEqual(workflow["320:340"]["inputs"]["audio_vae"], ["320:279", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["start_second"], 0)
+        self.assertEqual(workflow["320:340"]["inputs"]["end_second"], ["320:344", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["start_frame"], 0)
+        self.assertEqual(workflow["320:340"]["inputs"]["end_frame"], ["320:323", 1])
         self.assertEqual(workflow["320:340"]["inputs"]["duration_seconds"], ["320:344", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["duration_frames"], ["320:323", 1])
         self.assertEqual(workflow["320:340"]["inputs"]["frame_rate"], ["320:298", 0])
+        self.assertTrue(workflow["320:340"]["inputs"]["use_custom_motion"])
+        self.assertTrue(workflow["320:340"]["inputs"]["inpaint_audio"])
+        self.assertFalse(workflow["320:340"]["inputs"]["override_audio"])
         self.assertEqual(workflow["320:304"]["inputs"]["positive"], ["320:340", 1])
-        self.assertEqual(workflow["320:304"]["inputs"]["frame_rate"], ["320:340", 5])
+        self.assertEqual(workflow["320:304"]["inputs"]["frame_rate"], ["320:340", 6])
+        self.assertEqual(workflow["320:310"]["inputs"]["fps"], ["320:340", 6])
         self.assertEqual(workflow["320:344"]["class_type"], "ComfyMathExpression")
         self.assertEqual(workflow["320:342"]["class_type"], "LTXDirectorGuide")
         self.assertEqual(workflow["320:343"]["class_type"], "LTXDirectorGuide")
+        self.assertEqual(workflow["320:342"]["inputs"]["motion_guide_data"], ["320:340", 5])
+        self.assertEqual(workflow["320:342"]["inputs"]["model"], ["320:340", 0])
+        self.assertEqual(workflow["320:342"]["inputs"]["scale_by"], 0.5)
+        self.assertEqual(workflow["320:342"]["inputs"]["ic_lora_name"], "None")
+        self.assertEqual(workflow["320:343"]["inputs"]["motion_guide_data"], ["320:340", 5])
+        self.assertEqual(workflow["320:343"]["inputs"]["model"], ["320:340", 0])
+        self.assertEqual(workflow["320:343"]["inputs"]["scale_by"], 1)
         self.assertEqual(workflow["320:318"]["inputs"]["video_latent"], ["320:342", 2])
         self.assertEqual(workflow["320:318"]["inputs"]["audio_latent"], ["320:340", 3])
+        self.assertEqual(workflow["320:325"]["inputs"]["model"], ["320:342", 3])
+        self.assertEqual(workflow["320:314"]["inputs"]["model"], ["320:325", 0])
         self.assertEqual(workflow["320:314"]["inputs"]["positive"], ["320:342", 0])
         self.assertEqual(workflow["320:314"]["inputs"]["negative"], ["320:342", 1])
+        self.assertEqual(workflow["320:284"]["class_type"], "LTXDirectorCropGuides")
         self.assertEqual(workflow["320:284"]["inputs"]["positive"], ["320:342", 0])
         self.assertEqual(workflow["320:284"]["inputs"]["negative"], ["320:342", 1])
+        self.assertEqual(workflow["320:287"]["inputs"]["samples"], ["320:284", 2])
         self.assertEqual(workflow["320:343"]["inputs"]["positive"], ["320:284", 0])
         self.assertEqual(workflow["320:343"]["inputs"]["latent"], ["320:287", 0])
+        self.assertEqual(workflow["320:282"]["inputs"]["model"], ["320:343", 3])
         self.assertEqual(workflow["320:278"]["inputs"]["video_latent"], ["320:343", 2])
         self.assertEqual(workflow["320:278"]["inputs"]["audio_latent"], ["320:307", 1])
+        self.assertEqual(workflow["320:345"]["class_type"], "LTXDirectorCropGuides")
+        self.assertEqual(workflow["320:345"]["inputs"]["latent"], ["320:309", 0])
+        self.assertEqual(workflow["320:315"]["inputs"]["samples"], ["320:345", 2])
         self.assertEqual(workflow["320:316"]["inputs"]["ckpt_name"], TEN_EROS_CKPT)
 
     def test_director_variant_quick_form_exposes_director_fields(self):
@@ -172,13 +198,72 @@ class Ltx10ErosWorkflowTests(unittest.TestCase):
         self.assertEqual(config["workflow"], "i2v_ltx23_10eros_director.json")
         self.assertEqual(fields["320:340::global_prompt"]["zone"], "user_input")
         self.assertEqual(fields["320:340::global_prompt"]["label"], "导演全局提示词")
+        self.assertEqual(fields["320:312::value"]["role"], "width")
+        self.assertEqual(fields["320:299::value"]["role"], "height")
         self.assertEqual(fields["320:340::timeline_data"]["zone"], "hidden")
         self.assertEqual(fields["320:340::local_prompts"]["zone"], "hidden")
         self.assertEqual(fields["320:340::segment_lengths"]["zone"], "hidden")
+        self.assertEqual(fields["320:340::use_custom_motion"]["zone"], "hidden")
+        self.assertEqual(fields["320:340::override_audio"]["zone"], "hidden")
         entry = meta["i2v_ltx23_10eros_director.json"]
         self.assertEqual(entry["name"], "LTX2.3 10Eros 导演版")
         self.assertTrue(entry["shared"])
         self.assertIn("视频制作", entry["tags"])
+        self.assertIn("导演版", entry["tags"])
+
+    def test_official_director_variant_matches_ltx_director_2_structure(self):
+        workflow = json.loads(OFFICIAL_DIRECTOR_WORKFLOW.read_text())
+
+        self.assertEqual(workflow["320:316"]["class_type"], "UNETLoader")
+        self.assertEqual(
+            workflow["320:316"]["inputs"]["unet_name"],
+            "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+        )
+        self.assertEqual(workflow["320:317"]["class_type"], "DualCLIPLoader")
+        self.assertEqual(workflow["320:317"]["inputs"]["type"], "ltxv")
+        self.assertEqual(workflow["320:279"]["inputs"]["vae_name"], "LTX23_audio_vae_bf16.safetensors")
+        self.assertEqual(workflow["320:330"]["inputs"]["vae_name"], "LTX23_video_vae_bf16.safetensors")
+        self.assertEqual(workflow["320:340"]["inputs"]["model"], ["320:316", 0])
+        self.assertEqual(workflow["320:340"]["inputs"]["clip"], ["320:317", 0])
+        self.assertEqual(workflow["320:304"]["inputs"]["frame_rate"], ["320:340", 6])
+        self.assertEqual(workflow["320:310"]["inputs"]["fps"], ["320:340", 6])
+        self.assertEqual(workflow["320:306"]["class_type"], "BasicScheduler")
+        self.assertEqual(workflow["320:306"]["inputs"]["scheduler"], "linear_quadratic")
+        self.assertEqual(workflow["320:306"]["inputs"]["steps"], 8)
+        self.assertEqual(workflow["320:281"]["inputs"]["steps"], 4)
+        self.assertEqual(workflow["320:281"]["inputs"]["denoise"], 0.42)
+        self.assertEqual(workflow["320:342"]["inputs"]["motion_guide_data"], ["320:340", 5])
+        self.assertEqual(workflow["320:342"]["inputs"]["model"], ["320:340", 0])
+        self.assertEqual(workflow["320:342"]["inputs"]["scale_by"], 0.5)
+        self.assertEqual(workflow["320:343"]["inputs"]["motion_guide_data"], ["320:340", 5])
+        self.assertEqual(workflow["320:343"]["inputs"]["model"], ["320:340", 0])
+        self.assertEqual(workflow["320:343"]["inputs"]["scale_by"], 1)
+        self.assertEqual(workflow["320:284"]["class_type"], "LTXDirectorCropGuides")
+        self.assertEqual(workflow["320:287"]["inputs"]["samples"], ["320:284", 2])
+        self.assertEqual(workflow["320:345"]["class_type"], "LTXDirectorCropGuides")
+        self.assertEqual(workflow["320:315"]["class_type"], "VAEDecode")
+        self.assertEqual(workflow["320:315"]["inputs"]["samples"], ["320:345", 2])
+
+    def test_official_director_quick_form_exposes_real_control_surface(self):
+        config = json.loads(OFFICIAL_DIRECTOR_CONFIG.read_text())
+        fields = {item["key"]: item for item in config["fields"]}
+        meta = json.loads(META.read_text())
+
+        self.assertEqual(config["workflow"], "i2v_ltx23_director_official.json")
+        self.assertEqual(fields["320:340::global_prompt"]["zone"], "user_input")
+        self.assertEqual(fields["320:312::value"]["role"], "width")
+        self.assertEqual(fields["320:299::value"]["role"], "height")
+        self.assertEqual(fields["320:306::steps"]["zone"], "advanced")
+        self.assertEqual(fields["320:281::denoise"]["zone"], "advanced")
+        self.assertEqual(fields["320:340::timeline_data"]["zone"], "hidden")
+        self.assertEqual(fields["320:340::use_custom_audio"]["zone"], "hidden")
+        self.assertEqual(fields["320:340::use_custom_motion"]["zone"], "hidden")
+        self.assertEqual(fields["320:342::ic_lora_name"]["zone"], "hidden")
+        self.assertEqual(fields["320:343::ic_lora_name"]["zone"], "hidden")
+        entry = meta["i2v_ltx23_director_official.json"]
+        self.assertEqual(entry["name"], "LTX2.3 官方导演版")
+        self.assertTrue(entry["shared"])
+        self.assertIn("导演版", entry["tags"])
 
     def test_legacy_tiled_sampler_uses_stable_resize_path(self):
         workflow = json.loads(TILED_WORKFLOW.read_text())

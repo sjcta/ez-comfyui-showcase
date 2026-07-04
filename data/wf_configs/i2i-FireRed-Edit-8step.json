@@ -3,11 +3,31 @@
   "workflow": "i2i-FireRed-Edit-8step.json",
   "fields": [
     {
+      "key": "143::__image_reference_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图模式",
+      "order": 0,
+      "type": "image_reference_mode",
+      "value": "single"
+    },
+    {
+      "key": "143::__multi_reference_images",
+      "zone": "user_input",
+      "visible": true,
+      "label": "多参考图片",
+      "order": 2,
+      "type": "multi_image_refs",
+      "value": "[]",
+      "min": 2,
+      "max": 3
+    },
+    {
       "key": "143::image",
       "zone": "user_input",
       "visible": true,
       "label": "参考图片",
-      "order": 0,
+      "order": 1,
       "type": "image"
     },
     {
@@ -15,7 +35,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "提示词",
-      "order": 1,
+      "order": 3,
       "type": "textarea"
     },
     {

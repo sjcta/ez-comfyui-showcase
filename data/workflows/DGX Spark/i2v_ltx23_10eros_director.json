@@ -88,8 +88,8 @@
     "inputs": {
       "cfg": 1,
       "model": [
-        "320:285",
-        0
+        "320:343",
+        3
       ],
       "positive": [
         "320:284",
@@ -148,9 +148,9 @@
         0
       ]
     },
-    "class_type": "LTXVCropGuides",
+    "class_type": "LTXDirectorCropGuides",
     "_meta": {
-      "title": "LTXV裁剪指导"
+      "title": "一阶段裁剪 Director Guides"
     }
   },
   "320:285": {
@@ -183,8 +183,8 @@
   "320:287": {
     "inputs": {
       "samples": [
-        "320:307",
-        0
+        "320:284",
+        2
       ],
       "upscale_model": [
         "320:311",
@@ -427,7 +427,7 @@
     "inputs": {
       "frame_rate": [
         "320:340",
-        5
+        6
       ],
       "positive": [
         "320:340",
@@ -537,7 +537,7 @@
     "inputs": {
       "fps": [
         "320:340",
-        5
+        6
       ],
       "images": [
         "320:315",
@@ -608,8 +608,8 @@
   "320:315": {
     "inputs": {
       "samples": [
-        "320:309",
-        0
+        "320:345",
+        2
       ],
       "vae": [
         "320:316",
@@ -710,7 +710,7 @@
         "320:344",
         0
       ],
-      "timeline_data": "{\"segments\":[],\"audioSegments\":[]}",
+      "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"motionTrackEnabled\":true,\"propHeight\":90,\"globalPropHeight\":60,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":true,\"global_prompt\":\"\",\"retake_global_prompt\":\"\",\"retakeMode\":false,\"retakeStart\":24,\"retakeLength\":48,\"retakePrompt\":\"\",\"retakeStrength\":1,\"retakeVideo\":null,\"normalStartFrame\":0,\"normalDurationFrames\":121,\"segments\":[],\"motionSegments\":[],\"audioSegments\":[]}",
       "use_custom_audio": false,
       "local_prompts": "",
       "segment_lengths": "",
@@ -731,7 +731,20 @@
       ],
       "resize_method": "maintain aspect ratio",
       "divisible_by": 32,
-      "img_compression": 18
+      "img_compression": 18,
+      "start_second": 0,
+      "end_second": [
+        "320:344",
+        0
+      ],
+      "start_frame": 0,
+      "end_frame": [
+        "320:323",
+        1
+      ],
+      "use_custom_motion": true,
+      "inpaint_audio": true,
+      "override_audio": false
     },
     "class_type": "LTXDirector",
     "_meta": {
@@ -752,7 +765,7 @@
   },
   "320:342": {
     "inputs": {
-      "scale_by": 1,
+      "scale_by": 0.5,
       "upscale_method": "bicubic",
       "positive": [
         "320:304",
@@ -773,7 +786,24 @@
       "guide_data": [
         "320:340",
         4
-      ]
+      ],
+      "motion_guide_data": [
+        "320:340",
+        5
+      ],
+      "model": [
+        "320:340",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "image_attention_strength": 1,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 256,
+      "tile_overlap": 64,
+      "retake_mode": false
     },
     "class_type": "LTXDirectorGuide",
     "_meta": {
@@ -803,7 +833,24 @@
       "guide_data": [
         "320:340",
         4
-      ]
+      ],
+      "motion_guide_data": [
+        "320:340",
+        5
+      ],
+      "model": [
+        "320:340",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "image_attention_strength": 1,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 256,
+      "tile_overlap": 64,
+      "retake_mode": false
     },
     "class_type": "LTXDirectorGuide",
     "_meta": {
@@ -828,13 +875,33 @@
       "lora_name": "ltx/ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors",
       "strength_model": 0.28,
       "model": [
-        "320:316",
-        0
+        "320:342",
+        3
       ]
     },
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "音频净化首段 LoRA"
+    }
+  },
+  "320:345": {
+    "inputs": {
+      "positive": [
+        "320:343",
+        0
+      ],
+      "negative": [
+        "320:343",
+        1
+      ],
+      "latent": [
+        "320:309",
+        0
+      ]
+    },
+    "class_type": "LTXDirectorCropGuides",
+    "_meta": {
+      "title": "二阶段裁剪 Director Guides"
     }
   }
 }

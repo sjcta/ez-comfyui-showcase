@@ -2,8 +2,13 @@ import json
 import tempfile
 from pathlib import Path
 import unittest
+from unittest import mock
 
 import app
+from modules.scail2_workflow import (
+    apply_scail2_audio_mux_to_workflow,
+    apply_scail2_model_variant_to_workflow,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +24,71 @@ def _load_repo_workflow(name: str):
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
     return None
+
+
+def _minimal_scail2_workflow():
+    return {
+        "1": {
+            "class_type": "VHS_LoadVideo",
+            "inputs": {"video": "clip.mov", "force_rate": 24, "frame_load_cap": 81},
+        },
+        "20": {
+            "class_type": "SCAIL2ColoredMask",
+            "inputs": {"replacement_mode": False},
+        },
+        "21": {
+            "class_type": "WanSCAILToVideo",
+            "inputs": {
+                "width": 512,
+                "height": 896,
+                "replacement_mode": False,
+                "pose_strength": 1,
+                "previous_frame_count": 5,
+            },
+        },
+        "22": {
+            "class_type": "SamplerCustom",
+            "inputs": {"noise_seed": 1, "cfg": 1},
+        },
+        "31": {
+            "class_type": "WanSCAILToVideo",
+            "inputs": {
+                "width": 512,
+                "height": 896,
+                "replacement_mode": False,
+                "pose_strength": 1,
+                "previous_frame_count": 5,
+            },
+        },
+        "32": {
+            "class_type": "SamplerCustom",
+            "inputs": {"noise_seed": 1, "cfg": 1},
+        },
+        "40": {
+            "class_type": "CreateVideo",
+            "inputs": {"fps": 24},
+        },
+        "41": {
+            "class_type": "SaveVideo",
+            "inputs": {"video": ["44", 0]},
+        },
+        "42": {
+            "class_type": "PrimitiveBoolean",
+            "inputs": {"value": True},
+        },
+        "43": {
+            "class_type": "CreateVideo",
+            "inputs": {"fps": 24, "audio": ["1", 2]},
+        },
+        "44": {
+            "class_type": "ComfySwitchNode",
+            "inputs": {
+                "switch": ["42", 0],
+                "on_false": ["40", 0],
+                "on_true": ["43", 0],
+            },
+        },
+    }
 
 
 class SeedFieldDetectionTests(unittest.TestCase):
@@ -103,6 +173,229 @@ class SeedFieldDetectionTests(unittest.TestCase):
         self.assertGreaterEqual(fields["92::seed"], 0)
         self.assertLessEqual(fields["92::seed"], 4294967295)
         self.assertNotEqual(fields["92::seed"], 8103845055849200000)
+
+    def test_flashvsr_seed_has_node_limit_metadata(self):
+        workflow = {
+            "59": {
+                "class_type": "FlashVSRNode",
+                "_meta": {"title": "FlashVSR Ultra-Fast"},
+                "inputs": {"seed": 393608325220287},
+            }
+        }
+        config = {
+            "fields": [
+                {"key": "59::seed", "type": "seed", "label": "FlashVSR 种子"},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wf.json"
+            path.write_text(json.dumps(workflow), encoding="utf-8")
+
+            parsed = app._parse_with_config(str(path), config)
+
+        field = parsed["fields"][0]
+        self.assertEqual(field["type"], "seed")
+        self.assertEqual(field["max"], 1125899906842624)
+
+    def test_flashvsr_seed_value_is_normalized_before_submit(self):
+        workflow = {
+            "59": {
+                "class_type": "FlashVSRNode",
+                "inputs": {"seed": 1},
+            }
+        }
+        fields = app._normalize_workflow_field_values(
+            workflow,
+            {"59::seed": 8103845055849200000},
+        )
+
+        self.assertGreaterEqual(fields["59::seed"], 0)
+        self.assertLessEqual(fields["59::seed"], 1125899906842624)
+        self.assertNotEqual(fields["59::seed"], 8103845055849200000)
+
+    def test_hidden_retry_fields_refresh_from_current_workflow_defaults(self):
+        workflow = {
+            "70": {
+                "class_type": "TTP_Image_Assy",
+                "inputs": {"padding": 1024},
+            }
+        }
+        config = {
+            "fields": [
+                {"key": "70::padding", "zone": "hidden", "visible": False, "type": "number"},
+            ]
+        }
+
+        with mock.patch.object(app, "load_wf_config", return_value=config):
+            fields = app._normalize_workflow_field_values(
+                workflow,
+                {"70::padding": 64},
+                "FlashVSR_SeedVR2_8K.json",
+            )
+
+        self.assertEqual(fields["70::padding"], 1024)
+
+    def test_scail2_timing_caps_duration_to_frame_limit_for_long_source_video(self):
+        workflow = _minimal_scail2_workflow()
+
+        with mock.patch.object(app, "_scail2_input_video_duration", return_value=27.353333):
+            fields = app._normalize_workflow_field_values(
+                workflow,
+                {
+                    "1::force_rate": 24,
+                    "1::frame_load_cap": 501,
+                    "40::fps": 24,
+                },
+                "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+            )
+
+        self.assertEqual(fields["1::frame_load_cap"], 501)
+        self.assertEqual(fields["1::force_rate"], 24)
+        self.assertEqual(fields["40::fps"], 24)
+        self.assertEqual(fields["43::fps"], 24)
+        self.assertAlmostEqual(float(fields["1::__output_duration_sec"]), 20.875, places=3)
+
+    def test_scail2_timing_uses_resampled_frame_count_when_below_cap(self):
+        workflow = _minimal_scail2_workflow()
+
+        with mock.patch.object(app, "_scail2_input_video_duration", return_value=27.353333):
+            fields = app._normalize_workflow_field_values(
+                workflow,
+                {
+                    "1::force_rate": 16,
+                    "1::frame_load_cap": 501,
+                    "40::fps": 16,
+                },
+                "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+            )
+
+        self.assertEqual(fields["1::frame_load_cap"], 437)
+        self.assertEqual(fields["1::force_rate"], 16)
+        self.assertEqual(fields["40::fps"], 16)
+        self.assertEqual(fields["43::fps"], 16)
+        self.assertAlmostEqual(float(fields["1::__output_duration_sec"]), 27.312, places=3)
+
+    def test_scail2_timing_uses_user_duration_and_fps(self):
+        workflow = _minimal_scail2_workflow()
+
+        with mock.patch.object(app, "_scail2_input_video_duration", return_value=10.0):
+            fields = app._normalize_workflow_field_values(
+                workflow,
+                {
+                    "1::__output_duration_sec": 10,
+                    "40::fps": 30,
+                },
+                "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+            )
+
+        self.assertEqual(fields["1::frame_load_cap"], 300)
+        self.assertEqual(fields["1::force_rate"], 30)
+        self.assertEqual(fields["40::fps"], 30)
+        self.assertEqual(fields["43::fps"], 30)
+        self.assertEqual(fields["1::__output_duration_sec"], 10.0)
+
+    def test_scail2_timing_clamps_user_duration_to_source_duration(self):
+        workflow = _minimal_scail2_workflow()
+
+        with mock.patch.object(app, "_scail2_input_video_duration", return_value=10.0):
+            fields = app._normalize_workflow_field_values(
+                workflow,
+                {
+                    "1::__output_duration_sec": 12,
+                    "40::fps": 24,
+                },
+                "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+            )
+
+        self.assertEqual(fields["1::frame_load_cap"], 240)
+        self.assertEqual(fields["1::force_rate"], 24)
+        self.assertEqual(fields["40::fps"], 24)
+        self.assertEqual(fields["1::__output_duration_sec"], 10.0)
+
+    def test_scail2_audio_mux_formal_workflow_uses_single_video_encoder(self):
+        workflow = _load_repo_workflow("i2v_scail2_vantage_gguf_q4_audio_mux.json")
+
+        self.assertIsNotNone(workflow)
+        create_nodes = [
+            node_id
+            for node_id, node in workflow.items()
+            if isinstance(node, dict) and node.get("class_type") == "CreateVideo"
+        ]
+
+        self.assertEqual(create_nodes, ["40"])
+        self.assertEqual(workflow["40"]["inputs"]["audio"], ["1", 2])
+        self.assertEqual(workflow["41"]["inputs"]["video"], ["40", 0])
+        self.assertNotIn("43", workflow)
+        self.assertNotIn("44", workflow)
+
+    def test_scail2_formal_workflow_exposes_unified_model_selector(self):
+        workflow_name = "i2v_scail2_vantage_gguf_q4_audio_mux.json"
+        workflow = _load_repo_workflow(workflow_name)
+        config = json.loads(
+            (ROOT / "data" / "wf_configs" / workflow_name).read_text(encoding="utf-8")
+        )
+
+        self.assertIsNotNone(workflow)
+        fields = {field["key"]: field for field in config.get("fields", [])}
+        selector = fields["6::__scail2_model_variant"]
+        self.assertEqual(selector["type"], "select")
+        self.assertEqual(selector["value"], "NVFP4")
+        self.assertEqual(
+            selector["options"],
+            ["FP16", "FP8", "Q4 GGUF", "MXFP8", "NVFP4"],
+        )
+
+    def test_scail2_model_selector_rewrites_loader_per_variant(self):
+        workflow = _load_repo_workflow("i2v_scail2_vantage_gguf_q4_audio_mux.json")
+        self.assertIsNotNone(workflow)
+
+        cases = [
+            ("Q4 GGUF", "UnetLoaderGGUF", "gguf/wan2.1_14B_SCAIL_2-Q4_K_M.gguf"),
+            ("FP16", "UNETLoader", "wan2.1_14B_SCAIL_2_fp16.safetensors"),
+            ("FP8", "UNETLoader", "wan2.1_14B_SCAIL_2_fp8_scaled.safetensors"),
+            ("MXFP8", "UNETLoader", "wan2.1_14B_SCAIL_2_mxfp8.safetensors"),
+            ("NVFP4", "UNETLoader", "wan2.1_14B_SCAIL_2_nvfp4_comfy_V2.safetensors"),
+        ]
+        for label, class_type, model_name in cases:
+            with self.subTest(label=label):
+                candidate = json.loads(json.dumps(workflow))
+                fields = {"6::__scail2_model_variant": label}
+                apply_scail2_model_variant_to_workflow(candidate, fields)
+
+                self.assertEqual(candidate["6"]["class_type"], class_type)
+                self.assertEqual(candidate["6"]["inputs"]["unet_name"], model_name)
+                if class_type == "UNETLoader":
+                    self.assertEqual(candidate["6"]["inputs"]["weight_dtype"], "default")
+                    self.assertEqual(fields["6::weight_dtype"], "default")
+                else:
+                    self.assertNotIn("weight_dtype", candidate["6"]["inputs"])
+                self.assertEqual(fields["6::unet_name"], model_name)
+
+    def test_scail2_audio_mux_submit_graph_keeps_only_selected_branch(self):
+        workflow = _minimal_scail2_workflow()
+
+        apply_scail2_audio_mux_to_workflow(
+            workflow,
+            {"42::value": False},
+            "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+        )
+
+        self.assertNotIn("audio", workflow["40"]["inputs"])
+        self.assertEqual(workflow["41"]["inputs"]["video"], ["40", 0])
+        self.assertNotIn("43", workflow)
+        self.assertNotIn("44", workflow)
+
+        workflow = _minimal_scail2_workflow()
+        apply_scail2_audio_mux_to_workflow(
+            workflow,
+            {"42::value": True},
+            "i2v_scail2_vantage_gguf_q4_audio_mux.json",
+        )
+
+        self.assertEqual(workflow["40"]["inputs"]["audio"], ["1", 2])
+        self.assertEqual(workflow["41"]["inputs"]["video"], ["40", 0])
+        self.assertNotIn("43", workflow)
+        self.assertNotIn("44", workflow)
 
     def test_random_generate_seed_overrides_flux2_noise_seed_field(self):
         workflow = {
@@ -337,7 +630,7 @@ class SeedFieldDetectionTests(unittest.TestCase):
         self.assertEqual(style["color_palette"], ["#FFFFFF", "#0F172A"])
         self.assertEqual(elements[0]["bbox"], [100, 200, 500, 700])
         self.assertIn("Positioned in the upper area", elements[0]["desc"])
-        self.assertIn("soft clustered part of the same image", elements[0]["desc"])
+        self.assertIn("natural edges", elements[0]["desc"])
         self.assertEqual(elements[0]["color_palette"], ["#F59E0B"])
         self.assertEqual(elements[1]["type"], "text")
         self.assertEqual(elements[1]["text"], "DESIGN LAB")
@@ -459,15 +752,65 @@ class SeedFieldDetectionTests(unittest.TestCase):
         payload = json.loads(normalized["24::text"])
         elements = payload["compositional_deconstruction"]["elements"]
 
-        self.assertEqual([el["type"] for el in elements], ["obj", "obj", "text"])
-        self.assertEqual(elements[0]["bbox"], [328, 116, 974, 503])
-        self.assertIn("official Ideogram4 coordinate metadata", elements[0]["desc"])
+        self.assertEqual([el["type"] for el in elements], ["obj", "text"])
+        self.assertNotIn("bbox", elements[0])
+        self.assertIn("composition cues", elements[0]["desc"])
         self.assertIn("22岁成年女大学生", elements[0]["desc"])
-        self.assertIn("霓虹闪烁的商业大楼", elements[1]["desc"])
-        self.assertEqual(elements[2]["bbox"], [495, 580, 735, 1000])
-        self.assertEqual(elements[2]["text"], "静静地\n我在等你")
-        self.assertIn("only the letter strokes should be visible", elements[2]["desc"])
+        self.assertIn("霓虹闪烁的商业大楼", elements[0]["desc"])
+        self.assertEqual(elements[1]["bbox"], [495, 580, 735, 1000])
+        self.assertEqual(elements[1]["text"], "静静地\n我在等你")
+        self.assertIn("only the letter strokes should be visible", elements[1]["desc"])
         self.assertNotIn("Rectangular bounded layout region", json.dumps(payload, ensure_ascii=False))
+
+    def test_official_ideogram_canvas_retry_does_not_rewrap_existing_caption_json(self):
+        existing_caption = {
+            "high_level_description": "近处乡村树林，远处高楼林立的无人机拍摄照片",
+            "style_description": {
+                "aesthetics": "one coherent realistic image",
+                "lighting": "natural daylight",
+                "medium": "photograph",
+            },
+            "compositional_deconstruction": {
+                "background": "连续的乡村到城市景观",
+                "elements": [
+                    {
+                        "type": "obj",
+                        "bbox": [0, 0, 1000, 350],
+                        "desc": "天空",
+                    }
+                ],
+            },
+        }
+        field_values = {
+            "24::text": json.dumps(existing_caption, ensure_ascii=False),
+            "__user_prompt": "",
+            "__ideogram4_canvas": json.dumps(
+                {
+                    "mode": "canvas",
+                    "shapes": [
+                        {"kind": "rect", "elementType": "obj", "x": 0, "y": 0, "w": 100, "h": 35, "text": "天空"},
+                        {"kind": "rect", "elementType": "obj", "x": 0, "y": 35, "w": 100, "h": 35, "text": "都市高楼"},
+                        {"kind": "rect", "elementType": "obj", "x": 0, "y": 70, "w": 100, "h": 30, "text": "乡村树林"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        }
+
+        normalized = app._normalize_workflow_field_values(
+            {},
+            field_values,
+            workflow_name="ideogram4_uncen_test.json",
+        )
+        payload = json.loads(normalized["24::text"])
+        encoded = json.dumps(payload, ensure_ascii=False)
+
+        self.assertIn("近处乡村树林", payload["high_level_description"])
+        self.assertIn("都市高楼", encoded)
+        self.assertIn("乡村树林", encoded)
+        self.assertNotIn("bbox", payload["compositional_deconstruction"]["elements"][0])
+        self.assertNotIn('{"high_level_description"', payload["high_level_description"])
+        self.assertNotIn('\\"high_level_description\\"', payload["high_level_description"])
 
     def test_official_ideogram_prompt_strips_style_block_and_wraps_json_caption(self):
         workflow = {
@@ -682,6 +1025,7 @@ class SeedFieldDetectionTests(unittest.TestCase):
 
         self.assertEqual(payload["high_level_description"], "海边石滩上的年轻女性环境人像")
         self.assertEqual(payload["compositional_deconstruction"]["background"], "灰黑色石滩、岩壁、海面和阴云天空")
+        self.assertNotIn("bbox", payload["compositional_deconstruction"]["elements"][0])
         self.assertIn("写实摄影", payload["style_description"]["aesthetics"])
         self.assertNotIn("负面提示词", caption)
         self.assertEqual(len(calls), 1)

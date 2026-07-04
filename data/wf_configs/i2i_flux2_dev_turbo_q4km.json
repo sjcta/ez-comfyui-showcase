@@ -3,11 +3,31 @@
   "workflow": "i2i_flux2_dev_turbo_q4km.json",
   "fields": [
     {
+      "key": "40::__image_reference_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图模式",
+      "order": 0,
+      "type": "image_reference_mode",
+      "value": "single"
+    },
+    {
+      "key": "40::__multi_reference_images",
+      "zone": "user_input",
+      "visible": true,
+      "label": "多参考图片",
+      "order": 2,
+      "type": "multi_image_refs",
+      "value": "[]",
+      "min": 2,
+      "max": 3
+    },
+    {
       "key": "40::image",
       "zone": "user_input",
       "visible": true,
       "label": "参考图片",
-      "order": 0,
+      "order": 1,
       "type": "image"
     },
     {
@@ -15,7 +35,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "编辑提示词",
-      "order": 1,
+      "order": 3,
       "type": "textarea"
     },
     {
@@ -23,7 +43,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "宽度",
-      "order": 2,
+      "order": 4,
       "type": "number",
       "step": 64,
       "min": 512,
@@ -34,7 +54,7 @@
       "zone": "user_input",
       "visible": true,
       "label": "高度",
-      "order": 3,
+      "order": 5,
       "type": "number",
       "step": 64,
       "min": 512,

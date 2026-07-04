@@ -1,5 +1,15 @@
 # 更新日志
 
+## v4.8.0
+
+v4.8.0 集中发布多参考图生图/修图能力，并补齐实测和任务保护。
+
+- 新增 Qwen Image Edit 2511、FireRed Image Edit 1.1、Flux2 Dev Turbo Q4 的单图/多图参考图切换入口，统一通过 `__image_reference_mode` 与 `__multi_reference_images` 提交。
+- Qwen Rapid 主版、Q2、SeedVR2 4K 三个图生图入口补齐单图/多图参考图选项，后端会把第 2/3 张参考图动态接入 `TextEncodeQwenImageEditPlus.image2/image3`。
+- 参考图模式切换时保持状态一致：单图切多图会把已有单图作为多图第一张，多图切回单图只保留第一张，避免隐藏参考图继续提交。
+- 已完成 FireRed、Qwen 2511、Flux2 Dev Turbo Q4、Qwen Rapid 的远端 smoke 验证，覆盖多参考图 graph 可执行性。
+- 修复远端 ComfyUI 长任务不在本地 active job 内时可能被 idle watcher 误判为空闲并停实例的问题。
+
 ## v4.7.48
 
 v4.7.48 将 Ideogram4 画布修正下沉到后端规范化路径，并同步 uncen workflow。

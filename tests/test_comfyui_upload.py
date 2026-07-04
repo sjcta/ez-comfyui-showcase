@@ -57,6 +57,39 @@ class ComfyUIUploadTest(unittest.TestCase):
             ["u1/2026-06-01/a.png", "u1/2026-06-01/b.png", "u1/2026-06-01/a.wav"],
         )
 
+    def test_collects_ltx_director_2_video_tracks_and_retake_media(self):
+        workflow = {
+            "1": {
+                "class_type": "LTXDirector",
+                "inputs": {
+                    "timeline_data": json.dumps({
+                        "segments": [
+                            {"type": "video", "imageFile": "u1/2026-06-01/ref.mp4"},
+                        ],
+                        "motionSegments": [
+                            {"videoFile": "u1/2026-06-01/motion.mp4"},
+                        ],
+                        "audioSegments": [
+                            {"audioFile": "u1/2026-06-01/audio.wav"},
+                        ],
+                        "retakeVideo": {
+                            "imageFile": "u1/2026-06-01/base.mp4",
+                        },
+                    })
+                },
+            },
+        }
+
+        self.assertEqual(
+            workflow_load_images(workflow),
+            [
+                "u1/2026-06-01/ref.mp4",
+                "u1/2026-06-01/audio.wav",
+                "u1/2026-06-01/motion.mp4",
+                "u1/2026-06-01/base.mp4",
+            ],
+        )
+
     def test_resolves_only_canonical_input_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             input_dir = os.path.join(tmp, "input")

@@ -162,6 +162,7 @@ def infer_generation_label(
     workflow: str,
     field_values: dict[str, Any] | None,
     workflow_type: str = "",
+    fallback_label: str = "",
 ) -> str:
     """Return a stable card/history label for a submitted generation."""
     prompt = text_prompt_from_fields(field_values)
@@ -171,6 +172,9 @@ def infer_generation_label(
     wf_name = os.path.basename(workflow or "").lower()
     is_upscale = workflow_type == "放大" or "upscale" in wf_name or "seedvr" in wf_name
     if is_upscale:
+        display = str(fallback_label or "").strip()
+        if display:
+            return display
         return upscale_label(upscale_resolution_from_fields(field_values))
 
     return ""

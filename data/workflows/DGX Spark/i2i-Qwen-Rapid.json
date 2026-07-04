@@ -61,7 +61,7 @@
     "inputs": {
       "horizontal_angle": 0,
       "vertical_angle": 0,
-      "zoom": 5,
+      "zoom": 0,
       "default_prompts": true,
       "camera_view": false,
       "image": [

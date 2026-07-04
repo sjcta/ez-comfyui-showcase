@@ -1,0 +1,395 @@
+{
+  "21": {
+    "inputs": {
+      "samples": [
+        "32",
+        0
+      ],
+      "vae": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "23": {
+    "inputs": {
+      "vae": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "LCSLoadData",
+    "_meta": {
+      "title": "LCS Load Data"
+    }
+  },
+  "24": {
+    "inputs": {
+      "image": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "easy imageBatchToImageList",
+    "_meta": {
+      "title": "图像批次到图像列表"
+    }
+  },
+  "25": {
+    "inputs": {
+      "value": "max(a,b)",
+      "a": [
+        "33",
+        0
+      ],
+      "b": [
+        "33",
+        1
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "简易运算"
+    }
+  },
+  "27": {
+    "inputs": {
+      "filename_prefix": "Klein_TTP_4K",
+      "images": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "32": {
+    "inputs": {
+      "seed": 224675015143665,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "38",
+        0
+      ],
+      "positive": [
+        "40",
+        0
+      ],
+      "negative": [
+        "39",
+        0
+      ],
+      "latent_image": [
+        "40",
+        1
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "33": {
+    "inputs": {
+      "image": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "34": {
+    "inputs": {
+      "width_factor": 2,
+      "height_factor": 2,
+      "overlap_rate": 0.2,
+      "image": [
+        "54",
+        0
+      ]
+    },
+    "class_type": "TTP_Tile_image_size",
+    "_meta": {
+      "title": "TTP_Tile_image_size"
+    }
+  },
+  "35": {
+    "inputs": {
+      "tile_width": [
+        "34",
+        0
+      ],
+      "tile_height": [
+        "34",
+        1
+      ],
+      "image": [
+        "54",
+        0
+      ]
+    },
+    "class_type": "TTP_Image_Tile_Batch",
+    "_meta": {
+      "title": "TTP_Image_Tile_Batch"
+    }
+  },
+  "37": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "fill",
+      "method": "lanczos",
+      "round_to_multiple": "16",
+      "scale_to_side": "None",
+      "scale_to_length": 1024,
+      "background_color": "#000000",
+      "image": [
+        "35",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "按宽高比缩放_V2"
+    }
+  },
+  "38": {
+    "inputs": {
+      "mode": "auto",
+      "intensity": 0.8,
+      "model": [
+        "57",
+        0
+      ],
+      "lcs_data": [
+        "23",
+        0
+      ],
+      "vae": [
+        "45",
+        0
+      ],
+      "reference_image": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "LCSColorAnchor",
+    "_meta": {
+      "title": "LCS Color Anchor"
+    }
+  },
+  "39": {
+    "inputs": {
+      "conditioning": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "40": {
+    "inputs": {
+      "prompt": "High definition, 4K, Add realistic details to the corrupted image, Restore high frequence details from the corrupted image, \n",
+      "ref_longest_edge": [
+        "25",
+        0
+      ],
+      "clip": [
+        "44",
+        0
+      ],
+      "vae": [
+        "45",
+        0
+      ],
+      "image1": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "Flux2KleinEditTextEncode_EditUtils",
+    "_meta": {
+      "title": "EditUtils: Flux2Klein Edit Text Encode lrzjason"
+    }
+  },
+  "41": {
+    "inputs": {
+      "method": "wavelet",
+      "image_output": "Preview",
+      "save_prefix": "ComfyUI",
+      "image_ref": [
+        "54",
+        0
+      ],
+      "image_target": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "easy imageColorMatch",
+    "_meta": {
+      "title": "图像颜色匹配"
+    }
+  },
+  "42": {
+    "inputs": {
+      "unet_name": "Flux2-Klein-9B-True-v2-fp8mixed.safetensors",
+      "weight_dtype": "fp8_e4m3fn"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNET加载器"
+    }
+  },
+  "44": {
+    "inputs": {
+      "clip_name": "qwen_3_8b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "CLIP加载器"
+    }
+  },
+  "45": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE加载器"
+    }
+  },
+  "49": {
+    "inputs": {
+      "image": "43483bc4981f3ab833e8003d94ab1f8c31af40b0b03e97793ff052adf86ab65c.webp"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "50": {
+    "inputs": {
+      "images": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "easy imageListToImageBatch",
+    "_meta": {
+      "title": "图像列表到图像批次"
+    }
+  },
+  "51": {
+    "inputs": {
+      "scale": 1,
+      "method": "lanczos",
+      "scale_by": "by_scale",
+      "scale_by_length": 1024,
+      "image": [
+        "50",
+        0
+      ],
+      "original_size": [
+        "37",
+        2
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleRestore V2",
+    "_meta": {
+      "title": "缩放恢复_V2"
+    }
+  },
+  "52": {
+    "inputs": {
+      "padding": 64,
+      "tiles": [
+        "51",
+        0
+      ],
+      "positions": [
+        "35",
+        1
+      ],
+      "original_size": [
+        "35",
+        2
+      ],
+      "grid_size": [
+        "35",
+        3
+      ]
+    },
+    "class_type": "TTP_Image_Assy",
+    "_meta": {
+      "title": "TTP_Image_Assy"
+    }
+  },
+  "54": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "fill",
+      "method": "lanczos",
+      "round_to_multiple": "8",
+      "scale_to_side": "longest",
+      "scale_to_length": [
+        "59",
+        0
+      ],
+      "background_color": "#000000",
+      "image": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "按宽高比缩放_V2"
+    }
+  },
+  "57": {
+    "inputs": {
+      "lora_name": "f2k_9B_小志一致性（0.5-0.7）lcs_consist_0412预览版preview.safetensors",
+      "strength_model": 0.2,
+      "model": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "59": {
+    "inputs": {
+      "value": 3840
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "整数常量"
+    }
+  }
+}

@@ -1,0 +1,684 @@
+{
+  "75": {
+    "inputs": {
+      "filename_prefix": "video/LTX_2.3_Director_official",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "320:310",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "320:276": {
+    "inputs": {
+      "noise_seed": 42
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "320:278": {
+    "inputs": {
+      "video_latent": [
+        "320:343",
+        2
+      ],
+      "audio_latent": [
+        "320:307",
+        1
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "二阶段 AV Latent 合并"
+    }
+  },
+  "320:279": {
+    "inputs": {
+      "vae_name": "LTX23_audio_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "官方 LTX2.3 Audio VAE"
+    }
+  },
+  "320:280": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "二阶段采样器"
+    }
+  },
+  "320:281": {
+    "inputs": {
+      "model": [
+        "320:343",
+        3
+      ],
+      "scheduler": "linear_quadratic",
+      "steps": 4,
+      "denoise": 0.42
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "二阶段 Scheduler"
+    }
+  },
+  "320:282": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "320:343",
+        3
+      ],
+      "positive": [
+        "320:343",
+        0
+      ],
+      "negative": [
+        "320:343",
+        1
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "二阶段 CFG"
+    }
+  },
+  "320:283": {
+    "inputs": {
+      "noise": [
+        "320:276",
+        0
+      ],
+      "guider": [
+        "320:314",
+        0
+      ],
+      "sampler": [
+        "320:291",
+        0
+      ],
+      "sigmas": [
+        "320:306",
+        0
+      ],
+      "latent_image": [
+        "320:318",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "一阶段采样"
+    }
+  },
+  "320:284": {
+    "inputs": {
+      "positive": [
+        "320:342",
+        0
+      ],
+      "negative": [
+        "320:342",
+        1
+      ],
+      "latent": [
+        "320:307",
+        0
+      ]
+    },
+    "class_type": "LTXDirectorCropGuides",
+    "_meta": {
+      "title": "一阶段裁剪 Director Guides"
+    }
+  },
+  "320:287": {
+    "inputs": {
+      "samples": [
+        "320:284",
+        2
+      ],
+      "upscale_model": [
+        "320:311",
+        0
+      ],
+      "vae": [
+        "320:330",
+        0
+      ]
+    },
+    "class_type": "LTXVLatentUpsampler",
+    "_meta": {
+      "title": "LTXV 潜空间上采样"
+    }
+  },
+  "320:291": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "一阶段采样器"
+    }
+  },
+  "320:297": {
+    "inputs": {
+      "samples": [
+        "320:309",
+        1
+      ],
+      "audio_vae": [
+        "320:279",
+        0
+      ]
+    },
+    "class_type": "LTXVAudioVAEDecode",
+    "_meta": {
+      "title": "LTXV 音频 VAE 解码"
+    }
+  },
+  "320:298": {
+    "inputs": {
+      "expression": "a",
+      "values.a": [
+        "320:300",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Frame Rate Float"
+    }
+  },
+  "320:299": {
+    "inputs": {
+      "value": 768
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "320:300": {
+    "inputs": {
+      "value": 24
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Frame Rate"
+    }
+  },
+  "320:301": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Duration"
+    }
+  },
+  "320:303": {
+    "inputs": {
+      "text": "A cinematic director-mode test shot. A young adult woman waits near a quiet street at sunset, checks her phone, then looks toward the road. Handheld camera, slow push-in, natural body motion, consistent identity, realistic ambient sound, no subtitles, no on-screen text.",
+      "clip": [
+        "320:317",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "备用正向文本编码"
+    }
+  },
+  "320:304": {
+    "inputs": {
+      "frame_rate": [
+        "320:340",
+        6
+      ],
+      "positive": [
+        "320:340",
+        1
+      ],
+      "negative": [
+        "320:341",
+        0
+      ]
+    },
+    "class_type": "LTXVConditioning",
+    "_meta": {
+      "title": "LTXV 条件"
+    }
+  },
+  "320:306": {
+    "inputs": {
+      "model": [
+        "320:342",
+        3
+      ],
+      "scheduler": "linear_quadratic",
+      "steps": 8,
+      "denoise": 1
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "一阶段 Scheduler"
+    }
+  },
+  "320:307": {
+    "inputs": {
+      "av_latent": [
+        "320:283",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "一阶段 AV Latent 分离"
+    }
+  },
+  "320:308": {
+    "inputs": {
+      "noise": [
+        "320:276",
+        0
+      ],
+      "guider": [
+        "320:282",
+        0
+      ],
+      "sampler": [
+        "320:280",
+        0
+      ],
+      "sigmas": [
+        "320:281",
+        0
+      ],
+      "latent_image": [
+        "320:278",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "二阶段采样"
+    }
+  },
+  "320:309": {
+    "inputs": {
+      "av_latent": [
+        "320:308",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "二阶段 AV Latent 分离"
+    }
+  },
+  "320:310": {
+    "inputs": {
+      "fps": [
+        "320:340",
+        6
+      ],
+      "images": [
+        "320:315",
+        0
+      ],
+      "audio": [
+        "320:297",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "320:311": {
+    "inputs": {
+      "model_name": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+    },
+    "class_type": "LatentUpscaleModelLoader",
+    "_meta": {
+      "title": "加载 Latent 放大模型"
+    }
+  },
+  "320:312": {
+    "inputs": {
+      "value": 512
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Width"
+    }
+  },
+  "320:313": {
+    "inputs": {
+      "text": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay, flicker, jitter, ghosting, temporal artifacts, warped motion, frozen frame, repeated frames, low frequency hum, sub-bass rumble, noisy room tone, audio distortion, audio clipping",
+      "clip": [
+        "320:317",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "负面提示词编码"
+    }
+  },
+  "320:314": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "320:342",
+        3
+      ],
+      "positive": [
+        "320:342",
+        0
+      ],
+      "negative": [
+        "320:342",
+        1
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "一阶段 CFG"
+    }
+  },
+  "320:315": {
+    "inputs": {
+      "samples": [
+        "320:345",
+        2
+      ],
+      "vae": [
+        "320:330",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE 解码"
+    }
+  },
+  "320:316": {
+    "inputs": {
+      "unet_name": "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "官方 LTX2.3 Base"
+    }
+  },
+  "320:317": {
+    "inputs": {
+      "clip_name1": "gemma_3_12B_it_fp4_mixed.safetensors",
+      "clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "官方 LTX2.3 Dual CLIP"
+    }
+  },
+  "320:318": {
+    "inputs": {
+      "video_latent": [
+        "320:342",
+        2
+      ],
+      "audio_latent": [
+        "320:340",
+        3
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "一阶段 AV Latent 合并"
+    }
+  },
+  "320:323": {
+    "inputs": {
+      "expression": "a * b + 1",
+      "values.a": [
+        "320:301",
+        0
+      ],
+      "values.b": [
+        "320:300",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression (length)"
+    }
+  },
+  "320:330": {
+    "inputs": {
+      "vae_name": "LTX23_video_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "官方 LTX2.3 Video VAE"
+    }
+  },
+  "320:340": {
+    "inputs": {
+      "model": [
+        "320:316",
+        0
+      ],
+      "clip": [
+        "320:317",
+        0
+      ],
+      "audio_vae": [
+        "320:279",
+        0
+      ],
+      "global_prompt": "A cinematic director-mode test shot. A young adult woman waits near a quiet street at sunset, checks her phone, then looks toward the road. Handheld camera, slow push-in, natural body motion, consistent identity, realistic ambient sound, no subtitles, no on-screen text.",
+      "start_second": 0,
+      "end_second": [
+        "320:344",
+        0
+      ],
+      "duration_seconds": [
+        "320:344",
+        0
+      ],
+      "start_frame": 0,
+      "end_frame": [
+        "320:323",
+        1
+      ],
+      "duration_frames": [
+        "320:323",
+        1
+      ],
+      "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"motionTrackEnabled\":true,\"propHeight\":90,\"globalPropHeight\":60,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":true,\"global_prompt\":\"\",\"retake_global_prompt\":\"\",\"retakeMode\":false,\"retakeStart\":24,\"retakeLength\":48,\"retakePrompt\":\"\",\"retakeStrength\":1,\"retakeVideo\":null,\"normalStartFrame\":0,\"normalDurationFrames\":121,\"segments\":[],\"motionSegments\":[],\"audioSegments\":[]}",
+      "use_custom_audio": false,
+      "use_custom_motion": true,
+      "inpaint_audio": true,
+      "local_prompts": "",
+      "segment_lengths": "",
+      "epsilon": 0.001,
+      "frame_rate": [
+        "320:298",
+        0
+      ],
+      "display_mode": "seconds",
+      "guide_strength": "",
+      "custom_width": [
+        "320:312",
+        0
+      ],
+      "custom_height": [
+        "320:299",
+        0
+      ],
+      "resize_method": "maintain aspect ratio",
+      "divisible_by": 32,
+      "img_compression": 18,
+      "override_audio": false
+    },
+    "class_type": "LTXDirector",
+    "_meta": {
+      "title": "LTX Director 2.0"
+    }
+  },
+  "320:341": {
+    "inputs": {
+      "conditioning": [
+        "320:340",
+        1
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "导演负面条件"
+    }
+  },
+  "320:342": {
+    "inputs": {
+      "positive": [
+        "320:304",
+        0
+      ],
+      "negative": [
+        "320:304",
+        1
+      ],
+      "vae": [
+        "320:330",
+        0
+      ],
+      "latent": [
+        "320:340",
+        2
+      ],
+      "guide_data": [
+        "320:340",
+        4
+      ],
+      "motion_guide_data": [
+        "320:340",
+        5
+      ],
+      "model": [
+        "320:340",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "scale_by": 0.5,
+      "upscale_method": "bicubic",
+      "image_attention_strength": 1,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 256,
+      "tile_overlap": 64,
+      "retake_mode": false
+    },
+    "class_type": "LTXDirectorGuide",
+    "_meta": {
+      "title": "LTX Director Guide（一阶段）"
+    }
+  },
+  "320:343": {
+    "inputs": {
+      "positive": [
+        "320:284",
+        0
+      ],
+      "negative": [
+        "320:284",
+        1
+      ],
+      "vae": [
+        "320:330",
+        0
+      ],
+      "latent": [
+        "320:287",
+        0
+      ],
+      "guide_data": [
+        "320:340",
+        4
+      ],
+      "motion_guide_data": [
+        "320:340",
+        5
+      ],
+      "model": [
+        "320:340",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "scale_by": 1,
+      "upscale_method": "bicubic",
+      "image_attention_strength": 1,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 256,
+      "tile_overlap": 64,
+      "retake_mode": false
+    },
+    "class_type": "LTXDirectorGuide",
+    "_meta": {
+      "title": "LTX Director Guide（二阶段）"
+    }
+  },
+  "320:344": {
+    "inputs": {
+      "expression": "a",
+      "values.a": [
+        "320:301",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Duration Seconds (float)"
+    }
+  },
+  "320:345": {
+    "inputs": {
+      "positive": [
+        "320:343",
+        0
+      ],
+      "negative": [
+        "320:343",
+        1
+      ],
+      "latent": [
+        "320:309",
+        0
+      ]
+    },
+    "class_type": "LTXDirectorCropGuides",
+    "_meta": {
+      "title": "二阶段裁剪 Director Guides"
+    }
+  }
+}

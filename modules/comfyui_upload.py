@@ -38,9 +38,17 @@ def workflow_load_images(workflow: dict[str, Any]) -> list[str]:
         for segment in data.get("segments", []) or []:
             if isinstance(segment, dict):
                 add_media(segment.get("imageFile"))
+                if segment.get("type") == "video":
+                    add_media(segment.get("videoFile") or segment.get("imageFile"))
         for segment in data.get("audioSegments", []) or []:
             if isinstance(segment, dict):
                 add_media(segment.get("audioFile"))
+        for segment in data.get("motionSegments", []) or []:
+            if isinstance(segment, dict):
+                add_media(segment.get("videoFile"))
+        retake_video = data.get("retakeVideo")
+        if isinstance(retake_video, dict):
+            add_media(retake_video.get("videoFile") or retake_video.get("imageFile"))
 
     for node in workflow.values():
         if not isinstance(node, dict):

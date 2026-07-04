@@ -1,6 +1,7 @@
 import Foundation
 import Photos
 import UIKit
+import UserNotifications
 import WebKit
 
 @MainActor
@@ -19,6 +20,10 @@ final class BrowserViewModel: NSObject, ObservableObject {
     private var observations: [NSKeyValueObservation] = []
     private let settingsStore: SettingsStore
     private let saveImageMessageHandler = SaveImageMessageHandler()
+    private var jobNotificationTimer: Timer?
+    private var knownJobStatuses: [String: String] = [:]
+    private var hasLoadedJobNotificationBaseline = false
+    private var notifiedJobIDs: Set<String> = []
 
     init(settingsStore: SettingsStore = .shared) {
         self.settingsStore = settingsStore
@@ -42,6 +47,9 @@ final class BrowserViewModel: NSObject, ObservableObject {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        UNUserNotificationCenter.current().delegate = self
+        requestNotificationPermission()
+        loadNotifiedJobIDs()
         observeWebViewState()
     }
 
@@ -55,6 +63,7 @@ final class BrowserViewModel: NSObject, ObservableObject {
         let normalized = SettingsStore.normalizedURLString(from: newValue)
         serverURLString = normalized
         settingsStore.serverURLString = normalized
+        resetJobNotificationState()
         load(normalized)
     }
 
@@ -115,6 +124,151 @@ final class BrowserViewModel: NSObject, ObservableObject {
                 }
             }
         ]
+    }
+}
+
+private extension BrowserViewModel {
+    struct NativeJobSnapshot {
+        let id: String
+        let status: String
+        let title: String
+        let message: String
+    }
+
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    func startJobNotificationPolling() {
+        guard jobNotificationTimer == nil else { return }
+        pollJobsForNotifications()
+        jobNotificationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pollJobsForNotifications()
+            }
+        }
+    }
+
+    func resetJobNotificationState() {
+        jobNotificationTimer?.invalidate()
+        jobNotificationTimer = nil
+        knownJobStatuses.removeAll()
+        hasLoadedJobNotificationBaseline = false
+    }
+
+    func pollJobsForNotifications() {
+        guard let jobsURL = apiURL(path: "api/jobs") else { return }
+        guard let urlLiteral = javascriptStringLiteral(jobsURL.absoluteString) else { return }
+        let script = """
+        (function() {
+          return fetch(\(urlLiteral), { credentials: 'include', cache: 'no-store' })
+            .then(function(response) {
+              if (!response.ok) return { ok: false, status: response.status };
+              return response.json().then(function(jobs) { return { ok: true, jobs: jobs }; });
+            })
+            .catch(function(error) { return { ok: false, error: String(error && error.message || error) }; });
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            Task { @MainActor in
+                self?.handleJobsPollingResult(result)
+            }
+        }
+    }
+
+    func handleJobsPollingResult(_ result: Any?) {
+        guard
+            let payload = result as? [String: Any],
+            (payload["ok"] as? Bool) == true,
+            let rawJobs = payload["jobs"] as? [[String: Any]]
+        else {
+            return
+        }
+
+        let snapshots = rawJobs.compactMap(NativeJobSnapshot.init)
+        let previousStatuses = knownJobStatuses
+        for snapshot in snapshots {
+            knownJobStatuses[snapshot.id] = snapshot.status
+        }
+
+        guard hasLoadedJobNotificationBaseline else {
+            hasLoadedJobNotificationBaseline = true
+            return
+        }
+
+        for snapshot in snapshots {
+            guard isFinalNotificationStatus(snapshot.status) else { continue }
+            guard previousStatuses[snapshot.id] != snapshot.status else { continue }
+            guard !notifiedJobIDs.contains(snapshot.id) else { continue }
+            notifiedJobIDs.insert(snapshot.id)
+            persistNotifiedJobIDs()
+            sendJobNotification(for: snapshot)
+        }
+    }
+
+    func isFinalNotificationStatus(_ status: String) -> Bool {
+        status == "done" || status == "history" || status == "error"
+    }
+
+    func sendJobNotification(for job: NativeJobSnapshot) {
+        let content = UNMutableNotificationContent()
+        if job.status == "error" {
+            content.title = "EZ ComfyUI 任务失败"
+            content.body = job.message.isEmpty ? job.title : job.message
+            content.sound = .default
+        } else {
+            content.title = "EZ ComfyUI 任务完成"
+            content.body = job.title.isEmpty ? "生成结果已准备好" : job.title
+            content.sound = .default
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "ez-comfyui-job-\(job.id)-\(job.status)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    func apiURL(path: String) -> URL? {
+        guard let baseURL = URL(string: SettingsStore.normalizedURLString(from: serverURLString)) else { return nil }
+        return URL(string: path, relativeTo: baseURL)?.absoluteURL
+    }
+
+    func javascriptStringLiteral(_ value: String) -> String? {
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: [value]),
+            let encoded = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        return String(encoded.dropFirst().dropLast())
+    }
+
+    func loadNotifiedJobIDs() {
+        let ids = UserDefaults.standard.stringArray(forKey: "notifiedJobIDs") ?? []
+        notifiedJobIDs = Set(ids)
+    }
+
+    func persistNotifiedJobIDs() {
+        let trimmed = Array(notifiedJobIDs.suffix(200))
+        notifiedJobIDs = Set(trimmed)
+        UserDefaults.standard.set(trimmed, forKey: "notifiedJobIDs")
+    }
+}
+
+private extension BrowserViewModel.NativeJobSnapshot {
+    init?(_ raw: [String: Any]) {
+        guard let id = raw["id"].map({ String(describing: $0) }), !id.isEmpty else { return nil }
+        self.id = id
+        self.status = (raw["status"] as? String ?? "").lowercased()
+        let workflow = (raw["workflow"] as? String ?? "")
+            .replacingOccurrences(of: ".json", with: "")
+        self.title = (raw["prompt_preview"] as? String)
+            ?? (raw["prompt"] as? String)
+            ?? workflow
+        self.message = raw["message"] as? String ?? ""
     }
 }
 
@@ -289,12 +443,23 @@ extension BrowserViewModel: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         errorMessage = nil
+        startJobNotificationPolling()
     }
 
     private func handleNavigationError(_ error: Error) {
         let nsError = error as NSError
         guard nsError.code != NSURLErrorCancelled else { return }
         errorMessage = nsError.localizedDescription
+    }
+}
+
+extension BrowserViewModel: UNUserNotificationCenterDelegate {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 }
 

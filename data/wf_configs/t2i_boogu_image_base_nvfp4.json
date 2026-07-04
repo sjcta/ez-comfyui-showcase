@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "workflow": "t2i_boogu_image_base_nvfp4.json",
+  "fields": [
+    {
+      "key": "6::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "提示词",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "58::width",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 1,
+      "type": "number",
+      "role": "width",
+      "step": 64,
+      "min": 256,
+      "max": 2048
+    },
+    {
+      "key": "58::height",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 2,
+      "type": "number",
+      "role": "height",
+      "step": 64,
+      "min": 256,
+      "max": 2048
+    },
+    {
+      "key": "3::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "3::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 1,
+      "type": "number",
+      "min": 1,
+      "max": 60
+    },
+    {
+      "key": "3::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG",
+      "order": 2,
+      "type": "number",
+      "step": 0.1,
+      "min": 0,
+      "max": 20
+    },
+    {
+      "key": "9::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "3::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "采样器",
+      "order": 0,
+      "type": "select",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "heun",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "ddim",
+        "uni_pc",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "3::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "调度器",
+      "order": 1,
+      "type": "select",
+      "options": [
+        "simple",
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "beta"
+      ]
+    },
+    {
+      "key": "3::denoise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "降噪",
+      "order": 2,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "7::text",
+      "zone": "hidden",
+      "visible": false,
+      "label": "负面提示词",
+      "order": 3,
+      "type": "textarea",
+      "value": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, malformed hands, extra fingers, missing fingers, duplicate subject, watermark, logo, signature, UI overlay, unreadable text, random letters, broken typography"
+    },
+    {
+      "key": "37::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Boogu 模型",
+      "order": 4,
+      "type": "text"
+    },
+    {
+      "key": "37::weight_dtype",
+      "zone": "hidden",
+      "visible": false,
+      "label": "weight_dtype",
+      "order": 5,
+      "type": "text"
+    },
+    {
+      "key": "38::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 6,
+      "type": "text"
+    },
+    {
+      "key": "38::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 7,
+      "type": "text"
+    },
+    {
+      "key": "38::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 8,
+      "type": "text"
+    },
+    {
+      "key": "39::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 9,
+      "type": "text"
+    },
+    {
+      "key": "58::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "batch_size",
+      "order": 10,
+      "type": "number"
+    },
+    {
+      "key": "66::shift",
+      "zone": "hidden",
+      "visible": false,
+      "label": "shift",
+      "order": 11,
+      "type": "number"
+    }
+  ],
+  "required_models": [
+    "diffusion_models/boogu_image_base_nvfp4.safetensors",
+    "text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
+    "vae/flux1_vae_bf16.safetensors"
+  ],
+  "notes": "Boogu-Image Base NVFP4 text-to-image workflow derived from the Comfy-Org repackaged model layout. Defaults follow the upstream Base guidance range with CFG 4 and 40 steps; quick form keeps 2K as the upper bound for dense text/layout testing."
+}

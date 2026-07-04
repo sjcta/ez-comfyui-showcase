@@ -10,6 +10,7 @@ denoise 未考虑、steps 链路解析不完整等系统性缺陷。
 """
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +30,7 @@ class StepInfo:
         node_weights: {node_id: unit_count} — 权重（0 表示仅时长推算）。
         node_labels: {node_id: 可读标签} — 如"采样中..."。
         sampler_steps: {node_id: effective_steps} — 采样器/超分器有效步数。
+        node_repeats: {node_id: repeat_count} — 循环节点的预估重复次数。
         node_order: 节点拓扑排序（processing order）。
         time_estimates: {node_id: expected_seconds} — 仅 weight=0 的节点。
     """
@@ -36,6 +38,7 @@ class StepInfo:
     node_weights: dict[str, float] = field(default_factory=dict)
     node_labels: dict[str, str] = field(default_factory=dict)
     sampler_steps: dict[str, int] = field(default_factory=dict)
+    node_repeats: dict[str, int] = field(default_factory=dict)
     node_order: list[str] = field(default_factory=list)
     time_estimates: dict[str, float] = field(default_factory=dict)
 
@@ -110,11 +113,13 @@ class StepCalculator:
             elif cat == "sampler":
                 steps = self._calc_sampler_steps(nid, workflow)
                 result.sampler_steps[nid] = steps
+                result.node_repeats[nid] = self._estimate_node_repeats(nid, workflow)
                 active_nodes.append(nid)
 
             elif cat == "upscale":
                 steps = self._calc_upscale_steps(nid, workflow)
                 result.sampler_steps[nid] = steps
+                result.node_repeats[nid] = self._estimate_node_repeats(nid, workflow)
                 if steps == 0:
                     # 无 steps 参数节点 → 时长推算
                     resolution = self._resolve_resolution_hint(workflow)
@@ -278,6 +283,84 @@ class StepCalculator:
             linked_steps = self.resolve_steps(str(raw_steps[0]), workflow)
             return max(1, linked_steps)
 
+        return 0
+
+    def _estimate_node_repeats(self, nid: str, workflow: dict) -> int:
+        """Estimate repeated executions for sampler/upscale nodes inside known loops.
+
+        ComfyUI reports progress for each execution of a looped node using the
+        same node id. Without a repeat hint, one SCAIL-2 loop chunk can consume
+        the entire remaining progress budget even though more chunks are queued.
+        """
+        node = workflow.get(str(nid), {})
+        if not isinstance(node, dict):
+            return 1
+        title = str(node.get("_meta", {}).get("title") or "").lower()
+        if "loop" not in title:
+            linked_loop = False
+            inputs = node.get("inputs") or {}
+            for value in inputs.values():
+                if not (isinstance(value, list) and value):
+                    continue
+                linked = workflow.get(str(value[0]), {})
+                if not isinstance(linked, dict):
+                    continue
+                linked_title = str(linked.get("_meta", {}).get("title") or "").lower()
+                linked_cls = str(linked.get("class_type") or "")
+                if "loop" in linked_title or linked_cls in {"easy forLoopStart", "easy forLoopEnd"}:
+                    linked_loop = True
+                    break
+            if not linked_loop:
+                return 1
+
+        return max(1, self._estimate_scail2_loop_count(workflow))
+
+    def _estimate_scail2_loop_count(self, workflow: dict) -> int:
+        """Estimate SCAIL-2 easy-forLoop iterations from frame cap and segment length."""
+        counts: list[int] = []
+        for node in workflow.values():
+            if not isinstance(node, dict) or node.get("class_type") != "easy forLoopStart":
+                continue
+            inputs = node.get("inputs") or {}
+            total = inputs.get("total")
+            if not (isinstance(total, list) and total):
+                continue
+            total_node = workflow.get(str(total[0]), {})
+            if not isinstance(total_node, dict):
+                continue
+            total_inputs = total_node.get("inputs") or {}
+            expression = str(total_inputs.get("expression") or "")
+            if "ceil" not in expression or "a - b - 5" not in expression:
+                continue
+            frame_count = self._resolve_scail2_variable(workflow, total_inputs.get("variables.a"))
+            segment_length = self._resolve_scail2_variable(workflow, total_inputs.get("variables.b"))
+            if frame_count <= 0 or segment_length <= 5:
+                continue
+            counts.append(max(0, math.ceil((frame_count - segment_length - 5) / (segment_length - 5))))
+        return max(counts or [1])
+
+    def _resolve_scail2_variable(self, workflow: dict, value: Any) -> int:
+        """Resolve the simple values used by the official SCAIL-2 loop formula."""
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(float(value))
+            except ValueError:
+                return 0
+        if isinstance(value, list) and value:
+            node = workflow.get(str(value[0]), {})
+            if not isinstance(node, dict):
+                return 0
+            inputs = node.get("inputs") or {}
+            cls = str(node.get("class_type") or "")
+            if cls == "VHS_LoadVideo":
+                frame_cap = self._resolve_linked_number(workflow, inputs.get("frame_load_cap"), 0)
+                if frame_cap > 0:
+                    return frame_cap
+            for key in ("value", "INT", "frame_load_cap"):
+                if key in inputs:
+                    return self._resolve_linked_number(workflow, inputs.get(key), 0)
         return 0
 
     def _resolve_steps_or_default(

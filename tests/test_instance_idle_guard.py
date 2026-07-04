@@ -59,6 +59,43 @@ class InstanceIdleGuardTest(unittest.TestCase):
         finally:
             app._instance_group.pop("B", None)
 
+    def test_idle_watcher_preserves_remote_running_prompt(self):
+        node = {"id": "n1", "name": "DGX Spark", "connection": "remote-ssh"}
+        inst = {"id": "i-b", "name": "B", "url": "http://b", "_node_id": "n1"}
+        app._instance_last_active["B"] = 100.0
+        sleep_calls = {"count": 0}
+
+        async def fake_sleep(_seconds):
+            sleep_calls["count"] += 1
+            if sleep_calls["count"] > 1:
+                raise asyncio.CancelledError()
+
+        async def run_case():
+            with mock.patch("app.asyncio.sleep", side_effect=fake_sleep), \
+                    mock.patch("app.time.time", return_value=1000.0), \
+                    mock.patch("app._get_enabled_instances", return_value=[inst]), \
+                    mock.patch("app._has_active_instance_job", return_value=False), \
+                    mock.patch("app._idle_timeout_for_instance", return_value=10), \
+                    mock.patch("app._get_node_by_id", return_value=node), \
+                    mock.patch("app._get_instance_queue_counts", return_value={
+                        "running": 1,
+                        "pending": 0,
+                        "total": 1,
+                        "running_prompt_ids": ["pid"],
+                        "pending_prompt_ids": [],
+                    }), \
+                    mock.patch("app._check_service_active", return_value=True), \
+                    mock.patch("app._managed_instance_action") as action:
+                with self.assertRaises(asyncio.CancelledError):
+                    await app._idle_instance_watcher()
+                action.assert_not_called()
+
+        try:
+            asyncio.run(run_case())
+            self.assertEqual(app._instance_last_active["B"], 1000.0)
+        finally:
+            app._instance_last_active.pop("B", None)
+
     def test_successful_stop_clears_idle_timestamp(self):
         app._instance_last_active["A"] = 123.0
         app._instance_group["A"] = "seedvr"

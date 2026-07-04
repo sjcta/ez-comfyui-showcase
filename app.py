@@ -46,15 +46,20 @@ import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
 from modules.media_outputs import collect_preferred_history_outputs, output_media_type, output_ref_rel_path, is_image_output
 from modules.llm_client import LLMVisionUnsupportedError, chat_completion, chat_text, configure_llm_client, llm_provider_name
+from modules.multi_reference_workflow import apply_multi_reference_image_mode_to_workflow
 from modules.prompt_interrogator import (
     prepare_interrogate_image,
     run_llm_expert_image_interrogator,
     run_llm_image_interrogator,
 )
-from modules.prompt_labels import infer_generation_label
+from modules.prompt_labels import infer_generation_label, text_prompt_from_fields
 from modules.prompt_optimizer import (
     run_llm_prompt_language_switcher,
     run_llm_prompt_optimizer,
+)
+from modules.scail2_workflow import (
+    apply_scail2_audio_mux_to_workflow,
+    apply_scail2_model_variant_to_workflow,
 )
 from modules.step_calculator import StepCalculator, StepInfo
 from modules.time_estimator import TimeEstimator as TimeEstimatorModule
@@ -608,6 +613,11 @@ def _job_gpu_activity_stalled(job_id: str, job: dict, stats: dict | None, now: f
     if status not in GPU_STALL_JOB_STATUSES:
         _job_gpu_activity_watch.pop(job_id, None)
         return False
+    progress_fields = _job_progress_monitor_fields(job)
+    current_node = str(progress_fields.get("current_node") or "")
+    if current_node in {"ZEngineerCLIPLoader", "ZEngineerCLIPLoaderGGUF", "ZEngineerEnhance"}:
+        _job_gpu_activity_watch.pop(job_id, None)
+        return False
     sample = _job_gpu_sample(stats)
     if sample is None:
         _job_gpu_activity_watch.pop(job_id, None)
@@ -615,7 +625,6 @@ def _job_gpu_activity_stalled(job_id: str, job: dict, stats: dict | None, now: f
     vram_used, util, total = sample
     now = now or time.time()
     previous = _job_gpu_activity_watch.get(job_id)
-    progress_fields = _job_progress_monitor_fields(job)
     previous_sample = None
     if isinstance(previous, dict):
         previous_samples = previous.get("samples")
@@ -1924,7 +1933,12 @@ def _gen_db_to_record(row: dict, compact: bool = False) -> dict:
     workflow = row["workflow"]
     workflow_type = _workflow_primary_type(workflow)
     prompt = row.get("prompt", "") or ""
-    prompt_preview = infer_generation_label(workflow, params, workflow_type) if params else _history_prompt_preview(prompt)
+    prompt_preview = infer_generation_label(
+        workflow,
+        params,
+        workflow_type,
+        _workflow_custom_display_name(workflow),
+    ) if params else _history_prompt_preview(prompt)
     prompt_preview = _history_prompt_preview(prompt_preview)
     record = {
         "id": row["id"],
@@ -2183,6 +2197,71 @@ def _latest_logged_node_for_job(job: dict) -> str:
     return latest_node
 
 
+def _logged_progress_high_water_for_job(job: dict, cap_active: bool = True) -> int:
+    job_id = str((job or {}).get("id") or "")
+    if not job_id:
+        return 0
+    short_id = job_id[-12:]
+    max_pct = 0
+    for entry in _read_recent_log_entries():
+        if str(entry.get("job_id") or "") != short_id:
+            continue
+        msg = str(entry.get("msg") or "")
+        for match in re.finditer(r"\((\d+(?:\.\d+)?)%\)", msg):
+            try:
+                pct = int(float(match.group(1)))
+            except (TypeError, ValueError):
+                continue
+            max_pct = max(max_pct, pct)
+    max_pct = max(0, min(100, max_pct))
+    if cap_active and str((job or {}).get("status") or "") in ACTIVE_JOB_STATUSES:
+        return min(max_pct, 99)
+    return max_pct
+
+
+def _job_progress_high_water(job: dict, cap_active: bool = True) -> int:
+    current = _job_progress_pct(job)
+    stored = 0
+    try:
+        stored = int((job or {}).get("progress_high_water_pct") or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    logged = _logged_progress_high_water_for_job(job or {}, cap_active=cap_active)
+    high = max(current, stored, logged)
+    if cap_active and str((job or {}).get("status") or "") in ACTIVE_JOB_STATUSES:
+        high = min(high, 99)
+    return max(0, min(100, high))
+
+
+def _set_job_progress_preserving_high_water(
+    job: dict,
+    progress: dict | None,
+    *,
+    message: str | None = None,
+    allow_complete: bool = False,
+) -> None:
+    progress = progress if isinstance(progress, dict) else {}
+    incoming = 0
+    try:
+        incoming = int(progress.get("pct", 0) or 0)
+    except (TypeError, ValueError):
+        incoming = 0
+    incoming = max(0, min(100, incoming))
+    if not allow_complete and str((job or {}).get("status") or "") in ACTIVE_JOB_STATUSES:
+        incoming = min(incoming, 99)
+    high = max(incoming, _job_progress_high_water(job, cap_active=not allow_complete))
+    if allow_complete:
+        high = max(high, incoming)
+    else:
+        high = min(high, 99)
+    progress_state = dict(progress)
+    progress_state["pct"] = high
+    job["progress"] = progress_state
+    job["progress_high_water_pct"] = high
+    if message:
+        job["message"] = message
+
+
 def _workflow_node_calibrated_estimate_sec(workflow: str, job: dict) -> int | None:
     workflow = os.path.basename(str(workflow or ""))
     progress = (job or {}).get("progress") or {}
@@ -2391,6 +2470,23 @@ def _workflow_primary_type(filename: str) -> str:
         return "图生图"
     if lower.startswith("t2i") or "-t2i" in lower or "_t2i" in lower:
         return "文生图"
+    return ""
+
+
+def _workflow_custom_display_name(filename: str) -> str:
+    """Return the user-facing workflow name only when metadata has a real custom label."""
+    name = os.path.basename(filename or "")
+    if not name:
+        return ""
+    default_name = name[:-5] if name.lower().endswith(".json") else name
+    try:
+        meta = _load_wf_meta()
+        entry = meta.get(name, {}) if isinstance(meta, dict) else {}
+        display = str((entry or {}).get("name") or "").strip()
+    except Exception:
+        display = ""
+    if display and display not in (name, default_name):
+        return display
     return ""
 
 
@@ -3199,6 +3295,10 @@ async def _idle_instance_watcher():
             if now - last > idle_timeout:
                 node = _get_node_by_id(inst.get("_node_id", ""))
                 if node:
+                    remote_queue = _get_instance_queue_counts(inst.get("url", ""))
+                    if remote_queue.get("running") or remote_queue.get("pending"):
+                        _instance_last_active[name] = now
+                        continue
                     if not _check_service_active(node, inst):
                         _instance_last_active[name] = 0
                         _instance_group[name] = ""
@@ -4186,6 +4286,8 @@ def _workflow_graph_for_resume(path: str, job: dict) -> dict:
             if "::" not in str(key):
                 continue
             nid, field = str(key).split("::", 1)
+            if field.startswith("__"):
+                continue
             if nid in graph and isinstance(graph[nid], dict):
                 inputs = graph[nid].setdefault("inputs", {})
                 if isinstance(inputs, dict):
@@ -4199,7 +4301,25 @@ def _workflow_graph_for_resume(path: str, job: dict) -> dict:
                     inputs["seed"] = seed
     except Exception:
         pass
+    apply_scail2_model_variant_to_workflow(graph, fields)
+    apply_scail2_audio_mux_to_workflow(graph, fields, os.path.basename(str(path or "")))
     return graph if isinstance(graph, dict) else {}
+
+
+def _resume_ws_silent_timeout_for_graph(graph: dict) -> float:
+    """Choose a WS silence window that fits long dynamic-loop workflows."""
+    if not isinstance(graph, dict):
+        return WSTracker.WS_SILENT_TIMEOUT
+    for node in graph.values():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        title = str((node.get("_meta") or {}).get("title") or "")
+        if class_type == "WanSCAILToVideo" or class_type in {"easy forLoopStart", "easy forLoopEnd"}:
+            return max(WSTracker.WS_SILENT_TIMEOUT, 900.0)
+        if "SCAIL" in title:
+            return max(WSTracker.WS_SILENT_TIMEOUT, 900.0)
+    return WSTracker.WS_SILENT_TIMEOUT
 
 
 def _start_resume_ws_progress(job_id: str, inst: dict, graph: dict, prompt_id: str, client_id: str, timeout: int):
@@ -4219,15 +4339,21 @@ def _start_resume_ws_progress(job_id: str, inst: dict, graph: dict, prompt_id: s
         job = jobs.get(job_id)
         if not job or job.get("status") not in ACTIVE_JOB_STATUSES:
             return
-        pct = int(progress.get("pct", 0) or 0)
         msg = str(progress.get("message") or "").strip()
-        progress_state = {"pct": pct}
+        progress_state = {}
+        try:
+            progress_state["pct"] = int(progress.get("pct", 0) or 0)
+        except (TypeError, ValueError):
+            progress_state["pct"] = 0
         for key in ("current_node", "sampler_cur", "sampler_total"):
             if key in progress:
                 progress_state[key] = progress.get(key)
-        if msg:
-            job["message"] = msg
-        job["progress"] = progress_state
+        _set_job_progress_preserving_high_water(
+            job,
+            progress_state,
+            message=msg or None,
+            allow_complete=msg == "完成",
+        )
         job["last_update"] = time.time()
         job["resume_ws_active"] = True
         save_jobs()
@@ -4243,7 +4369,8 @@ def _start_resume_ws_progress(job_id: str, inst: dict, graph: dict, prompt_id: s
         log_callback=add_log,
         client_id=client_id,
     )
-    tracker.WS_SILENT_TIMEOUT = min(tracker.WS_SILENT_TIMEOUT, 45.0)
+    tracker.WS_SILENT_TIMEOUT = _resume_ws_silent_timeout_for_graph(graph)
+    tracker.seed_progress_pct(_job_progress_high_water(jobs.get(job_id) or {}, cap_active=True))
 
     async def _run_resume_ws():
         try:
@@ -4303,7 +4430,12 @@ def _adopt_untracked_remote_prompts(inst: dict, remote_queue: dict) -> list[str]
                 "message": "已从远端队列找回，恢复追踪中...",
                 "workflow": workflow,
                 "workflow_type": workflow_type,
-                "prompt_preview": _remote_graph_prompt_preview(graph) or infer_generation_label(workflow, field_values, workflow_type)[:200],
+                "prompt_preview": _remote_graph_prompt_preview(graph) or infer_generation_label(
+                    workflow,
+                    field_values,
+                    workflow_type,
+                    _workflow_custom_display_name(workflow),
+                )[:200],
                 "prompt_id": prompt_id,
                 "client_id": client_id,
                 "instance": inst_name,
@@ -4390,6 +4522,10 @@ EDITABLE_FIELDS = {
     "TextEncodeQwenImageEditPlus": {
         "prompt": {"type": "textarea", "label": "提示词"},
     },
+    "TextEncodeBooguEdit": {
+        "prompt": {"type": "textarea", "label": "提示词"},
+        "negative_prompt": {"type": "textarea", "label": "负面提示词"},
+    },
     "KSampler": {
         "seed":          {"type": "seed",    "label": "种子"},
         "steps":         {"type": "number",  "label": "步数",   "min": 1, "max": 100},
@@ -4425,6 +4561,12 @@ EDITABLE_FIELDS = {
         "seed":       {"type": "seed",   "label": "超分种子", "min": 0, "max": 4294967295},
         "resolution": {"type": "number", "label": "超分分辨率", "min": 512, "max": 8192, "step": 64},
     },
+    "FlashVSRNode": {
+        "seed": {"type": "seed", "label": "FlashVSR 种子", "min": 0, "max": 1125899906842624},
+    },
+    "FlashVSRNodeAdv": {
+        "seed": {"type": "seed", "label": "FlashVSR 种子", "min": 0, "max": 1125899906842624},
+    },
     "QwenMultiangleCameraNode": {
         "horizontal_angle": {"type": "number", "label": "水平角度", "min": 0, "max": 360, "step": 1},
         "vertical_angle":   {"type": "number", "label": "俯仰角度", "min": -30, "max": 60, "step": 1},
@@ -4449,6 +4591,8 @@ def _looks_like_seed_field(ct: str, title: str, field: str) -> bool:
 def _seed_limits_for_field(class_type: str, field: str) -> tuple[int, int] | None:
     if class_type == "SeedVR2VideoUpscaler" and field == "seed":
         return (0, 4294967295)
+    if class_type in ("FlashVSRNode", "FlashVSRNodeAdv") and field == "seed":
+        return (0, 1125899906842624)
     return None
 
 
@@ -4520,6 +4664,197 @@ def _sync_flux2_scheduler_dimensions(wf: dict, field_values: dict) -> None:
             field_values[f"{nid}::height"] = height
 
 
+def _node_ids_by_class(wf: dict, class_type: str) -> list[str]:
+    return [
+        str(nid)
+        for nid, node in (wf or {}).items()
+        if isinstance(node, dict) and str(node.get("class_type") or "") == class_type
+    ]
+
+
+def _first_node_input_value(wf: dict, field_values: dict, node_ids: list[str], field: str):
+    for nid in node_ids:
+        key = f"{nid}::{field}"
+        if key in field_values:
+            return field_values[key]
+    for nid in node_ids:
+        inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+        value = inputs.get(field)
+        if not isinstance(value, list):
+            return value
+    return None
+
+
+def _first_node_default_input_value(wf: dict, node_ids: list[str], field: str):
+    for nid in node_ids:
+        inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+        value = inputs.get(field)
+        if not isinstance(value, list):
+            return value
+    return None
+
+
+SCAIL2_DEFAULT_FORCE_RATE = 24.0
+SCAIL2_MAX_FRAME_LOAD_CAP = 501
+SCAIL2_OUTPUT_DURATION_FIELD = "__output_duration_sec"
+
+
+def _scail2_float(value, fallback: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(parsed):
+        return fallback
+    return parsed
+
+
+def _scail2_rate(value, fallback: float = SCAIL2_DEFAULT_FORCE_RATE):
+    rate = _scail2_float(value, fallback)
+    if rate <= 0:
+        rate = fallback
+    rate = min(60.0, max(1.0, rate))
+    rounded = round(rate, 3)
+    return int(rounded) if float(rounded).is_integer() else rounded
+
+
+def _scail2_frame_count(value, fallback: int = 0) -> int:
+    try:
+        frames = int(round(float(value)))
+    except (TypeError, ValueError):
+        return fallback
+    return max(1, min(SCAIL2_MAX_FRAME_LOAD_CAP, frames))
+
+
+def _scail2_input_video_duration(wf: dict, field_values: dict, video_loader_ids: list[str]) -> float:
+    video_name = _first_node_input_value(wf, field_values, video_loader_ids, "video")
+    video_path = _safe_comfy_input_path(str(video_name or ""))
+    if not video_path or not os.path.isfile(video_path):
+        return 0.0
+    duration, _fps = _probe_video_timing(video_path)
+    return max(0.0, duration)
+
+
+def _scail2_max_duration_for_rate(source_duration: float, fps: float) -> float:
+    try:
+        source_duration = max(0.0, float(source_duration or 0))
+        fps = max(1.0, float(fps or SCAIL2_DEFAULT_FORCE_RATE))
+    except (TypeError, ValueError):
+        return 0.0
+    cap_duration = SCAIL2_MAX_FRAME_LOAD_CAP / fps
+    if source_duration > 0:
+        return min(source_duration, cap_duration)
+    return cap_duration
+
+
+def _scail2_duration_seconds(value, fallback: float = 0.0) -> float:
+    duration = _scail2_float(value, fallback)
+    if duration <= 0:
+        duration = fallback
+    return max(0.0, round(duration, 3))
+
+
+def _sync_scail2_official_flow(wf: dict, field_values: dict) -> None:
+    """Keep the paired SCAIL-2 mask/conditioning/chunk controls coherent."""
+    wan_ids = _node_ids_by_class(wf, "WanSCAILToVideo")
+    mask_ids = _node_ids_by_class(wf, "SCAIL2ColoredMask")
+    if not wan_ids or not mask_ids:
+        return
+
+    resize_ids = _node_ids_by_class(wf, "ImageResizeKJv2")
+    video_loader_ids = _node_ids_by_class(wf, "VHS_LoadVideo")
+    create_video_ids = _node_ids_by_class(wf, "CreateVideo")
+    video_combine_ids = _node_ids_by_class(wf, "VHS_VideoCombine")
+    sampler_ids = _node_ids_by_class(wf, "SamplerCustom")
+
+    replacement_mode = _first_node_input_value(wf, field_values, mask_ids, "replacement_mode")
+    if replacement_mode is None:
+        replacement_mode = _first_node_input_value(wf, field_values, wan_ids, "replacement_mode")
+    if replacement_mode is not None:
+        for nid in mask_ids + wan_ids:
+            inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+            if "replacement_mode" in inputs:
+                field_values[f"{nid}::replacement_mode"] = replacement_mode
+
+    for dimension in ("width", "height"):
+        value = _first_node_input_value(wf, field_values, resize_ids, dimension)
+        if value is None:
+            value = _first_node_input_value(wf, field_values, wan_ids, dimension)
+        if value is None:
+            continue
+        for nid in resize_ids + wan_ids:
+            inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+            if dimension in inputs:
+                field_values[f"{nid}::{dimension}"] = value
+
+    for nid in resize_ids:
+        inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+        if "keep_proportion" in inputs:
+            field_values[f"{nid}::keep_proportion"] = "crop"
+        if "divisible_by" in inputs:
+            field_values[f"{nid}::divisible_by"] = 32
+
+    source_duration = _scail2_input_video_duration(wf, field_values, video_loader_ids)
+    raw_output_fps = _first_node_input_value(wf, field_values, create_video_ids, "fps")
+    if raw_output_fps is None:
+        raw_output_fps = _first_node_input_value(wf, field_values, video_combine_ids, "frame_rate")
+    if raw_output_fps is None:
+        raw_output_fps = _first_node_input_value(wf, field_values, video_loader_ids, "force_rate")
+    output_fps = _scail2_rate(raw_output_fps, SCAIL2_DEFAULT_FORCE_RATE)
+
+    raw_frame_cap = _first_node_input_value(wf, field_values, video_loader_ids, "frame_load_cap")
+    frame_cap = _scail2_frame_count(raw_frame_cap, 0)
+    raw_duration = _first_node_input_value(wf, field_values, video_loader_ids, SCAIL2_OUTPUT_DURATION_FIELD)
+    fallback_duration = 0.0
+    if source_duration > 0:
+        fallback_duration = source_duration
+    elif frame_cap > 0 and output_fps > 0:
+        fallback_duration = frame_cap / float(output_fps)
+    target_duration = _scail2_duration_seconds(raw_duration, fallback_duration)
+    max_duration = _scail2_max_duration_for_rate(source_duration, output_fps)
+    if max_duration > 0:
+        target_duration = min(target_duration or max_duration, max_duration)
+    if target_duration > 0:
+        frame_cap = _scail2_frame_count(math.floor(target_duration * float(output_fps) + 1e-6))
+    else:
+        output_fps = _scail2_rate(raw_output_fps, SCAIL2_DEFAULT_FORCE_RATE)
+    if frame_cap > 0 and output_fps > 0:
+        target_duration = round(frame_cap / float(output_fps), 3)
+
+    for nid in video_loader_ids:
+        inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+        if "force_rate" in inputs:
+            field_values[f"{nid}::force_rate"] = output_fps
+        field_values[f"{nid}::{SCAIL2_OUTPUT_DURATION_FIELD}"] = target_duration
+    if frame_cap > 0:
+        for nid in video_loader_ids:
+            inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+            if "frame_load_cap" in inputs:
+                field_values[f"{nid}::frame_load_cap"] = frame_cap
+    for nid in create_video_ids:
+        field_values[f"{nid}::fps"] = output_fps
+    for nid in video_combine_ids:
+        field_values[f"{nid}::frame_rate"] = output_fps
+
+    for field in ("noise_seed", "cfg"):
+        value = _first_node_input_value(wf, field_values, sampler_ids, field)
+        if value is None:
+            continue
+        for nid in sampler_ids:
+            inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+            if field in inputs:
+                field_values[f"{nid}::{field}"] = value
+
+    for field in ("pose_strength", "previous_frame_count"):
+        value = _first_node_input_value(wf, field_values, wan_ids, field)
+        if value is None:
+            continue
+        for nid in wan_ids:
+            inputs = (wf.get(nid, {}) or {}).get("inputs") or {}
+            if field in inputs:
+                field_values[f"{nid}::{field}"] = value
+
+
 ERNIE_IMAGE_OFFICIAL_SIZES: tuple[tuple[int, int], ...] = (
     (1024, 1024),
     (1264, 848),
@@ -4530,6 +4865,43 @@ ERNIE_IMAGE_OFFICIAL_SIZES: tuple[tuple[int, int], ...] = (
     (768, 1376),
 )
 ERNIE_I2I_WORKFLOWS = {"i2i_ernie_image.json", "i2i_ernie_image_turbo.json"}
+BOOGU_I2I_WORKFLOWS = {
+    "i2i_boogu_image_edit_nvfp4.json",
+    "i2i_boogu_image_edit_fp8_scaled.json",
+}
+BOOGU_I2I_SOURCE_SIZE_WORKFLOWS: set[str] = set()
+BOOGU_I2I_REFERENCE_MAX_SIZE = 2048
+BOOGU_I2I_NATIVE_OUTPUT_MAX_PIXELS = 1024 * 1024
+QWEN_RAPID_I2I_WORKFLOWS = {
+    "i2i-Qwen-Rapid.json",
+    "i2i-Qwen-Rapid-Q2.json",
+    "i2i-Qwen-Rapid-seedVR2-4k.json",
+}
+QWEN_RAPID_I2I_REFERENCE_MAX_SIZE = 1536
+BOOGU_I2I_RECOMMENDED_1K_SIZES: tuple[tuple[int, int], ...] = (
+    (1024, 1024),
+    (848, 1280),
+    (1280, 848),
+    (896, 1200),
+    (1200, 896),
+    (736, 1472),
+    (1472, 736),
+    (768, 1376),
+    (1376, 768),
+)
+BOOGU_I2I_RECOMMENDED_2K_SIZES: tuple[tuple[int, int], ...] = (
+    (2048, 2048),
+    (1664, 2496),
+    (2496, 1664),
+    (1728, 2304),
+    (2304, 1728),
+    (1440, 2880),
+    (2880, 1440),
+    (1458, 2592),
+    (2592, 1458),
+)
+_BOOGU_I2I_REWRITE_CACHE: OrderedDict[str, str] = OrderedDict()
+_BOOGU_I2I_REWRITE_CACHE_MAX = 64
 
 
 def _official_ernie_size_for_aspect(width: int, height: int) -> tuple[int, int]:
@@ -4598,6 +4970,355 @@ def _sync_ernie_i2i_reference_dimensions(workflow_name: str, wf: dict, field_val
     field_values["__ernie_i2i_source_size"] = f"{source_w}x{source_h}"
     field_values["__ernie_i2i_auto_size"] = f"{target_w}x{target_h}"
     return target_w, target_h
+
+
+def _field_config_number_value(workflow_name: str, key: str, attr: str, fallback: int) -> int:
+    try:
+        config = load_wf_config(os.path.basename(str(workflow_name or "")))
+    except Exception:
+        config = None
+    if isinstance(config, dict):
+        for item in config.get("fields", []):
+            if not isinstance(item, dict) or item.get("key") != key:
+                continue
+            try:
+                value = int(float(item.get(attr)))
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                return value
+    return fallback
+
+
+def _snap_boogu_dimension(value: float, multiple: int = 1, maximum: int = 0) -> int:
+    try:
+        dim = int(round(float(value)))
+        step = max(1, int(multiple or 1))
+    except (TypeError, ValueError):
+        return 0
+    if step > 1:
+        dim = max(step, int(round(dim / step)) * step)
+    if maximum > 0:
+        dim = min(maximum, dim)
+    return max(1, dim)
+
+
+def _boogu_target_size_for_aspect(width: int, height: int, longest_edge: int, multiple: int = 1) -> tuple[int, int]:
+    try:
+        source_w = max(1, int(width))
+        source_h = max(1, int(height))
+        max_edge = max(1, int(longest_edge))
+    except (TypeError, ValueError):
+        return (0, 0)
+    if source_w >= source_h:
+        return (
+            _snap_boogu_dimension(max_edge, multiple, max_edge),
+            _snap_boogu_dimension(max_edge * source_h / source_w, multiple, max_edge),
+        )
+    return (
+        _snap_boogu_dimension(max_edge * source_w / source_h, multiple, max_edge),
+        _snap_boogu_dimension(max_edge, multiple, max_edge),
+    )
+
+
+def _boogu_target_size_for_pixels(
+    width: int,
+    height: int,
+    max_pixels: int,
+    multiple: int = 1,
+    maximum: int = 0,
+) -> tuple[int, int]:
+    try:
+        source_w = max(1, int(width))
+        source_h = max(1, int(height))
+        pixel_budget = max(1, int(max_pixels))
+        max_edge = max(0, int(maximum or 0))
+        step = max(1, int(multiple or 1))
+    except (TypeError, ValueError):
+        return (0, 0)
+    scale = math.sqrt(pixel_budget / max(1, source_w * source_h))
+    target_w = source_w * scale
+    target_h = source_h * scale
+    if max_edge > 0:
+        edge_scale = min(1.0, max_edge / max(target_w, target_h))
+        target_w *= edge_scale
+        target_h *= edge_scale
+    snapped_w = _snap_boogu_dimension(target_w, step, max_edge)
+    snapped_h = _snap_boogu_dimension(target_h, step, max_edge)
+    while snapped_w * snapped_h > pixel_budget and (snapped_w > step or snapped_h > step):
+        if snapped_w >= snapped_h and snapped_w > step:
+            snapped_w -= step
+        elif snapped_h > step:
+            snapped_h -= step
+        else:
+            break
+    return (max(1, snapped_w), max(1, snapped_h))
+
+
+def _boogu_reference_source_size_with_limits(
+    width: int,
+    height: int,
+    max_side: int = 0,
+    max_pixels: int = 0,
+) -> tuple[int, int]:
+    try:
+        source_w = max(1, int(width))
+        source_h = max(1, int(height))
+        side_limit = max(0, int(max_side or 0))
+        pixel_limit = max(0, int(max_pixels or 0))
+    except (TypeError, ValueError):
+        return (0, 0)
+    scale = 1.0
+    if side_limit > 0:
+        scale = min(scale, side_limit / source_w, side_limit / source_h)
+    if pixel_limit > 0 and source_w * source_h * scale * scale > pixel_limit:
+        scale = min(scale, math.sqrt(pixel_limit / max(1, source_w * source_h)))
+    return (
+        max(1, int(round(source_w * scale))),
+        max(1, int(round(source_h * scale))),
+    )
+
+
+def _boogu_recommended_size_for_aspect(width: int, height: int) -> tuple[int, int]:
+    try:
+        source_ratio = max(1, int(width)) / max(1, int(height))
+    except (TypeError, ValueError):
+        source_ratio = 1.0
+    return min(
+        BOOGU_I2I_RECOMMENDED_2K_SIZES,
+        key=lambda size: abs(math.log((size[0] / size[1]) / source_ratio)),
+    )
+
+
+BOOGU_IMAGE_SIZE_NODE_TYPES = {
+    "GetImageSize",
+    "Get Image Size",
+    "GetImageSize+",
+    "LayerUtility: GetImageSize",
+}
+
+
+def _boogu_latent_size_is_linked_to_image_size(wf: dict, latent_node_id: str) -> bool:
+    inputs = ((wf or {}).get(str(latent_node_id)) or {}).get("inputs") or {}
+    width_link = inputs.get("width")
+    height_link = inputs.get("height")
+    if not (
+        isinstance(width_link, list)
+        and isinstance(height_link, list)
+        and len(width_link) >= 2
+        and len(height_link) >= 2
+        and str(width_link[0]) == str(height_link[0])
+    ):
+        return False
+    try:
+        if int(width_link[1]) != 0 or int(height_link[1]) != 1:
+            return False
+    except (TypeError, ValueError):
+        return False
+    size_node = (wf or {}).get(str(width_link[0])) or {}
+    return str(size_node.get("class_type") or "") in BOOGU_IMAGE_SIZE_NODE_TYPES
+
+
+def _sync_boogu_i2i_reference_dimensions(workflow_name: str, wf: dict, field_values: dict) -> tuple[int, int]:
+    workflow_base = os.path.basename(str(workflow_name or ""))
+    if workflow_base not in BOOGU_I2I_WORKFLOWS:
+        return (0, 0)
+    image_value = ""
+    generate_node_id = ""
+    generate_inputs: dict = {}
+    load_image_ids: set[str] = set()
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "LoadImage":
+            load_image_ids.add(str(nid))
+        elif ct == "BOOGUGenerate" and not generate_node_id and "width" in inputs and "height" in inputs:
+            linked = inputs.get("input_image")
+            if isinstance(linked, list) and linked and str(linked[0]) in load_image_ids:
+                image_value = field_values.get(f"{linked[0]}::image", (wf.get(str(linked[0])) or {}).get("inputs", {}).get("image", ""))
+            generate_node_id = str(nid)
+            generate_inputs = inputs
+    if generate_node_id:
+        if not image_value:
+            for nid, node in (wf or {}).items():
+                if isinstance(node, dict) and str(node.get("class_type") or "") == "LoadImage":
+                    image_value = field_values.get(f"{nid}::image", (node.get("inputs") or {}).get("image", ""))
+                    break
+        if not image_value:
+            return (0, 0)
+        source_w, source_h = _image_dimensions_for_comfy_input(str(image_value))
+        if source_w <= 0 or source_h <= 0:
+            return (0, 0)
+        try:
+            max_side = int(float(field_values.get(
+                f"{generate_node_id}::max_input_image_side_length",
+                generate_inputs.get("max_input_image_side_length", BOOGU_I2I_REFERENCE_MAX_SIZE),
+            ) or BOOGU_I2I_REFERENCE_MAX_SIZE))
+        except (TypeError, ValueError):
+            max_side = BOOGU_I2I_REFERENCE_MAX_SIZE
+        max_side = max(64, min(max_side, BOOGU_I2I_REFERENCE_MAX_SIZE))
+        target_w, target_h = _boogu_target_size_for_aspect(source_w, source_h, max_side, multiple=16)
+        if target_w <= 0 or target_h <= 0:
+            return (0, 0)
+        field_values[f"{generate_node_id}::width"] = target_w
+        field_values[f"{generate_node_id}::height"] = target_h
+        field_values[f"{generate_node_id}::max_input_image_side_length"] = max_side
+        field_values["__boogu_i2i_source_size"] = f"{source_w}x{source_h}"
+        field_values["__boogu_i2i_auto_size"] = f"{target_w}x{target_h}"
+        return target_w, target_h
+
+    has_boogu_edit_encoder = any(
+        isinstance(node, dict) and str(node.get("class_type") or "") == "TextEncodeBooguEdit"
+        for node in (wf or {}).values()
+    )
+    if not has_boogu_edit_encoder:
+        return (0, 0)
+    image_value = ""
+    latent_node_id = ""
+    scale_node_id = ""
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "LoadImage" and not image_value:
+            image_value = field_values.get(f"{nid}::image", inputs.get("image", ""))
+        elif ct in ("EmptySD3LatentImage", "EmptyLatentImage") and not latent_node_id and "width" in inputs and "height" in inputs:
+            latent_node_id = str(nid)
+        elif ct == "ImageScaleToMaxDimension" and not scale_node_id and "largest_size" in inputs:
+            scale_node_id = str(nid)
+    if not image_value:
+        return (0, 0)
+    source_w, source_h = _image_dimensions_for_comfy_input(str(image_value))
+    if source_w <= 0 or source_h <= 0:
+        return (0, 0)
+    if latent_node_id:
+        if _boogu_latent_size_is_linked_to_image_size(wf, latent_node_id):
+            field_values.pop(f"{latent_node_id}::width", None)
+            field_values.pop(f"{latent_node_id}::height", None)
+            field_values["__boogu_i2i_source_size"] = f"{source_w}x{source_h}"
+            field_values["__boogu_i2i_auto_size"] = f"{source_w}x{source_h}"
+            return source_w, source_h
+        if workflow_base in BOOGU_I2I_SOURCE_SIZE_WORKFLOWS:
+            max_w = _field_config_number_value(workflow_name, f"{latent_node_id}::width", "max", 4096)
+            max_h = _field_config_number_value(workflow_name, f"{latent_node_id}::height", "max", 4096)
+            max_pixels = _field_config_number_value(
+                workflow_name,
+                f"{latent_node_id}::width",
+                "maxPixels",
+                BOOGU_I2I_RECOMMENDED_2K_SIZES[0][0] * BOOGU_I2I_RECOMMENDED_2K_SIZES[0][1],
+            )
+            target_w, target_h = _boogu_reference_source_size_with_limits(
+                source_w,
+                source_h,
+                min(max_w, max_h),
+                max_pixels,
+            )
+        else:
+            target_w, target_h = _boogu_recommended_size_for_aspect(source_w, source_h)
+        if target_w <= 0 or target_h <= 0:
+            return (0, 0)
+        field_values[f"{latent_node_id}::width"] = target_w
+        field_values[f"{latent_node_id}::height"] = target_h
+        field_values["__boogu_i2i_source_size"] = f"{source_w}x{source_h}"
+        field_values["__boogu_i2i_auto_size"] = f"{target_w}x{target_h}"
+        return target_w, target_h
+    if not scale_node_id:
+        return (0, 0)
+    max_size = _field_config_number_value(
+        workflow_name,
+        f"{scale_node_id}::largest_size",
+        "max",
+        BOOGU_I2I_REFERENCE_MAX_SIZE,
+    )
+    target_w, target_h = _boogu_target_size_for_aspect(source_w, source_h, max_size)
+    if target_w <= 0 or target_h <= 0:
+        return (0, 0)
+    field_values[f"{scale_node_id}::largest_size"] = max_size
+    field_values["__boogu_i2i_source_size"] = f"{source_w}x{source_h}"
+    field_values["__boogu_i2i_auto_size"] = f"{target_w}x{target_h}"
+    return target_w, target_h
+
+
+def _sync_qwen_rapid_i2i_reference_dimensions(workflow_name: str, wf: dict, field_values: dict) -> tuple[int, int]:
+    workflow_base = os.path.basename(str(workflow_name or ""))
+    if workflow_base not in QWEN_RAPID_I2I_WORKFLOWS:
+        return (0, 0)
+
+    image_value = ""
+    load_image_id = ""
+    scale_node_id = ""
+    scale_inputs: dict = {}
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        ct = str(node.get("class_type") or "")
+        if ct == "LoadImage" and not load_image_id:
+            load_image_id = str(nid)
+            image_value = field_values.get(f"{load_image_id}::image", inputs.get("image", ""))
+        elif ct == "ImageScaleToMaxDimension" and "largest_size" in inputs:
+            linked = inputs.get("image")
+            if isinstance(linked, list) and linked and str(linked[0]) == load_image_id:
+                scale_node_id = str(nid)
+                scale_inputs = inputs
+                break
+            if not scale_node_id:
+                scale_node_id = str(nid)
+                scale_inputs = inputs
+
+    if not image_value or not scale_node_id:
+        return (0, 0)
+    source_w, source_h = _image_dimensions_for_comfy_input(str(image_value))
+    if source_w <= 0 or source_h <= 0:
+        return (0, 0)
+
+    key = f"{scale_node_id}::largest_size"
+    workflow_default = scale_inputs.get("largest_size", 0)
+    submitted = field_values.get(key, workflow_default)
+    try:
+        submitted_i = int(float(submitted or 0))
+        default_i = int(float(workflow_default or 0))
+    except (TypeError, ValueError):
+        submitted_i = 0
+        default_i = 0
+
+    if submitted_i > 0 and default_i > 0 and submitted_i != default_i:
+        target_long = submitted_i
+    else:
+        min_size = _field_config_number_value(workflow_name, key, "min", 0)
+        max_size = _field_config_number_value(
+            workflow_name,
+            key,
+            "max",
+            QWEN_RAPID_I2I_REFERENCE_MAX_SIZE,
+        )
+        max_size = max(1, max_size)
+        target_long = min(max(source_w, source_h), max_size)
+        if min_size > 0:
+            target_long = max(min_size, target_long)
+
+    target_long = max(1, int(target_long))
+    target_w, target_h = _boogu_target_size_for_aspect(source_w, source_h, target_long, multiple=16)
+    if target_w <= 0 or target_h <= 0:
+        return (0, 0)
+    field_values[key] = target_long
+    field_values["__qwen_rapid_i2i_source_size"] = f"{source_w}x{source_h}"
+    field_values["__qwen_rapid_i2i_auto_size"] = f"{target_w}x{target_h}"
+    field_values["__qwen_rapid_i2i_largest_size"] = target_long
+    return target_w, target_h
+
+
+def _sync_i2i_reference_dimensions(workflow_name: str, wf: dict, field_values: dict) -> tuple[int, int]:
+    auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(workflow_name, wf, field_values)
+    if auto_w > 0 and auto_h > 0:
+        return auto_w, auto_h
+    auto_w, auto_h = _sync_qwen_rapid_i2i_reference_dimensions(workflow_name, wf, field_values)
+    if auto_w > 0 and auto_h > 0:
+        return auto_w, auto_h
+    return _sync_boogu_i2i_reference_dimensions(workflow_name, wf, field_values)
 
 
 def _sync_ltx_video_timing(wf: dict, field_values: dict) -> None:
@@ -5218,11 +5939,27 @@ def _ideogram4_style_wants_layout(text: str) -> bool:
     ))
 
 
+def _ideogram4_caption_wants_layout(high: str, style_description: dict | None = None) -> bool:
+    style_description = style_description if isinstance(style_description, dict) else {}
+    style_text = " ".join(
+        str(style_description.get(key) or "")
+        for key in ("aesthetics", "medium", "art_style", "photo")
+    )
+    return _ideogram4_style_wants_layout(f"{high} {style_text}")
+
+
 def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, existing_prompt: str = "") -> dict | None:
     shapes = _ideogram4_canvas_shapes(canvas_payload)
     if not shapes:
         return None
     base = _strip_style_prompt_blocks(raw_prompt or "")
+    parsed_raw = _json_object_from_text(base)
+    if isinstance(parsed_raw, dict):
+        prompt_value = parsed_raw.get("prompt") if "prompt" in parsed_raw else parsed_raw
+        if isinstance(prompt_value, dict) and _is_official_ideogram4_caption(json.dumps(prompt_value, ensure_ascii=False)):
+            base = str(prompt_value.get("high_level_description") or "").strip()
+        else:
+            base = _ideogram4_prompt_text(prompt_value)
     parsed = _json_object_from_text(existing_prompt)
     style_payload = {}
     if isinstance(parsed, dict) and isinstance(parsed.get("style"), dict):
@@ -5259,22 +5996,45 @@ def _ideogram4_canvas_caption_from_shapes(raw_prompt: str, canvas_payload, exist
         }
     else:
         style_description = {
-            "aesthetics": "one coherent realistic image, integrated scene composition, no collage, no slide layout, no visible guide boxes",
+            "aesthetics": "seamless single-view realistic image with integrated scene composition",
             "lighting": "consistent natural lighting across the whole scene",
-            "photo": "single uninterrupted continuous camera shot with consistent perspective, focus, depth, scale, and no dividing seam",
+            "photo": "single uninterrupted continuous camera shot with consistent perspective, focus, depth, and scale",
             "medium": "photograph",
         }
 
     elements: list[dict] = []
-    elements.extend(_ideogram4_canvas_object_element(shape) for shape in object_shapes)
+    if layout_mode:
+        elements.extend(_ideogram4_canvas_object_element(shape) for shape in object_shapes)
+    elif object_shapes:
+        notes = " ".join(
+            _ideogram4_canvas_object_note(shape)
+            for shape in object_shapes
+            if str(shape.get("text") or "").strip()
+        ).strip()
+        elements.append({
+            "type": "obj",
+            "desc": (
+                "One seamless photographic scene using these composition cues: "
+                + (notes or base)
+                + " Blend every object into the same physical environment with shared camera perspective, lighting, scale, depth, and occlusion. "
+                "Render the result as a single continuous camera view with natural transitions between all areas."
+            ).strip(),
+        })
     elements.extend(text_elements)
     if not elements:
         elements.append({"type": "obj", "desc": base})
 
+    canvas_note = (
+        "Element bboxes are coordinate metadata, not visible frames. Text modules use bbox placement for glyph positioning only."
+        if layout_mode
+        else "Object canvas regions are composition guidance for one seamless image. Text modules use placement constraints only for glyph positioning."
+    )
+
     payload = {
         "high_level_description": (
             base
-            + " All object modules belong to one continuous image; their bboxes are placement metadata, not visible frames. Text modules use bbox placement for glyph positioning only."
+            + " "
+            + canvas_note
         ).strip(),
         "style_description": style_description,
         "compositional_deconstruction": {
@@ -5327,6 +6087,8 @@ def _normalize_ideogram4_caption_object(data: dict) -> dict | None:
     if not isinstance(elements, list):
         elements = []
     clean_elements = []
+    style_description = _normalize_ideogram4_style_description(data.get("style_description"))
+    keep_object_bbox = _ideogram4_caption_wants_layout(high, style_description)
     for item in elements[:20]:
         if not isinstance(item, dict):
             continue
@@ -5334,14 +6096,22 @@ def _normalize_ideogram4_caption_object(data: dict) -> dict | None:
         if not desc:
             continue
         bbox = _ideogram4_clean_bbox(item.get("bbox"))
-        position = _ideogram4_bbox_position_phrase(bbox)
+        item_type = "text" if str(item.get("type") or "").lower() == "text" else "obj"
+        keep_bbox = bool(bbox and (item_type == "text" or keep_object_bbox))
+        position = _ideogram4_bbox_position_phrase(bbox) if keep_bbox else ""
         shape = str(item.get("shape") or "").strip().lower()
         if position and "roughly x " not in desc:
             desc = f"{position} {desc}"
         if shape in {"circle", "ellipse", "oval"} and "soft clustered" not in desc.lower():
-            desc = f"{desc} Arranged as a soft clustered part of the same image rather than as a drawn outline."
-        clean = {"type": "text" if str(item.get("type") or "").lower() == "text" else "obj"}
-        if bbox:
+            desc = f"{desc} Arranged as a soft clustered part of the same image with natural edges."
+        if item_type == "obj" and not keep_bbox:
+            desc = (
+                desc
+                + " This subject must belong to one continuous image with shared camera perspective, lighting, scale, depth, and occlusion; "
+                "render it as an integrated part of the same environment with natural transitions."
+            )
+        clean = {"type": item_type}
+        if keep_bbox:
             clean["bbox"] = bbox
         if clean["type"] == "text":
             clean["text"] = str(item.get("text") or desc).strip()
@@ -5351,8 +6121,7 @@ def _normalize_ideogram4_caption_object(data: dict) -> dict | None:
             clean["color_palette"] = palette
         clean_elements.append(clean)
     if not clean_elements and high:
-        clean_elements.append({"type": "obj", "bbox": [120, 180, 880, 820], "desc": high})
-    style_description = _normalize_ideogram4_style_description(data.get("style_description"))
+        clean_elements.append({"type": "obj", "desc": high})
     if not high or not background:
         return None
     return {
@@ -5607,10 +6376,13 @@ def _llm_official_ideogram4_caption(prompt_value, style: dict | None = None, *, 
         "Use exactly this top-level schema: "
         '{"high_level_description":"...",'
         '"style_description":{"aesthetics":"...","lighting":"...","medium":"...","art_style":"...","color_palette":[]},'
-        '"compositional_deconstruction":{"background":"...","elements":[{"type":"obj","bbox":[80,120,920,880],"desc":"..."}]}}. '
+        '"compositional_deconstruction":{"background":"...","elements":[{"type":"obj","desc":"..."}]}}. '
         "Preserve the user's visual intent, subjects, actions, composition, colors, materials, text that should appear, "
         "camera/framing, and style. Do not translate proper nouns or mixed-language terms unless needed for clarity. "
         "This is structural reorganization only: do not judge, screen, refuse, or add safety commentary. "
+        "For photographs, realistic scenes, landscapes, portraits, and normal illustrations, do not use bbox for object elements; "
+        "describe spatial relationships in natural language so the image remains one continuous scene. "
+        "Use bbox only for explicit poster/layout/graphic-design placement or literal text placement. "
         "If the input contains custom JSON such as 画面描述 or 正向提示词, extract the positive visual description into the schema. "
         "If the input contains 负面提示词, negative_prompt, avoid, no, 禁止, 不要, or error lists, do not copy those negative fields into the output. "
         "Do not repeat the same detail in multiple long blocks; keep each field concise but complete."
@@ -5689,7 +6461,6 @@ def _official_ideogram4_caption_from_plain(prompt: str, *, allow_llm: bool = Fal
             "elements": [
                 {
                     "type": "obj",
-                    "bbox": [80, 120, 920, 880],
                     "desc": body,
                 }
             ],
@@ -5716,8 +6487,146 @@ def _normalize_official_ideogram4_prompt(workflow_name: str, field_values: dict,
         field_values[key] = _official_ideogram4_caption_from_plain(field_values.get(key, ""), allow_llm=allow_llm)
 
 
+def _boogu_i2i_thinking_enabled(field_values: dict) -> bool:
+    for key, value in (field_values or {}).items():
+        if key == "__boogu_enable_thinking" or str(key).endswith("::__boogu_enable_thinking"):
+            return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _boogu_i2i_rewrite_cache_get(key: str) -> str:
+    if key in _BOOGU_I2I_REWRITE_CACHE:
+        value = _BOOGU_I2I_REWRITE_CACHE.pop(key)
+        _BOOGU_I2I_REWRITE_CACHE[key] = value
+        return value
+    return ""
+
+
+def _boogu_i2i_rewrite_cache_put(key: str, value: str) -> None:
+    if not key or not value:
+        return
+    _BOOGU_I2I_REWRITE_CACHE[key] = value
+    while len(_BOOGU_I2I_REWRITE_CACHE) > _BOOGU_I2I_REWRITE_CACHE_MAX:
+        _BOOGU_I2I_REWRITE_CACHE.popitem(last=False)
+
+
+def _llm_boogu_i2i_instruction_rewrite(instruction: str, *, chat_fn=chat_text) -> str:
+    raw_instruction = str(instruction or "").strip()
+    if not raw_instruction:
+        return ""
+    cache_key = raw_instruction
+    cached = _boogu_i2i_rewrite_cache_get(cache_key)
+    if cached:
+        return cached
+    system_prompt = (
+        "Rewrite the user's image-edit instruction for Boogu-Image-Edit. "
+        "Output one concise final instruction only. Preserve the user's exact requested edit and language. "
+        "Do not add broad rigid preservation rules, do not add markdown, and do not explain. "
+        "Only clarify the target area and natural visual result when the request is ambiguous."
+    )
+    rewritten = chat_fn(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": raw_instruction},
+        ],
+        temperature=0.05,
+        max_tokens=320,
+        timeout=60,
+    )
+    result = str(rewritten or "").strip().strip("\"'“”")
+    if not result:
+        result = raw_instruction
+    _boogu_i2i_rewrite_cache_put(cache_key, result)
+    return result
+
+
+def _normalize_boogu_i2i_prompt(workflow_name: str, wf: dict, field_values: dict, *, allow_llm: bool = False) -> None:
+    if os.path.basename(str(workflow_name or "")) not in BOOGU_I2I_WORKFLOWS:
+        return
+    prompt_key = ""
+    direct_prompt_key = ""
+    default_prompt = ""
+    for nid, node in (wf or {}).items():
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("class_type") or "") != "TextEncodeBooguEdit":
+            continue
+        inputs = node.get("inputs") or {}
+        if "prompt" not in inputs:
+            continue
+        direct_prompt_key = f"{nid}::prompt"
+        prompt_key = direct_prompt_key
+        prompt_input = inputs.get("prompt")
+        if isinstance(prompt_input, list) and prompt_input:
+            linked_id = str(prompt_input[0])
+            linked_node = (wf or {}).get(linked_id) or {}
+            linked_inputs = linked_node.get("inputs") or {}
+            if isinstance(linked_node, dict) and "text" in linked_inputs:
+                prompt_key = f"{linked_id}::text"
+                default_prompt = str(linked_inputs.get("text") or "")
+            else:
+                default_prompt = ""
+        else:
+            default_prompt = str(prompt_input or "")
+        break
+    if not prompt_key:
+        return
+    raw_prompt = str(
+        field_values.get("__user_prompt")
+        or field_values.get(prompt_key)
+        or field_values.get(direct_prompt_key)
+        or default_prompt
+        or ""
+    ).strip()
+    if not raw_prompt:
+        return
+    instruction_used = raw_prompt
+    if _boogu_i2i_thinking_enabled(field_values) and allow_llm:
+        try:
+            instruction_used = _llm_boogu_i2i_instruction_rewrite(raw_prompt)
+        except Exception as exc:
+            add_log("warn", "boogu_i2i", f"Enable Thinking rewrite fallback: {str(exc)[:160]}")
+    field_values["__user_prompt"] = raw_prompt
+    field_values["__boogu_instruction_used"] = instruction_used
+    if direct_prompt_key and prompt_key != direct_prompt_key:
+        field_values.pop(direct_prompt_key, None)
+    field_values[prompt_key] = instruction_used
+
+
+def _refresh_hidden_field_defaults_from_workflow(wf: dict, field_values: dict, workflow_name: str) -> None:
+    """Hidden fields are implementation details; retry should use current workflow defaults."""
+    try:
+        config = load_wf_config(os.path.basename(str(workflow_name or "")))
+    except Exception:
+        config = None
+    if not isinstance(config, dict):
+        return
+    for item in config.get("fields", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("visible", True) is not False and str(item.get("zone") or "") != "hidden":
+            continue
+        key = str(item.get("key") or "")
+        if "::" not in key:
+            continue
+        nid, field = key.split("::", 1)
+        if field.startswith("__"):
+            continue
+        node = wf.get(nid, {})
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or field not in inputs:
+            continue
+        default = inputs.get(field)
+        if isinstance(default, list):
+            continue
+        field_values[key] = default
+
+
 def _normalize_workflow_field_values(wf: dict, field_values: dict, workflow_name: str = "", *, allow_llm: bool = False) -> dict:
     normalized = dict(field_values or {})
+    _refresh_hidden_field_defaults_from_workflow(wf, normalized, workflow_name)
     for key, value in list(normalized.items()):
         if "::" not in key:
             continue
@@ -5732,10 +6641,12 @@ def _normalize_workflow_field_values(wf: dict, field_values: dict, workflow_name
         )
     _sync_flux2_scheduler_dimensions(wf, normalized)
     _sync_ltx_video_timing(wf, normalized)
+    _sync_scail2_official_flow(wf, normalized)
     _sync_longcat_avatar_audio_timing(wf, normalized)
     _lock_ltx_sulphur_dist_fields(workflow_name, normalized)
     _lock_ltx_singularity_omnicine_fields(workflow_name, normalized)
     _normalize_official_ideogram4_prompt(workflow_name, normalized, allow_llm=allow_llm)
+    _normalize_boogu_i2i_prompt(workflow_name, wf, normalized, allow_llm=allow_llm)
     _sync_ltx_director_timeline_prompts(wf, normalized)
     normalize_bernini_field_values(wf, normalized, workflow_name)
     return normalized
@@ -5765,7 +6676,7 @@ def _resolve_link(wf: dict, value, depth: int = 0):
 # ── Workflow Editor: auto-classify + config persistence ────────────────
 def _auto_classify(ct: str, field: str, value) -> tuple:
     """Return (zone, visible) based on node type and field name."""
-    if ct in ("CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus"):
+    if ct in ("CLIPTextEncode", "CLIPTextEncodeFlux", "TextEncodeQwenImageEditPlus", "TextEncodeBooguEdit"):
         f = "text" if ct in ("CLIPTextEncode", "CLIPTextEncodeFlux") else "prompt"
         if field == f:
             has_val = bool(value and str(value).strip())
@@ -6207,8 +7118,10 @@ NODE_STATUS_MAP = {
     "LoraLoader": "加载 LoRA...",
     "ModelSamplingAuraFlow": "配置采样策略...",
     "ModelSamplingFlux": "配置 Flux 采样...",
+    "BooguImageGuidance": "配置 Boogu 图像引导...",
     "CLIPTextEncode": "编码提示词...",
     "TextEncodeQwenImageEditPlus": "编码提示词...",
+    "TextEncodeBooguEdit": "编码 Boogu 编辑提示词...",
     "CLIPTextEncodeFlux": "编码 Flux 提示词...",
     "ConditioningZeroOut": "处理条件...",
     "ConditioningSetTimestepRange": "设置时间步范围...",
@@ -6433,7 +7346,15 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             if "::" not in key:
                 continue
             nid, field = key.split("::", 1)
+            if field.startswith("__"):
+                continue
             if nid in wf and "inputs" in wf[nid]:
+                val = _normalize_seed_value_for_field(
+                    str(wf[nid].get("class_type") or ""),
+                    field,
+                    val,
+                )
+                field_values[key] = val
                 wf[nid]["inputs"][field] = val
 
         for nid, v in wf.items():
@@ -6441,8 +7362,11 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 if "seed" in v.get("inputs", {}):
                     v["inputs"]["seed"] = seed
 
+        apply_multi_reference_image_mode_to_workflow(wf, field_values, workflow_path)
         apply_qwen_frame_roll_to_workflow(wf, field_values, COMFYUI_INPUT)
         apply_bernini_mixed_mode_to_workflow(wf, field_values, workflow_path)
+        apply_scail2_model_variant_to_workflow(wf, field_values)
+        apply_scail2_audio_mux_to_workflow(wf, field_values, workflow_path)
 
         issues = validate_api_prompt(wf)
         if issues:
@@ -6590,6 +7514,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             os.path.basename(workflow_path),
             field_values,
             _workflow_primary_type(os.path.basename(workflow_path)),
+            _workflow_custom_display_name(os.path.basename(workflow_path)),
         )
 
         batch_count = len(sources)
@@ -6711,8 +7636,10 @@ def load_jobs():
         job["last_update"] = float(job.get("last_update") or now)
         if job.get("prompt_id") and job["status"] not in ("error", "cancelled", "retrying"):
             job["message"] = "服务重启后恢复追踪中..."
+            _set_job_progress_preserving_high_water(job, job.get("progress") or {"pct": 0})
         jobs[job_id] = job
-        restored += 1
+        if job["status"] not in ("error", "retrying"):
+            restored += 1
     if restored:
         add_log("info", "queue", f"已恢复 {restored} 个重启前活跃任务")
 
@@ -6925,7 +7852,11 @@ async def _resume_persisted_generation_job(job_id: str) -> None:
     job["message"] = "服务重启后恢复追踪中..."
     job["last_update"] = time.time()
     job["instance"] = inst.get("name", "")
-    job["progress"] = job.get("progress") or {"pct": 0}
+    _set_job_progress_preserving_high_water(
+        job,
+        job.get("progress") or {"pct": 0},
+        message="服务重启后恢复追踪中...",
+    )
     save_jobs()
     await broadcast({"type": "job_update", "job": job})
 
@@ -6956,7 +7887,12 @@ async def _resume_persisted_generation_job(job_id: str) -> None:
                     if _job_runner:
                         job["status"] = "downloading"
                         job["message"] = "正在保存结果..."
-                        job["progress"] = {"pct": 100}
+                        _set_job_progress_preserving_high_water(
+                            job,
+                            {"pct": 100},
+                            message="正在保存结果...",
+                            allow_complete=True,
+                        )
                         save_jobs()
                         await broadcast({"type": "job_update", "job": job})
                         await _job_runner._save_output(
@@ -7099,6 +8035,54 @@ def _probe_video_timing(src: str) -> tuple[float, float]:
         return max(0.0, duration), max(0.0, fps)
     except Exception:
         return 0.0, 0.0
+
+
+def _probe_uploaded_video_metadata(src: str) -> dict:
+    """Return lightweight metadata for uploaded reference videos."""
+    ffprobe = _project_ffprobe_bin()
+    if not ffprobe or not src:
+        return {}
+    try:
+        result = subprocess.run([
+            ffprobe,
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,duration,avg_frame_rate,r_frame_rate,nb_frames:format=duration",
+            "-of", "json",
+            src,
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return {}
+        data = json.loads(getattr(result, "stdout", "") or "{}")
+        streams = data.get("streams") or []
+        stream = streams[0] if streams and isinstance(streams[0], dict) else {}
+        fmt = data.get("format") or {}
+        duration = 0.0
+        for candidate in (stream.get("duration"), fmt.get("duration")):
+            try:
+                duration = max(duration, float(candidate or 0))
+            except (TypeError, ValueError):
+                pass
+        fps = _parse_video_rate(stream.get("avg_frame_rate")) or _parse_video_rate(stream.get("r_frame_rate"))
+        width = int(float(stream.get("width") or 0) or 0)
+        height = int(float(stream.get("height") or 0) or 0)
+        frame_count = 0
+        try:
+            frame_count = int(float(stream.get("nb_frames") or 0) or 0)
+        except (TypeError, ValueError):
+            frame_count = 0
+        if frame_count <= 0 and duration > 0 and fps > 0:
+            frame_count = max(1, int(round(duration * fps)))
+        meta = {
+            "width": width,
+            "height": height,
+            "duration": round(duration, 3) if duration > 0 else 0,
+            "fps": round(fps, 3) if fps > 0 else 0,
+            "frame_count": frame_count,
+        }
+        return {k: v for k, v in meta.items() if v}
+    except Exception:
+        return {}
 
 
 def _safe_video_frame_time(requested: float, duration: float = 0.0, fps: float = 0.0) -> float:
@@ -7318,6 +8302,7 @@ class GenerateRequest(BaseModel):
     height: int = 0
     preferred_instance: str = ""
     preferred_node_id: str = ""
+    prompt_strategy: str = "none"
 
 
 class PromptOptimizeRequest(BaseModel):
@@ -7325,6 +8310,909 @@ class PromptOptimizeRequest(BaseModel):
     max_new_tokens: int = 384
     mode: str = "image"
     prompt_context: dict = Field(default_factory=dict)
+
+
+class PromptStrategyOptimizeRequest(BaseModel):
+    prompt: str
+    strategy: str = "auto"
+    workflow: str = ""
+    fields: dict = Field(default_factory=dict)
+
+
+PROMPT_STRATEGY_NONE = "none"
+PROMPT_STRATEGY_AUTO = "auto"
+PROMPT_STRATEGY_ANALYSIS_VERSION = "lingzao-visual-director-v1"
+try:
+    PROMPT_STRATEGY_LLM_TIMEOUT = float(os.environ.get("EZ_PROMPT_STRATEGY_LLM_TIMEOUT", "45") or 45)
+except (TypeError, ValueError):
+    PROMPT_STRATEGY_LLM_TIMEOUT = 45.0
+_PROMPT_STRATEGY_LLM_CACHE: OrderedDict[str, dict] = OrderedDict()
+_PROMPT_STRATEGY_LLM_CACHE_MAX = 64
+
+PROMPT_STRATEGIES: dict[str, dict[str, str]] = {
+    PROMPT_STRATEGY_NONE: {
+        "label": "不优化",
+        "positive": "",
+        "negative": "",
+    },
+    PROMPT_STRATEGY_AUTO: {
+        "label": "智能推荐",
+        "positive": "主体清晰，构图完整，层次明确，光线自然，材质细节丰富，画面干净，高质量成片",
+        "negative": "low quality, blurry, noisy, messy composition, duplicate subject, watermark, random text",
+    },
+    "xhs_cover": {
+        "label": "小红书封面",
+        "positive": "小红书封面风格，第一眼识别强，主体居中突出，标题留白充足，明亮干净，高点击率构图，适合手机竖屏浏览",
+        "negative": "tiny unreadable text, crowded layout, low contrast, messy background, watermark, logo, clutter",
+    },
+    "product_poster": {
+        "label": "产品海报",
+        "positive": "商业产品海报质感，产品主体突出，干净背景，柔和阴影，高级光影，卖点留白，适合品牌宣传",
+        "negative": "distorted product, wrong logo, unreadable typography, cheap lighting, cluttered props, watermark",
+    },
+    "ecommerce": {
+        "label": "电商主图",
+        "positive": "电商主图风格，产品完整清晰，占比醒目，白底或简洁场景，真实材质，高转化展示，边缘干净",
+        "negative": "cropped product, distorted shape, extra objects, dirty background, wrong packaging, watermark",
+    },
+    "portrait": {
+        "label": "人物写真",
+        "positive": "人物写真质感，五官自然，皮肤真实细腻，姿态舒展，眼神清晰，背景简洁，专业摄影光线",
+        "negative": "bad anatomy, distorted face, asymmetrical eyes, bad hands, extra fingers, plastic skin, over-smoothed face",
+    },
+    "realistic_scene": {
+        "label": "写实场景",
+        "positive": "写实摄影质感，真实空间关系，自然透视，环境细节丰富，电影级光影，色彩协调，画面可信",
+        "negative": "unrealistic perspective, floating objects, overprocessed, oversaturated, blurry, low detail",
+    },
+    "illustration": {
+        "label": "插画/二次元",
+        "positive": "精致插画质感，线条干净，色彩和谐，角色轮廓清晰，背景层次丰富，完成度高",
+        "negative": "rough sketch, broken lineart, messy colors, deformed limbs, low detail, unfinished",
+    },
+    "text_poster": {
+        "label": "文字海报",
+        "positive": "文字海报构图，标题区域清晰，文字层级明确，强对比，背景简洁，适合手机端阅读",
+        "negative": "unreadable text, misspelled characters, random letters, crowded typography, low contrast",
+    },
+    "reference_edit": {
+        "label": "参考图改图",
+        "positive": "严格保留参考图主体结构、身份特征、构图和关键物体，只修改用户指定内容，边缘自然融合，光影一致",
+        "negative": "identity drift, changed composition, changed face, missing key object, over-redraw, inconsistent lighting",
+    },
+}
+
+PROMPT_STRATEGY_LINGZAO_CONTRACTS: dict[str, dict[str, object]] = {
+    PROMPT_STRATEGY_AUTO: {
+        "platform": "通用生图",
+        "format": "高质量成片",
+        "style_group": "Lingzao general visual-director brief",
+        "aspect_ratio": "follow the workflow or user-provided size",
+        "image_purpose": "把一句提示词扩展为主体明确、构图完整、可直接出图的视觉 brief",
+        "quality_gates": ["主体一秒可识别", "画面有明确焦点", "不堆砌无关元素", "避免随机文字和水印"],
+    },
+    "xhs_cover": {
+        "platform": "小红书",
+        "format": "手机竖屏封面/笔记首图",
+        "style_group": "Lingzao XHS cover / no-person knowledge card",
+        "aspect_ratio": "prefer vertical 3:4 or 4:5 unless the workflow fixes another ratio",
+        "image_purpose": "提高首屏点击理由，让用户一眼看懂主题和利益点",
+        "quality_gates": ["手机首屏强识别", "标题安全区清楚", "主体大且干净", "不生成随机乱码"],
+    },
+    "product_poster": {
+        "platform": "品牌宣传",
+        "format": "商业产品海报",
+        "style_group": "Product/ecommerce conversion card",
+        "aspect_ratio": "follow product poster workflow, keep product uncropped",
+        "image_purpose": "突出产品主体、质感和卖点空间，形成可用于宣传的成片",
+        "quality_gates": ["产品轮廓完整", "材质可信", "卖点区域留白", "光影服务商品"],
+    },
+    "ecommerce": {
+        "platform": "电商",
+        "format": "商品主图",
+        "style_group": "Product/ecommerce conversion card",
+        "aspect_ratio": "square or workflow-defined commerce ratio",
+        "image_purpose": "让商品品类、轮廓和核心卖点第一眼可判断",
+        "quality_gates": ["商品无遮挡", "背景干净", "比例真实", "减少无关道具"],
+    },
+    "portrait": {
+        "platform": "人物视觉",
+        "format": "人物写真/头像/人像封面",
+        "style_group": "Face-led keyword cover",
+        "aspect_ratio": "follow portrait workflow; keep face and upper body comfortably framed",
+        "image_purpose": "保留人物身份气质，强化脸部、姿态、服装和光线的完成度",
+        "quality_gates": ["脸部自然", "眼神清晰", "手部和肢体不畸形", "皮肤不过度塑料感"],
+    },
+    "realistic_scene": {
+        "platform": "写实视觉",
+        "format": "摄影场景/空间氛围图",
+        "style_group": "Travel/Food/Local-life realistic cover",
+        "aspect_ratio": "follow the camera framing implied by the prompt or workflow",
+        "image_purpose": "把场景变成可信镜头，明确空间、光线、前中后景和材质关系",
+        "quality_gates": ["透视可信", "光影自然", "环境不抢主体", "像真实拍摄而不是拼贴"],
+    },
+    "illustration": {
+        "platform": "插画视觉",
+        "format": "完成度插画/二次元视觉",
+        "style_group": "Finished illustration / character visual",
+        "aspect_ratio": "follow illustration workflow or user composition",
+        "image_purpose": "把主题转为完整插画设定，明确角色轮廓、色彩层级和背景关系",
+        "quality_gates": ["线条干净", "色彩协调", "角色结构完整", "不是草稿或半成品"],
+    },
+    "text_poster": {
+        "platform": "内容传播",
+        "format": "文字海报/知识卡片",
+        "style_group": "Text-dense screenshot graphic note",
+        "aspect_ratio": "prefer vertical mobile-readable composition",
+        "image_purpose": "把主题组织成可读的主标题区、辅助信息区和干净背景",
+        "quality_gates": ["主标题层级明确", "手机可读", "不生成乱码", "留白和对比足够"],
+    },
+    "reference_edit": {
+        "platform": "参考图编辑",
+        "format": "图生图/局部改图",
+        "style_group": "Reference-image edit brief",
+        "aspect_ratio": "keep reference image framing unless user explicitly requests a change",
+        "image_purpose": "严格围绕参考图，只把用户要求修改的部分转成可执行编辑指令",
+        "quality_gates": ["身份和构图不漂移", "只改指定内容", "边缘自然融合", "光影和材质一致"],
+    },
+}
+
+
+def _normalize_prompt_strategy(strategy: str | None) -> str:
+    key = re.sub(r"[^a-zA-Z0-9_\-]", "", str(strategy or "").strip().lower()).replace("-", "_")
+    return key if key in PROMPT_STRATEGIES else PROMPT_STRATEGY_NONE
+
+
+def _node_title_text(node: dict) -> str:
+    meta = node.get("_meta") if isinstance(node, dict) else {}
+    if isinstance(meta, dict):
+        title = meta.get("title")
+        if title:
+            return str(title)
+    return str(node.get("title") or "") if isinstance(node, dict) else ""
+
+
+def _is_negative_prompt_field(wf: dict, key: str) -> bool:
+    if "::" not in str(key):
+        return False
+    nid, field = str(key).split("::", 1)
+    node = wf.get(str(nid), {})
+    title = _node_title_text(node).lower()
+    field_l = field.lower()
+    return "negative" in field_l or "negative" in title or "负面" in title or "反向" in title
+
+
+def _is_positive_prompt_field(wf: dict, key: str, value, base_prompt: str = "") -> bool:
+    if not isinstance(value, str) or "::" not in str(key):
+        return False
+    if _is_negative_prompt_field(wf, key):
+        return False
+    nid, field = str(key).split("::", 1)
+    node = wf.get(str(nid), {})
+    class_type = str(node.get("class_type") or "")
+    title = _node_title_text(node).lower()
+    field_l = field.lower()
+    if "prompt" in field_l or "positive" in field_l:
+        return True
+    if field_l in {"text", "value"}:
+        if base_prompt and base_prompt.strip() and base_prompt.strip() in value:
+            return True
+        class_l = class_type.lower()
+        return ("textencode" in class_l or "cliptextencode" in class_l or "primitivestring" in class_l) and (
+            "prompt" in title or "提示词" in title or "positive" in title
+        )
+    return False
+
+
+def _has_reference_prompt_context(wf: dict, field_values: dict) -> bool:
+    for key, value in (field_values or {}).items():
+        skey = str(key)
+        if skey.startswith("__bernini_refs") and str(value or "").strip():
+            return True
+        if "::" not in skey:
+            continue
+        nid, field = skey.split("::", 1)
+        node = wf.get(str(nid), {})
+        class_type = str(node.get("class_type") or "")
+        field_l = field.lower()
+        if field_l in {"image", "video", "audio"} and str(value or "").strip():
+            return True
+        if field_l.startswith("images.") and str(value or "").strip():
+            return True
+        if class_type == "LoadImage" and field_l == "image" and str(value or "").strip():
+            return True
+    return False
+
+
+def _resolve_auto_prompt_strategy(workflow_name: str, wf: dict, field_values: dict) -> str:
+    wf_name = os.path.basename(str(workflow_name or "")).lower()
+    if _has_reference_prompt_context(wf, field_values) or wf_name.startswith("i2i_") or "edit" in wf_name:
+        return "reference_edit"
+    if "upscale" in wf_name or "seedvr" in wf_name:
+        return PROMPT_STRATEGY_NONE
+    if "poster" in wf_name or "cover" in wf_name:
+        return "product_poster"
+    if "ideogram" in wf_name:
+        return "realistic_scene"
+    return PROMPT_STRATEGY_AUTO
+
+
+def _append_prompt_clause(prompt: str, clause: str) -> str:
+    base = str(prompt or "").strip()
+    extra = str(clause or "").strip()
+    if not base or not extra:
+        return base or extra
+    if extra in base:
+        return base
+    sep = "\n" if "\n" in base or len(base) > 120 else "，"
+    return f"{base}{sep}{extra}"
+
+
+_PROMPT_STRATEGY_TITLE_PREFIX_RE = re.compile(
+    r"^\s*(?:"
+    r"参考图改图(?:任务|成片|硬约束)?|"
+    r"小红书封面(?:成片|硬约束|成片硬约束)?|"
+    r"商业产品海报(?:成片|硬约束|成片硬约束)?|"
+    r"电商主图(?:成片|硬约束|成片硬约束)?|"
+    r"专业人物写真(?:成片|硬约束|成片硬约束)?|"
+    r"真人人物写真(?:成片|硬约束|成片硬约束)?|"
+    r"人物写真(?:成片|硬约束|成片硬约束)?|"
+    r"写实摄影场景(?:成片|硬约束|成片硬约束)?|"
+    r"写实摄影(?:成片|硬约束|成片硬约束)?|"
+    r"精致插画(?:成片|硬约束|成片硬约束)?|"
+    r"文字海报(?:成片|硬约束|成片硬约束)?|"
+    r"高质量完整成片(?:硬约束)?|"
+    r"最终提示词|优化提示词|正向提示词|生图提示词|提示词|"
+    r"reference edit hard constraint|xiaohongshu cover hard constraint|"
+    r"commercial product poster hard constraint|ecommerce hero image hard constraint|"
+    r"professional portrait hard constraint|realistic photography hard constraint|"
+    r"finished illustration hard constraint|text poster hard constraint|"
+    r"high-quality final image hard constraint|final prompt|positive prompt|prompt"
+    r")\s*[:：]\s*",
+    re.IGNORECASE,
+)
+_PROMPT_STRATEGY_PHOTOGRAPHIC_STRATEGIES = {"portrait", "realistic_scene"}
+_PROMPT_STRATEGY_CONFLICT_STYLE_RE = (
+    r"二次元|漫画|日漫|动漫|卡通|插画|"
+    r"anime|manga|comic|cartoon|illustration|cel[-\s]?shaded|2d anime"
+)
+
+
+def _strip_prompt_strategy_title_prefix(prompt: str) -> str:
+    text = str(prompt or "").strip()
+    for _ in range(4):
+        stripped = _PROMPT_STRATEGY_TITLE_PREFIX_RE.sub("", text, count=1).strip()
+        if stripped == text:
+            break
+        text = stripped
+    return text
+
+
+def _cleanup_prompt_strategy_text(text: str) -> str:
+    text = re.sub(r"[ \t]+", " ", str(text or "")).strip()
+    text = re.sub(r"\s*([，,、；;。.!！?？])\s*", r"\1", text)
+    text = re.sub(r"[，,、；;]{2,}", "，", text)
+    text = re.sub(r"^[，,、；;：:\s]+", "", text)
+    text = re.sub(r"[，,、；;：:\s]+$", "", text)
+    text = re.sub(r"([，,、；;])([。.!！?？])", r"\2", text)
+    return text.strip()
+
+
+def _remove_prompt_strategy_conflicting_styles(prompt: str, strategy_id: str) -> str:
+    strategy = _normalize_prompt_strategy(strategy_id)
+    text = str(prompt or "").strip()
+    if strategy not in _PROMPT_STRATEGY_PHOTOGRAPHIC_STRATEGIES or not text:
+        return text
+
+    text = re.sub(
+        rf"(?:避免|不要|禁止|排除|去掉|去除|不能出现|不出现)[^，,。.;；\n]*"
+        rf"(?:{_PROMPT_STRATEGY_CONFLICT_STYLE_RE})[^，,。.;；\n]*[，,。.;；]?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        rf"(?:avoid|without|no|not)\s+[^，,。.;；\n]*"
+        rf"(?:{_PROMPT_STRATEGY_CONFLICT_STYLE_RE})[^，,。.;；\n]*[，,。.;；]?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    for old, new in {
+        "漫画家": "视觉创作者",
+        "插画师": "视觉创作者",
+    }.items():
+        text = text.replace(old, new)
+    for phrase in sorted(
+        (
+            "二次元漫画风格",
+            "二次元漫画",
+            "二次元风格",
+            "二次元",
+            "日漫风格",
+            "日漫",
+            "动漫风格",
+            "动漫风",
+            "动漫感",
+            "动漫",
+            "漫画风格",
+            "漫画风",
+            "漫画感",
+            "漫画",
+            "卡通风格",
+            "卡通风",
+            "卡通感",
+            "卡通",
+            "插画风格",
+            "插画风",
+            "插画感",
+        ),
+        key=len,
+        reverse=True,
+    ):
+        text = text.replace(phrase, "")
+    text = re.sub(r"插画(?!师)", "", text)
+    text = re.sub(
+        r"\b(?:anime style|manga style|comic style|cartoon style|illustration style|"
+        r"anime|manga|comic|cartoon|illustration|cel[-\s]?shaded|2d anime)\b",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"(?i)\bstyle\b", "", text)
+    text = re.sub(r"(?:^|[，,、；;\s])风格(?:的)?", "，", text)
+    return _cleanup_prompt_strategy_text(text)
+
+
+def _sanitize_prompt_strategy_positive_prompt(prompt: str, strategy_id: str, fallback_prompt: str = "") -> str:
+    strategy = _normalize_prompt_strategy(strategy_id)
+    text = _strip_prompt_strategy_title_prefix(prompt)
+    text = _remove_prompt_strategy_conflicting_styles(text, strategy)
+    text = _cleanup_prompt_strategy_text(text)
+    if text:
+        return text
+    fallback = _remove_prompt_strategy_conflicting_styles(_strip_prompt_strategy_title_prefix(fallback_prompt), strategy)
+    fallback = _cleanup_prompt_strategy_text(fallback)
+    if fallback:
+        return fallback
+    if strategy == "portrait":
+        return "真实人物写真主体"
+    if strategy == "realistic_scene":
+        return "真实摄影场景"
+    return text
+
+
+def _compile_prompt_strategy_prompt(base_prompt: str, strategy_id: str, info: dict[str, str]) -> str:
+    """Build a high-impact prompt instead of hiding the strategy at the tail."""
+    base = str(base_prompt or "").strip()
+    if not base:
+        return ""
+    strategy = _normalize_prompt_strategy(strategy_id)
+    if strategy in {PROMPT_STRATEGY_NONE, ""}:
+        return base
+    base = _sanitize_prompt_strategy_positive_prompt(base, strategy, base_prompt)
+    if strategy == "reference_edit":
+        return (
+            "以参考图为主，保持主体身份、构图、姿态、镜头、关键物体和背景关系不变；"
+            f"只执行用户指定修改：{base}。"
+            "修改区域自然融合，材质、光影、颜色和边缘与原图一致，避免大幅重绘、换脸、换构图或新增无关元素。"
+        )
+    if strategy == "xhs_cover":
+        return (
+            f"{base}，小红书封面构图。"
+            "手机首屏识别度优先，主体大且清晰，视觉焦点明确，构图简洁，明亮干净的社媒审美，"
+            "预留标题和贴纸安全区但不要生成随机文字，背景不杂乱，适合竖屏浏览，高完成度商业级出图。"
+        )
+    if strategy == "product_poster":
+        return (
+            f"{base}，商业产品海报质感。"
+            "产品是绝对主角，轮廓完整，材质和反射真实，高级棚拍光影，背景简洁，卖点区域留白清楚，"
+            "品牌广告质感，画面干净、可信、可直接用于宣传。"
+        )
+    if strategy == "ecommerce":
+        return (
+            f"{base}，电商主图展示。"
+            "产品完整无遮挡，占画面核心位置，边缘干净，白底或极简场景，真实比例和材质，"
+            "减少多余道具，第一眼能判断商品品类和卖点，高转化展示。"
+        )
+    if strategy == "portrait":
+        return (
+            f"{base}，真实人物写真质感。"
+            "保留人物身份与气质，五官自然，皮肤真实细腻不过度磨皮，眼神清晰，姿态舒展，"
+            "服装和发丝细节完整，专业摄影布光，背景服务主体。"
+        )
+    if strategy == "realistic_scene":
+        return (
+            f"{base}，写实摄影质感。"
+            "空间关系可信，透视自然，真实镜头语言，环境细节丰富但不喧宾夺主，电影级自然光影，"
+            "材质、阴影、色彩和景深符合真实拍摄。"
+        )
+    if strategy == "illustration":
+        return (
+            f"{base}，精致插画质感。"
+            "线条干净，角色或主体轮廓清楚，色彩层次和谐，背景有完整空间层次，"
+            "画面完成度高，适合插画发布或视觉设定，不要像草稿或半成品。"
+        )
+    if strategy == "text_poster":
+        return (
+            f"{base}，文字海报版式。"
+            "版式清晰，主标题区域醒目，文字层级明确，背景简洁，强对比且适合手机阅读；"
+            "如果模型无法稳定生成准确文字，保留干净留白和排版区，避免随机乱码。"
+        )
+    if strategy == PROMPT_STRATEGY_AUTO:
+        return (
+            f"{base}。"
+            "主体清晰，构图完整，视觉焦点明确，光线自然，材质细节丰富，背景和主体关系干净，"
+            "整体像一次有明确摄影或设计意图的最终作品，而不是普通草图或随机生成图。"
+        )
+    return _append_prompt_clause(base, info.get("positive", ""))
+
+
+def _prompt_strategy_llm_enabled() -> bool:
+    raw = str(os.environ.get("EZ_PROMPT_STRATEGY_LLM", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
+def _prompt_strategy_text(value, limit: int = 800) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    else:
+        text = str(value or "")
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    text = re.sub(r"[\r\n]{3,}", "\n\n", text)
+    if limit > 0 and len(text) > limit:
+        text = text[:limit].rstrip()
+    return text
+
+
+def _prompt_strategy_dimension_summary(field_values: dict) -> str:
+    width = ""
+    height = ""
+    for key, value in (field_values or {}).items():
+        skey = str(key).lower()
+        if not width and skey.endswith("::width"):
+            width = str(value or "").strip()
+        if not height and skey.endswith("::height"):
+            height = str(value or "").strip()
+        if width and height:
+            break
+    return f"{width}x{height}" if width and height else ""
+
+
+def _prompt_strategy_contract(strategy_id: str, workflow_name: str, wf: dict, field_values: dict) -> dict:
+    strategy = _normalize_prompt_strategy(strategy_id)
+    base = dict(PROMPT_STRATEGY_LINGZAO_CONTRACTS.get(strategy) or PROMPT_STRATEGY_LINGZAO_CONTRACTS[PROMPT_STRATEGY_AUTO])
+    info = PROMPT_STRATEGIES.get(strategy) or PROMPT_STRATEGIES[PROMPT_STRATEGY_AUTO]
+    base.update(
+        {
+            "strategy_id": strategy,
+            "strategy_label": info.get("label", strategy),
+            "workflow": os.path.basename(str(workflow_name or "")),
+            "has_reference_image": _has_reference_prompt_context(wf, field_values),
+        }
+    )
+    size_summary = _prompt_strategy_dimension_summary(field_values)
+    if size_summary:
+        base["workflow_size"] = size_summary
+    return base
+
+
+def _prompt_strategy_fallback_brief(base_prompt: str, strategy_id: str, contract: dict, info: dict[str, str]) -> dict:
+    return {
+        "platform": contract.get("platform", ""),
+        "format": contract.get("format", ""),
+        "style_group": contract.get("style_group", ""),
+        "image_purpose": contract.get("image_purpose", ""),
+        "audience": "由用户提示词和所选出图策略推断",
+        "main_visual_subject": base_prompt,
+        "on_image_text": "未明确提供时不生成随机文字，只保留安全排版区",
+        "text_hierarchy": "主体优先，必要时保留标题/卖点留白",
+        "layout_structure": contract.get("aspect_ratio", ""),
+        "color_typography": "按策略选择干净、高识别度、适合手机端阅读的视觉组织",
+        "materials_or_reference_role": "参考图存在时保持主体、构图和光影关系；无参考图时按文本生成",
+        "negative_constraints": info.get("negative", ""),
+        "success_criteria": list(contract.get("quality_gates") or []),
+    }
+
+
+def _normalize_prompt_strategy_brief(value) -> dict:
+    brief = value if isinstance(value, dict) else {}
+    allowed = {
+        "platform",
+        "format",
+        "style_group",
+        "image_purpose",
+        "audience",
+        "main_visual_subject",
+        "on_image_text",
+        "text_hierarchy",
+        "layout_structure",
+        "color_typography",
+        "materials_or_reference_role",
+        "negative_constraints",
+        "success_criteria",
+    }
+    result: dict[str, object] = {}
+    for key in allowed:
+        raw = brief.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, list):
+            items = [_prompt_strategy_text(item, 160) for item in raw]
+            result[key] = [item for item in items if item][:8]
+        else:
+            result[key] = _prompt_strategy_text(raw, 900)
+    return result
+
+
+def _normalize_prompt_strategy_llm_result(data: dict | None, base_prompt: str) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+    final_prompt = _prompt_strategy_text(
+        data.get("final_prompt") or data.get("prompt") or data.get("positive_prompt"),
+        2400,
+    )
+    if not final_prompt or final_prompt.strip() == str(base_prompt or "").strip() or len(final_prompt) < 4:
+        return None
+    negative_prompt = _prompt_strategy_text(data.get("negative_prompt") or data.get("negative") or "", 900)
+    brief = _normalize_prompt_strategy_brief(data.get("visual_brief") or data.get("brief") or {})
+    if not brief:
+        brief = {"main_visual_subject": _prompt_strategy_text(base_prompt, 600)}
+    return {
+        "enhanced_prompt": final_prompt,
+        "negative_prompt": negative_prompt,
+        "brief": brief,
+    }
+
+
+def _prompt_strategy_uses_chinese(*values: str) -> bool:
+    return any(re.search(r"[\u4e00-\u9fff]", str(value or "")) for value in values)
+
+
+def _harden_prompt_strategy_prompt(prompt: str, strategy_id: str, base_prompt: str = "") -> str:
+    strategy = _normalize_prompt_strategy(strategy_id)
+    text = _sanitize_prompt_strategy_positive_prompt(prompt, strategy, base_prompt)
+    if not text:
+        return ""
+    zh = _prompt_strategy_uses_chinese(base_prompt, text)
+    if zh:
+        hardening: dict[str, str] = {
+            "reference_edit":
+                "必须优先锁定参考图的主体身份、构图、姿态、镜头角度、关键物体和光影关系；只改用户指定内容，禁止换脸、换构图或大幅重绘。",
+            "xhs_cover":
+                "必须手机首屏一秒识别主题，主体大且清晰，画面留出干净标题安全区，不生成随机文字、乱码、水印或无关贴纸。",
+            "product_poster":
+                "必须让产品成为绝对主角，轮廓完整，材质可信，棚拍光影明确，卖点留白干净，画面可直接用于品牌宣传。",
+            "ecommerce":
+                "必须商品完整无遮挡，占据画面核心，背景干净，比例真实，减少无关道具，第一眼能判断商品品类和核心卖点。",
+            "portrait":
+                "必须保持人物身份和气质，五官自然，眼神清晰，皮肤真实不过度磨皮，手部和肢体结构正确，专业摄影布光。",
+            "realistic_scene":
+                "必须空间关系可信，透视自然，前中后景明确，光影和材质符合真实拍摄，避免拼贴感和过度处理。",
+            "illustration":
+                "必须线条干净，主体轮廓清楚，色彩层级完整，背景有空间关系，画面是完成稿而不是草图或半成品。",
+            "text_poster":
+                "必须主标题区域醒目，文字层级和留白清楚，手机端可读；如果无法稳定生成准确文字，就保留干净排版区并避免乱码。",
+            PROMPT_STRATEGY_AUTO:
+                "必须主体清晰、构图完整、视觉焦点明确、光线自然、材质细节丰富，像一次有明确创作意图的最终作品。",
+        }
+    else:
+        hardening = {
+            "reference_edit":
+                "Lock the reference identity, composition, pose, camera angle, key objects, and lighting first; only change the requested details.",
+            "xhs_cover":
+                "Make the topic readable in one second on a phone, keep the subject large and clear, reserve a clean title-safe area, and avoid random text.",
+            "product_poster":
+                "Make the product the absolute hero, keep the silhouette complete, material credible, studio lighting clear, and selling-point space clean.",
+            "ecommerce":
+                "Show the product complete and unobstructed, centered as the core subject, with a clean background and immediately readable product category.",
+            "portrait":
+                "Preserve identity and character, natural facial structure, clear eyes, realistic skin, correct hands and body anatomy, and professional lighting.",
+            "realistic_scene":
+                "Use believable spatial relationships, natural perspective, clear foreground/midground/background, and real photographic light and materials.",
+            "illustration":
+                "Use clean linework, readable subject silhouette, complete color hierarchy, coherent background space, and finished artwork quality.",
+            "text_poster":
+                "Create a clear title area, readable visual hierarchy, mobile-safe spacing, and avoid random or misspelled text.",
+            PROMPT_STRATEGY_AUTO:
+                "Make the subject clear, composition complete, visual focus explicit, lighting natural, materials detailed, and the result feel intentional.",
+        }
+    clause = hardening.get(strategy, hardening.get(PROMPT_STRATEGY_AUTO, ""))
+    return _sanitize_prompt_strategy_positive_prompt(_append_prompt_clause(text, clause), strategy, base_prompt)
+
+
+def _prompt_strategy_llm_cache_key(base_prompt: str, strategy_id: str, contract: dict) -> str:
+    payload = {
+        "version": PROMPT_STRATEGY_ANALYSIS_VERSION,
+        "prompt": str(base_prompt or "").strip(),
+        "strategy": strategy_id,
+        "workflow": contract.get("workflow", ""),
+        "has_reference_image": bool(contract.get("has_reference_image")),
+        "workflow_size": contract.get("workflow_size", ""),
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _prompt_strategy_llm_cache_get(key: str) -> dict | None:
+    if key in _PROMPT_STRATEGY_LLM_CACHE:
+        value = _PROMPT_STRATEGY_LLM_CACHE.pop(key)
+        _PROMPT_STRATEGY_LLM_CACHE[key] = value
+        return dict(value)
+    return None
+
+
+def _prompt_strategy_llm_cache_put(key: str, value: dict) -> None:
+    if not key or not value:
+        return
+    _PROMPT_STRATEGY_LLM_CACHE[key] = dict(value)
+    while len(_PROMPT_STRATEGY_LLM_CACHE) > _PROMPT_STRATEGY_LLM_CACHE_MAX:
+        _PROMPT_STRATEGY_LLM_CACHE.popitem(last=False)
+
+
+def _llm_compile_prompt_strategy_prompt(
+    base_prompt: str,
+    strategy_id: str,
+    info: dict[str, str],
+    contract: dict,
+    *,
+    chat_fn=chat_text,
+) -> dict | None:
+    cache_key = _prompt_strategy_llm_cache_key(base_prompt, strategy_id, contract)
+    cached = _prompt_strategy_llm_cache_get(cache_key)
+    if cached:
+        cached["cached"] = True
+        return cached
+
+    payload = {
+        "user_prompt": base_prompt,
+        "selected_strategy": {
+            "id": strategy_id,
+            "label": info.get("label", strategy_id),
+            "baseline_positive_style": info.get("positive", ""),
+            "baseline_negative_style": info.get("negative", ""),
+        },
+        "lingzao_visual_contract": contract,
+    }
+    system_prompt = (
+        "Return only one valid JSON object. You are the EZ-ComfyUI Lingzao visual-director layer. "
+        "Use this internal sequence: user intent analysis -> platform/format fit -> main subject and click reason -> "
+        "composition/layout -> text-safe area and exact on-image text policy -> color/material/light -> reference-image role -> "
+        "quality gates -> final image-generation prompt. "
+        "The final_prompt must be a one-pass hard generation instruction, not a mild rewrite. "
+        "final_prompt must contain only the direct image prompt content. Do not add titles, section labels, prefixes, "
+        "or wrappers such as 'hard constraint:', '最终提示词：', '小红书封面：', or '专业人物写真成片硬约束：'. "
+        "Express the selected platform/format as visual content inside the sentence, then state mandatory composition, "
+        "subject scale, quality gates, text policy, and reference-image preservation rules when relevant. "
+        "Do not return the original prompt unchanged, and do not require a second optimization pass. "
+        "Do not expose process notes outside JSON. Preserve the user's concrete subject, count, action, constraints, "
+        "proper nouns, and requested edits, but resolve style conflicts by prioritizing selected_strategy and the user's "
+        "current target over stale source style words. If selected_strategy.id is portrait or realistic_scene, final_prompt "
+        "must describe real photography / real-person imagery and must remove incompatible style terms such as 二次元, 漫画, "
+        "日漫, 动漫, 卡通, 插画, anime, manga, comic, cartoon, and illustration, even if those words appear in user_prompt. "
+        "Only keep anime/comic/illustration terms when selected_strategy.id is illustration. "
+        "Do not invent prices, brands, logos, data, slogans, or exact text. "
+        "Use the same dominant language as the user_prompt. If the user_prompt is Chinese, final_prompt, visual_brief, "
+        "and negative_prompt must be Chinese except for common model artifact tags such as watermark or blurry. "
+        "If the user did not explicitly provide on-image text, set on_image_text to an empty string or text-safe-area note, "
+        "and instruct the image model to avoid random letters. For reference-image edits, keep identity, composition, pose, "
+        "key objects, camera angle, and lighting unless the user asks to change them. "
+        "negative_prompt must only contain artifact/layout/readability failures and must not contradict the requested subject. "
+        "Use exactly this schema: "
+        '{"visual_brief":{"platform":"...","format":"...","style_group":"...","image_purpose":"...",'
+        '"audience":"...","main_visual_subject":"...","on_image_text":"...","text_hierarchy":"...",'
+        '"layout_structure":"...","color_typography":"...","materials_or_reference_role":"...",'
+        '"negative_constraints":"...","success_criteria":["..."]},'
+        '"final_prompt":"...","negative_prompt":"..."}. '
+        "final_prompt must be a direct prompt submitted to an image workflow, not an explanation."
+    )
+    raw = chat_fn(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))},
+        ],
+        temperature=0.12,
+        max_tokens=1600,
+        timeout=PROMPT_STRATEGY_LLM_TIMEOUT,
+        response_format={"type": "json_object"},
+    )
+    result = _normalize_prompt_strategy_llm_result(_json_object_from_text(raw), base_prompt)
+    if not result:
+        raise RuntimeError("LLM returned malformed prompt-strategy JSON")
+    result["cached"] = False
+    _prompt_strategy_llm_cache_put(cache_key, result)
+    return dict(result)
+
+
+def _replace_prompt_fragment(value: str, original: str, enhanced: str) -> str:
+    text = str(value or "")
+    src = str(original or "").strip()
+    dst = str(enhanced or "").strip()
+    if not text.strip() or not dst:
+        return text
+    stripped = text.strip()
+    try:
+        data = json.loads(stripped)
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        prompt_value = data.get("prompt")
+        if isinstance(prompt_value, str):
+            if src and src in prompt_value:
+                data["prompt"] = prompt_value.replace(src, dst, 1)
+            elif src and prompt_value.strip() == src:
+                data["prompt"] = dst
+            else:
+                data["prompt"] = _append_prompt_clause(prompt_value, dst)
+            return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(prompt_value, dict):
+            for key in ("high_level_description", "description", "subject", "prompt"):
+                nested = prompt_value.get(key)
+                if not isinstance(nested, str) or not nested.strip():
+                    continue
+                if src and src in nested:
+                    prompt_value[key] = nested.replace(src, dst, 1)
+                elif src and nested.strip() == src:
+                    prompt_value[key] = dst
+                else:
+                    prompt_value[key] = _append_prompt_clause(nested, dst)
+                data["prompt"] = prompt_value
+                return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    if src and src in text:
+        return text.replace(src, dst, 1)
+    return _append_prompt_clause(text, dst)
+
+
+def _apply_prompt_strategy_to_fields(
+    wf: dict,
+    field_values: dict,
+    workflow_name: str = "",
+    strategy: str | None = PROMPT_STRATEGY_NONE,
+    *,
+    allow_llm: bool = False,
+    chat_fn=chat_text,
+) -> dict:
+    """Apply a creator strategy before workflow-specific prompt normalization."""
+    fields = dict(field_values or {})
+    requested = _normalize_prompt_strategy(strategy)
+    resolved = _resolve_auto_prompt_strategy(workflow_name, wf, fields) if requested == PROMPT_STRATEGY_AUTO else requested
+    if resolved == PROMPT_STRATEGY_NONE:
+        for meta_key in (
+            "__prompt_strategy_id",
+            "__prompt_strategy_label",
+            "__prompt_strategy_requested",
+            "__prompt_strategy_enhanced_prompt",
+            "__prompt_strategy_engine",
+            "__prompt_strategy_analysis_version",
+            "__prompt_strategy_brief",
+            "__prompt_strategy_negative_prompt",
+            "__prompt_strategy_llm_error",
+        ):
+            fields.pop(meta_key, None)
+        return fields
+
+    info = PROMPT_STRATEGIES.get(resolved) or PROMPT_STRATEGIES[PROMPT_STRATEGY_NONE]
+    base_prompt = str(fields.get("__user_prompt") or text_prompt_from_fields(fields) or "").strip()
+    if not base_prompt:
+        return fields
+
+    contract = _prompt_strategy_contract(resolved, workflow_name, wf, fields)
+    llm_result = None
+    llm_error = ""
+    if allow_llm and _prompt_strategy_llm_enabled():
+        try:
+            llm_result = _llm_compile_prompt_strategy_prompt(
+                base_prompt,
+                resolved,
+                info,
+                contract,
+                chat_fn=chat_fn,
+            )
+        except Exception as exc:
+            llm_error = str(exc)[:240]
+            add_log("warn", "prompt_strategy", f"LLM strategy compile fallback: {llm_error}")
+
+    if llm_result:
+        enhanced_prompt = _harden_prompt_strategy_prompt(
+            str(llm_result.get("enhanced_prompt") or "").strip(),
+            resolved,
+            base_prompt,
+        )
+        negative_extra = str(llm_result.get("negative_prompt") or "").strip() or str(info.get("negative") or "").strip()
+        brief = _normalize_prompt_strategy_brief(llm_result.get("brief") or {})
+        engine = "llm"
+    else:
+        enhanced_prompt = _compile_prompt_strategy_prompt(base_prompt, resolved, info)
+        negative_extra = str(info.get("negative") or "").strip()
+        brief = _prompt_strategy_fallback_brief(base_prompt, resolved, contract, info)
+        engine = "deterministic"
+
+    if not enhanced_prompt or enhanced_prompt == base_prompt:
+        return fields
+
+    positive_keys = [
+        key for key, value in fields.items()
+        if not str(key).startswith("__") and _is_positive_prompt_field(wf, str(key), value, base_prompt)
+    ]
+    for key in positive_keys:
+        fields[key] = _replace_prompt_fragment(str(fields.get(key) or ""), base_prompt, enhanced_prompt)
+
+    if negative_extra:
+        for key, value in list(fields.items()):
+            if not _is_negative_prompt_field(wf, str(key)) or not isinstance(value, str):
+                continue
+            fields[key] = _append_prompt_clause(value, negative_extra)
+
+    fields["__user_prompt_original"] = base_prompt
+    fields["__user_prompt"] = enhanced_prompt
+    fields["__prompt_strategy_requested"] = requested
+    fields["__prompt_strategy_id"] = resolved
+    fields["__prompt_strategy_label"] = info.get("label", resolved)
+    fields["__prompt_strategy_enhanced_prompt"] = enhanced_prompt
+    fields["__prompt_strategy_engine"] = engine
+    fields["__prompt_strategy_analysis_version"] = PROMPT_STRATEGY_ANALYSIS_VERSION
+    fields["__prompt_strategy_brief"] = json.dumps(brief, ensure_ascii=False, separators=(",", ":"))
+    fields["__prompt_strategy_negative_prompt"] = negative_extra
+    if llm_error:
+        fields["__prompt_strategy_llm_error"] = llm_error
+    else:
+        fields.pop("__prompt_strategy_llm_error", None)
+    return fields
+
+
+def _prompt_strategy_optimize_result(
+    prompt: str,
+    strategy: str | None,
+    workflow_name: str = "",
+    wf: dict | None = None,
+    fields: dict | None = None,
+    *,
+    allow_llm: bool = True,
+    chat_fn=chat_text,
+) -> dict:
+    base_prompt = str(prompt or "").strip()
+    if not base_prompt:
+        raise ValueError("Prompt is required")
+    workflow = wf if isinstance(wf, dict) else {}
+    field_values = dict(fields or {})
+    field_values["__user_prompt"] = base_prompt
+    requested = _normalize_prompt_strategy(strategy or PROMPT_STRATEGY_AUTO)
+    optimized_fields = _apply_prompt_strategy_to_fields(
+        workflow,
+        field_values,
+        workflow_name,
+        requested,
+        allow_llm=allow_llm,
+        chat_fn=chat_fn,
+    )
+    resolved = str(optimized_fields.get("__prompt_strategy_id") or "")
+    if not resolved:
+        resolved = _resolve_auto_prompt_strategy(workflow_name, workflow, field_values) if requested == PROMPT_STRATEGY_AUTO else requested
+    resolved = _normalize_prompt_strategy(resolved)
+    info = PROMPT_STRATEGIES.get(resolved) or PROMPT_STRATEGIES[PROMPT_STRATEGY_NONE]
+    optimized_prompt = str(
+        optimized_fields.get("__prompt_strategy_enhanced_prompt")
+        or optimized_fields.get("__user_prompt")
+        or base_prompt
+    ).strip()
+    brief_raw = str(optimized_fields.get("__prompt_strategy_brief") or "").strip()
+    try:
+        brief = json.loads(brief_raw) if brief_raw else {}
+    except Exception:
+        brief = {}
+    return {
+        "prompt": optimized_prompt,
+        "optimized_prompt": optimized_prompt,
+        "original_prompt": base_prompt,
+        "changed": optimized_prompt != base_prompt,
+        "prompt_strategy": resolved,
+        "prompt_strategy_requested": requested,
+        "prompt_strategy_label": info.get("label", resolved),
+        "prompt_strategy_engine": optimized_fields.get("__prompt_strategy_engine", ""),
+        "prompt_strategy_analysis_version": optimized_fields.get("__prompt_strategy_analysis_version", ""),
+        "negative_prompt": optimized_fields.get("__prompt_strategy_negative_prompt", ""),
+        "visual_brief": brief,
+        "llm_error": optimized_fields.get("__prompt_strategy_llm_error", ""),
+    }
 
 
 class PromptTranslateRequest(BaseModel):
@@ -7439,6 +9327,277 @@ async def index():
 @app.get("/api/version")
 def api_version():
     return {"version": APP_VERSION}
+
+
+API_INTERFACE_CATALOG = [
+    {
+        "name": "接口目录",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/interfaces",
+        "auth": "none",
+        "description": "返回可用提交、列表、详情、上传接口说明表。",
+        "request": "query: kind=submit|list|detail|upload|control, auth=none|optional|user|admin",
+        "response": "ok,total,endpoints[]",
+    },
+    {
+        "name": "版本信息",
+        "kind": "detail",
+        "method": "GET",
+        "path": "/api/version",
+        "auth": "none",
+        "description": "读取当前项目版本。",
+        "request": "none",
+        "response": "version",
+    },
+    {
+        "name": "系统状态",
+        "kind": "detail",
+        "method": "GET",
+        "path": "/api/status",
+        "auth": "optional",
+        "description": "读取队列、实例、运行状态摘要。",
+        "request": "query: refresh=true 可强制刷新部分状态",
+        "response": "ok,status,nodes,queue 等状态字段",
+    },
+    {
+        "name": "工作流列表",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/workflows",
+        "auth": "optional",
+        "description": "列出当前用户可见的工作流。",
+        "request": "none",
+        "response": "name,summary,model,field_count,dir,owner_id,shared",
+    },
+    {
+        "name": "工作流元数据列表",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/workflows/meta",
+        "auth": "optional",
+        "description": "读取工作流展示名、类型、标签、排序、共享等元数据。",
+        "request": "none",
+        "response": "meta",
+    },
+    {
+        "name": "工作流字段说明",
+        "kind": "detail",
+        "method": "GET",
+        "path": "/api/workflows/{name}/fields",
+        "auth": "optional",
+        "description": "读取某个工作流可提交字段，是调用生成接口前的字段契约。",
+        "request": "path: name=工作流 json 文件名",
+        "response": "summary,model,fields[]",
+    },
+    {
+        "name": "工作流版本列表",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/workflows/{name}/versions",
+        "auth": "none",
+        "description": "列出某个工作流已上传版本和当前激活版本。",
+        "request": "path: name=工作流 json 文件名",
+        "response": "versions,active_version,base",
+    },
+    {
+        "name": "提交生成任务",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/generate",
+        "auth": "user",
+        "description": "按工作流和字段提交一次生成任务。",
+        "request": "json: workflow, fields, seed?, width?, height?, preferred_instance?, preferred_node_id?, prompt_strategy?",
+        "response": "job_id,seed,prompt_preview,prompt_strategy",
+    },
+    {
+        "name": "任务列表",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/jobs",
+        "auth": "user",
+        "description": "列出当前用户可访问的运行中或排队任务。",
+        "request": "none",
+        "response": "jobs[]",
+    },
+    {
+        "name": "任务详情",
+        "kind": "detail",
+        "method": "GET",
+        "path": "/api/jobs/{job_id}",
+        "auth": "user",
+        "description": "读取单个任务状态、进度、输出等信息。",
+        "request": "path: job_id",
+        "response": "job",
+    },
+    {
+        "name": "重试任务",
+        "kind": "control",
+        "method": "POST",
+        "path": "/api/jobs/{job_id}/retry",
+        "auth": "user",
+        "description": "用当前工作流默认隐藏字段刷新后重试历史任务。",
+        "request": "path: job_id",
+        "response": "ok,job_id",
+    },
+    {
+        "name": "标准提示词优化",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/prompt/optimize",
+        "auth": "user",
+        "description": "提交文本到 LLM 做标准提示词或视频脚本优化。",
+        "request": "json: prompt, mode?, max_new_tokens?, prompt_context?",
+        "response": "optimized_prompt,provider 等字段",
+    },
+    {
+        "name": "策略提示词优化",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/prompt/strategy-optimize",
+        "auth": "user",
+        "description": "按智能优化、小红书封面、产品海报等策略生成最终 prompt。",
+        "request": "json: prompt, strategy?, workflow?, fields?",
+        "response": "final_prompt,negative_prompt,prompt_strategy_*",
+    },
+    {
+        "name": "图片反推",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/prompt/interrogate",
+        "auth": "user",
+        "description": "提交已上传图片，返回图片反推提示词或视频脚本基础描述。",
+        "request": "json: image, mode?, level?, expert?, expert_team?, prompt_context?",
+        "response": "prompt,prompt_zh,structured fields,source_image",
+    },
+    {
+        "name": "上传图片",
+        "kind": "upload",
+        "method": "POST",
+        "path": "/api/upload-image",
+        "auth": "user",
+        "description": "上传生成或反推使用的图片素材。",
+        "request": "multipart/form-data: file",
+        "response": "filename,url",
+    },
+    {
+        "name": "上传视频",
+        "kind": "upload",
+        "method": "POST",
+        "path": "/api/upload-video",
+        "auth": "user",
+        "description": "上传视频工作流使用的视频素材。",
+        "request": "multipart/form-data: file",
+        "response": "filename,url,metadata",
+    },
+    {
+        "name": "上传音频",
+        "kind": "upload",
+        "method": "POST",
+        "path": "/api/upload-audio",
+        "auth": "user",
+        "description": "上传音频驱动或音效工作流使用的音频素材。",
+        "request": "multipart/form-data: file",
+        "response": "filename,url",
+    },
+    {
+        "name": "历史列表",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/history",
+        "auth": "optional",
+        "description": "分页读取生成历史，支持图库、回收站、类型过滤。",
+        "request": "query: limit?, offset?, after_id?, status?, scope?, workflow_type?, compact?",
+        "response": "ok,total,count,data[]",
+    },
+    {
+        "name": "历史摘要",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/history/summary",
+        "auth": "optional",
+        "description": "轻量读取历史签名和数量，用于轮询是否需要刷新。",
+        "request": "query: limit?, offset?, status?, scope?, workflow_type?",
+        "response": "ok,total,count,signature",
+    },
+    {
+        "name": "工作流预览图列表",
+        "kind": "list",
+        "method": "GET",
+        "path": "/api/workflows/previews",
+        "auth": "optional",
+        "description": "按工作流返回当前用户最新一张预览产物和数量。",
+        "request": "none",
+        "response": "ok,data[],counts",
+    },
+    {
+        "name": "上传工作流",
+        "kind": "upload",
+        "method": "POST",
+        "path": "/api/workflows/upload",
+        "auth": "user",
+        "description": "上传新的工作流 JSON。",
+        "request": "multipart/form-data: file",
+        "response": "ok,name",
+    },
+    {
+        "name": "上传工作流版本",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/workflows/{name}/upload-version",
+        "auth": "admin",
+        "description": "给已有工作流追加一个版本并设为激活版本。",
+        "request": "path: name; multipart/form-data: file",
+        "response": "ok,version,versions",
+    },
+    {
+        "name": "激活工作流版本",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/workflows/{name}/activate-version",
+        "auth": "admin",
+        "description": "切换某个工作流的激活版本。",
+        "request": "path: name; json: version",
+        "response": "ok,version",
+    },
+]
+
+
+def _api_interface_catalog(base_url: str, kind: str = "", auth: str = "") -> list[dict]:
+    requested_kinds = {x.strip().lower() for x in str(kind or "").split(",") if x.strip()}
+    requested_auth = {x.strip().lower() for x in str(auth or "").split(",") if x.strip()}
+    base = str(base_url or "").rstrip("/")
+    endpoints = []
+    for item in API_INTERFACE_CATALOG:
+        entry = dict(item)
+        if requested_kinds and str(entry.get("kind", "")).lower() not in requested_kinds:
+            continue
+        if requested_auth and str(entry.get("auth", "")).lower() not in requested_auth:
+            continue
+        entry["url"] = f"{base}{entry['path']}" if base else entry["path"]
+        endpoints.append(entry)
+    return endpoints
+
+
+@app.get("/api/interfaces")
+def api_interfaces(
+    request: Request,
+    kind: str = "",
+    auth: str = "",
+    current_user: dict | None = Depends(get_current_user_optional),
+):
+    """Return a concise API address catalog for external callers."""
+    base_url = str(request.base_url).rstrip("/")
+    endpoints = _api_interface_catalog(base_url, kind=kind, auth=auth)
+    return {
+        "ok": True,
+        "base_url": base_url,
+        "version": APP_VERSION,
+        "viewer_role": str((current_user or {}).get("role") or "anonymous"),
+        "filters": {"kind": kind, "auth": auth},
+        "total": len(endpoints),
+        "endpoints": endpoints,
+    }
 
 
 def _request_app_base(request: Request) -> str:
@@ -8564,7 +10723,7 @@ async def api_upload_video(file: UploadFile = File(...), current_user: dict = De
             f.write(content)
     except Exception as e:
         raise HTTPException(500, "Video upload failed")
-    return {"ok": True, "filename": rel_name, "path": dest}
+    return {"ok": True, "filename": rel_name, "path": dest, **_probe_uploaded_video_metadata(dest)}
 
 
 def _normalize_uploaded_audio_content(filename: str, content: bytes) -> bytes:
@@ -8654,6 +10813,15 @@ def api_input_video(filename: str, current_user: dict = Depends(get_current_user
         ".m4v": "video/x-m4v",
     }.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+@app.get("/api/input-video-metadata/{filename:path}")
+def api_input_video_metadata(filename: str, current_user: dict = Depends(get_current_user)):
+    safe = filename.replace("\\", "/").lstrip("/")
+    path = _resolve_input_image_path(safe)
+    if not path:
+        raise HTTPException(404)
+    return {"ok": True, "filename": safe, **_probe_uploaded_video_metadata(path)}
 
 
 @app.get("/api/input-audio/{filename:path}")
@@ -8981,6 +11149,49 @@ def api_workflow_delete(name: str, current_user: dict = Depends(get_current_user
 #  API: Generation
 # ══════════════════════════════════════════════════════════════════════════
 
+@app.post("/api/prompt/strategy-optimize")
+def api_prompt_strategy_optimize(req: PromptStrategyOptimizeRequest, current_user: dict = Depends(get_current_user)):
+    prompt = str(req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt is required")
+    wf: dict = {}
+    workflow_name = os.path.basename(str(req.workflow or "").strip())
+    if workflow_name:
+        meta = _load_wf_meta()
+        entry = _normalize_wf_meta_entry(workflow_name, meta.get(workflow_name, {}))
+        if not _can_view_workflow(workflow_name, entry, current_user):
+            raise HTTPException(403, "No permission for this workflow")
+        path = _resolve_workflow(workflow_name, entry)
+        if not path:
+            raise HTTPException(404, "Workflow not found")
+        try:
+            with open(path) as f:
+                wf = json.load(f)
+        except Exception as exc:
+            raise HTTPException(400, f"工作流读取失败: {exc}") from exc
+    try:
+        result = _prompt_strategy_optimize_result(
+            prompt,
+            req.strategy,
+            workflow_name,
+            wf,
+            req.fields,
+            allow_llm=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        add_log("error", "prompt_strategy", str(exc), details=f"user={_user_id(current_user)}")
+        raise HTTPException(500, f"出图优化失败: {exc}") from exc
+    add_log(
+        "info",
+        "prompt_strategy",
+        f"Prompt strategy optimized: {result.get('prompt_strategy_label', '')}",
+        details=f"user={_user_id(current_user)} workflow={workflow_name or '-'} engine={result.get('prompt_strategy_engine', '')}",
+    )
+    return result
+
+
 @app.post("/api/prompt/optimize")
 def api_prompt_optimize(req: PromptOptimizeRequest, current_user: dict = Depends(get_current_user)):
     prompt = str(req.prompt or "").strip()
@@ -9178,14 +11389,24 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     try:
         with open(path) as f:
             wf_check = json.load(f)
-        normalized_fields = _normalize_workflow_field_values(wf_check, req.fields, req.workflow, allow_llm=True)
-        auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(req.workflow, wf_check, normalized_fields)
+        strategy_fields = _apply_prompt_strategy_to_fields(
+            wf_check,
+            req.fields,
+            req.workflow,
+            req.prompt_strategy,
+            allow_llm=True,
+        )
+        normalized_fields = _normalize_workflow_field_values(wf_check, strategy_fields, req.workflow, allow_llm=True)
+        apply_multi_reference_image_mode_to_workflow(wf_check, normalized_fields, req.workflow)
+        auto_w, auto_h = _sync_i2i_reference_dimensions(req.workflow, wf_check, normalized_fields)
         if random_seed_requested:
             _apply_generated_seed_to_seed_fields(wf_check, normalized_fields, seed)
         for key, val in normalized_fields.items():
             if "::" not in key:
                 continue
             nid, field = key.split("::", 1)
+            if field.startswith("__"):
+                continue
             if nid in wf_check and "inputs" in wf_check[nid]:
                 wf_check[nid]["inputs"][field] = val
         for nid, v in wf_check.items():
@@ -9193,6 +11414,8 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
                 if "seed" in v.get("inputs", {}):
                     v["inputs"]["seed"] = seed
         apply_bernini_mixed_mode_to_workflow(wf_check, normalized_fields, req.workflow)
+        apply_scail2_model_variant_to_workflow(wf_check, normalized_fields)
+        apply_scail2_audio_mux_to_workflow(wf_check, normalized_fields, req.workflow)
         issues = validate_api_prompt(wf_check)
         if issues:
             detail = describe_api_prompt_issues(issues)
@@ -9204,7 +11427,12 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         raise HTTPException(400, f"工作流校验失败: {e}") from e
 
     workflow_type = _workflow_primary_type(req.workflow)
-    prompt_preview = infer_generation_label(req.workflow, normalized_fields, workflow_type)[:200]
+    prompt_preview = infer_generation_label(
+        req.workflow,
+        normalized_fields,
+        workflow_type,
+        _workflow_custom_display_name(req.workflow),
+    )[:200]
     now_ts = time.time()
     jobs[job_id] = {
         "id": job_id, "status": "queued", "message": "排队中...",
@@ -9231,7 +11459,14 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
         job_id, path, normalized_fields, seed, vllm_was, auto_w or req.width, auto_h or req.height, user_id,
         req.preferred_instance or "", req.preferred_node_id or ""
     ))
-    return {"job_id": job_id, "seed": seed}
+    return {
+        "job_id": job_id,
+        "seed": seed,
+        "prompt_preview": prompt_preview,
+        "prompt_strategy": normalized_fields.get("__prompt_strategy_id", PROMPT_STRATEGY_NONE),
+        "prompt_strategy_label": normalized_fields.get("__prompt_strategy_label", ""),
+        "prompt_strategy_engine": normalized_fields.get("__prompt_strategy_engine", ""),
+    }
 
 
 @app.get("/api/jobs")
@@ -9406,7 +11641,8 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
             wf_check = json.load(f)
         fields = _normalize_workflow_field_values(wf_check, fields, wf, allow_llm=True)
         _apply_generated_seed_to_seed_fields(wf_check, fields, seed)
-        auto_w, auto_h = _sync_ernie_i2i_reference_dimensions(wf, wf_check, fields)
+        apply_multi_reference_image_mode_to_workflow(wf_check, fields, wf)
+        auto_w, auto_h = _sync_i2i_reference_dimensions(wf, wf_check, fields)
         if auto_w and auto_h:
             width, height = auto_w, auto_h
     except Exception:
@@ -9415,7 +11651,12 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     new_id = f"job_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     vllm_was = False
 
-    prompt_preview = infer_generation_label(wf, fields, _workflow_primary_type(wf))[:200]
+    prompt_preview = infer_generation_label(
+        wf,
+        fields,
+        _workflow_primary_type(wf),
+        _workflow_custom_display_name(wf),
+    )[:200]
 
     jobs[new_id] = {
         "id": new_id, "status": "queued", "message": "排队中...",

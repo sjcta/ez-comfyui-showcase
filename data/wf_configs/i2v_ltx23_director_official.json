@@ -1,0 +1,619 @@
+{
+  "version": 1,
+  "workflow": "i2v_ltx23_director_official.json",
+  "fields": [
+    {
+      "key": "320:340::global_prompt",
+      "zone": "user_input",
+      "visible": true,
+      "label": "导演全局提示词",
+      "order": 1,
+      "type": "textarea",
+      "value": "A cinematic director-mode test shot. A young adult woman waits near a quiet street at sunset, checks her phone, then looks toward the road. Handheld camera, slow push-in, natural body motion, consistent identity, realistic ambient sound, no subtitles, no on-screen text."
+    },
+    {
+      "key": "320:312::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "宽度",
+      "order": 2,
+      "type": "number",
+      "role": "width",
+      "min": 256,
+      "max": 1536,
+      "step": 32
+    },
+    {
+      "key": "320:299::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "高度",
+      "order": 3,
+      "type": "number",
+      "role": "height",
+      "min": 256,
+      "max": 1536,
+      "step": 32
+    },
+    {
+      "key": "320:301::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "长度（秒）",
+      "order": 4,
+      "type": "number",
+      "min": 1,
+      "max": 12,
+      "step": 1
+    },
+    {
+      "key": "320:300::value",
+      "zone": "user_input",
+      "visible": true,
+      "label": "帧率",
+      "order": 5,
+      "type": "number",
+      "min": 8,
+      "max": 30,
+      "step": 1
+    },
+    {
+      "key": "320:276::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "75::codec",
+      "zone": "advanced",
+      "visible": true,
+      "label": "视频编码",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "320:313::text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "负面提示词",
+      "order": 2,
+      "type": "textarea",
+      "value": "low quality, worst quality, blurry, out of focus, pixelated, noisy, compression artifacts, jpeg artifacts, overexposed, underexposed, washed out, color banding, distorted anatomy, bad anatomy, malformed face, distorted face, asymmetrical eyes, bad hands, malformed hands, extra fingers, missing fingers, fused fingers, extra limbs, missing limbs, duplicate subject, mutated body, unnatural pose, broken joints, cropped head, out of frame, watermark, logo, signature, text artifacts, unreadable text, incorrect lettering, random letters, subtitles, captions, UI overlay, flicker, jitter, ghosting, temporal artifacts, warped motion, frozen frame, repeated frames, low frequency hum, sub-bass rumble, noisy room tone, audio distortion, audio clipping"
+    },
+    {
+      "key": "320:306::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "一阶段步数",
+      "order": 3,
+      "type": "number",
+      "min": 1,
+      "max": 24,
+      "step": 1
+    },
+    {
+      "key": "320:281::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "二阶段步数",
+      "order": 4,
+      "type": "number",
+      "min": 1,
+      "max": 16,
+      "step": 1
+    },
+    {
+      "key": "320:281::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "二阶段重绘强度",
+      "order": 5,
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0.01
+    },
+    {
+      "key": "320:340::epsilon",
+      "zone": "advanced",
+      "visible": true,
+      "label": "分镜边界锐度",
+      "order": 6,
+      "type": "number",
+      "min": 0.0001,
+      "max": 0.99,
+      "step": 0.0001
+    },
+    {
+      "key": "320:340::resize_method",
+      "zone": "advanced",
+      "visible": true,
+      "label": "导演图像缩放",
+      "order": 7,
+      "type": "select",
+      "options": [
+        "maintain aspect ratio",
+        "stretch to fit",
+        "pad",
+        "crop"
+      ]
+    },
+    {
+      "key": "320:340::img_compression",
+      "zone": "advanced",
+      "visible": true,
+      "label": "参考图压缩",
+      "order": 8,
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 1
+    },
+    {
+      "key": "75::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "输出前缀",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "75::format",
+      "zone": "hidden",
+      "visible": false,
+      "label": "format",
+      "order": 100,
+      "type": "text"
+    },
+    {
+      "key": "320:316::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "unet_name",
+      "order": 101,
+      "type": "text"
+    },
+    {
+      "key": "320:316::weight_dtype",
+      "zone": "hidden",
+      "visible": false,
+      "label": "weight_dtype",
+      "order": 102,
+      "type": "text"
+    },
+    {
+      "key": "320:317::clip_name1",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name1",
+      "order": 103,
+      "type": "text"
+    },
+    {
+      "key": "320:317::clip_name2",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name2",
+      "order": 104,
+      "type": "text"
+    },
+    {
+      "key": "320:317::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 105,
+      "type": "text"
+    },
+    {
+      "key": "320:317::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 106,
+      "type": "text"
+    },
+    {
+      "key": "320:279::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 107,
+      "type": "text"
+    },
+    {
+      "key": "320:330::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 108,
+      "type": "text"
+    },
+    {
+      "key": "320:340::start_second",
+      "zone": "hidden",
+      "visible": false,
+      "label": "start_second",
+      "order": 109,
+      "type": "text"
+    },
+    {
+      "key": "320:340::end_second",
+      "zone": "hidden",
+      "visible": false,
+      "label": "end_second",
+      "order": 110,
+      "type": "text"
+    },
+    {
+      "key": "320:340::start_frame",
+      "zone": "hidden",
+      "visible": false,
+      "label": "start_frame",
+      "order": 111,
+      "type": "text"
+    },
+    {
+      "key": "320:340::end_frame",
+      "zone": "hidden",
+      "visible": false,
+      "label": "end_frame",
+      "order": 112,
+      "type": "text"
+    },
+    {
+      "key": "320:340::duration_frames",
+      "zone": "hidden",
+      "visible": false,
+      "label": "duration_frames",
+      "order": 113,
+      "type": "text"
+    },
+    {
+      "key": "320:340::duration_seconds",
+      "zone": "hidden",
+      "visible": false,
+      "label": "duration_seconds",
+      "order": 114,
+      "type": "text"
+    },
+    {
+      "key": "320:340::timeline_data",
+      "zone": "hidden",
+      "visible": false,
+      "label": "timeline_data",
+      "order": 115,
+      "type": "text"
+    },
+    {
+      "key": "320:340::local_prompts",
+      "zone": "hidden",
+      "visible": false,
+      "label": "local_prompts",
+      "order": 116,
+      "type": "text"
+    },
+    {
+      "key": "320:340::segment_lengths",
+      "zone": "hidden",
+      "visible": false,
+      "label": "segment_lengths",
+      "order": 117,
+      "type": "text"
+    },
+    {
+      "key": "320:340::guide_strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "guide_strength",
+      "order": 118,
+      "type": "text"
+    },
+    {
+      "key": "320:340::use_custom_audio",
+      "zone": "hidden",
+      "visible": false,
+      "label": "use_custom_audio",
+      "order": 119,
+      "type": "text"
+    },
+    {
+      "key": "320:340::use_custom_motion",
+      "zone": "hidden",
+      "visible": false,
+      "label": "use_custom_motion",
+      "order": 120,
+      "type": "text"
+    },
+    {
+      "key": "320:340::inpaint_audio",
+      "zone": "hidden",
+      "visible": false,
+      "label": "inpaint_audio",
+      "order": 121,
+      "type": "text"
+    },
+    {
+      "key": "320:340::override_audio",
+      "zone": "hidden",
+      "visible": false,
+      "label": "override_audio",
+      "order": 122,
+      "type": "text"
+    },
+    {
+      "key": "320:340::display_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "display_mode",
+      "order": 123,
+      "type": "text"
+    },
+    {
+      "key": "320:340::divisible_by",
+      "zone": "hidden",
+      "visible": false,
+      "label": "divisible_by",
+      "order": 124,
+      "type": "text"
+    },
+    {
+      "key": "320:340::custom_width",
+      "zone": "hidden",
+      "visible": false,
+      "label": "custom_width",
+      "order": 125,
+      "type": "text"
+    },
+    {
+      "key": "320:340::custom_height",
+      "zone": "hidden",
+      "visible": false,
+      "label": "custom_height",
+      "order": 126,
+      "type": "text"
+    },
+    {
+      "key": "320:342::ic_lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ic_lora_name",
+      "order": 127,
+      "type": "text"
+    },
+    {
+      "key": "320:342::ic_lora_strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ic_lora_strength",
+      "order": 128,
+      "type": "text"
+    },
+    {
+      "key": "320:342::scale_by",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scale_by",
+      "order": 129,
+      "type": "text"
+    },
+    {
+      "key": "320:342::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 130,
+      "type": "text"
+    },
+    {
+      "key": "320:342::image_attention_strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "image_attention_strength",
+      "order": 131,
+      "type": "text"
+    },
+    {
+      "key": "320:342::crop",
+      "zone": "hidden",
+      "visible": false,
+      "label": "crop",
+      "order": 132,
+      "type": "text"
+    },
+    {
+      "key": "320:342::auto_snap_ic_grid",
+      "zone": "hidden",
+      "visible": false,
+      "label": "auto_snap_ic_grid",
+      "order": 133,
+      "type": "text"
+    },
+    {
+      "key": "320:342::use_tiled_encode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "use_tiled_encode",
+      "order": 134,
+      "type": "text"
+    },
+    {
+      "key": "320:342::tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_size",
+      "order": 135,
+      "type": "text"
+    },
+    {
+      "key": "320:342::tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_overlap",
+      "order": 136,
+      "type": "text"
+    },
+    {
+      "key": "320:342::retake_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "retake_mode",
+      "order": 137,
+      "type": "text"
+    },
+    {
+      "key": "320:343::ic_lora_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ic_lora_name",
+      "order": 138,
+      "type": "text"
+    },
+    {
+      "key": "320:343::ic_lora_strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "ic_lora_strength",
+      "order": 139,
+      "type": "text"
+    },
+    {
+      "key": "320:343::scale_by",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scale_by",
+      "order": 140,
+      "type": "text"
+    },
+    {
+      "key": "320:343::upscale_method",
+      "zone": "hidden",
+      "visible": false,
+      "label": "upscale_method",
+      "order": 141,
+      "type": "text"
+    },
+    {
+      "key": "320:343::image_attention_strength",
+      "zone": "hidden",
+      "visible": false,
+      "label": "image_attention_strength",
+      "order": 142,
+      "type": "text"
+    },
+    {
+      "key": "320:343::crop",
+      "zone": "hidden",
+      "visible": false,
+      "label": "crop",
+      "order": 143,
+      "type": "text"
+    },
+    {
+      "key": "320:343::auto_snap_ic_grid",
+      "zone": "hidden",
+      "visible": false,
+      "label": "auto_snap_ic_grid",
+      "order": 144,
+      "type": "text"
+    },
+    {
+      "key": "320:343::use_tiled_encode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "use_tiled_encode",
+      "order": 145,
+      "type": "text"
+    },
+    {
+      "key": "320:343::tile_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_size",
+      "order": 146,
+      "type": "text"
+    },
+    {
+      "key": "320:343::tile_overlap",
+      "zone": "hidden",
+      "visible": false,
+      "label": "tile_overlap",
+      "order": 147,
+      "type": "text"
+    },
+    {
+      "key": "320:343::retake_mode",
+      "zone": "hidden",
+      "visible": false,
+      "label": "retake_mode",
+      "order": 148,
+      "type": "text"
+    },
+    {
+      "key": "320:280::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sampler_name",
+      "order": 149,
+      "type": "text"
+    },
+    {
+      "key": "320:291::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "sampler_name",
+      "order": 150,
+      "type": "text"
+    },
+    {
+      "key": "320:306::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scheduler",
+      "order": 151,
+      "type": "text"
+    },
+    {
+      "key": "320:306::denoise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "denoise",
+      "order": 152,
+      "type": "text"
+    },
+    {
+      "key": "320:281::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "scheduler",
+      "order": 153,
+      "type": "text"
+    },
+    {
+      "key": "320:282::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 154,
+      "type": "text"
+    },
+    {
+      "key": "320:314::cfg",
+      "zone": "hidden",
+      "visible": false,
+      "label": "cfg",
+      "order": 155,
+      "type": "text"
+    },
+    {
+      "key": "320:311::model_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "model_name",
+      "order": 156,
+      "type": "text"
+    }
+  ]
+}

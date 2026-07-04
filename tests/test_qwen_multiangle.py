@@ -38,6 +38,13 @@ RAPID_V23_PARAMS = {
     "denoise": 1,
 }
 
+RAPID_WORKFLOW_FILES = [
+    "data/workflows/DGX Spark/i2i-Qwen-Rapid.json",
+    "data/workflows/DGX Spark/i2i-Qwen-Rapid-Q2.json",
+    "data/workflows/i2i-Qwen-Rapid-seedVR2-4k.json",
+    "data/workflows/DGX Spark/i2i-Qwen-Rapid-seedVR2-4k.json",
+]
+
 
 class QwenMultiangleWorkflowTests(unittest.TestCase):
     def test_qwen_i2i_workflows_include_multiangle_node(self):
@@ -62,6 +69,17 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
                 self.assertIn("zoom", node["inputs"])
                 self.assertIsInstance(node["inputs"].get("image"), list)
 
+    def test_qwen_rapid_defaults_do_not_crop_reference_frame(self):
+        for rel in RAPID_WORKFLOW_FILES:
+            with self.subTest(workflow=rel):
+                wf = json.loads((ROOT / rel).read_text())
+                node = wf["910"]
+                self.assertEqual(node["class_type"], "QwenMultiangleCameraNode")
+                self.assertEqual(node["inputs"]["horizontal_angle"], 0)
+                self.assertEqual(node["inputs"]["vertical_angle"], 0)
+                self.assertEqual(node["inputs"]["zoom"], 0)
+                self.assertFalse(node["inputs"]["camera_view"])
+
     def test_qwen_rapid_adjustable_fields_are_valid_for_output_graph(self):
         workflow_pairs = [
             (
@@ -80,6 +98,7 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
 
                 self.assertEqual(wf["115:111"]["inputs"]["image1"], ["78", 0])
                 self.assertEqual(wf["88"]["inputs"]["image"], ["78", 0])
+                self.assertEqual(wf["910"]["inputs"]["zoom"], 0)
 
                 for node in wf.values():
                     if not isinstance(node, dict):
@@ -92,6 +111,8 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
                     if field.get("zone") not in ("user_input", "advanced"):
                         continue
                     node_id, field_name = field["key"].split("::", 1)
+                    if field_name.startswith("__"):
+                        continue
                     node = wf.get(node_id)
                     self.assertIsNotNone(node, field["key"])
                     self.assertIn(field_name, node.get("inputs", {}), field["key"])
@@ -240,7 +261,8 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
         self.assertNotIn("C-axis depth", generate_js)
         self.assertNotIn("control target: ", generate_js)
         self.assertNotIn("不要", generate_js)
-        self.assertNotIn("不是", generate_js)
+        qwen_descriptor_body = generate_js.split("function _qwenAngleDescriptor", 1)[1].split("function _qwenAnglePromptFromFieldValues", 1)[0]
+        self.assertNotIn("不是", qwen_descriptor_body)
         self.assertNotIn("Dutch angle camera roll", generate_js)
         self.assertNotIn("do not rotate the entire image or canvas", generate_js)
         self.assertNotIn("do not swap portrait and landscape orientation", generate_js)
@@ -257,6 +279,9 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
         self.assertIn("function _setQwenAngleMode", generate_js)
         self.assertIn("__qwen_angle_mode", generate_js)
         self.assertIn("function _isQwenAngleNeutral", generate_js)
+        self.assertIn("function _qwenAngleNeutralZoom", generate_js)
+        self.assertIn("function _qwenAngleDefaultValue", generate_js)
+        self.assertIn("neutralZoom", generate_js)
         self.assertIn("function _isQwenAngleControlActive", generate_js)
         self.assertIn("function _isCurrentQwenAngleActive", generate_js)
         self.assertIn("function _qwenPitchToMarkerY", generate_js)
@@ -284,6 +309,10 @@ class QwenMultiangleWorkflowTests(unittest.TestCase):
         self.assertIn("window.CW.preparePromptForQwenAngle", generate_js)
         self.assertIn("anglePrompt + '\\n' + base", generate_js)
         self.assertNotIn("base.indexOf('<sks>') >= 0) return base", generate_js)
+        self.assertNotIn('data-angle-preset="h:0,v:0,z:5"', generate_js)
+        self.assertNotIn('data-angle-preset="h:180,v:0,z:5"', generate_js)
+        self.assertIn('data-angle-preset="h:0,v:0"', generate_js)
+        self.assertIn('data-angle-preset="h:180,v:0"', generate_js)
         self.assertIn("<sks> ", generate_js)
         self.assertIn("低角度|高角度|俯视|俯拍|仰视|仰拍|平视", generate_js)
         self.assertIn("QwenMultiangleCameraNode", generate_js)

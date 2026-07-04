@@ -1,0 +1,749 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "sample.mp4",
+      "force_rate": 24,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 81,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "Wan"
+    },
+    "_meta": {
+      "title": "Load Driving Video"
+    }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "Load Reference Image"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Load Wan Text Encoder"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "3",
+        0
+      ],
+      "text": "A character is dancing with coherent motion, stable identity, natural body movement, clean detailed video."
+    },
+    "_meta": {
+      "title": "Positive Prompt"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "3",
+        0
+      ],
+      "text": "low quality, blurry, distorted body, bad hands, flicker, artifacts, snow, vertical lines, text, watermark"
+    },
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "6": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.1_14B_SCAIL_2_nvfp4_comfy_V2.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load SCAIL-2 NVFP4"
+    }
+  },
+  "7": {
+    "class_type": "WanChunkFeedForward",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "chunks": 4,
+      "dim_threshold": 4096
+    },
+    "_meta": {
+      "title": "Wan Chunk FeedForward"
+    }
+  },
+  "8": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "7",
+        0
+      ],
+      "lora_name": "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+      "strength_model": 0.8
+    },
+    "_meta": {
+      "title": "LightX2V LoRA"
+    }
+  },
+  "9": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "8",
+        0
+      ],
+      "shift": 5.0
+    },
+    "_meta": {
+      "title": "Sampling Shift"
+    }
+  },
+  "10": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "8",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 6,
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "Scheduler"
+    }
+  },
+  "11": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "_meta": {
+      "title": "Sampler"
+    }
+  },
+  "12": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Wan VAE"
+    }
+  },
+  "13": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "clip_vision_h.safetensors"
+    },
+    "_meta": {
+      "title": "Load CLIP Vision"
+    }
+  },
+  "14": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "13",
+        0
+      ],
+      "image": [
+        "2",
+        0
+      ],
+      "crop": "none"
+    },
+    "_meta": {
+      "title": "Encode Reference CLIP Vision"
+    }
+  },
+  "15": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "Load SAM3.1"
+    }
+  },
+  "16": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "15",
+        1
+      ],
+      "text": "the main person"
+    },
+    "_meta": {
+      "title": "SAM Tracking Prompt"
+    }
+  },
+  "17": {
+    "class_type": "ImageResizeKJv2",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "width": 896,
+      "height": 512,
+      "upscale_method": "lanczos",
+      "keep_proportion": "crop",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 32,
+      "device": "cpu"
+    },
+    "_meta": {
+      "title": "Resize Driving Video"
+    }
+  },
+  "18": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "images": [
+        "17",
+        0
+      ],
+      "model": [
+        "15",
+        0
+      ],
+      "conditioning": [
+        "16",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 1,
+      "detect_interval": 2
+    },
+    "_meta": {
+      "title": "Track Driving Subject"
+    }
+  },
+  "19": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "model": [
+        "15",
+        0
+      ],
+      "conditioning": [
+        "16",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 1,
+      "detect_interval": 2
+    },
+    "_meta": {
+      "title": "Track Reference Subject"
+    }
+  },
+  "20": {
+    "class_type": "SCAIL2ColoredMask",
+    "inputs": {
+      "driving_track_data": [
+        "18",
+        0
+      ],
+      "ref_track_data": [
+        "19",
+        0
+      ],
+      "object_indices": "",
+      "sort_by": "left_to_right",
+      "replacement_mode": false
+    },
+    "_meta": {
+      "title": "Create SCAIL-2 Colored Masks"
+    }
+  },
+  "21": {
+    "class_type": "WanSCAILToVideo",
+    "inputs": {
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ],
+      "width": [
+        "17",
+        1
+      ],
+      "height": [
+        "17",
+        2
+      ],
+      "length": [
+        "26",
+        1
+      ],
+      "batch_size": 1,
+      "pose_strength": 1.0,
+      "pose_start": 0.0,
+      "pose_end": 1.0,
+      "video_frame_offset": 0,
+      "previous_frame_count": 5,
+      "pose_video": [
+        "17",
+        0
+      ],
+      "pose_video_mask": [
+        "20",
+        0
+      ],
+      "replacement_mode": false,
+      "reference_image": [
+        "2",
+        0
+      ],
+      "reference_image_mask": [
+        "20",
+        1
+      ],
+      "clip_vision_output": [
+        "14",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "SCAIL-2 First Chunk"
+    }
+  },
+  "22": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "9",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": 42424242,
+      "cfg": 1.0,
+      "positive": [
+        "21",
+        0
+      ],
+      "negative": [
+        "21",
+        1
+      ],
+      "sampler": [
+        "11",
+        0
+      ],
+      "sigmas": [
+        "10",
+        0
+      ],
+      "latent_image": [
+        "21",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Sample First Chunk"
+    }
+  },
+  "23": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "22",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode First Chunk"
+    }
+  },
+  "25": {
+    "class_type": "INTConstant",
+    "inputs": {
+      "value": 81
+    },
+    "_meta": {
+      "title": "SCAIL Segment Length"
+    }
+  },
+  "26": {
+    "class_type": "SimpleCalculatorKJ",
+    "inputs": {
+      "expression": "min(a, b)",
+      "variables.a": [
+        "1",
+        1
+      ],
+      "variables.b": [
+        "25",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Initial Window"
+    }
+  },
+  "27": {
+    "class_type": "SimpleCalculatorKJ",
+    "inputs": {
+      "expression": "max(0, ceil((a - b - 5) / (b - 5)))",
+      "variables.a": [
+        "1",
+        1
+      ],
+      "variables.b": [
+        "25",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Loop Count"
+    }
+  },
+  "28": {
+    "class_type": "easy compare",
+    "inputs": {
+      "a": [
+        "27",
+        1
+      ],
+      "comparison": "a > 0"
+    },
+    "_meta": {
+      "title": "Has Loop"
+    }
+  },
+  "29": {
+    "class_type": "easy forLoopStart",
+    "inputs": {
+      "total": [
+        "27",
+        1
+      ],
+      "initial_value1": [
+        "23",
+        0
+      ],
+      "initial_value2": [
+        "21",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "SCAIL Segment Loop Start"
+    }
+  },
+  "30": {
+    "class_type": "SimpleCalculatorKJ",
+    "inputs": {
+      "expression": "max(0, min(c, a - b + 5))",
+      "variables.a": [
+        "1",
+        1
+      ],
+      "variables.b": [
+        "29",
+        3
+      ],
+      "variables.c": [
+        "25",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Current Window Size"
+    }
+  },
+  "31": {
+    "class_type": "WanSCAILToVideo",
+    "inputs": {
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ],
+      "width": [
+        "17",
+        1
+      ],
+      "height": [
+        "17",
+        2
+      ],
+      "length": [
+        "30",
+        1
+      ],
+      "batch_size": 1,
+      "pose_strength": 1.0,
+      "pose_start": 0.0,
+      "pose_end": 1.0,
+      "video_frame_offset": [
+        "29",
+        3
+      ],
+      "previous_frame_count": 5,
+      "pose_video": [
+        "17",
+        0
+      ],
+      "pose_video_mask": [
+        "20",
+        0
+      ],
+      "replacement_mode": false,
+      "reference_image": [
+        "2",
+        0
+      ],
+      "reference_image_mask": [
+        "20",
+        1
+      ],
+      "clip_vision_output": [
+        "14",
+        0
+      ],
+      "previous_frames": [
+        "29",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "SCAIL-2 Loop Chunk"
+    }
+  },
+  "32": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "9",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": 42424242,
+      "cfg": 1.0,
+      "positive": [
+        "31",
+        0
+      ],
+      "negative": [
+        "31",
+        1
+      ],
+      "sampler": [
+        "11",
+        0
+      ],
+      "sigmas": [
+        "10",
+        0
+      ],
+      "latent_image": [
+        "31",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Sample Loop Chunk"
+    }
+  },
+  "33": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "32",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode Loop Chunk"
+    }
+  },
+  "34": {
+    "class_type": "GetImageRangeFromBatch",
+    "inputs": {
+      "images": [
+        "33",
+        0
+      ],
+      "start_index": 5,
+      "num_frames": 4096
+    },
+    "_meta": {
+      "title": "Drop Overlap Frames"
+    }
+  },
+  "35": {
+    "class_type": "GetImageRangeFromBatch",
+    "inputs": {
+      "images": [
+        "29",
+        2
+      ],
+      "start_index": -1,
+      "num_frames": 1
+    },
+    "_meta": {
+      "title": "Previous Tail Frame"
+    }
+  },
+  "36": {
+    "class_type": "ColorTransfer",
+    "inputs": {
+      "image_target": [
+        "34",
+        0
+      ],
+      "image_ref": [
+        "35",
+        0
+      ],
+      "method": "reinhard_lab",
+      "source_stats": "per_frame",
+      "strength": 1.0
+    },
+    "_meta": {
+      "title": "Loop Color Match"
+    }
+  },
+  "37": {
+    "class_type": "BatchImagesNode",
+    "inputs": {
+      "images.image0": [
+        "29",
+        2
+      ],
+      "images.image1": [
+        "36",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Append Loop Chunk"
+    }
+  },
+  "38": {
+    "class_type": "easy forLoopEnd",
+    "inputs": {
+      "flow": [
+        "29",
+        0
+      ],
+      "initial_value1": [
+        "37",
+        0
+      ],
+      "initial_value2": [
+        "31",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "SCAIL Segment Loop End"
+    }
+  },
+  "39": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "28",
+        0
+      ],
+      "on_false": [
+        "23",
+        0
+      ],
+      "on_true": [
+        "38",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Use Looped Result If Needed"
+    }
+  },
+  "40": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "39",
+        0
+      ],
+      "fps": 24.0,
+      "audio": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Create Video"
+    }
+  },
+  "41": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "40",
+        0
+      ],
+      "filename_prefix": "scail2_official_q4_audio",
+      "format": "mp4",
+      "codec": "h264"
+    },
+    "_meta": {
+      "title": "Save Video"
+    }
+  },
+  "42": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": true
+    },
+    "_meta": {
+      "title": "合成原视频音频"
+    }
+  }
+}

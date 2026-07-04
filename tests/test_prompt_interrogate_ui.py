@@ -128,6 +128,7 @@ class PromptInterrogateUiContractTests(unittest.TestCase):
         self.assertIn("translateBtn.disabled = !hasText", ui_js)
         self.assertIn("clearBtn.disabled = !hasText", ui_js)
         self.assertIn("optimizeBtn.disabled = !hasText", ui_js)
+        self.assertIn("strategyOptimizeBtn.disabled = !hasText", ui_js)
         self.assertIn("复制到输入框", ui_js)
         self.assertIn("复刻正向提示词", ui_js)
         self.assertNotIn("复刻完整提示词", ui_js)
@@ -208,11 +209,16 @@ class PromptInterrogateUiContractTests(unittest.TestCase):
         self.assertIn("min-height: 36px", css)
         self.assertIn(".prompt-tool-btn-vibrant .prompt-tool-label", css)
         self.assertIn(".prompt-input-wrap #promptInput", css)
-        self.assertIn("min-height: 168px", css)
+        self.assertIn("min-height: 96px", css)
         self.assertIn(".gen-footer #btnGenerate", css)
         self.assertIn("min-height: 48px", css)
         self.assertIn("--prompt-tool-color: var(--accent)", css)
         self.assertIn("--prompt-tool-color: #22d3ee", css)
+        self.assertIn(".prompt-tool-btn-strategy", css)
+        self.assertIn("--prompt-tool-color: #f59e0b", css)
+        self.assertIn(".prompt-strategy-modal", css)
+        self.assertIn(".prompt-strategy-goal", css)
+        self.assertIn(".prompt-strategy-result", css)
         self.assertIn(".prompt-tool-btn-translate", css)
         self.assertIn("--prompt-tool-color: #a78bfa", css)
         self.assertIn(".prompt-tool-btn-translate:hover:not(:disabled)", css)
@@ -263,6 +269,19 @@ class PromptInterrogateUiContractTests(unittest.TestCase):
         self.assertNotIn("promptToolTextCycle", css)
         self.assertNotIn("linear-gradient(135deg, rgba(17,35,68,.98)", css)
         self.assertIn(".prompt-interrogate-actions .prompt-tool-btn", css)
+        actions_block = css[
+            css.index(".prompt-interrogate-actions {") :
+            css.index(".prompt-interrogate-actions .prompt-tool-btn")
+        ]
+        self.assertIn("flex-wrap: nowrap", actions_block)
+        button_block = css[
+            css.index(".prompt-interrogate-actions .prompt-tool-btn {") :
+            css.index(".prompt-interrogate-actions .prompt-interrogate-expert-btn")
+        ]
+        self.assertIn("flex: 1 1 0", button_block)
+        self.assertIn("min-width: 0", button_block)
+        self.assertIn("white-space: nowrap", button_block)
+        self.assertNotIn("min-width: 156px", button_block)
         self.assertIn(".prompt-interrogate-modal .prompt-interrogate-upload", css)
         self.assertIn(".prompt-interrogate-modal.open .prompt-interrogate-upload", css)
         self.assertIn("transform: translateY(10px)", css)

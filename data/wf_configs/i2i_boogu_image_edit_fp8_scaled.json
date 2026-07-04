@@ -1,0 +1,192 @@
+{
+  "version": 2,
+  "workflow": "i2i_boogu_image_edit_fp8_scaled.json",
+  "fields": [
+    {
+      "key": "32::image",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考图片",
+      "order": 0,
+      "type": "image"
+    },
+    {
+      "key": "46::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "编辑提示词",
+      "order": 1,
+      "type": "textarea"
+    },
+    {
+      "key": "21::noise_seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 0,
+      "type": "seed"
+    },
+    {
+      "key": "26::steps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "步数",
+      "order": 1,
+      "type": "number",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "value": 25
+    },
+    {
+      "key": "21::cfg",
+      "zone": "advanced",
+      "visible": true,
+      "label": "Text guidance scale",
+      "order": 2,
+      "type": "number",
+      "min": 0,
+      "max": 12,
+      "step": 0.1,
+      "value": 3.5
+    },
+    {
+      "key": "26::denoise",
+      "zone": "advanced",
+      "visible": true,
+      "label": "denoise",
+      "order": 3,
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "value": 1
+    },
+    {
+      "key": "33::shift",
+      "zone": "advanced",
+      "visible": true,
+      "label": "shift",
+      "order": 4,
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 0.01,
+      "value": 3.16
+    },
+    {
+      "key": "44::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text",
+      "value": "ComfyUI"
+    },
+    {
+      "key": "8::batch_size",
+      "zone": "hidden",
+      "visible": false,
+      "label": "batch_size",
+      "order": 0,
+      "type": "number",
+      "value": 1
+    },
+    {
+      "key": "21::add_noise",
+      "zone": "hidden",
+      "visible": false,
+      "label": "add_noise",
+      "order": 1,
+      "type": "toggle",
+      "value": true
+    },
+    {
+      "key": "22::sampler_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "采样器",
+      "order": 2,
+      "type": "text",
+      "value": "dpmpp_2m"
+    },
+    {
+      "key": "26::scheduler",
+      "zone": "hidden",
+      "visible": false,
+      "label": "调度器",
+      "order": 3,
+      "type": "text",
+      "value": "simple"
+    },
+    {
+      "key": "2::weight_dtype",
+      "zone": "hidden",
+      "visible": false,
+      "label": "weight_dtype",
+      "order": 4,
+      "type": "text",
+      "value": "default"
+    },
+    {
+      "key": "2::unet_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "Boogu 模型",
+      "order": 5,
+      "type": "text",
+      "value": "boogu_image_edit_fp8_scaled.safetensors"
+    },
+    {
+      "key": "7::clip_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "clip_name",
+      "order": 6,
+      "type": "text",
+      "value": "qwen3vl_8b_fp8_scaled.safetensors"
+    },
+    {
+      "key": "7::type",
+      "zone": "hidden",
+      "visible": false,
+      "label": "type",
+      "order": 7,
+      "type": "text",
+      "value": "boogu"
+    },
+    {
+      "key": "7::device",
+      "zone": "hidden",
+      "visible": false,
+      "label": "device",
+      "order": 8,
+      "type": "text",
+      "value": "default"
+    },
+    {
+      "key": "5::vae_name",
+      "zone": "hidden",
+      "visible": false,
+      "label": "vae_name",
+      "order": 9,
+      "type": "text",
+      "value": "flux1_vae_bf16.safetensors"
+    },
+    {
+      "key": "36::negative_prompt",
+      "zone": "hidden",
+      "visible": false,
+      "label": "负面提示词",
+      "order": 10,
+      "type": "textarea",
+      "value": ""
+    }
+  ],
+  "required_models": [
+    "diffusion_models/boogu_image_edit_fp8_scaled.safetensors",
+    "text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
+    "vae/flux1_vae_bf16.safetensors"
+  ],
+  "notes": "Aligned to DJJ-tested Boogu Image Edit API workflow. Runtime-only adaptations: JjkText -> Text, Get Image Size -> GetImageSize, VAE -> flux1_vae_bf16.safetensors, and TextEncodeBooguEdit keeps the flat images.image_1 API key required by COMFY_AUTOGROW_V3. Final sampler parameters are SamplerCustom.model -> UNETLoader, BasicScheduler.model -> ModelSamplingAuraFlow, dpmpp_2m/simple, steps=25, cfg=3.5, denoise=1, shift=3.16, empty negative prompt, and latent width/height linked to the uploaded reference image size."
+}

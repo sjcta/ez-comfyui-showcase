@@ -119,6 +119,14 @@
     [832, 1248, '2:3', '16px', '24px'],
     [720, 1280, '9:16', '14px', '24px']
   ];
+  var WAN_VIDEO_MAX_PIXELS = 896 * 512;
+  var WAN_VIDEO_RATIO_PRESETS = [
+    [512, 896, '9:16', '14px', '24px'],
+    [576, 768, '3:4', '18px', '24px'],
+    [672, 672, '1:1', '22px', '22px'],
+    [768, 576, '4:3', '24px', '18px'],
+    [896, 512, '16:9', '28px', '16px']
+  ];
   var STYLE_PROMPT_VERSION = 4;
   var STYLE_CATEGORIES = [
     { id: 'photography', label: '摄影/人像' },
@@ -322,9 +330,274 @@ function _currentStyleSelect() {
     return document.querySelector('#stylePresetSelect');
   }
 
-function _currentStylePresetId() {
+  function _currentStylePresetId() {
     var select = _currentStyleSelect();
     return select ? String(select.value || '') : '';
+  }
+
+  var PROMPT_STRATEGY_OPTIONS = [
+    { id: 'none', label: '不优化', summary: '按原提示词直接提交' },
+    { id: 'auto', label: '智能推荐', summary: 'LLM先汇总画面brief，再按工作流补全要求' },
+    { id: 'xhs_cover', label: '小红书封面', summary: 'LLM拆解点击理由、主体和标题安全区' },
+    { id: 'product_poster', label: '产品海报', summary: 'LLM拆解产品主体、商业光影和卖点留白' },
+    { id: 'ecommerce', label: '电商主图', summary: 'LLM拆解商品完整度、干净背景和转化展示' },
+    { id: 'portrait', label: '人物写真', summary: 'LLM拆解脸部、姿态、皮肤和摄影光线' },
+    { id: 'realistic_scene', label: '写实场景', summary: 'LLM拆解空间、透视、环境和真实镜头' },
+    { id: 'illustration', label: '插画/二次元', summary: 'LLM拆解线条、色彩、角色轮廓和完成度' },
+    { id: 'text_poster', label: '文字海报', summary: 'LLM拆解文字层级、对比和阅读留白' },
+    { id: 'reference_edit', label: '参考图改图', summary: 'LLM拆解参考图保留项和局部修改边界' }
+  ];
+
+function _promptStrategyById(id) {
+    var key = String(id || 'none');
+    for (var i = 0; i < PROMPT_STRATEGY_OPTIONS.length; i++) {
+      if (PROMPT_STRATEGY_OPTIONS[i].id === key) return PROMPT_STRATEGY_OPTIONS[i];
+    }
+    return PROMPT_STRATEGY_OPTIONS[0];
+  }
+
+function _currentPromptStrategyId() {
+    return 'none';
+  }
+
+function _promptOptimizeMenuItemsHtml() {
+    var out = '<button class="prompt-optimize-choice" type="button" data-optimize-kind="standard" data-prompt-strategy="">'
+      + '<span>标准优化</span>'
+      + '</button>';
+    for (var i = 0; i < PROMPT_STRATEGY_OPTIONS.length; i++) {
+      var item = PROMPT_STRATEGY_OPTIONS[i];
+      if (!item || item.id === 'none') continue;
+      var label = item.id === 'auto' ? '智能优化' : item.label;
+      out += '<button class="prompt-optimize-choice" type="button" data-optimize-kind="strategy" data-prompt-strategy="' + escA(item.id) + '">'
+        + '<span>' + escH(label) + '</span>'
+        + '</button>';
+    }
+    return out;
+  }
+
+function closePromptOptimizeMenu() {
+    var layer = document.getElementById('promptOptimizeMenuLayer');
+    if (layer && layer.parentNode) layer.parentNode.removeChild(layer);
+    document.removeEventListener('keydown', _promptOptimizeMenuKeydown);
+    document.removeEventListener('pointerdown', _promptOptimizeMenuOutsidePointer);
+  }
+
+function _positionPromptOptimizeMenu(menu, anchor) {
+    if (!menu || !anchor || !anchor.getBoundingClientRect) return;
+    var rect = anchor.getBoundingClientRect();
+    var width = window.innerWidth < 560
+      ? Math.min(220, Math.max(168, window.innerWidth - 20))
+      : 276;
+    var top = rect.bottom + 8;
+    var maxHeight = Math.min(320, Math.max(120, window.innerHeight - top - 10));
+    var anchorCenter = rect.left + (rect.width / 2);
+    var left = Math.max(10, Math.min(window.innerWidth - width - 10, anchorCenter - (width / 2)));
+    menu.style.width = width + 'px';
+    menu.style.maxHeight = maxHeight + 'px';
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+  }
+
+function openPromptOptimizeMenu(event) {
+    var input = $('#promptInput');
+    var raw = (input && input.value ? input.value : '').trim();
+    var copy = _promptOptimizeCopy();
+    if (!raw) {
+      if (window.CW && CW.toast) CW.toast(copy.empty, 'warn');
+      if (input) input.focus();
+      return;
+    }
+    closePromptOptimizeMenu();
+    var html = '<div class="prompt-optimize-menu-layer" id="promptOptimizeMenuLayer" onclick="CW.closePromptOptimizeMenu()">'
+      + '<div class="prompt-optimize-menu" id="promptOptimizeMenu" role="menu" aria-label="' + escA(copy.label || '优化提示词') + '" onclick="event.stopPropagation()">'
+      + '<div class="prompt-optimize-menu-head"><span>' + escH(copy.label || '优化提示词') + '</span></div>'
+      + '<div class="prompt-optimize-menu-list">'
+      + _promptOptimizeMenuItemsHtml()
+      + '</div>'
+      + '</div>'
+      + '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    var menu = document.getElementById('promptOptimizeMenu');
+    var anchor = (event && event.currentTarget) || $('#optimizePromptBtn');
+    _positionPromptOptimizeMenu(menu, anchor);
+    var buttons = menu ? menu.querySelectorAll('.prompt-optimize-choice') : [];
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function() {
+        runPromptOptimizeChoice(this.dataset.optimizeKind || 'standard', this.dataset.promptStrategy || '');
+      });
+    }
+    setTimeout(function() {
+      document.addEventListener('keydown', _promptOptimizeMenuKeydown);
+      document.addEventListener('pointerdown', _promptOptimizeMenuOutsidePointer);
+    });
+  }
+
+function _promptOptimizeMenuKeydown(event) {
+    if (event && event.key === 'Escape') closePromptOptimizeMenu();
+  }
+
+function _promptOptimizeMenuOutsidePointer(event) {
+    var menu = document.getElementById('promptOptimizeMenu');
+    var btn = document.getElementById('optimizePromptBtn');
+    var target = event && event.target;
+    if (menu && target && menu.contains(target)) return;
+    if (btn && target && btn.contains(target)) return;
+    closePromptOptimizeMenu();
+  }
+
+function _promptStrategyReadCookie(name) {
+    try {
+      var prefix = encodeURIComponent(name) + '=';
+      var parts = String(document.cookie || '').split(';');
+      for (var i = 0; i < parts.length; i++) {
+        var part = parts[i].trim();
+        if (part.indexOf(prefix) === 0) return decodeURIComponent(part.slice(prefix.length));
+      }
+    } catch (e) {}
+    return '';
+  }
+
+function _promptStrategyFetchOptions(body) {
+    var headers = { 'Content-Type': 'application/json' };
+    var csrf = _promptStrategyReadCookie('ez_comfyui_csrf');
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+    return {
+      method: 'POST',
+      credentials: 'include',
+      headers: headers,
+      body: JSON.stringify(body)
+    };
+  }
+
+async function _promptStrategyOptimizationFields(rawPrompt) {
+    var fields = { __user_prompt: rawPrompt };
+    _applyCurrentSizeLimit();
+    var metas = [];
+    try {
+      metas = await _getSubmitFieldsMeta();
+    } catch (e) {
+      metas = A._wfFieldMeta || [];
+    }
+    for (var i = 0; i < (metas || []).length; i++) {
+      var f = metas[i] || {};
+      var key = _fieldKeyForMeta(f);
+      if (!key) continue;
+      if (_isPromptSubmitField(f)) {
+        fields[key] = rawPrompt;
+      } else if (_isLatentDimensionField(f, 'width') || _isFlux2SchedulerSizeField(f, 'width')) {
+        fields[key] = parseInt(($('#widthInput') || {}).value, 10) || f.value || 0;
+      } else if (_isLatentDimensionField(f, 'height') || _isFlux2SchedulerSizeField(f, 'height')) {
+        fields[key] = parseInt(($('#heightInput') || {}).value, 10) || f.value || 0;
+      } else if (_isImageReferenceModeField(f)) {
+        fields[key] = _currentImageReferenceMode();
+      } else if (_isMultiImageRefsField(f)) {
+        fields[key] = JSON.stringify(_multiUploadedRefNames());
+      } else if (f.class_type === 'LoadImage' && f.field === 'image') {
+        fields[key] = _primaryReferenceImageValue() || f.value || '';
+      } else if (_isReferenceVideoField(f)) {
+        fields[key] = ($('#refVideoValue') || {}).value || f.value || '';
+      } else if (_isReferenceAudioField(f)) {
+        fields[key] = ($('#refAudioValue') || {}).value || f.value || '';
+      } else if (_isBerniniRefsField(f)) {
+        fields[key] = JSON.stringify(_berniniUploadedRefNames());
+      } else {
+        fields[key] = _currentFieldValueForMeta(f);
+      }
+    }
+    $$('#quickFormFields [data-key], #advFields [data-key]').forEach(function(el) {
+      if (!el || !el.dataset || !el.dataset.key) return;
+      fields[el.dataset.key] = _readFieldControlValue(el);
+    });
+    fields.__user_prompt = rawPrompt;
+    return fields;
+  }
+
+async function _runStandardPromptOptimize(raw) {
+    var copy = _promptOptimizeCopy();
+    var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+    var response = await fetcher(API + '/api/prompt/optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: raw,
+        max_new_tokens: copy.mode === 'video_script' ? 768 : 384,
+        mode: copy.mode,
+        prompt_context: copy.mode === 'video_script' ? _videoScriptTimingContext() : {}
+      })
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error(data.detail || data.message || copy.error);
+    var optimized = String(data.optimized_prompt || data.cleaned_prompt || '').trim();
+    if (!optimized) throw new Error('优化结果为空');
+    window.CW.lastPromptOptimization = data;
+    return { optimized: optimized, data: data, label: '标准优化', toast: data.structured_prompt_json ? copy.doneJson : copy.done };
+  }
+
+async function _runStrategyPromptOptimize(raw, strategyId) {
+    var selected = _promptStrategyById(strategyId || 'auto');
+    var fields = await _promptStrategyOptimizationFields(raw);
+    var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+    var response = await fetcher(
+      API + '/api/prompt/strategy-optimize',
+      _promptStrategyFetchOptions({
+        prompt: raw,
+        strategy: selected.id || 'auto',
+        workflow: A.currentWF || '',
+        fields: fields
+      })
+    );
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error(data.detail || data.message || '出图优化失败');
+    var optimized = String(data.optimized_prompt || data.prompt || '').trim();
+    if (!optimized) throw new Error('优化结果为空');
+    window.CW.lastPromptStrategyOptimization = data;
+    return {
+      optimized: optimized,
+      data: data,
+      label: selected.id === 'auto' ? '智能优化' : (data.prompt_strategy_label || selected.label || '出图优化'),
+      toast: (selected.id === 'auto' ? '智能优化' : (data.prompt_strategy_label || selected.label || '出图优化')) + '已写入提示词'
+    };
+  }
+
+async function runPromptOptimizeChoice(kind, strategyId) {
+    var input = $('#promptInput');
+    var raw = (input && input.value ? input.value : '').trim();
+    var btn = $('#optimizePromptBtn');
+    var copy = _promptOptimizeCopy();
+    if (!raw) {
+      if (window.CW && CW.toast) CW.toast(copy.empty, 'warn');
+      if (input) input.focus();
+      return;
+    }
+    closePromptOptimizeMenu();
+    var oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' 优化中';
+    }
+    try {
+      var result = kind === 'strategy'
+        ? await _runStrategyPromptOptimize(raw, strategyId)
+        : await _runStandardPromptOptimize(raw);
+      _setPromptInputValue(result.optimized);
+      if (kind === 'strategy') {
+        _clearPromptOptimizationVariants();
+      } else {
+        _showPromptOptimizationVariants(result.data);
+      }
+      closePromptOptimizeMenu();
+      if (window.CW && CW.toast) CW.toast(result.toast || (result.label + '已写入提示词'), 'ok');
+    } catch (e) {
+      console.warn('[runPromptOptimizeChoice] failed:', e);
+      if (window.CW && CW.toast) CW.toast(e.message || copy.error, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-loading');
+        btn.innerHTML = oldHtml || ((window.CW && CW.icon ? CW.icon('zap') : '') + ' ' + copy.label);
+      }
+    }
   }
 
 function _stylePromptInfo(presetId, fields) {
@@ -1058,6 +1331,9 @@ function _workflowSizeLimits(fields) {
     if (/bernini/i.test(workflow) || _hasFieldClass(fields, /^BerniniConditioning$/)) {
       return { name: 'bernini', maxSide: 848, maxPixels: null, multiple: 16, minSide: 256, inputMax: 1280, basePresets: DEFAULT_RATIO_BASE_PRESETS };
     }
+    if (/scail|wan/i.test(workflow) || _hasFieldClass(fields, /Wan.*(?:ToVideo|Video)|SCAIL/i)) {
+      return { name: 'wan-video', maxSide: 896, maxPixels: WAN_VIDEO_MAX_PIXELS, multiple: 32, minSide: 256, inputMax: 1536, presets: WAN_VIDEO_RATIO_PRESETS };
+    }
     var hasLtxVideoLatent = _hasFieldClass(fields, /EmptyLTXVLatentVideo|LTXV/i);
     if (/ltx|sulphur/i.test(workflow) || hasLtxVideoLatent) {
       return { name: 'ltx-video', maxSide: 1280, maxPixels: null, multiple: 32, minSide: 192, minWidth: 256, minHeight: 192, inputMax: 1280, basePresets: DEFAULT_RATIO_BASE_PRESETS };
@@ -1102,6 +1378,122 @@ function _limitDimensions(w, h, limits) {
     return [width, height];
   }
 
+function _roundToMultiple(value, multiple, mode) {
+    multiple = Math.max(1, parseInt(multiple || 1, 10));
+    value = Number(value);
+    if (!Number.isFinite(value)) return multiple;
+    var scaled = value / multiple;
+    if (mode === 'floor') return Math.max(multiple, Math.floor(scaled) * multiple);
+    if (mode === 'ceil') return Math.max(multiple, Math.ceil(scaled) * multiple);
+    return Math.max(multiple, Math.round(scaled) * multiple);
+  }
+
+function _sizeLimitBounds(limits) {
+    limits = limits || DEFAULT_SIZE_LIMITS;
+    var multiple = Math.max(1, parseInt(limits.multiple || 64, 10));
+    var minSide = Math.max(multiple, parseInt(limits.minSide || multiple, 10));
+    var minWidth = _roundToMultiple(Math.max(multiple, parseInt(limits.minWidth || minSide, 10)), multiple, 'ceil');
+    var minHeight = _roundToMultiple(Math.max(multiple, parseInt(limits.minHeight || minSide, 10)), multiple, 'ceil');
+    var inputMax = parseInt(limits.inputMax || limits.maxSide || 2048, 10) || 2048;
+    var maxSide = limits.maxSide ? Math.min(inputMax, parseInt(limits.maxSide, 10) || inputMax) : inputMax;
+    var maxWidth = _roundToMultiple(Math.max(minWidth, maxSide), multiple, 'floor');
+    var maxHeight = _roundToMultiple(Math.max(minHeight, maxSide), multiple, 'floor');
+    return {
+      multiple: multiple,
+      minWidth: minWidth,
+      minHeight: minHeight,
+      maxWidth: Math.max(minWidth, maxWidth),
+      maxHeight: Math.max(minHeight, maxHeight)
+    };
+  }
+
+function _readSizePresetRatio(btn) {
+    if (!btn) return null;
+    var w = parseInt(btn.dataset.ratioW || btn.dataset.w || '', 10);
+    var h = parseInt(btn.dataset.ratioH || btn.dataset.h || '', 10);
+    if (!w || !h) return null;
+    return { width: w, height: h };
+  }
+
+function _activeSizeRatio() {
+    var section = $('#sizeSection');
+    var w = parseInt((section && section.dataset.sizeRatioW) || '', 10);
+    var h = parseInt((section && section.dataset.sizeRatioH) || '', 10);
+    if (w && h) return { width: w, height: h };
+    return null;
+  }
+
+function _sizePresetButtonForRatio(ratio) {
+    if (!ratio) return null;
+    var targetW = String(ratio.width || '');
+    var targetH = String(ratio.height || '');
+    var match = null;
+    _sizePresetButtons().forEach(function(btn) {
+      if (String(btn.dataset.ratioW || btn.dataset.w || '') === targetW && String(btn.dataset.ratioH || btn.dataset.h || '') === targetH) match = btn;
+    });
+    return match;
+  }
+
+function _ratioHeightFromWidth(width, ratio, multiple) {
+    return _roundToMultiple(width * ratio.height / Math.max(1, ratio.width), multiple, 'round');
+  }
+
+function _ratioWidthFromHeight(height, ratio, multiple) {
+    return _roundToMultiple(height * ratio.width / Math.max(1, ratio.height), multiple, 'round');
+  }
+
+function _fitSizeForRatio(width, height, changed, ratio, limits) {
+    limits = limits || DEFAULT_SIZE_LIMITS;
+    ratio = ratio || { width: 1, height: 1 };
+    changed = changed === 'height' ? 'height' : 'width';
+    var bounds = _sizeLimitBounds(limits);
+    var multiple = bounds.multiple;
+    var w = Number(width);
+    var h = Number(height);
+    if (!Number.isFinite(w) || w <= 0) w = bounds.minWidth;
+    if (!Number.isFinite(h) || h <= 0) h = bounds.minHeight;
+
+    if (changed === 'height') {
+      h = Math.min(bounds.maxHeight, Math.max(bounds.minHeight, _roundToMultiple(h, multiple, 'round')));
+      w = _ratioWidthFromHeight(h, ratio, multiple);
+    } else {
+      w = Math.min(bounds.maxWidth, Math.max(bounds.minWidth, _roundToMultiple(w, multiple, 'round')));
+      h = _ratioHeightFromWidth(w, ratio, multiple);
+    }
+
+    for (var i = 0; i < 8; i++) {
+      var prev = w + 'x' + h;
+      if (w < bounds.minWidth) { w = bounds.minWidth; h = _ratioHeightFromWidth(w, ratio, multiple); }
+      if (h < bounds.minHeight) { h = bounds.minHeight; w = _ratioWidthFromHeight(h, ratio, multiple); }
+      if (w > bounds.maxWidth) { w = bounds.maxWidth; h = _ratioHeightFromWidth(w, ratio, multiple); }
+      if (h > bounds.maxHeight) { h = bounds.maxHeight; w = _ratioWidthFromHeight(h, ratio, multiple); }
+      if (limits.maxPixels && w * h > limits.maxPixels) {
+        var scale = Math.sqrt(Number(limits.maxPixels) / Math.max(1, w * h));
+        if (changed === 'height') {
+          h = Math.max(bounds.minHeight, _roundToMultiple(h * scale, multiple, 'floor'));
+          w = _ratioWidthFromHeight(h, ratio, multiple);
+        } else {
+          w = Math.max(bounds.minWidth, _roundToMultiple(w * scale, multiple, 'floor'));
+          h = _ratioHeightFromWidth(w, ratio, multiple);
+        }
+      }
+      if (prev === w + 'x' + h) break;
+    }
+
+    while (limits.maxPixels && w * h > limits.maxPixels) {
+      if (changed === 'height' && h > bounds.minHeight) {
+        h = Math.max(bounds.minHeight, h - multiple);
+        w = _ratioWidthFromHeight(h, ratio, multiple);
+      } else if (w > bounds.minWidth) {
+        w = Math.max(bounds.minWidth, w - multiple);
+        h = _ratioHeightFromWidth(w, ratio, multiple);
+      } else {
+        break;
+      }
+    }
+    return [w, h];
+  }
+
 function _scaledRatioPreset(w, h, label, shapeW, shapeH, limits) {
     var size = _limitDimensions(w, h, limits);
     return [size[0], size[1], label, shapeW, shapeH];
@@ -1115,42 +1507,540 @@ function _ratioPresetsForLimits(limits) {
     });
   }
 
-function _applyCurrentSizeLimit() {
+function _sizePresetLabel(preset) {
+    if (!preset) return '';
+    return String(preset[2] || (preset[0] + ':' + preset[1]));
+  }
+
+function _ratioPartsForPreset(preset) {
+    var label = _sizePresetLabel(preset);
+    var m = label.match(/^\s*(\d+)\s*:\s*(\d+)\s*$/);
+    if (m) {
+      var rw = parseInt(m[1], 10);
+      var rh = parseInt(m[2], 10);
+      if (rw && rh) return { width: rw, height: rh };
+    }
+    return {
+      width: parseInt((preset && preset[0]) || 1, 10) || 1,
+      height: parseInt((preset && preset[1]) || 1, 10) || 1
+    };
+  }
+
+function _closestSizePresetForAspect(width, height, limits) {
+    width = parseInt(width, 10) || 0;
+    height = parseInt(height, 10) || 0;
+    if (!width || !height) return null;
+    var target = width / height;
+    var best = null;
+    var bestDiff = Infinity;
+    _ratioPresetsForLimits(limits || _workflowSizeLimits()).forEach(function(p) {
+      var pw = parseInt(p[0], 10) || 0;
+      var ph = parseInt(p[1], 10) || 0;
+      if (!pw || !ph) return;
+      var diff = Math.abs(Math.log((pw / ph) / target));
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = p;
+      }
+    });
+    return best;
+  }
+
+function _largestSizeForSourceAspect(width, height, limits) {
+    limits = limits || _workflowSizeLimits();
+    width = parseInt(width, 10) || 0;
+    height = parseInt(height, 10) || 0;
+    if (!width || !height) return null;
+    var multiple = Math.max(1, parseInt(limits.multiple || 32, 10));
+    var maxSide = parseInt(limits.maxSide || 0, 10) || Math.max(width, height);
+    var targetW, targetH;
+    if (width >= height) {
+      targetW = maxSide;
+      targetH = Math.max(multiple, Math.round((maxSide * height / width) / multiple) * multiple);
+    } else {
+      targetH = maxSide;
+      targetW = Math.max(multiple, Math.round((maxSide * width / height) / multiple) * multiple);
+    }
+    return _limitDimensions(targetW, targetH, limits);
+  }
+
+function _applyBestSizeForAspect(width, height) {
     var wi = $('#widthInput'), hi = $('#heightInput');
-    if (!wi || !hi) return;
-    var size = _limitDimensions(wi.value, hi.value, _workflowSizeLimits());
+    if (!wi || !hi) return false;
+    var limits = _workflowSizeLimits();
+    var size = limits.name === 'wan-video'
+      ? _largestSizeForSourceAspect(width, height, limits)
+      : _closestSizePresetForAspect(width, height, limits);
+    if (!size) return false;
     wi.value = size[0];
     hi.value = size[1];
-    highlightRatio(size[0], size[1]);
+    _applyCurrentSizeLimit();
+    var matched = null;
+    _sizePresetButtons().forEach(function(btn) {
+      if (String(btn.dataset.w || '') === String(size[0]) && String(btn.dataset.h || '') === String(size[1])) {
+        matched = btn;
+      }
+    });
+    if (matched) _setActiveSizePreset(matched);
+    return true;
+  }
+
+function _numericFieldControlForMeta(f) {
+    var key = _fieldKeyForMeta(f);
+    if (!key) return null;
+    return document.querySelector('#quickFormFields [data-key="' + key + '"], #advFields [data-key="' + key + '"]');
+  }
+
+function _isVideoFpsLikeFieldMeta(f) {
+    f = f || {};
+    var label = String(f.label || '');
+    var field = String(f.field || '');
+    var cls = String(f.class_type || '');
+    var title = String(f.node_title || '');
+    var haystack = (label + ' ' + field + ' ' + cls + ' ' + title).toLowerCase();
+    return field === 'fps' ||
+      field === 'frame_rate' ||
+      field === 'force_rate' ||
+      /fps|帧率|frame[_ -]?rate|force[_ -]?rate/.test(haystack);
+  }
+
+function _videoFrameFieldMeta(kind) {
+    var fields = A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      var label = String(f.label || '');
+      var field = String(f.field || '');
+      var cls = String(f.class_type || '');
+      var title = String(f.node_title || '');
+      var haystack = (label + ' ' + field + ' ' + cls + ' ' + title).toLowerCase();
+      if (kind === 'generate' && !_isVideoFpsLikeFieldMeta(f) && (
+        /生成帧数|生成.*帧|输出.*帧/.test(label) ||
+        (field === 'length' && /video|tovideo|latentvideo|scail|wan/i.test(cls + ' ' + title))
+      )) return f;
+      if (kind === 'read' && (field === 'frame_load_cap' || /读取帧数|读入帧数|frame[_ -]?load[_ -]?cap/.test(haystack))) return f;
+      if (kind === 'duration' && (
+        field === '__output_duration_sec' ||
+        /输出时长|视频时长|时长.*秒|duration|seconds/.test(haystack)
+      )) return f;
+    }
+    return null;
+  }
+
+function _isWanScailReferenceVideoWorkflow(fieldsMeta) {
+    var fields = fieldsMeta || A._wfFieldMeta || [];
+    var workflow = String(A.currentWF || '');
+    var hasVideo = false;
+    var hasWanScail = /scail|wan/i.test(workflow);
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      var cls = String(f.class_type || '');
+      var title = String(f.node_title || '');
+      var field = String(f.field || '');
+      if (_isReferenceVideoField(f)) hasVideo = true;
+      if (/Wan.*(?:ToVideo|Video)|SCAIL/i.test(cls + ' ' + title) || field === 'force_rate') hasWanScail = true;
+    }
+    return hasVideo && hasWanScail;
+  }
+
+function _wanScailTimingFieldMeta(kind, fieldsMeta) {
+    var fields = fieldsMeta || A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      var label = String(f.label || '');
+      var field = String(f.field || '');
+      var cls = String(f.class_type || '');
+      var title = String(f.node_title || '');
+      var haystack = (label + ' ' + field + ' ' + cls + ' ' + title).toLowerCase();
+      if (kind === 'output_fps') {
+        if (field === 'fps') return f;
+        if (/输出帧率|output.*fps|create\s*video/.test(label + ' ' + title)) return f;
+      }
+      if (kind === 'force_rate') {
+        if (field === 'force_rate') return f;
+        if (/重采样.*fps|force[_ -]?rate|load.*fps/.test(haystack)) return f;
+      }
+    }
+    return null;
+  }
+
+function _numberFieldValue(fields, meta) {
+    var key = _fieldKeyForMeta(meta);
+    if (!key) return 0;
+    var raw = fields && Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : null;
+    if (raw === null || raw === undefined || raw === '') {
+      raw = _currentFieldValueForMeta(meta);
+    }
+    var value = parseFloat(raw);
+    return isFinite(value) ? value : 0;
+  }
+
+function _writeNumberField(fields, snapshot, meta, value) {
+    var key = _fieldKeyForMeta(meta);
+    if (!key || !isFinite(value)) return;
+    fields[key] = value;
+    if (snapshot && snapshot.adv) snapshot.adv[key] = value;
+    var control = _numericFieldControlForMeta(meta);
+    if (control) _setNumberControlValue(control, value);
+  }
+
+function _wanScailDefaultForceRate() {
+    return 24;
+  }
+
+var _wanScailTimingSyncing = false;
+
+function _roundWanScailFps(value) {
+    var fps = parseFloat(value);
+    if (!isFinite(fps) || fps <= 0) fps = _wanScailDefaultForceRate();
+    fps = Math.max(1, Math.min(60, fps));
+    fps = Math.round(fps * 1000) / 1000;
+    return Math.abs(fps - Math.round(fps)) < 0.0001 ? Math.round(fps) : fps;
+  }
+
+function _wanScailVideoDuration(meta) {
+    var source = meta || _getRefVideoMetadata();
+    var duration = parseFloat((source && (source.duration || source.duration_seconds)) || 0) || 0;
+    return duration > 0 ? duration : 0;
+  }
+
+function _wanScailVideoFps(meta) {
+    var source = meta || _getRefVideoMetadata();
+    var fps = parseFloat((source && (source.fps || source.frame_rate)) || 0) || 0;
+    return fps > 0 ? _roundWanScailFps(fps) : 0;
+  }
+
+function _fieldNumberLimit(meta, name, fallback) {
+    if (!meta) return fallback;
+    var key = _fieldKeyForMeta(meta);
+    var control = key ? _numericFieldControlForMeta(meta) : null;
+    var raw = control ? control.getAttribute(name) : meta[name];
+    var value = parseFloat(raw);
+    return isFinite(value) ? value : fallback;
+  }
+
+function _wanScailFrameLimit(readMeta, genMeta) {
+    var value = _fieldNumberLimit(readMeta, 'max', 0);
+    if (!(value > 0)) value = _fieldNumberLimit(genMeta, 'max', 0);
+    return value > 0 ? value : 501;
+  }
+
+function _setNumberControlMax(meta, value) {
+    var control = _numericFieldControlForMeta(meta);
+    if (!control || !(value > 0)) return;
+    control.setAttribute('max', String(Math.round(value * 1000) / 1000));
+  }
+
+function _clampWanScailDuration(value, sourceDuration, fps, frameLimit) {
+    var duration = parseFloat(value);
+    var maxDuration = 0;
+    if (sourceDuration > 0) maxDuration = sourceDuration;
+    if (frameLimit > 0 && fps > 0) {
+      var frameDuration = frameLimit / fps;
+      maxDuration = maxDuration > 0 ? Math.min(maxDuration, frameDuration) : frameDuration;
+    }
+    if (!isFinite(duration) || duration <= 0) duration = maxDuration || 0;
+    if (maxDuration > 0) duration = Math.min(duration, maxDuration);
+    duration = Math.max(0.1, duration || 0.1);
+    return Math.round(duration * 1000) / 1000;
+  }
+
+function _wanScailForceRateValue(fields, forceRateMeta) {
+    var forceRate = forceRateMeta ? _numberFieldValue(fields || {}, forceRateMeta) : 0;
+    if (!isFinite(forceRate) || forceRate <= 0) forceRate = _wanScailDefaultForceRate();
+    return _roundWanScailFps(forceRate);
+  }
+
+function _autoFitWanScailVideoTimingControls(meta, fieldsMeta) {
+    fieldsMeta = fieldsMeta || A._wfFieldMeta || [];
+    var forceRateMeta = _wanScailTimingFieldMeta('force_rate', fieldsMeta);
+    var outputFpsMeta = _wanScailTimingFieldMeta('output_fps', fieldsMeta);
+    var genMeta = _videoFrameFieldMeta('generate');
+    var readMeta = _videoFrameFieldMeta('read');
+    var durationMeta = _videoFrameFieldMeta('duration');
+    var sourceDuration = _wanScailVideoDuration(meta);
+    var outputFps = _wanScailForceRateValue({}, outputFpsMeta || forceRateMeta);
+    var frameLimit = _wanScailFrameLimit(readMeta, genMeta);
+    var duration = _clampWanScailDuration(sourceDuration, sourceDuration, outputFps, frameLimit);
+    _setNumberControlMax(durationMeta, _clampWanScailDuration(sourceDuration, sourceDuration, outputFps, frameLimit));
+
+    var targetFrames = duration > 0 ? Math.max(1, Math.floor(duration * outputFps + 0.000001)) : _videoFrameTotalFromMeta(meta);
+    targetFrames = Math.max(1, Math.min(frameLimit, targetFrames || 1));
+
+    if (durationMeta) _writeNumberField({}, { adv: {} }, durationMeta, duration);
+    if (forceRateMeta) _writeNumberField({}, { adv: {} }, forceRateMeta, outputFps);
+
+    if (genMeta && targetFrames > 0) _writeNumberField({}, { adv: {} }, genMeta, targetFrames);
+    if (readMeta && _fieldKeyForMeta(readMeta) !== _fieldKeyForMeta(genMeta) && targetFrames > 0) {
+      _writeNumberField({}, { adv: {} }, readMeta, targetFrames);
+    }
+
+    if (outputFpsMeta) _writeNumberField({}, { adv: {} }, outputFpsMeta, _roundWanScailFps(outputFps));
+    return !!(durationMeta || forceRateMeta || outputFpsMeta || genMeta || readMeta);
+  }
+
+function _syncWanScailVideoTiming(fields, snapshot, fieldsMeta, opts) {
+    fieldsMeta = fieldsMeta || A._wfFieldMeta || [];
+    if (!_isWanScailReferenceVideoWorkflow(fieldsMeta)) return null;
+    if (_wanScailTimingSyncing) return null;
+    _wanScailTimingSyncing = true;
+    try {
+    fields = fields || {};
+    snapshot = snapshot || {};
+    opts = opts || {};
+    var outputFpsMeta = _wanScailTimingFieldMeta('output_fps', fieldsMeta);
+    var forceRateMeta = _wanScailTimingFieldMeta('force_rate', fieldsMeta);
+    var durationMeta = _videoFrameFieldMeta('duration');
+    var changed = {};
+    var outputFps = _wanScailForceRateValue(fields, outputFpsMeta || forceRateMeta);
+    var genMeta = _videoFrameFieldMeta('generate');
+    var readMeta = _videoFrameFieldMeta('read');
+    var genKey = _fieldKeyForMeta(genMeta);
+    var readKey = _fieldKeyForMeta(readMeta);
+    var durationKey = _fieldKeyForMeta(durationMeta);
+    var sourceDuration = _wanScailVideoDuration();
+    var frameLimit = _wanScailFrameLimit(readMeta, genMeta);
+    var requestedDuration = 0;
+    if (opts.preferFrameCount && readMeta && outputFps > 0 && fields && Object.prototype.hasOwnProperty.call(fields, readKey)) {
+      requestedDuration = Math.round((_numberFieldValue(fields, readMeta) / outputFps) * 1000) / 1000;
+    } else if (durationMeta && durationKey && fields && Object.prototype.hasOwnProperty.call(fields, durationKey)) {
+      requestedDuration = parseFloat(fields[durationKey]) || 0;
+    } else if (durationMeta) {
+      requestedDuration = _numberFieldValue(fields, durationMeta);
+    }
+    if (!(requestedDuration > 0) && readMeta && outputFps > 0) {
+      requestedDuration = Math.round((_numberFieldValue(fields, readMeta) / outputFps) * 1000) / 1000;
+    }
+    var duration = _clampWanScailDuration(requestedDuration || sourceDuration, sourceDuration, outputFps, frameLimit);
+    _setNumberControlMax(durationMeta, _clampWanScailDuration(sourceDuration || duration, sourceDuration, outputFps, frameLimit));
+    var frames = Math.max(1, Math.min(frameLimit, Math.floor(duration * outputFps + 0.000001)));
+
+    if (durationMeta) {
+      var currentDuration = _numberFieldValue(fields, durationMeta);
+      if (Math.abs(currentDuration - duration) > 0.001) {
+        _writeNumberField(fields, snapshot, durationMeta, duration);
+        changed.duration = duration;
+      } else {
+        var durationKey = _fieldKeyForMeta(durationMeta);
+        if (durationKey) fields[durationKey] = duration;
+      }
+    }
+    if (forceRateMeta) {
+      var currentForceRate = _numberFieldValue(fields, forceRateMeta);
+      if (Math.abs(currentForceRate - outputFps) > 0.001) {
+        _writeNumberField(fields, snapshot, forceRateMeta, outputFps);
+        changed.force_rate = outputFps;
+      }
+    }
+    if (readMeta && frames > 0) {
+      var readFrames = _numberFieldValue(fields, readMeta);
+      if (Math.round(readFrames) !== frames) {
+        _writeNumberField(fields, snapshot, readMeta, frames);
+        changed.frame_load_cap = frames;
+      }
+    }
+    if (genMeta && genKey !== readKey && frames > 0) {
+      var genFrames = _numberFieldValue(fields, genMeta);
+      if (Math.round(genFrames) !== frames) {
+        _writeNumberField(fields, snapshot, genMeta, frames);
+        changed.generate_frames = frames;
+      }
+    }
+    if (outputFpsMeta) {
+      outputFps = _roundWanScailFps(outputFps);
+      var currentOutputFps = _numberFieldValue(fields, outputFpsMeta);
+      if (Math.abs(currentOutputFps - outputFps) > 0.001) {
+        _writeNumberField(fields, snapshot, outputFpsMeta, outputFps);
+        changed.output_fps = outputFps;
+      }
+    }
+    return Object.keys(changed).length ? changed : null;
+    } finally {
+      _wanScailTimingSyncing = false;
+    }
+  }
+
+function _bindWanScailVideoTimingSync(fieldsMeta) {
+    fieldsMeta = fieldsMeta || A._wfFieldMeta || [];
+    if (!_isWanScailReferenceVideoWorkflow(fieldsMeta)) return;
+    var forceRateMeta = _wanScailTimingFieldMeta('force_rate', fieldsMeta);
+    var outputFpsMeta = _wanScailTimingFieldMeta('output_fps', fieldsMeta);
+    var durationMeta = _videoFrameFieldMeta('duration');
+    var genMeta = _videoFrameFieldMeta('generate');
+    var readMeta = _videoFrameFieldMeta('read');
+    [forceRateMeta, outputFpsMeta, durationMeta, genMeta, readMeta].forEach(function(meta) {
+      var control = _numericFieldControlForMeta(meta);
+      if (!control || control.getAttribute('data-wan-scail-timing-bound') === '1') return;
+      control.setAttribute('data-wan-scail-timing-bound', '1');
+      control.addEventListener('input', function() {
+        _syncWanScailVideoTiming({}, { adv: {} }, fieldsMeta, { sourceKey: _fieldKeyForMeta(meta) });
+      });
+      control.addEventListener('change', function() {
+        _syncWanScailVideoTiming({}, { adv: {} }, fieldsMeta, { sourceKey: _fieldKeyForMeta(meta) });
+      });
+    });
+    _syncWanScailVideoTiming({}, { adv: {} }, fieldsMeta);
+  }
+
+function _videoFrameTotalFromMeta(meta) {
+    meta = meta || {};
+    var frames = parseInt(meta.frame_count || meta.frames || meta.nb_frames || 0, 10) || 0;
+    var duration = parseFloat(meta.duration || meta.duration_seconds || 0) || 0;
+    var fps = parseFloat(meta.fps || meta.frame_rate || 0) || 0;
+    if (!frames && duration > 0 && fps > 0) frames = Math.max(1, Math.round(duration * fps));
+    return frames;
+  }
+
+function _snapVideoFrameCount(value, control) {
+    value = Math.max(1, parseInt(value, 10) || 1);
+    var min = parseInt((control && control.getAttribute('min')) || 1, 10) || 1;
+    var max = parseInt((control && control.getAttribute('max')) || value, 10) || value;
+    var step = parseInt((control && control.getAttribute('step')) || 1, 10) || 1;
+    value = Math.max(min, Math.min(max, value));
+    if (step > 1) {
+      var base = step === 4 ? 1 : min;
+      value = base + Math.round((value - base) / step) * step;
+      if (value < min) value = min;
+      if (value > max) value = max;
+    }
+    return Math.max(min, Math.min(max, value));
+  }
+
+function _setNumberControlValue(control, value) {
+    if (!control) return;
+    control.value = String(value);
+    control.dispatchEvent(new Event('input', { bubbles: true }));
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+function _autoFitVideoFrameControls(meta) {
+    if (_isWanScailReferenceVideoWorkflow()) {
+      return _autoFitWanScailVideoTimingControls(meta, A._wfFieldMeta || []);
+    }
+    var totalFrames = _videoFrameTotalFromMeta(meta);
+    if (!totalFrames) return false;
+    var genMeta = _videoFrameFieldMeta('generate');
+    var readMeta = _videoFrameFieldMeta('read');
+    var genControl = genMeta ? _numericFieldControlForMeta(genMeta) : null;
+    var readControl = readMeta ? _numericFieldControlForMeta(readMeta) : null;
+    var target = 0;
+    if (genControl) {
+      target = _snapVideoFrameCount(totalFrames, genControl);
+      _setNumberControlValue(genControl, target);
+    }
+    if (readControl) {
+      var readTarget = target || _snapVideoFrameCount(totalFrames, readControl);
+      _setNumberControlValue(readControl, readTarget);
+    }
+    return !!(genControl || readControl);
+  }
+
+function _sizePresetButtons() {
+    var btns = $$('[data-size-preset]');
+    return btns && btns.length ? btns : $$('.ratio-btn');
+  }
+
+function _setActiveSizePreset(activeBtn) {
+    var section = $('#sizeSection');
+    var ratio = _readSizePresetRatio(activeBtn);
+    if (section) {
+      if (ratio) {
+        section.dataset.sizeRatioW = String(ratio.width);
+        section.dataset.sizeRatioH = String(ratio.height);
+      } else {
+        delete section.dataset.sizeRatioW;
+        delete section.dataset.sizeRatioH;
+      }
+    }
+    _sizePresetButtons().forEach(function(btn) {
+      var active = btn === activeBtn;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+function _applyCurrentSizeLimit(changed) {
+    var wi = $('#widthInput'), hi = $('#heightInput');
+    if (!wi || !hi) return;
+    var limits = _workflowSizeLimits();
+    var ratio = _activeSizeRatio();
+    var size = ratio
+      ? _fitSizeForRatio(wi.value, hi.value, changed, ratio, limits)
+      : _limitDimensions(wi.value, hi.value, limits);
+    wi.value = size[0];
+    hi.value = size[1];
+    if (ratio) {
+      var active = _sizePresetButtonForRatio(ratio);
+      if (active) _setActiveSizePreset(active);
+    } else {
+      highlightRatio(size[0], size[1]);
+    }
+    _syncIdeogramCanvasAspect();
+  }
+
+function _syncSizeInputForRatio(changed, commit) {
+    var wi = $('#widthInput'), hi = $('#heightInput');
+    if (!wi || !hi) return;
+    var ratio = _activeSizeRatio();
+    var limits = _workflowSizeLimits();
+    if (!ratio) {
+      var w = parseInt(wi.value, 10) || 0;
+      var h = parseInt(hi.value, 10) || 0;
+      highlightRatio(w, h);
+      _syncIdeogramCanvasAspect();
+      return;
+    }
+    var bounds = _sizeLimitBounds(limits);
+    var sourceValue = changed === 'height' ? Number(hi.value) : Number(wi.value);
+    var sourceMin = changed === 'height' ? bounds.minHeight : bounds.minWidth;
+    if (!commit && (!Number.isFinite(sourceValue) || sourceValue < sourceMin)) {
+      _syncIdeogramCanvasAspect();
+      return;
+    }
+    var size = _fitSizeForRatio(wi.value, hi.value, changed, ratio, limits);
+    if (commit || sourceValue >= sourceMin) {
+      wi.value = size[0];
+      hi.value = size[1];
+    } else if (changed === 'height') {
+      wi.value = size[0];
+    } else {
+      hi.value = size[1];
+    }
+    var active = _sizePresetButtonForRatio(ratio);
+    if (active) _setActiveSizePreset(active);
     _syncIdeogramCanvasAspect();
   }
 
 function initRatioGrid() {
     // Ratio buttons are created dynamically by renderQuickForm - guard
-    var btns = $$('.ratio-btn');
+    var btns = _sizePresetButtons();
     if (!btns || !btns.length) return;
+    var initialActive = null;
+    btns.forEach(function(b) {
+      if (!initialActive && b.classList.contains('active')) initialActive = b;
+    });
+    if (initialActive) _setActiveSizePreset(initialActive);
     btns.forEach(function(b) {
       b.addEventListener('click', function() {
-        var allBtns = $$('.ratio-btn');
-        allBtns.forEach(function(x) { x.classList.remove('active'); });
-        b.classList.add('active');
-        $('#widthInput').value = b.dataset.w;
-        $('#heightInput').value = b.dataset.h;
-        _applyCurrentSizeLimit();
+        _setActiveSizePreset(b);
+        var wi = $('#widthInput'), hi = $('#heightInput');
+        if (wi) wi.value = b.dataset.w;
+        if (hi) hi.value = b.dataset.h;
+        _applyCurrentSizeLimit('width');
       });
     });
-    // Sync: if user manually changes inputs, clear active highlight
     ['#widthInput', '#heightInput'].forEach(function(sel) {
       var el = $(sel);
       if (el) {
+        var changed = sel === '#heightInput' ? 'height' : 'width';
         el.addEventListener('input', function() {
-          var w = parseInt($('#widthInput').value) || 0,
-            h = parseInt($('#heightInput').value) || 0;
-          highlightRatio(w, h);
-          _syncIdeogramCanvasAspect();
+          _syncSizeInputForRatio(changed, false);
         });
-        el.addEventListener('change', _applyCurrentSizeLimit);
-        el.addEventListener('blur', _applyCurrentSizeLimit);
+        el.addEventListener('change', function() {
+          _syncSizeInputForRatio(changed, true);
+        });
+        el.addEventListener('blur', function() {
+          _syncSizeInputForRatio(changed, true);
+        });
       }
     });
   }
@@ -1158,13 +2048,17 @@ function initRatioGrid() {
 function highlightRatio(w, h) {
     var target = w / h;
     var best = null, bestDiff = Infinity;
-    $$('.ratio-btn').forEach((b) => {
+    _sizePresetButtons().forEach((b) => {
       var bw = parseInt(b.dataset.w), bh = parseInt(b.dataset.h);
       var ratio = bw / bh;
       var diff = Math.abs(ratio - target);
       if (diff < bestDiff) { bestDiff = diff; best = b; }
     });
-    $$('.ratio-btn').forEach((b) => b.classList.toggle('active', bestDiff < 0.01 && b === best));
+    _sizePresetButtons().forEach((b) => {
+      var active = bestDiff < 0.01 && b === best;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
   }
 
 function scaleDim(w, h, maxSide = 1920) {
@@ -1430,6 +2324,16 @@ function _isBerniniRefsField(f) {
     return f.type === 'bernini_refs' || String(f.field || '') === '__bernini_refs' || _fieldKeyForMeta(f).endsWith('::__bernini_refs');
   }
 
+function _isImageReferenceModeField(f) {
+    if (!f) return false;
+    return f.type === 'image_reference_mode' || String(f.field || '') === '__image_reference_mode' || _fieldKeyForMeta(f).endsWith('::__image_reference_mode');
+  }
+
+function _isMultiImageRefsField(f) {
+    if (!f) return false;
+    return f.type === 'multi_image_refs' || String(f.field || '') === '__multi_reference_images' || _fieldKeyForMeta(f).endsWith('::__multi_reference_images');
+  }
+
 function _isBerniniFramesField(f) {
     if (!f) return false;
     return f.type === 'bernini_frames' || String(f.field || '') === '__bernini_frames' || _fieldKeyForMeta(f).endsWith('::__bernini_frames');
@@ -1445,8 +2349,60 @@ function _currentBerniniMode() {
     return String((input && input.value) || 't2i').trim().toLowerCase() || 't2i';
   }
 
+function _currentImageReferenceMode() {
+    var input = document.querySelector('[data-type="image_reference_mode"][data-key]');
+    var value = String((input && input.value) || 'single').trim().toLowerCase();
+    return value === 'multi' ? 'multi' : 'single';
+  }
+
+function _imageReferenceModeNeedsMultiRefs(mode) {
+    return String(mode || '').toLowerCase() === 'multi';
+  }
+
+function _berniniModeOptions() {
+    return [
+      { value: 't2i', code: 'T2I', label: '文生图', desc: '用提示词生成图片' },
+      { value: 'i2i', code: 'I2I', label: '图生图', desc: '用提示词和 1 张源图生成/重绘图片' },
+      { value: 't2v', code: 'T2V', label: '文生视频', desc: '用提示词生成视频' },
+      { value: 'v2v', code: 'V2V', label: '视频重绘', desc: '用提示词和源视频生成视频' },
+      { value: 'i2v', code: 'I2V', label: '图生视频', desc: '用提示词和 1 张参考图生成视频' },
+      { value: 'r2v', code: 'R2V', label: '多参考图生视频', desc: '用提示词和多张参考图生成视频' },
+      { value: 'rv2v', code: 'RV2V', label: '参考图视频编辑', desc: '用源视频、多张参考图和提示词生成视频' }
+    ];
+  }
+
+function _berniniModeInfo(mode) {
+    mode = String(mode || 't2i').toLowerCase();
+    var modes = _berniniModeOptions();
+    for (var i = 0; i < modes.length; i++) {
+      if (modes[i].value === mode) return modes[i];
+    }
+    return modes[0];
+  }
+
+function _berniniModeOptionLabel(info) {
+    return info.code + '（' + info.label + '）' + info.desc;
+  }
+
 function _berniniModeNeedsRefs(mode) {
-    return ['i2i', 'i2v', 'r2v'].indexOf(String(mode || '').toLowerCase()) >= 0;
+    return ['i2i', 'i2v', 'r2v', 'rv2v'].indexOf(String(mode || '').toLowerCase()) >= 0;
+  }
+
+function _berniniModeNeedsVideo(mode) {
+    return ['v2v', 'rv2v'].indexOf(String(mode || '').toLowerCase()) >= 0;
+  }
+
+function _isBerniniWorkflowFields(fieldsMeta) {
+    var workflow = String(A.currentWF || A._wfFieldWorkflow || '');
+    if (/bernini/i.test(workflow)) return true;
+    var fields = fieldsMeta || A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      if (_isBerniniModeField(f) || _isBerniniRefsField(f)) return true;
+      var cls = String(f.class_type || '');
+      if (cls === 'BerniniConditioning' || cls.indexOf('RHBerniniFull') === 0) return true;
+    }
+    return false;
   }
 
 function _isSeedVR2VideoUpscaleWorkflow(fieldsMeta) {
@@ -1495,7 +2451,23 @@ function _getRefVideoMetadata() {
       0,
       10
     ) || 0;
-    return { width: width, height: height };
+    var duration = parseFloat(
+      (valueInput && valueInput.getAttribute('data-video-duration')) ||
+      (preview && (preview.getAttribute('data-video-duration') || preview.duration)) ||
+      0
+    ) || 0;
+    var fps = parseFloat(
+      (valueInput && valueInput.getAttribute('data-video-fps')) ||
+      (preview && preview.getAttribute('data-video-fps')) ||
+      0
+    ) || 0;
+    var frameCount = parseInt(
+      (valueInput && valueInput.getAttribute('data-video-frame-count')) ||
+      (preview && preview.getAttribute('data-video-frame-count')) ||
+      0,
+      10
+    ) || 0;
+    return { width: width, height: height, duration: duration, fps: fps, frame_count: frameCount };
   }
 
 function _applyVideoUpscaleLongEdgeResolution(fields, fieldsMeta) {
@@ -1559,10 +2531,18 @@ function _isFlux2SchedulerSizeField(f, dim) {
     return !!(f && f.class_type === 'Flux2Scheduler' && f.field === dim);
   }
 
-function _isLatentDimensionField(f, dim) {
+function _isCanvasDimensionField(f, dim) {
     var cls = String((f && f.class_type) || '');
     if (f && f.role === dim) return true;
-    return !!(f && f.field === dim && (cls.indexOf('LatentImage') >= 0 || cls.indexOf('LatentVideo') >= 0));
+    return !!(f && f.field === dim && (
+      cls.indexOf('LatentImage') >= 0 ||
+      cls.indexOf('LatentVideo') >= 0 ||
+      /Wan.*(?:ToVideo|Video)|SCAIL/i.test(cls)
+    ));
+  }
+
+function _isLatentDimensionField(f, dim) {
+    return _isCanvasDimensionField(f, dim);
   }
 
 function _isVideoModeField(f) {
@@ -1598,17 +2578,19 @@ function _qwenSignedYaw(horizontal) {
     return h > 180 ? h - 360 : h;
   }
 
-function _isQwenAngleNeutral(horizontal, vertical, zoom, roll) {
+function _isQwenAngleNeutral(horizontal, vertical, zoom, roll, neutralZoom) {
     var signedYaw = _qwenSignedYaw(horizontal);
     var v = parseFloat(vertical);
     if (!Number.isFinite(v)) v = 0;
+    var neutralZ = parseFloat(neutralZoom);
+    if (!Number.isFinite(neutralZ)) neutralZ = 5;
     var z = parseFloat(zoom);
-    if (!Number.isFinite(z)) z = 5;
+    if (!Number.isFinite(z)) z = neutralZ;
     var r = parseFloat(roll);
     if (!Number.isFinite(r)) r = 0;
     return Math.abs(signedYaw) < 0.5
       && Math.abs(v) < 0.5
-      && Math.abs(z - 5) < 0.05
+      && Math.abs(z - neutralZ) < 0.05
       && Math.abs(r) < 0.5;
   }
 
@@ -1645,15 +2627,17 @@ function _qwenRollCompositionText(direction, degrees) {
     return '调整画面构图，用' + direction + '约' + degrees + '度 对角线构图';
   }
 
-function _qwenAngleDescriptor(horizontal, vertical, zoom, roll, mode) {
+function _qwenAngleDescriptor(horizontal, vertical, zoom, roll, mode, neutralZoom) {
     var h = ((parseFloat(horizontal) || 0) % 360 + 360) % 360;
     var v = parseFloat(vertical);
     if (!Number.isFinite(v)) v = 0;
+    var neutralZ = parseFloat(neutralZoom);
+    if (!Number.isFinite(neutralZ)) neutralZ = 5;
     var z = parseFloat(zoom);
-    if (!Number.isFinite(z)) z = 5;
+    if (!Number.isFinite(z)) z = neutralZ;
     var r = parseFloat(roll);
     if (!Number.isFinite(r)) r = 0;
-    if (_isQwenAngleNeutral(h, v, z, r)) return '';
+    if (_isQwenAngleNeutral(h, v, z, r, neutralZ)) return '';
     var rollDirectionZh = r > 0 ? '顺时针' : '逆时针';
     var rollDegrees = Math.abs(Math.round(r));
     var rollText = Math.abs(r) < 1 ? ''
@@ -1664,7 +2648,7 @@ function _qwenAngleDescriptor(horizontal, vertical, zoom, roll, mode) {
       + rollText;
   }
 
-function _qwenAnglePromptFromFieldValues(fieldValues) {
+function _qwenAnglePromptFromFieldValues(fieldValues, neutralZoom) {
     var values = fieldValues || {};
     for (var key in values) {
       if (!Object.prototype.hasOwnProperty.call(values, key) || key.indexOf('::') < 0) continue;
@@ -1675,7 +2659,7 @@ function _qwenAnglePromptFromFieldValues(fieldValues) {
       var v = values[nodeId + '::vertical_angle'];
       var z = values[nodeId + '::zoom'];
       if (h === undefined || v === undefined || z === undefined) continue;
-      return _qwenAngleDescriptor(h, v, z, _currentQwenRoll(), _currentQwenAngleMode());
+      return _qwenAngleDescriptor(h, v, z, _currentQwenRoll(), _currentQwenAngleMode(), neutralZoom);
     }
     return '';
   }
@@ -1692,17 +2676,30 @@ function _isCurrentQwenAngleEnabled() {
     return _isQwenAngleControlEnabled(_currentQwenAngleRoot());
   }
 
+function _qwenAngleDefaultValue(root, axis, fallback) {
+    var input = _qwenAngleInput(root, axis);
+    var value = input && input.dataset ? input.dataset.angleDefault : undefined;
+    if (value === undefined || value === null || value === '') return fallback;
+    return value;
+  }
+
+function _qwenAngleNeutralZoom(root) {
+    return _qwenAngleDefaultValue(root, 'zoom', 5);
+  }
+
 function _isQwenAngleControlNeutral(root) {
     if (!root) return true;
     var h = root.querySelector('[data-angle-field="horizontal_angle"]');
     var v = root.querySelector('[data-angle-field="vertical_angle"]');
     var z = root.querySelector('[data-angle-field="zoom"]');
     var r = root.querySelector('[data-angle-roll]');
+    var neutralZoom = _qwenAngleNeutralZoom(root);
     return _isQwenAngleNeutral(
       h ? h.value : 0,
       v ? v.value : 0,
-      z ? z.value : 5,
-      r ? r.value : 0
+      z ? z.value : neutralZoom,
+      r ? r.value : 0,
+      neutralZoom
     );
   }
 
@@ -1776,14 +2773,15 @@ function _currentQwenRoll() {
 function _currentQwenAnglePrompt(fieldValues) {
     var root = _currentQwenAngleRoot();
     if (root && !_isQwenAngleControlEnabled(root)) return '';
-    var fromFields = _qwenAnglePromptFromFieldValues(fieldValues);
+    var neutralZoom = _qwenAngleNeutralZoom(root);
+    var fromFields = _qwenAnglePromptFromFieldValues(fieldValues, neutralZoom);
     if (fromFields) return fromFields;
     if (!root) return '';
     var h = root.querySelector('[data-angle-field="horizontal_angle"]');
     var v = root.querySelector('[data-angle-field="vertical_angle"]');
     var z = root.querySelector('[data-angle-field="zoom"]');
     if (!h || !v || !z) return '';
-    return _qwenAngleDescriptor(h.value, v.value, z.value, _currentQwenRoll(), _currentQwenAngleMode());
+    return _qwenAngleDescriptor(h.value, v.value, z.value, _currentQwenRoll(), _currentQwenAngleMode(), neutralZoom);
   }
 
 function _stripExistingQwenAngleMarkers(prompt) {
@@ -2000,6 +2998,84 @@ function _showPromptOptimizationVariants(data) {
     labelRow.appendChild(panel);
   }
 
+function _promptFullscreenEditorCountText(value) {
+    var len = String(value || '').length;
+    return len + ' 字';
+  }
+
+function closePromptFullscreenEditor() {
+    var overlay = document.getElementById('promptFullscreenEditor');
+    document.removeEventListener('keydown', _promptFullscreenEditorKeydown);
+    document.body.classList.remove('prompt-fullscreen-open');
+    if (!overlay) return;
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    var prompt = $('#promptInput');
+    if (prompt && prompt.focus) prompt.focus();
+  }
+
+function _promptFullscreenEditorKeydown(event) {
+    if (!event) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closePromptFullscreenEditor();
+    } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      closePromptFullscreenEditor();
+    }
+  }
+
+function openPromptFullscreenEditor() {
+    var prompt = $('#promptInput');
+    if (!prompt) {
+      if (window.CW && CW.toast) CW.toast('没有可编辑的提示词输入框', 'warn');
+      return;
+    }
+    closePromptOptimizeMenu();
+    closePromptFullscreenEditor();
+    var overlay = document.createElement('div');
+    overlay.id = 'promptFullscreenEditor';
+    overlay.className = 'prompt-fullscreen-editor';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'promptFullscreenTitle');
+    overlay.innerHTML = ''
+      + '<div class="prompt-fullscreen-panel">'
+      + '<div class="prompt-fullscreen-head">'
+      + '<div><strong id="promptFullscreenTitle">全屏编辑提示词</strong></div>'
+      + '<button class="prompt-fullscreen-close" type="button" title="关闭" aria-label="关闭">' + (window.CW && CW.icon ? CW.icon('x', 18) : '×') + '</button>'
+      + '</div>'
+      + '<textarea id="promptFullscreenTextarea" class="prompt-fullscreen-textarea" spellcheck="false"></textarea>'
+      + '<div class="prompt-fullscreen-foot"><span id="promptFullscreenCount"></span><button class="prompt-fullscreen-done" type="button">完成</button></div>'
+      + '</div>';
+    document.body.appendChild(overlay);
+    document.body.classList.add('prompt-fullscreen-open');
+    var editor = overlay.querySelector('#promptFullscreenTextarea');
+    var count = overlay.querySelector('#promptFullscreenCount');
+    var closeBtn = overlay.querySelector('.prompt-fullscreen-close');
+    var doneBtn = overlay.querySelector('.prompt-fullscreen-done');
+    function syncCount() {
+      if (count) count.textContent = _promptFullscreenEditorCountText(editor ? editor.value : '');
+    }
+    if (editor) {
+      editor.value = prompt.value || '';
+      editor.addEventListener('input', function() {
+        _setPromptInputValue(editor.value);
+        syncCount();
+      });
+      setTimeout(function() {
+        editor.focus();
+        editor.selectionStart = editor.selectionEnd = editor.value.length;
+      }, 0);
+    }
+    if (closeBtn) closeBtn.addEventListener('click', closePromptFullscreenEditor);
+    if (doneBtn) doneBtn.addEventListener('click', closePromptFullscreenEditor);
+    overlay.addEventListener('pointerdown', function(event) {
+      if (event.target === overlay) closePromptFullscreenEditor();
+    });
+    document.addEventListener('keydown', _promptFullscreenEditorKeydown);
+    syncCount();
+  }
+
 function _quickGenerationLabel() {
     if (_isIdeogram4Workflow() && _ideogramCanvasState.mode === 'canvas' && _ideogramCanvasShapes().length) {
       var canvasSummary = _ideogramCanvasSummary();
@@ -2059,6 +3135,17 @@ function _isReusableLoadImageField(key, fieldsMeta) {
     return key.endsWith('::image');
   }
 
+function _isReusableLoadVideoField(key, fieldsMeta) {
+    key = String(key || '');
+    var fields = fieldsMeta || A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      if ((f.node_id + '::' + f.field) !== key) continue;
+      return _isReferenceVideoField(f);
+    }
+    return /::(?:video|file)$/.test(key);
+  }
+
 function _restoreRefImageValue(value) {
     var refValue = String(value || '').trim();
     if (!refValue) return false;
@@ -2077,11 +3164,61 @@ function _restoreRefImageValue(value) {
     return true;
   }
 
+async function _fetchInputVideoMetadata(filename) {
+    var safe = String(filename || '').trim();
+    if (!safe) return {};
+    try {
+      var url = API + '/api/input-video-metadata/' + encodeURIComponent(safe);
+      var resp = (window.CW && window.CW.auth && typeof window.CW.auth.apiFetch === 'function')
+        ? await window.CW.auth.apiFetch(url)
+        : await fetch(url);
+      if (!resp || !resp.ok) return {};
+      var data = await resp.json();
+      return data && data.ok ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+async function _restoreRefVideoValue(value) {
+    var refValue = String(value || '').trim();
+    if (!refValue) return false;
+    var vInput = document.querySelector('#refVideoValue');
+    var preview = document.querySelector('#refVideoPreview');
+    var ph = document.querySelector('#refVideoPlaceholder');
+    if (!vInput) return false;
+    vInput.value = refValue;
+    _setRefVideoMetadata({});
+    if (preview) {
+      preview.setAttribute('data-video-autofit', '0');
+      preview.src = API + '/api/input-video/' + encodeURIComponent(refValue);
+      preview.style.display = '';
+      preview.classList.remove('hidden');
+      _showRefVideoFirstFrame(preview);
+      preview.load && preview.load();
+    }
+    if (ph) ph.style.display = 'none';
+    var meta = await _fetchInputVideoMetadata(refValue);
+    if (($('#refVideoValue') || {}).value === refValue && meta && Object.keys(meta).length) {
+      _setRefVideoMetadata(meta);
+    }
+    return true;
+  }
+
 function _restoreRefImageFromFieldValues(fieldValues, fieldsMeta) {
     var values = fieldValues || {};
     for (const [k, v] of Object.entries(values)) {
       if (!_isReusableLoadImageField(k, fieldsMeta)) continue;
       if (_restoreRefImageValue(v)) return true;
+    }
+    return false;
+  }
+
+async function _restoreRefVideoFromFieldValues(fieldValues, fieldsMeta) {
+    var values = fieldValues || {};
+    for (const [k, v] of Object.entries(values)) {
+      if (!_isReusableLoadVideoField(k, fieldsMeta)) continue;
+      if (await _restoreRefVideoValue(v)) return true;
     }
     return false;
   }
@@ -2105,6 +3242,42 @@ function _restoreBerniniRefsFromFieldValues(fieldValues) {
     _berniniRefsState = [];
     refs.forEach(_addBerniniRefFilename);
     _renderBerniniRefsList();
+    return true;
+  }
+
+function _fieldValueBySuffix(fieldValues, suffix) {
+    var values = fieldValues || {};
+    if (Object.prototype.hasOwnProperty.call(values, suffix)) return values[suffix];
+    var keySuffix = '::' + suffix;
+    for (var key in values) {
+      if (Object.prototype.hasOwnProperty.call(values, key) && String(key).endsWith(keySuffix)) {
+        return values[key];
+      }
+    }
+    return '';
+  }
+
+function _restoreMultiRefsFromFieldValues(fieldValues) {
+    var raw = _fieldValueBySuffix(fieldValues, '__multi_reference_images');
+    if (!raw) return false;
+    var refs = [];
+    if (Array.isArray(raw)) refs = raw;
+    else {
+      try {
+        var parsed = JSON.parse(String(raw));
+        refs = Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        refs = String(raw).split(',');
+      }
+    }
+    refs = refs.map(function(item) { return String(item || '').trim(); }).filter(Boolean);
+    if (!refs.length) return false;
+    _multiRefsState = [];
+    refs.forEach(_addMultiRefFilename);
+    var modeInput = document.querySelector('[data-type="image_reference_mode"][data-key]');
+    if (modeInput) modeInput.value = refs.length >= 2 ? 'multi' : 'single';
+    _renderMultiRefsList();
+    _syncImageReferenceModeUi();
     return true;
   }
 
@@ -2190,7 +3363,9 @@ async function fillFormFromHistory(idx, key) {
         _setFieldControlValue(k, v);
       }
       _restoreRefImageFromFieldValues(h.field_values, reuseFieldsMeta);
+      await _restoreRefVideoFromFieldValues(h.field_values, reuseFieldsMeta);
       _restoreBerniniRefsFromFieldValues(h.field_values);
+      _restoreMultiRefsFromFieldValues(h.field_values);
     }
     if (reusedPrompt || h.prompt) {
       _setPromptInputValue(_preparePromptForCurrentControls(reusedPrompt || h.prompt));
@@ -2218,7 +3393,9 @@ async function restoreJob(jobId) {
         _setFieldControlValue(k, v);
       }
       _restoreRefImageFromFieldValues(snap.adv || {});
+      await _restoreRefVideoFromFieldValues(snap.adv || {});
       _restoreBerniniRefsFromFieldValues(snap.adv || {});
+      _restoreMultiRefsFromFieldValues(snap.adv || {});
       if (Object.keys(snap.adv || {}).some(function(k) { return k.endsWith('::seed'); })) _setSeedRandomEnabled(true);
       return;
     }
@@ -2281,7 +3458,10 @@ async function restoreJob(jobId) {
         _setFieldControlValue(k, v);
       }
 	      _restoreRefImageFromFieldValues(j.fields, jobReuseFieldsMeta);
+      await _restoreRefVideoFromFieldValues(j.fields, jobReuseFieldsMeta);
+      _syncWanScailVideoTiming(Object.assign({}, j.fields), { adv: {} }, jobReuseFieldsMeta, { preferFrameCount: true });
       _restoreBerniniRefsFromFieldValues(j.fields);
+      _restoreMultiRefsFromFieldValues(j.fields);
     }
     // Restore seed only for old job records that do not have workflow seed fields.
     if (j.seed && !_hasRestorableSeedFieldValues(j.fields || {})) {
@@ -2316,6 +3496,7 @@ async function doGenerate() {
     try {
       await _waitForRefImageUpload();
       await _waitForBerniniRefsUpload();
+      await _waitForMultiRefsUpload();
       await _waitForRefVideoUpload();
       await _waitForRefAudioUpload();
       await _waitForDirectorUploads();
@@ -2367,9 +3548,23 @@ async function doGenerate() {
           }
           continue;
         }
+        if (_isImageReferenceModeField(f)) {
+          fields[key] = _currentImageReferenceMode();
+          snapshot.adv[key] = fields[key];
+          continue;
+        }
+        if (_isMultiImageRefsField(f)) {
+          const refs = _multiUploadedRefNames();
+          fields[key] = JSON.stringify(refs);
+          snapshot.adv[key] = fields[key];
+          if (_imageReferenceModeNeedsMultiRefs(_currentImageReferenceMode()) && refs.length < 2) {
+            throw new Error('多图模式需要先上传至少 2 张参考图');
+          }
+          continue;
+        }
         // LoadImage ref
         if (f.class_type === 'LoadImage' && f.field === 'image' && (zone === 'user_input' || !f.zone)) {
-          const refVal = $('#refImageValue')?.value || '';
+          const refVal = _primaryReferenceImageValue();
           delete fields[key];
           if (!refVal) {
             throw new Error(_isVideoI2VMode() ? '图生视频需要先上传参考图' : '需要先上传参考图');
@@ -2380,10 +3575,15 @@ async function doGenerate() {
         }
         if (_isReferenceVideoField(f) && (zone === 'user_input' || !f.zone)) {
           const refVal = $('#refVideoValue')?.value || '';
+          if (_isBerniniWorkflowFields(submitFieldsMeta) && !_berniniModeNeedsVideo(_currentBerniniMode())) {
+            delete fields[key];
+            continue;
+          }
           if (!refVal) {
-            throw new Error('需要先上传参考视频');
+            throw new Error(_isBerniniWorkflowFields(submitFieldsMeta) ? 'Bernini 当前模式需要先上传源视频' : '需要先上传参考视频');
           }
           fields[key] = refVal;
+          snapshot.adv[key] = refVal;
           continue;
         }
         if (_isReferenceAudioField(f) && (zone === 'user_input' || !f.zone)) {
@@ -2421,6 +3621,8 @@ async function doGenerate() {
     $$('#directorPanel [data-key]').forEach(collectSubmitControl);
 
     $$('#advFields [data-key]').forEach(collectSubmitControl);
+
+    _syncWanScailVideoTiming(fields, snapshot, submitFieldsMeta);
 
     if (qwenAngleEnabled) {
       const qwenFrameRoll = _currentQwenRoll();
@@ -2463,6 +3665,7 @@ async function doGenerate() {
       snapshot.adv.__video_upscale_long_edge = videoUpscaleSizing.targetLongEdge;
       snapshot.adv.__video_upscale_source_size = videoUpscaleSizing.width + 'x' + videoUpscaleSizing.height;
     }
+    _syncWanScailVideoTiming(fields, snapshot, submitFieldsMeta);
 
     try {
       const manualSeed = _getManualSeedValue();
@@ -2492,7 +3695,7 @@ async function doGenerate() {
         message: '排队中...',
         workflow: A.currentWF,
         seed: String(d.seed),
-        prompt_preview: _quickGenerationLabel(),
+        prompt_preview: String(d.prompt_preview || '').trim() || _quickGenerationLabel(),
         width: parseInt(($('#widthInput') || {}).value) || 0,
         height: parseInt(($('#heightInput') || {}).value) || 0,
         preferred_instance: '',
@@ -2501,7 +3704,9 @@ async function doGenerate() {
         _local_submitted_at: Date.now(),
       };
       try {
-        if (window.CW && CW.toast) CW.toast('排队中', 'queued');
+        if (window.CW && CW.toast) {
+          CW.toast('排队中', 'queued');
+        }
       } catch (e) {}
       // Trigger onJobUpdate to kick off active job polling
       window.CW.onJobUpdate(jobs[d.job_id]);
@@ -2517,52 +3722,7 @@ async function doGenerate() {
 
 
 async function optimizePrompt() {
-    var input = $('#promptInput');
-    var btn = $('#optimizePromptBtn');
-    if (!input) return;
-    var copy = _promptOptimizeCopy();
-    var raw = (input.value || '').trim();
-    if (!raw) {
-      if (window.CW && CW.toast) CW.toast(copy.empty, 'warn');
-      input.focus();
-      return;
-    }
-    var oldHtml = btn ? btn.innerHTML : '';
-    if (btn) {
-      btn.disabled = true;
-      btn.classList.add('is-loading');
-      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' ' + copy.loading;
-    }
-    try {
-      var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
-      var response = await fetcher(API + '/api/prompt/optimize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: raw,
-          max_new_tokens: copy.mode === 'video_script' ? 768 : 384,
-          mode: copy.mode,
-          prompt_context: copy.mode === 'video_script' ? _videoScriptTimingContext() : {}
-        })
-      });
-      var data = await response.json().catch(function() { return {}; });
-      if (!response.ok) throw new Error(data.detail || data.message || copy.error);
-      var optimized = String(data.optimized_prompt || data.cleaned_prompt || '').trim();
-      if (!optimized) throw new Error('优化结果为空');
-      window.CW.lastPromptOptimization = data;
-      _setPromptInputValue(optimized);
-      _showPromptOptimizationVariants(data);
-      if (window.CW && CW.toast) CW.toast(data.structured_prompt_json ? copy.doneJson : copy.done, 'ok');
-    } catch (e) {
-      console.warn('[optimizePrompt] failed:', e);
-      if (window.CW && CW.toast) CW.toast(e.message || copy.error, 'error');
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.classList.remove('is-loading');
-        btn.innerHTML = oldHtml || ((window.CW && CW.icon ? CW.icon('zap') : '') + ' ' + copy.label);
-      }
-    }
+    return runPromptOptimizeChoice('standard', '');
   }
 
 
@@ -2682,7 +3842,7 @@ var _promptInterrogateRunning = false;
   }
 
   async function interrogatePromptFromImage() {
-    var refVal = ($('#refImageValue') || {}).value || '';
+    var refVal = _primaryReferenceImageValue();
     openPromptInterrogateModal(refVal);
   }
 
@@ -2950,8 +4110,8 @@ function _qwenAngleControlHtml(group) {
         '</div>' +
         '<div class="qwen-angle-presets" aria-label="角度预设">' +
           '<button type="button" data-angle-reset title="复原" aria-label="复原">' + resetIcon + '<span>复原</span></button>' +
-          '<button type="button" data-angle-preset="h:0,v:0,z:5">正面</button>' +
-          '<button type="button" data-angle-preset="h:180,v:0,z:5">背面</button>' +
+          '<button type="button" data-angle-preset="h:0,v:0">正面</button>' +
+          '<button type="button" data-angle-preset="h:180,v:0">背面</button>' +
         '</div>' +
         '<div class="qwen-angle-slider qwen-angle-distance" aria-label="距离">' +
           '<div class="qwen-angle-slider-head"><span>C-axis 距离</span><b data-angle-slider-value="zoom"></b></div>' +
@@ -3054,7 +4214,7 @@ function _syncQwenAngleControl(root) {
     var h = parseFloat(hEl.value) || 0;
     var v = parseFloat(vEl.value) || 0;
     var z = parseFloat(zEl.value);
-    if (!Number.isFinite(z)) z = 5;
+    if (!Number.isFinite(z)) z = parseFloat(_qwenAngleNeutralZoom(root)) || 0;
     var r = parseFloat(rEl && rEl.value);
     if (!Number.isFinite(r)) r = 0;
     root.style.setProperty('--qwen-angle-y', (-h) + 'deg');
@@ -3093,7 +4253,7 @@ function _syncQwenAngleControl(root) {
       if (output) output.textContent = outputs[axis];
     });
     var prompt = root.querySelector('[data-angle-prompt]');
-    if (prompt) prompt.textContent = _isQwenAngleControlEnabled(root) ? _qwenAngleDescriptor(h, v, z, r, _qwenAngleMode(root)) : '';
+    if (prompt) prompt.textContent = _isQwenAngleControlEnabled(root) ? _qwenAngleDescriptor(h, v, z, r, _qwenAngleMode(root), _qwenAngleNeutralZoom(root)) : '';
     _syncQwenAngleReferencePreview();
   }
 
@@ -3486,8 +4646,10 @@ function _renderDirectorTrackOnly() {
         '</div>';
       }).join('');
     }
-    var hint = root.querySelector('[data-director-summary]');
-    if (hint) hint.textContent = (_directorState.segments.length || 0) + ' 个镜头 / ' + total + ' 帧';
+    var summaryText = (_directorState.segments.length || 0) + ' 个镜头 / ' + total + ' 帧';
+    document.querySelectorAll('[data-director-summary], [data-director-param-summary]').forEach(function(hint) {
+      hint.textContent = summaryText;
+    });
   }
 
 function _syncDirectorShotControls(seg) {
@@ -3731,6 +4893,14 @@ function _directorPanelHtml() {
     '</div>';
   }
 
+function _directorParamControlHtml() {
+    return '<div class="fg director-mode-param" id="directorModeParam">' +
+      '<div class="director-mode-param-head"><label>导演模式</label><span data-director-param-summary>0 个镜头</span></div>' +
+      '<button id="directorModeBtn" class="director-mode-param-btn" type="button" title="打开导演模式" onclick="CW.toggleDirectorPanel()">' + (window.CW && CW.icon ? CW.icon('clapperboard', 16) : '') + '<span>打开导演面板</span></button>' +
+      '<div class="director-mode-param-hint">分镜、参考图和首中尾帧控制</div>' +
+    '</div>';
+  }
+
 function _removeBodyDirectorPanel() {
     var panel = document.body && document.body.querySelector('#directorPanel');
     if (panel && panel.parentElement === document.body) panel.remove();
@@ -3911,6 +5081,18 @@ function _berniniRefsFieldHtml(f) {
     return '<div class="ref-image-section bernini-ref-section" id="berniniRefSection"><label>' + escH((f && f.label) || '参考图片') + '</label><div class="img-upload-zone bernini-ref-zone" id="berniniRefsZone"><div id="berniniRefsPlaceholder" class="img-upload-placeholder">选择或拖入参考图</div><div id="berniniRefsList" class="bernini-ref-list"></div><input type="hidden" id="berniniRefsValue" data-key="' + escA(key) + '" data-type="bernini_refs" value="[]"><input type="file" id="berniniRefsFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" multiple class="hidden"></div></div>';
   }
 
+function _imageReferenceModeFieldHtml(f) {
+    var key = _fieldKeyForMeta(f);
+    var value = String((f && f.value) || 'single').toLowerCase() === 'multi' ? 'multi' : 'single';
+    return '<div class="fg image-ref-mode-fg"><label>' + escH((f && f.label) || '参考图模式') + '</label><div class="video-mode-control image-ref-mode-control" data-image-ref-mode-key="' + escA(key) + '"><button type="button" class="video-mode-btn image-ref-mode-btn' + (value === 'single' ? ' active' : '') + '" data-image-ref-mode="single" aria-pressed="' + (value === 'single' ? 'true' : 'false') + '">单图</button><button type="button" class="video-mode-btn image-ref-mode-btn' + (value === 'multi' ? ' active' : '') + '" data-image-ref-mode="multi" aria-pressed="' + (value === 'multi' ? 'true' : 'false') + '">多图</button><input type="hidden" data-key="' + escA(key) + '" data-type="image_reference_mode" value="' + escA(value) + '"></div></div>';
+  }
+
+function _multiRefsFieldHtml(f) {
+    var key = _fieldKeyForMeta(f) || '40::__multi_reference_images';
+    var maxRefs = parseInt((f && f.max) || 3, 10) || 3;
+    return '<div class="ref-image-section multi-ref-section" id="multiRefSection" data-max-refs="' + escA(String(maxRefs)) + '"><label>' + escH((f && f.label) || '多参考图片') + '</label><div class="img-upload-zone bernini-ref-zone multi-ref-zone" id="multiRefsZone"><div id="multiRefsPlaceholder" class="img-upload-placeholder">选择或拖入 2-' + escH(String(maxRefs)) + ' 张参考图</div><div id="multiRefsList" class="bernini-ref-list"></div><input type="hidden" id="multiRefsValue" data-key="' + escA(key) + '" data-type="multi_image_refs" value="[]"><input type="file" id="multiRefsFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" multiple class="hidden"></div></div>';
+  }
+
 function _berniniUploadedRefNames() {
     var names = (_berniniRefsState || [])
       .filter(function(item) { return item && !item.error && item.filename; })
@@ -3931,19 +5113,201 @@ function _syncBerniniRefsValue() {
     if (hidden) hidden.value = JSON.stringify(_berniniUploadedRefNames());
   }
 
+function _multiUploadedRefNames() {
+    var names = (_multiRefsState || [])
+      .filter(function(item) { return item && !item.error && item.filename; })
+      .map(function(item) { return item.filename; });
+    if (names.length) return names;
+    var hidden = $('#multiRefsValue');
+    if (!hidden || !hidden.value) return [];
+    try {
+      var parsed = JSON.parse(hidden.value);
+      return Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : [];
+    } catch (e) {
+      return String(hidden.value || '').split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+    }
+  }
+
+function _syncMultiRefsValue() {
+    var hidden = $('#multiRefsValue');
+    if (hidden) hidden.value = JSON.stringify(_multiUploadedRefNames());
+  }
+
+function _singleReferenceImageValue() {
+    return String(($('#refImageValue') || {}).value || '').trim();
+  }
+
+function _clearSingleReferenceImageValue() {
+    var preview = $('#refImagePreview');
+    var placeholder = $('#refImagePlaceholder');
+    var valueInput = $('#refImageValue');
+    if (valueInput) valueInput.value = '';
+    if (preview) {
+      preview.src = '';
+      preview.style.display = 'none';
+      preview.classList.add('hidden');
+    }
+    if (placeholder) placeholder.style.display = '';
+    _syncQwenAngleReferencePreview();
+  }
+
+function _multiRefMaxCount() {
+    var zone = $('#multiRefSection');
+    return parseInt((zone && zone.getAttribute('data-max-refs')) || '3', 10) || 3;
+  }
+
+function _multiRefItemFromFilename(filename) {
+    filename = String(filename || '').trim();
+    if (!filename) return null;
+    return {
+      id: ++_multiRefsSeq,
+      filename: filename,
+      preview: API + '/api/input-image/' + encodeURIComponent(filename),
+      uploading: false,
+      error: false
+    };
+  }
+
+function _revokeMultiRefPreview(item) {
+    try {
+      if (item && item.preview && item.preview.indexOf('blob:') === 0 && window.URL && URL.revokeObjectURL) {
+        URL.revokeObjectURL(item.preview);
+      }
+    } catch (e) {}
+  }
+
+function _multiRefItemsFromCurrentValue() {
+    var items = (_multiRefsState || []).filter(Boolean);
+    if (items.length) return items;
+    return _multiUploadedRefNames().map(_multiRefItemFromFilename).filter(Boolean);
+  }
+
+function _ensureMultiRefsStartWithSingleReference() {
+    var filename = _singleReferenceImageValue();
+    if (!filename) {
+      _syncMultiRefsValue();
+      return false;
+    }
+    var items = _multiRefItemsFromCurrentValue();
+    var selected = null;
+    var rest = [];
+    items.forEach(function(item) {
+      if (item && item.filename === filename && !selected) selected = item;
+      else rest.push(item);
+    });
+    if (!selected) selected = _multiRefItemFromFilename(filename);
+    var next = [selected].concat(rest).slice(0, _multiRefMaxCount()).filter(Boolean);
+    items.forEach(function(item) {
+      if (next.indexOf(item) < 0) _revokeMultiRefPreview(item);
+    });
+    _multiRefsState = next;
+    _renderMultiRefsList();
+    return true;
+  }
+
+function _syncSingleReferenceFromFirstMultiRef(trimMulti) {
+    var items = _multiRefItemsFromCurrentValue().filter(function(item) {
+      return item && !item.error;
+    });
+    var first = items.length ? items[0] : null;
+    if (trimMulti) {
+      var next = first ? [first] : [];
+      (_multiRefsState || []).forEach(function(item) {
+        if (next.indexOf(item) < 0) _revokeMultiRefPreview(item);
+      });
+      _multiRefsState = next;
+      _renderMultiRefsList();
+    }
+    if (first && first.filename) {
+      return _restoreRefImageValue(first.filename);
+    }
+    _clearSingleReferenceImageValue();
+    return false;
+  }
+
+function _primaryReferenceImageValue() {
+    if (_imageReferenceModeNeedsMultiRefs(_currentImageReferenceMode())) {
+      var refs = _multiUploadedRefNames();
+      return refs.length ? refs[0] : '';
+    }
+    return _singleReferenceImageValue();
+  }
+
+function _syncImageReferenceModeUi() {
+    var input = document.querySelector('[data-type="image_reference_mode"][data-key]');
+    var mode = _currentImageReferenceMode();
+    if (input) input.value = mode;
+    document.querySelectorAll('[data-image-ref-mode]').forEach(function(btn) {
+      var active = btn.getAttribute('data-image-ref-mode') === mode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    var singleSection = $('#refImageZone') && $('#refImageZone').closest ? $('#refImageZone').closest('.ref-image-section') : null;
+    var multiSection = $('#multiRefSection');
+    var needsMulti = _imageReferenceModeNeedsMultiRefs(mode);
+    if (singleSection) singleSection.style.display = needsMulti ? 'none' : '';
+    if (multiSection) {
+      multiSection.style.display = needsMulti ? '' : 'none';
+      multiSection.classList.toggle('is-required', needsMulti);
+      var placeholder = $('#multiRefsPlaceholder');
+      var maxRefs = parseInt(multiSection.getAttribute('data-max-refs') || '3', 10) || 3;
+      if (placeholder) placeholder.textContent = needsMulti ? ('选择或拖入 2-' + maxRefs + ' 张参考图') : '当前模式不需要多参考图';
+    }
+  }
+
+function _initImageReferenceModeControl() {
+    var root = document.querySelector('[data-image-ref-mode-key]');
+    if (!root || root.dataset.inited === '1') {
+      _syncImageReferenceModeUi();
+      return;
+    }
+    root.dataset.inited = '1';
+    root.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest ? e.target.closest('[data-image-ref-mode]') : null;
+      if (!btn) return;
+      var nextMode = btn.getAttribute('data-image-ref-mode') === 'multi' ? 'multi' : 'single';
+      var input = root.querySelector('[data-type="image_reference_mode"]');
+      if (input) input.value = nextMode;
+      if (nextMode === 'multi') _ensureMultiRefsStartWithSingleReference();
+      else _syncSingleReferenceFromFirstMultiRef(true);
+      _syncImageReferenceModeUi();
+    });
+    _syncImageReferenceModeUi();
+  }
+
 function _syncBerniniRefsMode() {
-    var section = $('#berniniRefSection');
-    if (!section) return;
     var mode = _currentBerniniMode();
+    var section = $('#berniniRefSection');
     var needed = _berniniModeNeedsRefs(mode);
+    if (section) {
+      section.style.display = needed ? '' : 'none';
+      section.classList.toggle('is-required', needed);
+      var placeholder = $('#berniniRefsPlaceholder');
+      if (placeholder) {
+        if (mode === 'i2i') placeholder.textContent = '上传 1 张源图';
+        else if (mode === 'i2v') placeholder.textContent = '上传 1 张参考图';
+        else if (mode === 'r2v') placeholder.textContent = '上传 1-8 张参考图';
+        else if (mode === 'rv2v') placeholder.textContent = '上传 1-8 张风格/角色参考图';
+        else placeholder.textContent = '当前模式不需要参考图';
+      }
+    }
+    _syncBerniniVideoMode(mode);
+  }
+
+function _syncBerniniVideoMode(modeArg) {
+    var section = $('#refVideoZone')?.closest('.ref-video-section');
+    if (!section || !_isBerniniWorkflowFields()) return;
+    var mode = String(modeArg || _currentBerniniMode()).toLowerCase();
+    var needed = _berniniModeNeedsVideo(mode);
     section.style.display = needed ? '' : 'none';
     section.classList.toggle('is-required', needed);
-    var placeholder = $('#berniniRefsPlaceholder');
+    var label = section.querySelector('label');
+    if (label) label.textContent = mode === 'rv2v' ? '源视频' : '源视频';
+    var placeholder = $('#refVideoPlaceholder');
     if (placeholder) {
-      if (mode === 'i2i') placeholder.textContent = '上传 1 张源图';
-      else if (mode === 'i2v') placeholder.textContent = '上传 1 张参考图';
-      else if (mode === 'r2v') placeholder.textContent = '上传 1-8 张参考图';
-      else placeholder.textContent = 'T2I 模式不需要参考图';
+      if (mode === 'rv2v') placeholder.textContent = '上传要编辑的源视频';
+      else if (mode === 'v2v') placeholder.textContent = '上传要重绘/编辑的源视频';
+      else placeholder.textContent = '当前模式不需要源视频';
     }
   }
 
@@ -3951,15 +5315,13 @@ function _syncBerniniModeUi() {
     var root = document.querySelector('[data-bernini-mode-key]');
     if (!root) {
       _syncBerniniRefsMode();
+      _syncBerniniVideoMode();
       return;
     }
-    var hidden = root.querySelector('input[data-type="bernini_mode"]');
-    var mode = String((hidden && hidden.value) || 't2i').toLowerCase() || 't2i';
-    root.querySelectorAll('.bernini-mode-btn').forEach(function(btn) {
-      var active = btn.getAttribute('data-mode') === mode;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
+    var select = root.querySelector('[data-type="bernini_mode"]');
+    var mode = String((select && select.value) || 't2i').toLowerCase() || 't2i';
+    var summary = root.querySelector('[data-bernini-mode-summary]');
+    if (summary) summary.textContent = _berniniModeInfo(mode).desc;
     _syncBerniniRefsMode();
   }
 
@@ -3970,17 +5332,8 @@ function _initBerniniModeControl() {
       return;
     }
     root.dataset.inited = '1';
-    var hidden = root.querySelector('input[data-type="bernini_mode"]');
-    root.addEventListener('click', function(e) {
-      var btn = e.target && e.target.closest ? e.target.closest('.bernini-mode-btn') : null;
-      if (!btn) return;
-      var mode = btn.getAttribute('data-mode') || 't2i';
-      if (hidden) hidden.value = mode;
-      root.querySelectorAll('.bernini-mode-btn').forEach(function(item) {
-        var active = item === btn;
-        item.classList.toggle('active', active);
-        item.setAttribute('aria-pressed', active ? 'true' : 'false');
-      });
+    root.addEventListener('change', function(e) {
+      if (!e.target || e.target.getAttribute('data-type') !== 'bernini_mode') return;
       _syncBerniniModeUi();
     });
     _syncBerniniModeUi();
@@ -3991,12 +5344,13 @@ function renderQuickForm(fields) {
     if (!container) return;
     _removeBodyDirectorPanel();
     if (!fields || !fields.length) { container.innerHTML = ''; return; }
+    fields = _normalizeFieldMeta(fields, A.currentWF || A._wfFieldWorkflow || '');
     // Preserve prompt text across workflow switches
     var _savedPrompt = ($('#promptInput') || {}).value || '';
     var _savedStylePreset = _currentStylePresetId();
     var hasZones = fields.some(function(f) { return f.zone; });
     var hasDirector = _hasDirectorWorkflow(fields);
-    var html = '', hasTextEncode = false, hasLoadImage = false, hasLoadVideo = false, hasLoadAudio = false, hasBerniniRefs = false, quickImageRendered = false, quickVideoRendered = false, quickAudioRendered = false, quickBerniniRefsRendered = false, sizeRendered = false, styleRendered = false, ideogramCanvasRendered = false;
+    var html = '', hasTextEncode = false, hasLoadImage = false, hasLoadVideo = false, hasLoadAudio = false, hasBerniniRefs = false, hasMultiRefs = false, hasImageReferenceMode = false, quickImageRendered = false, quickVideoRendered = false, quickAudioRendered = false, quickBerniniRefsRendered = false, quickMultiRefsRendered = false, sizeRendered = false, styleRendered = false, ideogramCanvasRendered = false;
     var qwenAngleGroups = _qwenAngleGroups(fields);
     var qwenAngleByNode = {};
     var qwenAngleRendered = {};
@@ -4014,16 +5368,19 @@ function renderQuickForm(fields) {
       var limits = _workflowSizeLimits(fields);
       var baseSize = _limitDimensions(hasLatentW ? latentW : 1024, hasLatentH ? latentH : 1024, limits);
       var sw = baseSize[0], sh = baseSize[1];
-      var out = '<div class="fg" id="sizeSection"><label>出图比例</label><div class="ratio-grid" id="ratioGrid">';
+      var bounds = _sizeLimitBounds(limits);
+      var limitLabel = limits.maxPixels
+        ? '按' + bounds.multiple + '像素倍数与当前模型像素上限同步'
+        : '按' + bounds.multiple + '像素倍数与当前工作流上限同步';
+      var out = '<div class="fg size-control" id="sizeSection" data-size-control data-size-limit="' + escA(limits.name || 'default') + '"><div class="size-control-head"><label>出图尺寸</label><span class="size-control-hint">' + escH(limitLabel) + '</span></div><div class="ratio-grid size-preset-grid" id="ratioGrid" role="group" aria-label="出图比例">';
       var presets = _ratioPresetsForLimits(limits);
       for (var spi = 0; spi < presets.length; spi++) {
         var p = presets[spi];
-        out += '<button class="ratio-btn' + (p[0]===sw&&p[1]===sh?' active':'') + '" data-w="' + p[0] + '" data-h="' + p[1] + '" title="' + p[0] + '×' + p[1] + '"><span class="ratio-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label">' + p[2] + '</span></button>';
+        var active = p[0] === sw && p[1] === sh;
+        var ratio = _ratioPartsForPreset(p);
+        out += '<button type="button" class="ratio-btn size-preset-btn' + (active ? ' active' : '') + '" data-size-preset="1" data-w="' + p[0] + '" data-h="' + p[1] + '" data-ratio-w="' + ratio.width + '" data-ratio-h="' + ratio.height + '" title="' + p[0] + '×' + p[1] + '" aria-pressed="' + (active ? 'true' : 'false') + '"><span class="ratio-shape size-preset-shape" style="width:' + p[3] + ';height:' + p[4] + '"></span><span class="ratio-label size-preset-ratio">' + escH(_sizePresetLabel(p)) + '</span><span class="size-preset-pixels">' + p[0] + '×' + p[1] + '</span></button>';
       }
-      var inputMax = limits.inputMax || 2048;
-      var minW = limits.minWidth || limits.minSide;
-      var minH = limits.minHeight || limits.minSide;
-      out += '</div><div class="ratio-custom"><input type="number" id="widthInput" value="' + sw + '" step="' + limits.multiple + '" min="' + minW + '" max="' + inputMax + '"><span class="sep-dim" aria-label="乘以">×</span><input type="number" id="heightInput" value="' + sh + '" step="' + limits.multiple + '" min="' + minH + '" max="' + inputMax + '"></div></div>';
+      out += '</div><div class="ratio-custom size-custom-row"><input type="number" id="widthInput" value="' + sw + '" step="' + bounds.multiple + '" min="' + bounds.minWidth + '" max="' + bounds.maxWidth + '" aria-label="宽度"><span class="sep-dim" aria-label="乘以">×</span><input type="number" id="heightInput" value="' + sh + '" step="' + bounds.multiple + '" min="' + bounds.minHeight + '" max="' + bounds.maxHeight + '" aria-label="高度"></div></div>';
       return out;
     }
     for (var fi = 0; fi < fields.length; fi++) {
@@ -4032,6 +5389,8 @@ function renderQuickForm(fields) {
         if (hasZones) continue;
         if (f.class_type === 'LoadImage' && f.field === 'image') hasLoadImage = true;
         else if (_isBerniniRefsField(f)) hasBerniniRefs = true;
+        else if (_isMultiImageRefsField(f)) hasMultiRefs = true;
+        else if (_isImageReferenceModeField(f)) hasImageReferenceMode = true;
         else if (_isReferenceVideoField(f)) hasLoadVideo = true;
         else if (_isReferenceAudioField(f)) hasLoadAudio = true;
         else if (_isPromptLikeField(f)) hasTextEncode = true;
@@ -4049,7 +5408,6 @@ function renderQuickForm(fields) {
         hasTextEncode = true;
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
         var optimizeCopy = _promptOptimizeCopy(fields);
-        var directorBtn = hasDirector ? '<button id="directorModeBtn" class="prompt-tool-btn prompt-tool-btn-vibrant" type="button" title="导演模式" onclick="CW.toggleDirectorPanel()">' + (window.CW && CW.icon ? CW.icon('clapperboard') : '') + ' <span class="prompt-tool-label">导演模式</span></button>' : '';
         var styleControlHtml = '';
         if (!styleRendered) {
           styleControlHtml = _stylePresetControlHtml(fields);
@@ -4060,7 +5418,8 @@ function renderQuickForm(fields) {
           ideogramCanvasHtml = _ideogramCanvasControlHtml();
           ideogramCanvasRendered = true;
         }
-        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label></div><div class="prompt-input-wrap prompt-input-wrap-with-style"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea>' + styleControlHtml + ideogramCanvasHtml + '</div><div class="prompt-actions">' + directorBtn + '<button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="' + escA(optimizeCopy.label) + '" data-optimize-mode="' + escA(optimizeCopy.mode) + '" onclick="CW.optimizePrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">' + escH(optimizeCopy.label) + '</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
+        var promptFullscreenBtnHtml = '<button id="promptFullscreenBtn" class="prompt-fullscreen-btn" type="button" title="全屏编辑提示词" aria-label="全屏编辑提示词" onclick="CW.openPromptFullscreenEditor()">' + (window.CW && CW.icon ? CW.icon('scaleup', 15) : '↗') + '</button>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label>' + promptFullscreenBtnHtml + '</div><div class="prompt-input-wrap prompt-input-wrap-with-style"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea>' + styleControlHtml + ideogramCanvasHtml + '</div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="' + escA(optimizeCopy.label) + '" data-optimize-mode="' + escA(optimizeCopy.mode) + '" aria-haspopup="menu" onclick="CW.openPromptOptimizeMenu(event)" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">' + escH(optimizeCopy.label) + '</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
       } else if (_isVideoModeField(f)) {
         var modeKey = `${f.node_id}::${f.field}`;
         var isBypass = f.value !== false && f.value !== 'false' && f.value !== 'False';
@@ -4068,23 +5427,25 @@ function renderQuickForm(fields) {
       } else if (_isBerniniModeField(f)) {
         var berniniModeKey = _fieldKeyForMeta(f);
         var berniniModeVal = String(f.value || 't2i').toLowerCase();
-        var berniniModes = [
-          ['t2i', 'T2I', '文生图'],
-          ['i2i', 'I2I', '图生图'],
-          ['i2v', 'I2V', '单图视频'],
-          ['r2v', 'R2V', '多图视频']
-        ];
-        html += '<div class="fg bernini-mode-fg"><label>' + escH(f.label || '生成模式') + '</label><div class="video-mode-control bernini-mode-control" data-bernini-mode-key="' + escA(berniniModeKey) + '">';
+        var berniniModes = _berniniModeOptions();
+        var berniniModeInfo = _berniniModeInfo(berniniModeVal);
+        html += '<div class="fg bernini-mode-fg"><label>' + escH(f.label || '生成模式') + '</label><div class="bernini-mode-control" data-bernini-mode-key="' + escA(berniniModeKey) + '"><select class="bernini-mode-select" data-key="' + escA(berniniModeKey) + '" data-type="bernini_mode">';
         for (var bmi = 0; bmi < berniniModes.length; bmi++) {
           var bm = berniniModes[bmi];
-          var active = bm[0] === berniniModeVal;
-          html += '<button type="button" class="video-mode-btn bernini-mode-btn' + (active ? ' active' : '') + '" data-mode="' + escA(bm[0]) + '" aria-pressed="' + (active ? 'true' : 'false') + '" title="' + escA(bm[2]) + '">' + escH(bm[1]) + '</button>';
+          html += '<option value="' + escA(bm.value) + '"' + (bm.value === berniniModeVal ? ' selected' : '') + '>' + escH(_berniniModeOptionLabel(bm)) + '</option>';
         }
-        html += '<input type="hidden" data-key="' + escA(berniniModeKey) + '" data-type="bernini_mode" value="' + escA(berniniModeVal) + '"></div></div>';
+        html += '</select><div class="bernini-mode-summary" data-bernini-mode-summary>' + escH(berniniModeInfo.desc) + '</div></div></div>';
       } else if (_isBerniniRefsField(f)) {
         hasBerniniRefs = true;
         quickBerniniRefsRendered = true;
         html += _berniniRefsFieldHtml(f);
+      } else if (_isImageReferenceModeField(f)) {
+        hasImageReferenceMode = true;
+        html += _imageReferenceModeFieldHtml(f);
+      } else if (_isMultiImageRefsField(f)) {
+        hasMultiRefs = true;
+        quickMultiRefsRendered = true;
+        html += _multiRefsFieldHtml(f);
       } else if (f.class_type === 'LoadImage' && f.field === 'image') {
         hasLoadImage = true;
         quickImageRendered = true;
@@ -4114,6 +5475,10 @@ function renderQuickForm(fields) {
           return '<option value="' + escA(o) + '" ' + (o === selectVal ? 'selected' : '') + '>' + escH(o) + '</option>';
         }).join('');
         html += '<div class="fg quick-select-fg"><label>' + escH(f.label || f.field) + '</label><select data-key="' + escA(selectKey) + '">' + selectOpts + '</select></div>';
+      } else if (f.type === 'toggle' || f.type === 'bool') {
+        var toggleKey = `${f.node_id}::${f.field}`;
+        var toggleVal = f.value === true || f.value === 'True' || f.value === 'true';
+        html += '<div class="fg quick-toggle-fg"><label>' + escH(f.label || f.field) + '</label><label class="toggle-label bool-toggle"><input type="checkbox" data-key="' + escA(toggleKey) + '" data-type="bool" value="' + (toggleVal ? 'true' : 'false') + '" ' + (toggleVal ? 'checked' : '') + ' onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label></div>';
       } else if (f.type === 'text') {
         var textKey = `${f.node_id}::${f.field}`;
         var textVal = f.value ?? '';
@@ -4125,6 +5490,9 @@ function renderQuickForm(fields) {
     }
     if (!hasTextEncode && !hasLatentW && !hasLatentH && hasBerniniRefs && !quickBerniniRefsRendered) {
       html += _berniniRefsFieldHtml({ key: '50::__bernini_refs', field: '__bernini_refs', label: '参考图片' });
+    }
+    if (!hasTextEncode && !hasLatentW && !hasLatentH && hasMultiRefs && !quickMultiRefsRendered) {
+      html += _multiRefsFieldHtml({ key: '40::__multi_reference_images', field: '__multi_reference_images', label: '多参考图片', max: 3 });
     }
     if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadVideo && !quickVideoRendered) {
       html += '<div class="ref-image-section ref-video-section"><label>Reference Video</label><div class="img-upload-zone video-upload-zone" id="refVideoZone"><div id="refVideoPlaceholder" class="img-upload-placeholder">Click or drag video</div><video id="refVideoPreview" class="img-upload-preview video-upload-preview hidden" muted playsinline controls></video><input type="hidden" id="refVideoValue" value=""><input type="file" id="refVideoFile" accept="video/*,.mp4,.webm,.mov,.m4v" class="hidden"></div></div>';
@@ -4158,9 +5526,12 @@ function renderQuickForm(fields) {
     _initBerniniModeControl();
     if (hasBerniniRefs) { _berniniRefsInited = false; setTimeout(function() { _initBerniniRefsZone(); }, 50); }
     else _resetBerniniRefs();
+    if (hasImageReferenceMode) _initImageReferenceModeControl();
+    if (hasMultiRefs) { _multiRefsInited = false; setTimeout(function() { _initMultiRefsZone(); _syncImageReferenceModeUi(); }, 50); }
+    else _resetMultiRefs();
     _initQwenAngleControls();
     if (hasDirector) _initDirectorPanel();
-    if (hasLoadImage) { _refImageInited = false; setTimeout(function() { _initRefImageZone(); }, 50); }
+    if (hasLoadImage) { _refImageInited = false; setTimeout(function() { _initRefImageZone(); _syncImageReferenceModeUi(); }, 50); }
     if (hasLoadVideo) { _refVideoInited = false; setTimeout(function() { _initRefVideoZone(); }, 50); }
     if (hasLoadAudio) { _refAudioInited = false; setTimeout(function() { _initRefAudioZone(); }, 50); }
   }
@@ -4222,6 +5593,7 @@ function renderAdvFields(fields) {
         if (_isReferenceAudioField(f)) return false;
         if (_isVideoModeField(f)) return false;
         if (_isBerniniModeField(f) || _isBerniniRefsField(f)) return false;
+        if (_isImageReferenceModeField(f) || _isMultiImageRefsField(f)) return false;
         // LatentImage size → size section
         if (_isLatentDimensionField(f, 'width') || _isLatentDimensionField(f, 'height'))
           return false;
@@ -4236,17 +5608,20 @@ function renderAdvFields(fields) {
         if (_isReferenceVideoField(f)) return false;
         if (_isReferenceAudioField(f)) return false;
         if (_isBerniniModeField(f) || _isBerniniRefsField(f)) return false;
+        if (_isImageReferenceModeField(f) || _isMultiImageRefsField(f)) return false;
       }
       // Skip output zone (read-only, handled by SaveImage)
       if (zone === 'output') return false;
       return true;
     });
 
+    const hasDirector = _hasDirectorWorkflow(fields);
+    let html = hasDirector ? _directorParamControlHtml() : '';
     if (!advFields.length) {
-      box.innerHTML = '<div class="gen-empty">无可编辑参数</div>';
+      box.innerHTML = html || '<div class="gen-empty">无可编辑参数</div>';
+      if (hasDirector) _renderDirectorTrackOnly();
       return;
     }
-    let html = '';
     for (const f of advFields) {
       const key = _fieldKeyForMeta(f);
       const val = f.value ?? '';
@@ -4279,6 +5654,8 @@ function renderAdvFields(fields) {
       html += `</div>`;
     }
     box.innerHTML = html;
+    if (hasDirector) _renderDirectorTrackOnly();
+    setTimeout(function() { _bindWanScailVideoTimingSync(fields); }, 0);
   }
 
 function toggleGenForm() {
@@ -4303,6 +5680,10 @@ var _berniniRefsInited = false;
 var _berniniRefsState = [];
 var _berniniRefsUploadPromises = [];
 var _berniniRefsSeq = 0;
+var _multiRefsInited = false;
+var _multiRefsState = [];
+var _multiRefsUploadPromises = [];
+var _multiRefsSeq = 0;
 var _refVideoInited = false;
 var _refVideoUploadPromise = null;
 var _refVideoUploadToken = 0;
@@ -4338,6 +5719,21 @@ function _resetBerniniRefs() {
     _setBerniniRefsUploading(false);
   }
 
+function _resetMultiRefs() {
+    _multiRefsInited = false;
+    _multiRefsUploadPromises = [];
+    _multiRefsState.forEach(function(item) {
+      try {
+        if (item && item.preview && item.preview.indexOf('blob:') === 0 && window.URL && URL.revokeObjectURL) {
+          URL.revokeObjectURL(item.preview);
+        }
+      } catch (e) {}
+    });
+    _multiRefsState = [];
+    _renderMultiRefsList();
+    _setMultiRefsUploading(false);
+  }
+
 function _resetRefVideo() {
     _refVideoInited = false;
     _refVideoUploadPromise = null;
@@ -4345,7 +5741,7 @@ function _resetRefVideo() {
     var preview = $('#refVideoPreview');
     var placeholder = $('#refVideoPlaceholder');
     var valueInput = $('#refVideoValue');
-    if (preview) { preview.removeAttribute('src'); preview.load && preview.load(); preview.style.display = 'none'; preview.classList.add('hidden'); }
+    if (preview) { preview.removeAttribute('data-video-autofit'); preview.removeAttribute('src'); preview.load && preview.load(); preview.style.display = 'none'; preview.classList.add('hidden'); }
     if (placeholder) placeholder.style.display = '';
     if (valueInput) valueInput.value = '';
     _setRefVideoMetadata({});
@@ -4416,6 +5812,9 @@ var __curZone = null;
   function _setRefVideoMetadata(meta) {
     var width = parseInt((meta && meta.width) || 0, 10) || 0;
     var height = parseInt((meta && meta.height) || 0, 10) || 0;
+    var duration = parseFloat((meta && (meta.duration || meta.duration_seconds)) || 0) || 0;
+    var fps = parseFloat((meta && (meta.fps || meta.frame_rate)) || 0) || 0;
+    var frameCount = _videoFrameTotalFromMeta(meta);
     [$('#refVideoValue'), $('#refVideoPreview')].forEach(function(el) {
       if (!el) return;
       if (width && height) {
@@ -4425,7 +5824,38 @@ var __curZone = null;
         el.removeAttribute('data-video-width');
         el.removeAttribute('data-video-height');
       }
+      if (duration) el.setAttribute('data-video-duration', String(duration));
+      else el.removeAttribute('data-video-duration');
+      if (fps) el.setAttribute('data-video-fps', String(fps));
+      else el.removeAttribute('data-video-fps');
+      if (frameCount) el.setAttribute('data-video-frame-count', String(frameCount));
+      else el.removeAttribute('data-video-frame-count');
     });
+  }
+
+  function _showRefVideoFirstFrame(preview) {
+    if (!preview) return;
+    preview.classList.remove('hidden');
+    preview.style.display = '';
+    preview.muted = true;
+    preview.preload = 'auto';
+    preview.setAttribute('playsinline', 'playsinline');
+    function seekFirstFrame() {
+      try {
+        preview.pause();
+        var duration = Number(preview.duration || 0);
+        var t = duration > 0 ? Math.min(0.05, Math.max(0.001, duration / 1000)) : 0.001;
+        if (Number.isFinite(t)) preview.currentTime = t;
+      } catch (e) {}
+    }
+    if (preview.readyState >= 1) {
+      setTimeout(seekFirstFrame, 0);
+    } else {
+      preview.addEventListener('loadedmetadata', seekFirstFrame, { once: true });
+    }
+    preview.addEventListener('seeked', function() {
+      try { preview.pause(); } catch (e) {}
+    }, { once: true });
   }
 
   function _readVideoFileMetadata(file) {
@@ -4495,6 +5925,19 @@ var __curZone = null;
     }
   }
 
+  function _setMultiRefsUploading(uploading) {
+    var zone = $('#multiRefsZone');
+    if (!zone) return;
+    if (uploading) {
+      if (zone.setAttribute) zone.setAttribute('data-uploading', '1');
+      else if (zone.dataset) zone.dataset.uploading = '1';
+    } else if (zone.removeAttribute) {
+      zone.removeAttribute('data-uploading');
+    } else if (zone.dataset) {
+      delete zone.dataset.uploading;
+    }
+  }
+
   function _setRefVideoUploading(uploading) {
     var zone = $('#refVideoZone');
     if (!zone) return;
@@ -4542,6 +5985,17 @@ var __curZone = null;
     }
   }
 
+  async function _waitForMultiRefsUpload() {
+    var pending = (_multiRefsUploadPromises || []).filter(Boolean);
+    if (!pending.length) return;
+    if (window.CW && CW.toast) CW.toast('多参考图仍在上传，完成后继续提交', 'info');
+    try {
+      await Promise.all(pending);
+    } catch (e) {
+      throw new Error('多参考图上传失败，请重新上传后再出图');
+    }
+  }
+
   async function _waitForRefVideoUpload() {
     if (!_refVideoUploadPromise) return;
     if (window.CW && CW.toast) CW.toast('参考视频仍在上传，完成后继续提交', 'info');
@@ -4580,6 +6034,9 @@ var __curZone = null;
         preview.style.display = '';
       }
       if (placeholder) placeholder.style.display = 'none';
+      if (_imageReferenceModeNeedsMultiRefs(_currentImageReferenceMode())) {
+        _ensureMultiRefsStartWithSingleReference();
+      }
       _syncQwenAngleReferencePreview();
       return d;
     }).finally(function() {
@@ -4630,6 +6087,43 @@ var __curZone = null;
     _renderBerniniRefsList();
   }
 
+  function _renderMultiRefsList() {
+    var list = $('#multiRefsList');
+    var placeholder = $('#multiRefsPlaceholder');
+    if (!list) {
+      _syncMultiRefsValue();
+      return;
+    }
+    var items = _multiRefsState || [];
+    list.innerHTML = items.map(function(item, index) {
+      var preview = item.preview || (item.filename ? API + '/api/input-image/' + encodeURIComponent(item.filename) : '');
+      var status = item.uploading ? '<span class="bernini-ref-status">上传中</span>' : (item.error ? '<span class="bernini-ref-status error">失败</span>' : '');
+      return '<div class="bernini-ref-item multi-ref-item" data-index="' + index + '">'
+        + (preview ? '<img src="' + escA(preview) + '" alt="multi reference">' : '<div class="bernini-ref-thumb"></div>')
+        + status
+        + '<button type="button" class="bernini-ref-remove" data-multi-ref-remove="' + index + '" title="移除" aria-label="移除">×</button>'
+        + '</div>';
+    }).join('');
+    if (placeholder) placeholder.style.display = items.length ? 'none' : '';
+    _syncMultiRefsValue();
+    _syncImageReferenceModeUi();
+  }
+
+  function _addMultiRefFilename(filename) {
+    filename = String(filename || '').trim();
+    if (!filename) return;
+    var exists = (_multiRefsState || []).some(function(item) { return item && item.filename === filename; });
+    if (exists) return;
+    _multiRefsState.push({
+      id: ++_multiRefsSeq,
+      filename: filename,
+      preview: API + '/api/input-image/' + encodeURIComponent(filename),
+      uploading: false,
+      error: false
+    });
+    _renderMultiRefsList();
+  }
+
   function _applyUploadedBerniniRefs(files, fileInput) {
     files = Array.prototype.slice.call(files || []).filter(Boolean);
     if (!files.length) return Promise.resolve([]);
@@ -4678,11 +6172,74 @@ var __curZone = null;
     return Promise.all(uploads);
   }
 
+  function _applyUploadedMultiRefs(files, fileInput) {
+    files = Array.prototype.slice.call(files || []).filter(Boolean);
+    if (!files.length) return Promise.resolve([]);
+    var zone = $('#multiRefSection');
+    var maxRefs = parseInt((zone && zone.getAttribute('data-max-refs')) || '3', 10) || 3;
+    var remaining = Math.max(0, maxRefs - (_multiRefsState || []).length);
+    if (files.length > remaining) {
+      files = files.slice(0, remaining);
+      if (window.CW && CW.toast) CW.toast('最多上传 ' + maxRefs + ' 张参考图', 'info');
+    }
+    if (!files.length) {
+      if (fileInput) fileInput.value = '';
+      return Promise.resolve([]);
+    }
+    var slots = files.map(function(file) {
+      var preview = '';
+      try {
+        if (window.URL && URL.createObjectURL) preview = URL.createObjectURL(file);
+      } catch (e) {}
+      var item = {
+        id: ++_multiRefsSeq,
+        filename: '',
+        preview: preview,
+        uploading: true,
+        error: false
+      };
+      _multiRefsState.push(item);
+      return { file: file, item: item };
+    });
+    _renderMultiRefsList();
+    _setMultiRefsUploading(true);
+    var uploads = slots.map(function(slot) {
+      var promise = _uploadRefImage(slot.file).then(function(d) {
+        slot.item.filename = d.filename;
+        slot.item.uploading = false;
+        if (!slot.item.preview) slot.item.preview = API + '/api/input-image/' + encodeURIComponent(d.filename);
+        if (!_imageReferenceModeNeedsMultiRefs(_currentImageReferenceMode())) {
+          _syncSingleReferenceFromFirstMultiRef(true);
+        }
+        _renderMultiRefsList();
+        return d;
+      }).catch(function(err) {
+        slot.item.uploading = false;
+        slot.item.error = true;
+        _renderMultiRefsList();
+        throw err;
+      });
+      _multiRefsUploadPromises.push(promise);
+      promise.then(function() {
+        _multiRefsUploadPromises = _multiRefsUploadPromises.filter(function(item) { return item !== promise; });
+        _setMultiRefsUploading(_multiRefsUploadPromises.length > 0);
+        if (fileInput) fileInput.value = '';
+      }, function() {
+        _multiRefsUploadPromises = _multiRefsUploadPromises.filter(function(item) { return item !== promise; });
+        _setMultiRefsUploading(_multiRefsUploadPromises.length > 0);
+        if (fileInput) fileInput.value = '';
+      });
+      return promise;
+    });
+    return Promise.all(uploads);
+  }
+
   function _applyUploadedRefVideo(file, fileInput, zone, preview, valueInput, placeholder) {
     if (!file) return Promise.resolve(null);
     var token = ++_refVideoUploadToken;
     if (valueInput) valueInput.value = '';
     if (preview) {
+      preview.removeAttribute('data-video-autofit');
       preview.removeAttribute('src');
       preview.load && preview.load();
       preview.style.display = 'none';
@@ -4692,13 +6249,16 @@ var __curZone = null;
     _setRefVideoUploading(true);
     var upload = Promise.all([_uploadRefVideo(file), _readVideoFileMetadata(file)]).then(function(results) {
       var d = results[0];
-      var meta = results[1] || {};
+      var meta = Object.assign({}, results[1] || {}, d || {});
       if (token !== _refVideoUploadToken) return d;
       if (valueInput) valueInput.value = d.filename;
       _setRefVideoMetadata(meta);
+      if (meta.width && meta.height) _applyBestSizeForAspect(meta.width, meta.height);
+      _autoFitVideoFrameControls(meta);
       if (preview) {
+        preview.removeAttribute('data-video-autofit');
         preview.src = API + '/api/input-video/' + encodeURIComponent(d.filename);
-        preview.style.display = '';
+        _showRefVideoFirstFrame(preview);
         preview.load && preview.load();
       }
       if (placeholder) placeholder.style.display = 'none';
@@ -4863,6 +6423,64 @@ var __curZone = null;
     _renderBerniniRefsList();
   }
 
+  function _initMultiRefsZone() {
+    if (_multiRefsInited) {
+      _renderMultiRefsList();
+      _syncImageReferenceModeUi();
+      return;
+    }
+    _multiRefsInited = true;
+    var zone = $('#multiRefsZone');
+    var fileInput = $('#multiRefsFile');
+    if (!zone || !fileInput) return;
+    zone.addEventListener('click', function(e) {
+      var removeBtn = e.target && e.target.closest ? e.target.closest('[data-multi-ref-remove]') : null;
+      if (removeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        var index = parseInt(removeBtn.getAttribute('data-multi-ref-remove') || '-1', 10);
+        if (index >= 0 && index < _multiRefsState.length) {
+          var removed = _multiRefsState.splice(index, 1)[0];
+          try {
+            if (removed && removed.preview && removed.preview.indexOf('blob:') === 0 && window.URL && URL.revokeObjectURL) URL.revokeObjectURL(removed.preview);
+          } catch (err) {}
+          _renderMultiRefsList();
+        }
+        return;
+      }
+      if (e.target && e.target.tagName === 'IMG') return;
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', async function() {
+      if (!fileInput.files.length) return;
+      try {
+        await _applyUploadedMultiRefs(fileInput.files, fileInput);
+      } catch (e) {
+        alert('upload fail: ' + e.message);
+      }
+    });
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      zone.classList.add('dragover');
+    });
+    zone.addEventListener('dragleave', function() {
+      zone.classList.remove('dragover');
+    });
+    zone.addEventListener('drop', async function(e) {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      var files = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files : [];
+      if (!files.length) return;
+      try {
+        await _applyUploadedMultiRefs(files, fileInput);
+      } catch (err) {
+        alert('upload fail: ' + err.message);
+      }
+    });
+    _renderMultiRefsList();
+    _syncImageReferenceModeUi();
+  }
+
   function _initRefVideoZone() {
     if (_refVideoInited) return;
     _refVideoInited = true;
@@ -4887,10 +6505,19 @@ var __curZone = null;
     });
     if (preview) {
       preview.addEventListener('loadedmetadata', function() {
-        _setRefVideoMetadata({
+        var meta = Object.assign({}, _getRefVideoMetadata(), {
           width: preview.videoWidth || 0,
-          height: preview.videoHeight || 0
+          height: preview.videoHeight || 0,
+          duration: preview.duration || 0
         });
+        _setRefVideoMetadata(meta);
+        if (preview.getAttribute('data-video-autofit') === '0') {
+          preview.removeAttribute('data-video-autofit');
+        } else {
+          if (meta.width && meta.height) _applyBestSizeForAspect(meta.width, meta.height);
+          _autoFitVideoFrameControls(meta);
+        }
+        _showRefVideoFirstFrame(preview);
       });
       preview.addEventListener('click', function(e) {
         e.stopPropagation();
@@ -4983,6 +6610,10 @@ function renderQuickGen() {
   window.CW.restoreJob = restoreJob;
   window.CW.fillFormFromHistory = fillFormFromHistory;
   window.CW.doGenerate = doGenerate;
+  window.CW.openPromptOptimizeMenu = openPromptOptimizeMenu;
+  window.CW.closePromptOptimizeMenu = closePromptOptimizeMenu;
+  window.CW.openPromptFullscreenEditor = openPromptFullscreenEditor;
+  window.CW.closePromptFullscreenEditor = closePromptFullscreenEditor;
   window.CW.optimizePrompt = optimizePrompt;
   window.CW.translatePromptLanguage = translatePromptLanguage;
   window.CW.registerPromptTranslationPair = registerPromptTranslationPair;

@@ -65,8 +65,9 @@ function syncClearPromptButton() {
   var inp = $('#promptInput');
   var clearBtn = $('#clearPromptBtn');
   var optimizeBtn = $('#optimizePromptBtn');
+  var strategyOptimizeBtn = $('#strategyOptimizeBtn');
   var translateBtn = $('#translatePromptBtn');
-  if (!clearBtn && !optimizeBtn && !translateBtn) return;
+  if (!clearBtn && !optimizeBtn && !strategyOptimizeBtn && !translateBtn) return;
   var hasText = !!(inp && inp.value.trim());
   if (translateBtn) {
     translateBtn.classList.remove('hidden');
@@ -82,6 +83,11 @@ function syncClearPromptButton() {
     optimizeBtn.classList.remove('hidden');
     optimizeBtn.classList.toggle('is-compact-disabled', !hasText);
     optimizeBtn.disabled = !hasText;
+  }
+  if (strategyOptimizeBtn) {
+    strategyOptimizeBtn.classList.remove('hidden');
+    strategyOptimizeBtn.classList.toggle('is-compact-disabled', !hasText);
+    strategyOptimizeBtn.disabled = !hasText;
   }
   var anchor = clearBtn || optimizeBtn;
   var actions = anchor && anchor.closest ? anchor.closest('.prompt-actions') : null;

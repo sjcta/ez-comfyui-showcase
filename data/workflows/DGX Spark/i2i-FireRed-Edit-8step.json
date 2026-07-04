@@ -317,5 +317,47 @@
     "_meta": {
       "title": "切换"
     }
+  },
+  "922": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "z-image-turbo_00010_.png"
+    },
+    "_meta": {
+      "title": "Multi Reference Image 2"
+    }
+  },
+  "932": {
+    "class_type": "FluxKontextImageScale",
+    "inputs": {
+      "image": [
+        "922",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Scale Multi Reference 2"
+    }
+  },
+  "923": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "z-image-turbo_00010_.png"
+    },
+    "_meta": {
+      "title": "Multi Reference Image 3"
+    }
+  },
+  "933": {
+    "class_type": "FluxKontextImageScale",
+    "inputs": {
+      "image": [
+        "923",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Scale Multi Reference 3"
+    }
   }
 }

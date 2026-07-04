@@ -27,9 +27,14 @@ from modules.instance_manager import InstanceManager
 from modules.instance_picker import pick_best_instance, strict_preferred_instance_name
 from modules.prompt_labels import infer_generation_label
 from modules.media_outputs import collect_preferred_history_outputs, output_media_type, output_ref_rel_path, is_image_output
+from modules.multi_reference_workflow import apply_multi_reference_image_mode_to_workflow
 from modules.step_calculator import StepCalculator
 from modules.comfyui_upload import apply_qwen_frame_roll_to_workflow, ensure_workflow_images_available
 from modules.bernini_workflow import apply_bernini_mixed_mode_to_workflow
+from modules.scail2_workflow import (
+    apply_scail2_audio_mux_to_workflow,
+    apply_scail2_model_variant_to_workflow,
+)
 from modules.workflow_validation import describe_api_prompt_issues, validate_api_prompt
 from modules.ws_tracker import WSTracker, TrackResult, PromptStartTimeout, PromptSubmitError
 
@@ -73,6 +78,31 @@ def _filter_retry_instances(instances: list[dict], workflow_name: str, failed_in
     return [inst for inst in instances if inst.get("name") not in failed_instances]
 
 
+def _seed_limits_for_field(class_type: str, field: str) -> tuple[int, int] | None:
+    if class_type == "SeedVR2VideoUpscaler" and field == "seed":
+        return (0, 4294967295)
+    if class_type in ("FlashVSRNode", "FlashVSRNodeAdv") and field == "seed":
+        return (0, 1125899906842624)
+    return None
+
+
+def _normalize_seed_value_for_field(class_type: str, field: str, value):
+    limits = _seed_limits_for_field(class_type, field)
+    if not limits:
+        return value
+    try:
+        seed = int(value)
+    except (TypeError, ValueError):
+        return value
+    mn, mx = limits
+    if seed < mn:
+        return mn
+    if seed > mx:
+        span = mx - mn + 1
+        return mn + ((seed - mn) % span)
+    return seed
+
+
 DEFAULT_TRACK_TIMEOUT = 900
 VIDEO_TRACK_TIMEOUT = 3600
 RUNNING_GENERATION_STATUSES = {"starting_comfyui", "preparing", "submitting", "generating", "downloading"}
@@ -86,8 +116,8 @@ def _workflow_track_timeout(job: dict | None, workflow_path: str) -> int:
     job = job or {}
     fields = job.get("fields") or {}
     if isinstance(fields, dict):
-        bernini_mode = str(fields.get("50::__bernini_mode") or fields.get("__bernini_mode") or "").lower()
-        if bernini_mode in {"i2v", "r2v"}:
+        bernini_mode = str(fields.get("1::__bernini_mode") or fields.get("50::__bernini_mode") or fields.get("__bernini_mode") or "").lower()
+        if bernini_mode in {"t2v", "v2v", "i2v", "r2v", "rv2v"}:
             return VIDEO_TRACK_TIMEOUT
     workflow_type = str(job.get("workflow_type") or "")
     workflow_name = os.path.basename(str(workflow_path or "")).lower()
@@ -96,6 +126,15 @@ def _workflow_track_timeout(job: dict | None, workflow_path: str) -> int:
     ):
         return VIDEO_TRACK_TIMEOUT
     return DEFAULT_TRACK_TIMEOUT
+
+
+def _workflow_prompt_start_timeout(workflow: dict) -> float:
+    for node in (workflow or {}).values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") in {"ZEngineerCLIPLoader", "ZEngineerCLIPLoaderGGUF"}:
+            return 600.0
+    return WSTracker.PROMPT_START_TIMEOUT
 
 
 class JobRunner:
@@ -500,7 +539,15 @@ class JobRunner:
                 if "::" not in key:
                     continue
                 nid, field = key.split("::", 1)
+                if field.startswith("__"):
+                    continue
                 if nid in wf and "inputs" in wf[nid]:
+                    val = _normalize_seed_value_for_field(
+                        str(wf[nid].get("class_type") or ""),
+                        field,
+                        val,
+                    )
+                    field_values[key] = val
                     wf[nid]["inputs"][field] = val
 
             # 注入种子
@@ -509,8 +556,11 @@ class JobRunner:
                     if "seed" in v.get("inputs", {}):
                         v["inputs"]["seed"] = seed
 
+            apply_multi_reference_image_mode_to_workflow(wf, field_values, workflow_name)
             apply_qwen_frame_roll_to_workflow(wf, field_values, self._input_dir)
             apply_bernini_mixed_mode_to_workflow(wf, field_values, workflow_name)
+            apply_scail2_model_variant_to_workflow(wf, field_values)
+            apply_scail2_audio_mux_to_workflow(wf, field_values, workflow_name)
 
             issues = validate_api_prompt(wf)
             if issues:
@@ -580,6 +630,7 @@ class JobRunner:
                 progress_callback=_progress_callback,
                 log_callback=self._add_log,
                 client_id=client_id,
+                prompt_start_timeout=_workflow_prompt_start_timeout(wf),
             )
 
             try:

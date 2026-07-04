@@ -63,6 +63,15 @@ class GalleryJobIsolationContractTests(unittest.TestCase):
         self.assertIn("window.CW.forceGalleryRerender", generate)
         self.assertIn("_local_submitted_at: Date.now()", generate)
 
+    def test_gallery_job_cards_keep_paused_jobs_in_queue_order(self):
+        history = (ROOT / "static/js/modules/history.js").read_text()
+
+        self.assertIn("if (status === 'queued' || status === 'paused') return 0;", history)
+        self.assertIn("if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;", history)
+        self.assertNotIn("if (status === 'paused') return 3;", history)
+        self.assertIn("job.created_at_ts || job._local_submitted_at", history)
+        self.assertIn("var tsDiff = bTs - aTs;", history)
+
     def test_gallery_patch_keeps_unchanged_cards_in_place(self):
         history = (ROOT / "static/js/modules/history.js").read_text()
         card_manager = (ROOT / "static/js/modules/card_manager.js").read_text()

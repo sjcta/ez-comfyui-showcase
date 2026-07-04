@@ -37,6 +37,7 @@ class Flux2DevUnslothWorkflowsTest(unittest.TestCase):
                 self.assertEqual(workflow["41"]["class_type"], "ImageScaleToTotalPixels")
                 self.assertEqual(workflow["41"]["inputs"]["image"], ["40", 0])
                 self.assertEqual(workflow["41"]["inputs"]["megapixels"], 1.0)
+                self.assertEqual(workflow["41"]["inputs"]["resolution_steps"], 1)
                 self.assertEqual(workflow["42"]["inputs"]["pixels"], ["41", 0])
                 self.assertEqual(workflow["48"]["inputs"]["steps"], 28)
                 self.assertEqual(workflow["26"]["inputs"]["guidance"], 4.0)

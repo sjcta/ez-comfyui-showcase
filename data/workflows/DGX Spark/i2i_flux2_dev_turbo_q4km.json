@@ -209,7 +209,8 @@
         0
       ],
       "upscale_method": "lanczos",
-      "megapixels": 1.0
+      "megapixels": 1.0,
+      "resolution_steps": 1
     },
     "class_type": "ImageScaleToTotalPixels",
     "_meta": {
@@ -259,6 +260,118 @@
     "class_type": "ReferenceLatent",
     "_meta": {
       "title": "Reference Latent"
+    }
+  },
+  "140": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "t2i-z-xxx_00001_.png"
+    },
+    "_meta": {
+      "title": "Multi Reference Image 2"
+    }
+  },
+  "141": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {
+      "image": [
+        "140",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 1.0,
+      "resolution_steps": 1
+    },
+    "_meta": {
+      "title": "Scale Multi Reference 2"
+    }
+  },
+  "142": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "141",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode Multi Reference 2"
+    }
+  },
+  "143": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "44",
+        0
+      ],
+      "latent": [
+        "142",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Apply Multi Reference 2"
+    }
+  },
+  "145": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "t2i-z-xxx_00001_.png"
+    },
+    "_meta": {
+      "title": "Multi Reference Image 3"
+    }
+  },
+  "146": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {
+      "image": [
+        "145",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 1.0,
+      "resolution_steps": 1
+    },
+    "_meta": {
+      "title": "Scale Multi Reference 3"
+    }
+  },
+  "147": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "146",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode Multi Reference 3"
+    }
+  },
+  "148": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "143",
+        0
+      ],
+      "latent": [
+        "147",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Apply Multi Reference 3"
     }
   }
 }

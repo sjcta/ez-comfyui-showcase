@@ -11,7 +11,12 @@ class DirectorModeUiTests(unittest.TestCase):
 
         self.assertIn("function _hasDirectorWorkflow(fields)", generate_js)
         self.assertIn("LTXDirector", generate_js)
+        self.assertIn("function _directorParamControlHtml()", generate_js)
+        self.assertIn("director-mode-param", generate_js)
+        self.assertIn("director-mode-param-btn", generate_js)
         self.assertIn("directorModeBtn", generate_js)
+        self.assertNotIn("var directorBtn = hasDirector", generate_js)
+        self.assertNotIn("prompt-actions\">' + directorBtn", generate_js)
         self.assertIn("自动导入提示词", generate_js)
         self.assertIn("function _directorParsePromptSegments(text)", generate_js)
         self.assertIn("function _directorDefaultSegmentPrompt(seg, idx, segments)", generate_js)
@@ -51,6 +56,8 @@ class DirectorModeUiTests(unittest.TestCase):
         css = (ROOT / "static/css/style.css").read_text()
 
         self.assertIn(".director-panel", css)
+        self.assertIn(".director-mode-param", css)
+        self.assertIn(".director-mode-param-btn", css)
         self.assertIn("position: fixed;", css)
         self.assertIn(".director-drop", css)
         self.assertIn(".director-tools", css)

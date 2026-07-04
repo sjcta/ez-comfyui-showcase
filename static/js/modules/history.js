@@ -53,8 +53,10 @@
     scale: 1,
     x: 0,
     y: 0,
+    mode: '',
     pinch: null,
     pan: null,
+    pointer: null,
     baseWidth: 0,
     baseHeight: 0,
   };
@@ -64,6 +66,9 @@
   var HISTORY_DETAIL_CACHE_LIMIT = 24;
   var HISTORY_DELETE_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
   var HISTORY_FILTER_AUTO_LOAD_PAGE_LIMIT = 3;
+  var LIGHTBOX_ZOOM_MIN = 1;
+  var LIGHTBOX_ZOOM_MAX = 4;
+  var LIGHTBOX_ZOOM_STEP = 0.25;
 
   function _currentHistoryScope() {
     var user = window.CW && CW.auth && CW.auth.getCurrentUser ? CW.auth.getCurrentUser() : null;
@@ -724,7 +729,8 @@ function _attachSentinel() {
   }
 
   function _renderJobCard(j) {
-    const label = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
+    const rawLabel = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
+    const label = _displayPromptForWorkflowItem(j, rawLabel) || rawLabel;
     const statusMsg = _neutralJobStatusMessage(j.message || j.status);
     const hasImage = !!j.image;
     const isVideo = _mediaType(j.media_type, j.image) === 'video';
@@ -783,6 +789,7 @@ function _attachSentinel() {
     const pauseAction = isPausedJob
       ? `<button class="gi-pause is-resume" type="button" onclick="event.stopPropagation();CW.resumeJob('${escA(j.id)}')" title="恢复排队" aria-label="恢复排队">${CW.icon("play", 12)}</button>`
       : (canPauseJob ? `<button class="gi-pause" type="button" onclick="event.stopPropagation();CW.pauseJob('${escA(j.id)}')" title="暂停排队" aria-label="暂停排队">${CW.icon("pause", 12)}</button>` : '');
+    const showWfLabel = wfLabel && wfLabel !== label;
     return `<div class="gi job-card ${escH(j.status)} ${jTypeCls}" data-job-id="${escA(j.id)}">
       <div class="gi-img ${hasImage ? '' : 'job-placeholder'}${checkingSensitiveCls}">
         ${imgHtml}
@@ -793,8 +800,8 @@ function _attachSentinel() {
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
         ${j.status === 'generating' || j.status === 'submitting' ? `<div class="gi-progress-top${_jobProgressClass(j)}"><div class="gi-progress-fill" style="width:${_jobProgressPct(j)}%"></div></div>` : ''}
-        ${wfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
-        <div class="gi-prompt" title="${escA(j.prompt_preview || label)}">${escH(j.prompt_preview || label)}</div>
+        ${showWfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
+        <div class="gi-prompt" title="${escA(label)}">${escH(label)}</div>
         ${j.status !== 'generating' && j.status !== 'submitting' ? `<div class="gi-meta">
           ${j.queued_at ? `<span>${CW.icon("clock")} ${j.queued_at}</span>` : ''}
           <div class="gi-meta-row">
@@ -899,7 +906,10 @@ function _attachSentinel() {
       const wfMeta = (A._wfMeta || {})[job.workflow] || {};
       const wfTag = window.CW.wfTag ? window.CW.wfTag(job.workflow || '', wfMeta.tags) : '';
       const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-      const displayPrompt = job.prompt_preview || (job.workflow ? job.workflow.replace('.json', '') : '出图完成');
+      const wfLabel = _workflowCustomDisplayName(job.workflow || '');
+      const rawDisplayPrompt = job.prompt_preview || (job.workflow ? job.workflow.replace('.json', '') : '出图完成');
+      const displayPrompt = _displayPromptForWorkflowItem(job, rawDisplayPrompt) || rawDisplayPrompt;
+      const showWfLabel = wfLabel && wfLabel !== displayPrompt;
       const jobBatchCount = Number(job.batch_count || (Array.isArray(job.images) ? job.images.length : 1) || 1);
       const jobBatchBadge = jobBatchCount > 1 ? `<div class="gi-batch-badge">×${jobBatchCount}</div>` : '';
       const protectionStatus = String(job.protection_status || '').toLowerCase();
@@ -915,6 +925,7 @@ function _attachSentinel() {
           jobBatchBadge +
         `</div>` +
         `<div class="gi-info">` +
+          (showWfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : '') +
           `<div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>` +
           `<div class="gi-meta"><span>${CW.icon("clock")} 刚刚</span>` +
             `<div class="gi-meta-row">` +
@@ -1585,7 +1596,7 @@ function _typeClass(typeText, workflowName) {
     return typeText ? 'wf-tag-res' : '';
   }
 
-function _historyItemType(item) {
+  function _historyItemType(item) {
     if (item && item.workflow_type) return item.workflow_type;
     var workflow = item && item.workflow ? item.workflow : '';
     var meta = (A._wfMeta || {})[workflow] || {};
@@ -1593,10 +1604,41 @@ function _historyItemType(item) {
     return tag && tag.text ? tag.text : '';
   }
 
-function _historyDisplayPrompt(item) {
+  function _workflowCustomDisplayName(workflow) {
+    workflow = String(workflow || '');
+    if (!workflow) return '';
+    var meta = (A._wfMeta || {})[workflow] || {};
+    var display = window.CW && CW.workflowDisplayName
+      ? CW.workflowDisplayName(workflow, meta)
+      : String(meta.name || '').trim();
+    display = String(display || '').trim();
+    var fallback = workflow.replace(/\.json$/i, '');
+    if (display && display !== workflow && display !== fallback) return display;
+    return '';
+  }
+
+  function _isGenericUpscaleLabel(text) {
+    text = String(text || '').trim();
+    return /^(?:放大|(?:\d+(?:\.\d+)?P|[248]K)\s*放大)$/i.test(text);
+  }
+
+  function _displayPromptForWorkflowItem(item, text) {
+    text = String(text || '').trim();
+    if (_historyItemType(item) !== '放大') return text;
+    var workflow = item && item.workflow ? String(item.workflow) : '';
+    var customName = _workflowCustomDisplayName(workflow);
+    if (!customName) return text;
+    var fallback = workflow.replace(/\.json$/i, '');
+    if (!text || text === workflow || text === fallback || _isGenericUpscaleLabel(text)) {
+      return customName;
+    }
+    return text;
+  }
+
+  function _historyDisplayPrompt(item) {
     if (!item) return '—';
     var text = item.prompt || item.prompt_preview || '';
-    if (text) return text;
+    if (text) return _displayPromptForWorkflowItem(item, text);
     if (_historyItemType(item) === '放大') {
       var fields = item.field_values || {};
       var resolution = 0;
@@ -1606,9 +1648,9 @@ function _historyDisplayPrompt(item) {
         resolution = parseInt(fields[key], 10) || 0;
         return true;
       });
-      if (resolution >= 3840) return '4K 放大';
-      if (resolution >= 1920) return '2K 放大';
-      return resolution > 0 ? (resolution + 'P 放大') : '放大';
+      if (resolution >= 3840) return _displayPromptForWorkflowItem(item, '4K 放大');
+      if (resolution >= 1920) return _displayPromptForWorkflowItem(item, '2K 放大');
+      return _displayPromptForWorkflowItem(item, resolution > 0 ? (resolution + 'P 放大') : '放大');
     }
     return '—';
   }
@@ -1764,17 +1806,16 @@ function setHistoryTypeFilter(value) {
   }
 
   function _jobSortPriority(status) {
-    if (status === 'queued') return 0;
-    if (status === 'paused') return 1;
-    if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting') return 2;
-    if (status === 'generating' || status === 'downloading' || status === 'checking') return 3;
+    if (status === 'queued' || status === 'paused') return 0;
+    if (status === 'preparing' || status === 'starting_comfyui' || status === 'submitting' || status === 'dispatching') return 1;
+    if (status === 'generating' || status === 'downloading' || status === 'checking') return 2;
     if (status === 'error' || status === 'retrying') return 4;
     return 5;
   }
 
   function _jobSortTimestamp(job) {
     if (!job) return 0;
-    var raw = job.last_update || job.created_at_ts || job.queued_at || job.generating_at || job.created_at || job.submitted_at || job.time || '';
+    var raw = job.created_at_ts || job._local_submitted_at || job.submitted_at || job.queued_at || job.created_at || job.generating_at || job.time || job.last_update || '';
     if (!raw) return 0;
     if (typeof raw === 'number') return raw;
     var parsed = Date.parse(raw);
@@ -1802,7 +1843,9 @@ function setHistoryTypeFilter(value) {
     return items.slice().sort(function(a, b) {
       var prioDiff = _jobSortPriority(a.status) - _jobSortPriority(b.status);
       if (prioDiff !== 0) return prioDiff;
-      var tsDiff = _jobSortTimestamp(b) - _jobSortTimestamp(a);
+      var aTs = _jobSortTimestamp(a);
+      var bTs = _jobSortTimestamp(b);
+      var tsDiff = bTs - aTs;
       if (tsDiff !== 0) return tsDiff;
       return String(b.id || '').localeCompare(String(a.id || ''));
     });
@@ -2412,7 +2455,35 @@ function lbNav(dir) {
   function _clampLightboxZoomScale(scale) {
     scale = Number(scale || 1);
     if (!Number.isFinite(scale)) scale = 1;
-    return Math.max(1, Math.min(4, scale));
+    return Math.max(LIGHTBOX_ZOOM_MIN, Math.min(LIGHTBOX_ZOOM_MAX, scale));
+  }
+
+  function _lightboxZoomControlElements() {
+    return {
+      root: $('#lbZoomControls'),
+      range: $('#lbZoomRange'),
+      value: $('#lbZoomValue'),
+      zoomOut: $('#lbZoomOut'),
+      zoomIn: $('#lbZoomIn'),
+      reset: $('#lbZoomReset'),
+    };
+  }
+
+  function _syncLightboxZoomControls(visible) {
+    var els = _lightboxZoomControlElements();
+    var scale = _clampLightboxZoomScale(_lbZoomState.scale);
+    if (!els.root) return;
+    if (typeof visible === 'boolean') els.root.hidden = !visible;
+    if (els.range) els.range.value = String(scale);
+    if (els.value) els.value.textContent = Math.round(scale * 100) + '%';
+    if (els.zoomOut) els.zoomOut.disabled = scale <= LIGHTBOX_ZOOM_MIN + 0.01;
+    if (els.reset) els.reset.disabled = scale <= LIGHTBOX_ZOOM_MIN + 0.01;
+    if (els.zoomIn) els.zoomIn.disabled = scale >= LIGHTBOX_ZOOM_MAX - 0.01;
+    if (!els.root.hidden) _positionLightboxActions();
+  }
+
+  function _setLightboxZoomControlsVisible(visible) {
+    _syncLightboxZoomControls(!!visible);
   }
 
   function _clampLightboxPan(x, y, scale) {
@@ -2431,7 +2502,10 @@ function lbNav(dir) {
     var stage = $('#lbStage');
     if (!stage) return;
     var scale = _clampLightboxZoomScale(_lbZoomState.scale);
-    stage.classList.toggle('lb-image-zoomed', scale > 1.01);
+    var isZoomed = scale > LIGHTBOX_ZOOM_MIN + 0.01;
+    var isControlZoom = _lbZoomState.mode === 'control';
+    stage.classList.toggle('lb-image-zoomed', isZoomed && !isControlZoom);
+    stage.classList.toggle('lb-image-control-zoomed', isZoomed && isControlZoom);
     var pan = _clampLightboxPan(_lbZoomState.x, _lbZoomState.y, scale);
     _lbZoomState.scale = scale;
     _lbZoomState.x = pan.x;
@@ -2439,6 +2513,7 @@ function lbNav(dir) {
     stage.style.setProperty('--lb-image-zoom', String(scale));
     stage.style.setProperty('--lb-image-pan-x', pan.x.toFixed(2) + 'px');
     stage.style.setProperty('--lb-image-pan-y', pan.y.toFixed(2) + 'px');
+    _syncLightboxZoomControls();
   }
 
   function _resetLightboxImageZoom() {
@@ -2446,11 +2521,45 @@ function lbNav(dir) {
     _lbZoomState.scale = 1;
     _lbZoomState.x = 0;
     _lbZoomState.y = 0;
+    _lbZoomState.mode = '';
     _lbZoomState.pinch = null;
     _lbZoomState.pan = null;
+    _lbZoomState.pointer = null;
     _applyLightboxImageZoom();
     _lbZoomState.baseWidth = 0;
     _lbZoomState.baseHeight = 0;
+  }
+
+  function setLBImageZoom(value, e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    var stage = $('#lbStage');
+    if (!stage || stage.classList.contains('is-video')) return false;
+    var scale = _clampLightboxZoomScale(value);
+    if (scale <= LIGHTBOX_ZOOM_MIN + 0.01) {
+      _resetLightboxImageZoom();
+      return false;
+    }
+    _lockLightboxZoomBaseSize();
+    _lbZoomState.mode = 'control';
+    _lbZoomState.scale = scale;
+    _applyLightboxImageZoom();
+    return false;
+  }
+
+  function adjustLBImageZoom(delta, e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    var amount = Number(delta || 0);
+    if (!Number.isFinite(amount) || !amount) amount = LIGHTBOX_ZOOM_STEP;
+    return setLBImageZoom(_lbZoomState.scale + amount, e);
+  }
+
+  function resetLBImageZoom(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    _resetLightboxImageZoom();
+    return false;
   }
 
   function _lockLightboxZoomBaseSize() {
@@ -2520,6 +2629,7 @@ function lbNav(dir) {
       if (!_isImageZoomTarget(e.target) || !e.touches) return;
       if (e.touches.length === 2) {
         _lockLightboxZoomBaseSize();
+        _lbZoomState.mode = 'touch';
         var rect = stage.getBoundingClientRect();
         var center = _touchCenter(e.touches[0], e.touches[1]);
         _lbZoomState.pinch = {
@@ -2579,6 +2689,41 @@ function lbNav(dir) {
       _lbZoomState.pan = null;
       if (_lbZoomState.scale <= 1.01) _resetLightboxImageZoom();
     }, { passive: true });
+    stage.addEventListener('pointerdown', function(e) {
+      if (e.pointerType === 'touch') return;
+      if (!_isImageZoomTarget(e.target) || _lbZoomState.scale <= LIGHTBOX_ZOOM_MIN + 0.01) return;
+      _lbZoomState.pointer = {
+        id: e.pointerId,
+        x: _lbZoomState.x,
+        y: _lbZoomState.y,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+      if (stage.setPointerCapture) {
+        try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    stage.addEventListener('pointermove', function(e) {
+      var pointer = _lbZoomState.pointer;
+      if (!pointer || pointer.id !== e.pointerId) return;
+      _lbZoomState.x = pointer.x + (e.clientX - pointer.startX);
+      _lbZoomState.y = pointer.y + (e.clientY - pointer.startY);
+      _applyLightboxImageZoom();
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    function clearPointerPan(e) {
+      var pointer = _lbZoomState.pointer;
+      if (!pointer || (e && pointer.id !== e.pointerId)) return;
+      if (stage.releasePointerCapture && e) {
+        try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+      }
+      _lbZoomState.pointer = null;
+    }
+    stage.addEventListener('pointerup', clearPointerPan);
+    stage.addEventListener('pointercancel', clearPointerPan);
   }
 
   function _videoEditorElements() {
@@ -3348,7 +3493,34 @@ function lbNav(dir) {
     if (!overlay) return;
     overlay.style.removeProperty('--lb-action-right');
     overlay.style.removeProperty('--lb-action-bottom');
+    var stage = $('#lbStage');
+    var controls = $('#lbZoomControls');
+    if (!stage || !controls || controls.hidden || !stage.getBoundingClientRect) {
+      if (controls) {
+        controls.style.left = '';
+        controls.style.top = '';
+        controls.style.width = '';
+      }
+      return;
+    }
+    var rect = stage.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    var controlHeight = controls.offsetHeight || 44;
+    var top = rect.bottom + 12;
+    var maxTop = window.innerHeight - controlHeight - 56;
+    if (top > maxTop) top = Math.max(rect.top + 12, maxTop);
+    var width = Math.min(Math.max(rect.width, 300), window.innerWidth - 160, 460);
+    controls.style.left = (rect.left + rect.width / 2) + 'px';
+    controls.style.top = top + 'px';
+    controls.style.width = Math.max(260, width) + 'px';
   }
+
+  window.addEventListener('resize', function() {
+    var overlay = $('#lightbox');
+    if (!overlay || !overlay.classList.contains('open')) return;
+    _applyLightboxImageZoom();
+    _positionLightboxActions();
+  }, { passive: true });
 
   function _imageContentRect(img) {
     if (!img || !img.getBoundingClientRect) return null;
@@ -3453,6 +3625,7 @@ function lbNav(dir) {
       var video = $('#lbVideo');
       var stageVideo = $('#lbStage');
       _resetLightboxImageZoom();
+      _setLightboxZoomControlsVisible(false);
       _hideLightboxVideoEditor();
       _lbLoadToken += 1;
       _resetLightboxFullLayer();
@@ -3521,6 +3694,7 @@ function lbNav(dir) {
     var stageImage = $('#lbStage');
     if (stageImage) stageImage.classList.remove('is-video');
     _resetLightboxImageZoom();
+    _setLightboxZoomControlsVisible(true);
     var hasSourceAnimation = !!(opts.sourceEl && opts.sourceEl.getBoundingClientRect);
     if (hasSourceAnimation) {
       var stage = $('#lbStage');
@@ -3598,6 +3772,7 @@ function renderLB(sourceEl) {
     _resetLightboxFullLayer();
     _clearLightboxDisplaySize();
     _resetLightboxImageZoom();
+    _setLightboxZoomControlsVisible(false);
     if (overlay) {
       overlay.classList.remove('lb-has-flight');
       overlay.style.removeProperty('--lb-action-right');
@@ -4342,6 +4517,9 @@ function renderGallery() {
   window.CW.closeLB = closeLB;
   window.CW.downloadLB = downloadLB;
   window.CW.copyLBPrompt = copyLBPrompt;
+  window.CW.setLBImageZoom = setLBImageZoom;
+  window.CW.adjustLBImageZoom = adjustLBImageZoom;
+  window.CW.resetLBImageZoom = resetLBImageZoom;
   window.CW.lbNav = lbNav;
   window.CW.enableLBVideoEditor = enableLBVideoEditor;
   window.CW.toggleLBImageExportMenu = toggleLBImageExportMenu;

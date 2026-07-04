@@ -1,0 +1,257 @@
+{
+  "2": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "crop",
+      "method": "lanczos",
+      "round_to_multiple": "16",
+      "scale_to_side": "longest",
+      "scale_to_length": 1024,
+      "background_color": "#000000",
+      "image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "按宽高比缩放_V2"
+    }
+  },
+  "5": {
+    "inputs": {
+      "image": "7e1483800794511ac47d935e122fb6a435969c970dd653ee8b13b5e64eae84f9.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "49": {
+    "inputs": {
+      "filename_prefix": "FlashVSR_SeedVR2_8K",
+      "images": [
+        "71",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "59": {
+    "inputs": {
+      "model": "FlashVSR-v1.1",
+      "mode": "tiny-long",
+      "scale": 4,
+      "tiled_vae": true,
+      "tiled_dit": true,
+      "unload_dit": false,
+      "seed": 393608325220287,
+      "frames": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "FlashVSRNode",
+    "_meta": {
+      "title": "FlashVSR Ultra-Fast"
+    }
+  },
+  "63": {
+    "inputs": {
+      "model": "seedvr2_ema_7b_sharp-Q4_K_M.gguf",
+      "device": "cuda:0",
+      "blocks_to_swap": 36,
+      "swap_io_components": false,
+      "offload_device": "cpu",
+      "attention_mode": "sageattn_3",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load DiT Model"
+    }
+  },
+  "64": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "cpu",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load VAE Model"
+    }
+  },
+  "70": {
+    "inputs": {
+      "padding": 128,
+      "tiles": [
+        "172",
+        0
+      ],
+      "positions": [
+        "184",
+        1
+      ],
+      "original_size": [
+        "184",
+        2
+      ],
+      "grid_size": [
+        "184",
+        3
+      ]
+    },
+    "class_type": "TTP_Image_Assy",
+    "_meta": {
+      "title": "TTP_Image_Assy"
+    }
+  },
+  "71": {
+    "inputs": {
+      "amount": 0.30000000000000004,
+      "image": [
+        "70",
+        0
+      ]
+    },
+    "class_type": "ImageCASharpening+",
+    "_meta": {
+      "title": "图像对比度自适应锐化"
+    }
+  },
+  "74": {
+    "inputs": {
+      "amount": 0.20000000000000004,
+      "image": [
+        "184",
+        0
+      ]
+    },
+    "class_type": "ImageCASharpening+",
+    "_meta": {
+      "title": "图像对比度自适应锐化"
+    }
+  },
+  "77": {
+    "inputs": {
+      "seed": 400244245,
+      "resolution": 1024,
+      "max_resolution": 0,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "wavelet",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "image": [
+        "74",
+        0
+      ],
+      "dit": [
+        "63",
+        0
+      ],
+      "vae": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "SeedVR2视频放大器"
+    }
+  },
+  "79": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 2,
+      "image": [
+        "59",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "图像按系数缩放"
+    }
+  },
+  "81": {
+    "inputs": {
+      "anything": [
+        "77",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "清理GPU占用"
+    }
+  },
+  "172": {
+    "inputs": {
+      "width": [
+        "173",
+        0
+      ],
+      "height": [
+        "173",
+        1
+      ],
+      "interpolation": "lanczos",
+      "method": "stretch",
+      "condition": "always",
+      "multiple_of": 8,
+      "image": [
+        "81",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "图像缩放"
+    }
+  },
+  "173": {
+    "inputs": {
+      "image": [
+        "184",
+        0
+      ]
+    },
+    "class_type": "easy imageSize",
+    "_meta": {
+      "title": "图像尺寸"
+    }
+  },
+  "184": {
+    "inputs": {
+      "image": [
+        "79",
+        0
+      ],
+      "tile_width": 1152,
+      "tile_height": 1152
+    },
+    "class_type": "TTP_Image_Tile_Batch",
+    "_meta": {
+      "title": "TTP_Image_Tile_Batch"
+    }
+  }
+}
