@@ -6,9 +6,13 @@
   var A = window.__APP__ || {};
   var $ = A.$, $$ = A.$$, escH = A.escH, escA = A.escA;
   var API = A.API, jobs = A.jobs, jobFields = A.jobFields, historyItems = A.historyItems;
-  var PROMPT_TRANSLATION_CACHE_KEY = 'cw_prompt_translation_cache_v1';
+  var PROMPT_TRANSLATION_CACHE_KEY = 'cw_prompt_translation_cache_v2';
   var _promptTranslationCache = _loadPromptTranslationCache();
   var _ideogramCanvasState = { mode: 'text', activeTool: 'rect', shapes: [], selectedId: '', nextId: 1 };
+  var _promptVoiceRecorder = null;
+  var _promptVoiceStream = null;
+  var _promptVoiceChunks = [];
+  var _promptVoiceBusy = false;
 
   function _normalizePromptCacheText(text) {
     return String(text || '').trim().replace(/\s+/g, ' ');
@@ -294,6 +298,16 @@ function _styleFamilyForWorkflow(fields) {
     if (/qwen|千问/i.test(workflow) || _hasFieldClass(fields, /QwenImage/i)) return 'qwen';
     if (/flux[\s_.-]*2/i.test(workflow) || _hasFieldClass(fields, /^Flux2Scheduler$/)) return 'flux2';
     return 'generic';
+  }
+
+function _isTtsPromptWorkflow(fields) {
+    var workflow = String(A.currentWF || A._wfFieldWorkflow || '').split(/[\\/]/).pop();
+    if (/tts_|_tts|语音tts|qwen tts|voxcpm2 tts|indextts2 tts|higgs audio/i.test(workflow)) return true;
+    return _hasFieldClass(fields, /^EZ_TTS_Service$/);
+  }
+
+function _shouldRenderStylePresetControl(fields) {
+    return !_isTtsPromptWorkflow(fields);
   }
 
 function _stylePresetById(id) {
@@ -2119,6 +2133,7 @@ function _normalizeFieldMeta(fields, workflowName) {
         label: f.label,
         value: f.value,
         role: f.role,
+        required: f.required,
         options: f.options,
         step: f.step,
         min: f.min,
@@ -2167,6 +2182,7 @@ function _isPromptLikeField(f) {
     if (!f) return false;
     var cls = String(f.class_type || '');
     var field = String(f.field || '').toLowerCase();
+    if (field === 'voice_description' || field === 'voice_style_custom' || field === 'reference_text' || field === 'voice_input_mode' || field === 'voice_preset') return false;
     if (f.type === 'textarea' || cls.indexOf('TextEncode') >= 0) return true;
     if (cls === 'CLIPTextEncode' && field === 'text') return true;
 
@@ -2192,6 +2208,26 @@ function _isReferenceAudioField(f) {
     var field = String(f.field || '');
     if (f.type === 'audio') return true;
     return cls === 'LoadAudio' && field === 'audio';
+  }
+
+function _isTtsVoiceInputModeField(f) {
+    if (!f) return false;
+    return String(f.field || '') === 'voice_input_mode' || _fieldKeyForMeta(f).endsWith('::voice_input_mode');
+  }
+
+function _isTtsVoiceDescriptionField(f) {
+    if (!f) return false;
+    return String(f.field || '') === 'voice_description' || _fieldKeyForMeta(f).endsWith('::voice_description');
+  }
+
+function _isTtsVoiceStyleCustomField(f) {
+    if (!f) return false;
+    return String(f.field || '') === 'voice_style_custom' || _fieldKeyForMeta(f).endsWith('::voice_style_custom');
+  }
+
+function _isTtsReferenceTextField(f) {
+    if (!f) return false;
+    return String(f.field || '') === 'reference_text' || _fieldKeyForMeta(f).endsWith('::reference_text');
   }
 
 function _isVideoPromptWorkflow(fields) {
@@ -2893,6 +2929,55 @@ function _syncVideoModeUi() {
     });
   }
 
+function _ttsVoiceModeInput() {
+    return document.querySelector('#quickFormFields [data-key$="::voice_input_mode"], #advFields [data-key$="::voice_input_mode"]');
+  }
+
+function _ttsVoiceModeKind(value) {
+    var raw = String(value || '').trim().toLowerCase();
+    if (/customvoice|custom voice|speaker|预设/.test(raw)) return 'voice';
+    if (/官方发音人|dashscope|select voice|voice speaker|发音人/.test(raw)) return 'voice';
+    if (/极致克隆|ultimate|hi-?fi|prompt[_ -]?text|逐字稿/.test(raw)) return 'ultimate';
+    if (/可控克隆|controllable/.test(raw)) return 'reference';
+    if (/声音设计|voice design/.test(raw)) return 'description';
+    if (/文字描述|voice[_ -]?description|description/.test(raw)) return 'description';
+    if (/上传参考|参考音频|reference|upload/.test(raw)) return 'reference';
+    if (/原生|zero|native/.test(raw)) return 'native';
+    return 'auto';
+  }
+
+function _setTtsFieldGroupVisible(selector, visible) {
+    $$(selector).forEach(function(el) {
+      el.style.display = visible ? '' : 'none';
+      el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    });
+  }
+
+function _syncTtsVoiceInputModeUi() {
+    var modeInput = _ttsVoiceModeInput();
+    if (!modeInput) return;
+    var rawMode = String(modeInput.value || '').trim().toLowerCase();
+    var kind = _ttsVoiceModeKind(modeInput.value);
+    var showVoicePreset = kind === 'voice';
+    var isQwenBaseReference = kind === 'reference' && /base|本地参考音频克隆/.test(rawMode);
+    var showDescription = kind === 'voice' || kind === 'description' || (kind === 'reference' && !isQwenBaseReference);
+    var showStyleCustom = kind === 'voice';
+    var showReference = kind === 'reference' || kind === 'ultimate';
+    var showReferenceText = kind === 'ultimate' || (kind === 'reference' && /base|本地参考音频克隆/.test(rawMode));
+    _setTtsFieldGroupVisible('[data-key-wrap$="::voice_preset"]', showVoicePreset);
+    _setTtsFieldGroupVisible('[data-key-wrap$="::voice_description"]', showDescription);
+    _setTtsFieldGroupVisible('[data-key-wrap$="::voice_style_custom"]', showStyleCustom);
+    _setTtsFieldGroupVisible('[data-tts-reference-audio="1"]', showReference);
+    _setTtsFieldGroupVisible('[data-key-wrap$="::reference_text"]', showReferenceText);
+  }
+
+function _initTtsVoiceInputModeControl() {
+    var modeInput = _ttsVoiceModeInput();
+    if (!modeInput) return;
+    modeInput.addEventListener('change', _syncTtsVoiceInputModeUi);
+    _syncTtsVoiceInputModeUi();
+  }
+
 function setVideoMode(mode) {
     var input = _getVideoModeBypassInput();
     if (!input) return;
@@ -2945,6 +3030,7 @@ function _setFieldControlValue(key, value) {
       el.value = value;
     }
     if (el.dataset && el.dataset.type === 'video_mode') _syncVideoModeUi();
+    if (key.endsWith('::voice_input_mode')) _syncTtsVoiceInputModeUi();
     if (el.dataset && el.dataset.type === 'bernini_mode') _syncBerniniModeUi();
     if (el.dataset && el.dataset.angleField) {
       var root = el.closest('.qwen-angle-control');
@@ -3146,6 +3232,17 @@ function _isReusableLoadVideoField(key, fieldsMeta) {
     return /::(?:video|file)$/.test(key);
   }
 
+function _isReusableLoadAudioField(key, fieldsMeta) {
+    key = String(key || '');
+    var fields = fieldsMeta || A._wfFieldMeta || [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i] || {};
+      if ((f.node_id + '::' + f.field) !== key) continue;
+      return _isReferenceAudioField(f);
+    }
+    return /::(?:audio|reference_audio)$/.test(key);
+  }
+
 function _restoreRefImageValue(value) {
     var refValue = String(value || '').trim();
     if (!refValue) return false;
@@ -3161,6 +3258,7 @@ function _restoreRefImageValue(value) {
     }
     if (ph) ph.style.display = 'none';
     _syncQwenAngleReferencePreview();
+    _renderPromptReferenceMenu($('#promptInput'));
     return true;
   }
 
@@ -3205,6 +3303,30 @@ async function _restoreRefVideoValue(value) {
     return true;
   }
 
+function _restoreRefAudioValue(value) {
+    var refValue = String(value || '').trim();
+    if (!refValue) return false;
+    var vInput = document.querySelector('#refAudioValue');
+    var preview = document.querySelector('#refAudioPreview');
+    var ph = document.querySelector('#refAudioPlaceholder');
+    var actions = document.querySelector('#refAudioActions');
+    var nameEl = document.querySelector('#refAudioName');
+    if (!vInput) return false;
+    vInput.value = refValue;
+    if (preview) {
+      preview.src = API + '/api/input-audio/' + encodeURIComponent(refValue);
+      preview.style.display = '';
+      preview.classList.remove('hidden');
+      preview.load && preview.load();
+    }
+    if (nameEl) {
+      nameEl.textContent = refValue.split('/').filter(Boolean).pop() || refValue || 'audio.wav';
+    }
+    if (actions) actions.classList.remove('hidden');
+    if (ph) ph.style.display = 'none';
+    return true;
+  }
+
 function _restoreRefImageFromFieldValues(fieldValues, fieldsMeta) {
     var values = fieldValues || {};
     for (const [k, v] of Object.entries(values)) {
@@ -3219,6 +3341,15 @@ async function _restoreRefVideoFromFieldValues(fieldValues, fieldsMeta) {
     for (const [k, v] of Object.entries(values)) {
       if (!_isReusableLoadVideoField(k, fieldsMeta)) continue;
       if (await _restoreRefVideoValue(v)) return true;
+    }
+    return false;
+  }
+
+function _restoreRefAudioFromFieldValues(fieldValues, fieldsMeta) {
+    var values = fieldValues || {};
+    for (const [k, v] of Object.entries(values)) {
+      if (!_isReusableLoadAudioField(k, fieldsMeta)) continue;
+      if (_restoreRefAudioValue(v)) return true;
     }
     return false;
   }
@@ -3364,6 +3495,7 @@ async function fillFormFromHistory(idx, key) {
       }
       _restoreRefImageFromFieldValues(h.field_values, reuseFieldsMeta);
       await _restoreRefVideoFromFieldValues(h.field_values, reuseFieldsMeta);
+      _restoreRefAudioFromFieldValues(h.field_values, reuseFieldsMeta);
       _restoreBerniniRefsFromFieldValues(h.field_values);
       _restoreMultiRefsFromFieldValues(h.field_values);
     }
@@ -3394,6 +3526,7 @@ async function restoreJob(jobId) {
       }
       _restoreRefImageFromFieldValues(snap.adv || {});
       await _restoreRefVideoFromFieldValues(snap.adv || {});
+      _restoreRefAudioFromFieldValues(snap.adv || {});
       _restoreBerniniRefsFromFieldValues(snap.adv || {});
       _restoreMultiRefsFromFieldValues(snap.adv || {});
       if (Object.keys(snap.adv || {}).some(function(k) { return k.endsWith('::seed'); })) _setSeedRandomEnabled(true);
@@ -3459,6 +3592,7 @@ async function restoreJob(jobId) {
       }
 	      _restoreRefImageFromFieldValues(j.fields, jobReuseFieldsMeta);
       await _restoreRefVideoFromFieldValues(j.fields, jobReuseFieldsMeta);
+      _restoreRefAudioFromFieldValues(j.fields, jobReuseFieldsMeta);
       _syncWanScailVideoTiming(Object.assign({}, j.fields), { adv: {} }, jobReuseFieldsMeta, { preferFrameCount: true });
       _restoreBerniniRefsFromFieldValues(j.fields);
       _restoreMultiRefsFromFieldValues(j.fields);
@@ -3588,20 +3722,30 @@ async function doGenerate() {
         }
         if (_isReferenceAudioField(f) && (zone === 'user_input' || !f.zone)) {
           const refVal = $('#refAudioValue')?.value || '';
-          if (!refVal) {
+          if (!refVal && f.required !== false) {
             throw new Error('需要先上传参考音频');
           }
-          fields[key] = refVal;
-          snapshot.adv[key] = refVal;
+          if (refVal) {
+            fields[key] = refVal;
+            snapshot.adv[key] = refVal;
+          } else {
+            delete fields[key];
+          }
           continue;
         }
       }
       if (rawPrompt && $('#promptInput') && promptFieldCount === 0) {
         throw new Error('未找到可提交的提示词字段，请重新选择工作流后再出图');
       }
+      if (_workflowHasReferenceImageInput(submitFieldsMeta)) {
+        const invalidMentions = _invalidPromptReferenceMentions(rawPrompt);
+        if (invalidMentions.length) {
+          throw new Error('提示词中的 ' + invalidMentions.join('、') + ' 没有对应参考图');
+        }
+      }
     } catch (e) {
       console.error(e);
-      alert('出图失败: ' + (e.message || '提示词字段读取失败'));
+      alert('任务失败: ' + (e.message || '提示词字段读取失败'));
       btn.disabled = false;
       btn.innerHTML = CW.icon('play') + ' 开始生成';
       return;
@@ -3650,9 +3794,10 @@ async function doGenerate() {
       snapshot.adv.__ideogram4_canvas = fields.__ideogram4_canvas;
     }
 
+    const referenceBoundPrompt = _compilePromptReferenceBindings(rawPrompt);
     const styledPrompt = _isOfficialIdeogram4Workflow(submitFieldsMeta)
-      ? _composeIdeogramCanvasPrompt(rawPrompt, styleInfo)
-      : _promptWithStylePreset(rawPrompt, styleInfo);
+      ? _composeIdeogramCanvasPrompt(referenceBoundPrompt, styleInfo)
+      : _promptWithStylePreset(referenceBoundPrompt, styleInfo);
     const prompt = _promptWithQwenAngle(styledPrompt, fields);
     promptKeys.forEach((key) => {
       fields[key] = prompt;
@@ -3692,7 +3837,7 @@ async function doGenerate() {
       jobs[d.job_id] = {
         id: d.job_id,
         status: 'queued',
-        message: '排队中...',
+        message: '任务排队中...',
         workflow: A.currentWF,
         seed: String(d.seed),
         prompt_preview: String(d.prompt_preview || '').trim() || _quickGenerationLabel(),
@@ -3705,7 +3850,7 @@ async function doGenerate() {
       };
       try {
         if (window.CW && CW.toast) {
-          CW.toast('排队中', 'queued');
+          CW.toast('任务排队中', 'queued');
         }
       } catch (e) {}
       // Trigger onJobUpdate to kick off active job polling
@@ -3713,7 +3858,7 @@ async function doGenerate() {
       if (window.CW.forceGalleryRerender) window.CW.forceGalleryRerender();
       else window.CW.renderGallery();
     } catch (e) {
-      alert('出图失败: ' + e.message);
+      alert('任务失败: ' + e.message);
     } finally {
       btn.disabled = false;
       btn.innerHTML = CW.icon('play') + ' 开始生成';
@@ -3776,6 +3921,129 @@ async function translatePromptLanguage() {
       }
       if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
     }
+  }
+
+
+  function _promptVoiceButtonHtml(label) {
+    return (window.CW && CW.icon ? CW.icon('mic') : '') + ' <span class="prompt-tool-label">' + escH(label || '语音') + '</span>';
+  }
+
+  function _setPromptVoiceButtonState(state, label) {
+    var btn = $('#promptVoiceBtn');
+    if (!btn) return;
+    var recording = state === 'recording';
+    var loading = state === 'loading';
+    btn.classList.toggle('is-recording', recording);
+    btn.classList.toggle('is-loading', loading);
+    btn.disabled = loading;
+    btn.setAttribute('aria-pressed', recording ? 'true' : 'false');
+    if (loading) {
+      btn.innerHTML = (window.CW && CW.icon ? CW.icon('loader') : '') + ' <span class="prompt-tool-label">' + escH(label || '识别中') + '</span>';
+    } else {
+      btn.innerHTML = _promptVoiceButtonHtml(label || (recording ? '停止' : '语音'));
+    }
+  }
+
+  function _cleanupPromptVoiceStream() {
+    if (_promptVoiceStream && _promptVoiceStream.getTracks) {
+      _promptVoiceStream.getTracks().forEach(function(track) {
+        try { track.stop(); } catch (e) {}
+      });
+    }
+    _promptVoiceStream = null;
+  }
+
+  function _appendPromptVoiceText(text) {
+    text = String(text || '').trim();
+    if (!text) return;
+    var input = $('#promptInput');
+    var current = input ? String(input.value || '').trim() : '';
+    var joiner = current ? (/[\s,，。.!！？?；;：:]$/.test(current) ? '' : '，') : '';
+    _setPromptInputValue(current + joiner + text);
+    if (input && input.focus) {
+      input.focus();
+      input.selectionStart = input.selectionEnd = input.value.length;
+    }
+  }
+
+  function _promptVoiceMimeType() {
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+    var candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg'];
+    for (var i = 0; i < candidates.length; i++) {
+      if (MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+    }
+    return '';
+  }
+
+  async function _sendPromptVoiceBlob(blob) {
+    if (!blob || !blob.size) throw new Error('录音为空');
+    var fd = new FormData();
+    var ext = /ogg/i.test(blob.type || '') ? 'ogg' : 'webm';
+    fd.append('file', blob, 'prompt_voice.' + ext);
+    var fetcher = (window.CW && CW.auth && CW.auth.apiFetch) ? CW.auth.apiFetch : fetch;
+    var response = await fetcher(API + '/api/speech/transcribe', { method: 'POST', body: fd });
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok || data.ok === false) throw new Error(data.detail || data.message || '语音识别失败');
+    var text = String(data.text || data.transcript || '').trim();
+    if (!text) throw new Error('没有识别到文字');
+    _appendPromptVoiceText(text);
+    if (window.CW && CW.toast) CW.toast('语音已写入提示词', 'ok');
+  }
+
+  async function _startPromptVoiceInput() {
+    if (_promptVoiceBusy) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      if (window.CW && CW.toast) CW.toast('当前浏览器不支持录音', 'error');
+      return;
+    }
+    closePromptOptimizeMenu();
+    try {
+      _promptVoiceChunks = [];
+      _promptVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      var mimeType = _promptVoiceMimeType();
+      _promptVoiceRecorder = new MediaRecorder(_promptVoiceStream, mimeType ? { mimeType: mimeType } : undefined);
+      _promptVoiceRecorder.ondataavailable = function(event) {
+        if (event && event.data && event.data.size) _promptVoiceChunks.push(event.data);
+      };
+      _promptVoiceRecorder.onerror = function() {
+        _cleanupPromptVoiceStream();
+        _setPromptVoiceButtonState('idle');
+      };
+      _promptVoiceRecorder.onstop = async function() {
+        var type = (_promptVoiceRecorder && _promptVoiceRecorder.mimeType) || mimeType || 'audio/webm';
+        var blob = new Blob(_promptVoiceChunks, { type: type });
+        _promptVoiceRecorder = null;
+        _promptVoiceChunks = [];
+        _cleanupPromptVoiceStream();
+        _promptVoiceBusy = true;
+        _setPromptVoiceButtonState('loading', '识别中');
+        try {
+          await _sendPromptVoiceBlob(blob);
+        } catch (e) {
+          console.warn('[promptVoice] failed:', e);
+          if (window.CW && CW.toast) CW.toast(e.message || '语音识别失败', 'error');
+        } finally {
+          _promptVoiceBusy = false;
+          _setPromptVoiceButtonState('idle');
+          if (window.CW && CW.syncClearPromptButton) CW.syncClearPromptButton();
+        }
+      };
+      _promptVoiceRecorder.start();
+      _setPromptVoiceButtonState('recording', '停止');
+      if (window.CW && CW.toast) CW.toast('开始录音', 'info');
+    } catch (e) {
+      _cleanupPromptVoiceStream();
+      _setPromptVoiceButtonState('idle');
+      if (window.CW && CW.toast) CW.toast(e.message || '无法访问麦克风', 'error');
+    }
+  }
+
+  function togglePromptVoiceInput() {
+    if (_promptVoiceRecorder && _promptVoiceRecorder.state === 'recording') {
+      _promptVoiceRecorder.stop();
+      return;
+    }
+    _startPromptVoiceInput();
   }
 
 
@@ -5089,8 +5357,11 @@ function _imageReferenceModeFieldHtml(f) {
 
 function _multiRefsFieldHtml(f) {
     var key = _fieldKeyForMeta(f) || '40::__multi_reference_images';
+    var minRefs = parseInt((f && f.min) || 2, 10) || 2;
     var maxRefs = parseInt((f && f.max) || 3, 10) || 3;
-    return '<div class="ref-image-section multi-ref-section" id="multiRefSection" data-max-refs="' + escA(String(maxRefs)) + '"><label>' + escH((f && f.label) || '多参考图片') + '</label><div class="img-upload-zone bernini-ref-zone multi-ref-zone" id="multiRefsZone"><div id="multiRefsPlaceholder" class="img-upload-placeholder">选择或拖入 2-' + escH(String(maxRefs)) + ' 张参考图</div><div id="multiRefsList" class="bernini-ref-list"></div><input type="hidden" id="multiRefsValue" data-key="' + escA(key) + '" data-type="multi_image_refs" value="[]"><input type="file" id="multiRefsFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" multiple class="hidden"></div></div>';
+    var countText = minRefs === maxRefs ? String(maxRefs) : (String(minRefs) + '-' + String(maxRefs));
+    var hint = (f && f.hint) || ('当前模型最多 ' + maxRefs + ' 张；在提示词中输入 @ 可指定 @图1 / @图2 的用途');
+    return '<div class="ref-image-section multi-ref-section" id="multiRefSection" data-min-refs="' + escA(String(minRefs)) + '" data-max-refs="' + escA(String(maxRefs)) + '"><div class="multi-ref-head"><label>' + escH((f && f.label) || '多参考图片') + '</label><span class="multi-ref-limit">上限 ' + escH(String(maxRefs)) + ' 张</span></div><div class="multi-ref-limit-hint" id="multiRefsLimitHint">' + escH(hint) + '</div><div class="img-upload-zone bernini-ref-zone multi-ref-zone" id="multiRefsZone"><div id="multiRefsPlaceholder" class="img-upload-placeholder">选择或拖入 ' + escH(countText) + ' 张参考图</div><div id="multiRefsList" class="bernini-ref-list"></div><input type="hidden" id="multiRefsValue" data-key="' + escA(key) + '" data-type="multi_image_refs" value="[]"><input type="file" id="multiRefsFile" accept="image/*,.tif,.tiff,.gif,.jfif,.jpe,.avif,.heic,.heif" multiple class="hidden"></div></div>';
   }
 
 function _berniniUploadedRefNames() {
@@ -5149,6 +5420,7 @@ function _clearSingleReferenceImageValue() {
     }
     if (placeholder) placeholder.style.display = '';
     _syncQwenAngleReferencePreview();
+    _renderPromptReferenceMenu($('#promptInput'));
   }
 
 function _multiRefMaxCount() {
@@ -5233,6 +5505,194 @@ function _primaryReferenceImageValue() {
     return _singleReferenceImageValue();
   }
 
+function _promptReferenceLabel(index) {
+    return '@图' + String((parseInt(index, 10) || 0) + 1);
+  }
+
+function _promptReferenceItems() {
+    var items = [];
+    if (_imageReferenceModeNeedsMultiRefs(_currentImageReferenceMode())) {
+      items = _multiRefItemsFromCurrentValue();
+    } else {
+      var single = _singleReferenceImageValue();
+      if (single) {
+        items = [{
+          filename: single,
+          preview: API + '/api/input-image/' + encodeURIComponent(single),
+          uploading: false,
+          error: false
+        }];
+      }
+    }
+    return (items || []).filter(function(item) {
+      return item && !item.error && item.filename;
+    }).map(function(item, index) {
+      return {
+        index: index,
+        token: _promptReferenceLabel(index),
+        filename: item.filename,
+        preview: item.preview || (API + '/api/input-image/' + encodeURIComponent(item.filename))
+      };
+    });
+  }
+
+function _promptMentionRange(input) {
+    if (!input) return null;
+    var end = input.selectionStart || 0;
+    var before = String(input.value || '').slice(0, end);
+    var match = before.match(/(^|[\s,，。；;:：\n])(@[A-Za-z0-9_\u4e00-\u9fa5]*)$/);
+    if (!match) return null;
+    return {
+      start: end - match[2].length,
+      end: end,
+      query: match[2].toLowerCase()
+    };
+  }
+
+function _filteredPromptReferenceItems(query) {
+    query = String(query || '').replace(/^@/, '').toLowerCase();
+    var items = _promptReferenceItems();
+    if (!query) return items;
+    return items.filter(function(item) {
+      return item.token.toLowerCase().indexOf('@' + query) === 0
+        || ('image' + String(item.index + 1)).indexOf(query) === 0
+        || String(item.filename || '').toLowerCase().indexOf(query) >= 0;
+    });
+  }
+
+function _hidePromptReferenceMenu() {
+    var menu = $('#promptRefMentionMenu');
+    if (menu) {
+      menu.classList.add('hidden');
+      menu.innerHTML = '';
+    }
+    _promptRefMentionActiveIndex = 0;
+  }
+
+function _renderPromptReferenceMenu(input) {
+    var menu = $('#promptRefMentionMenu');
+    var range = _promptMentionRange(input);
+    if (!menu || !range) {
+      _hidePromptReferenceMenu();
+      return false;
+    }
+    var items = _filteredPromptReferenceItems(range.query);
+    menu.classList.remove('hidden');
+    if (!items.length) {
+      menu.innerHTML = '<div class="prompt-ref-mention-empty">先上传参考图后可用 @ 绑定</div>';
+      return true;
+    }
+    _promptRefMentionActiveIndex = Math.max(0, Math.min(_promptRefMentionActiveIndex, items.length - 1));
+    menu.innerHTML = items.map(function(item, idx) {
+      return '<button type="button" class="prompt-ref-mention-item' + (idx === _promptRefMentionActiveIndex ? ' active' : '') + '" data-ref-token="' + escA(item.token) + '" data-ref-index="' + item.index + '">'
+        + '<img src="' + escA(item.preview) + '" alt="' + escA(item.token) + '">'
+        + '<span><strong>' + escH(item.token) + '</strong><small>Image ' + escH(String(item.index + 1)) + '</small></span>'
+        + '</button>';
+    }).join('');
+    return true;
+  }
+
+function _insertPromptReferenceMention(input, token) {
+    if (!input || !token) return;
+    var range = _promptMentionRange(input) || { start: input.selectionStart || 0, end: input.selectionEnd || 0 };
+    var text = String(input.value || '');
+    var insert = token + ' ';
+    input.value = text.slice(0, range.start) + insert + text.slice(range.end);
+    var caret = range.start + insert.length;
+    input.setSelectionRange(caret, caret);
+    input.focus();
+    _hidePromptReferenceMenu();
+    if (window.CW && typeof CW.syncClearPromptButton === 'function') CW.syncClearPromptButton();
+  }
+
+function _initPromptReferenceMentions() {
+    var input = $('#promptInput');
+    var menu = $('#promptRefMentionMenu');
+    if (!input || !menu || input.dataset.refMentionInited === '1') return;
+    input.dataset.refMentionInited = '1';
+    input.addEventListener('input', function() {
+      _promptRefMentionActiveIndex = 0;
+      _renderPromptReferenceMenu(input);
+    });
+    input.addEventListener('click', function() {
+      _renderPromptReferenceMenu(input);
+    });
+    input.addEventListener('blur', function() {
+      setTimeout(_hidePromptReferenceMenu, 140);
+    });
+    input.addEventListener('keydown', function(e) {
+      var menuVisible = menu && !menu.classList.contains('hidden');
+      if (!menuVisible) return;
+      var itemCount = menu.querySelectorAll('[data-ref-token]').length;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        _hidePromptReferenceMenu();
+      } else if (itemCount && e.key === 'ArrowDown') {
+        e.preventDefault();
+        _promptRefMentionActiveIndex = (_promptRefMentionActiveIndex + 1) % itemCount;
+        _renderPromptReferenceMenu(input);
+      } else if (itemCount && e.key === 'ArrowUp') {
+        e.preventDefault();
+        _promptRefMentionActiveIndex = (_promptRefMentionActiveIndex + itemCount - 1) % itemCount;
+        _renderPromptReferenceMenu(input);
+      } else if (itemCount && e.key === 'Enter') {
+        var active = menu.querySelector('.prompt-ref-mention-item.active') || menu.querySelector('[data-ref-token]');
+        if (active) {
+          e.preventDefault();
+          _insertPromptReferenceMention(input, active.getAttribute('data-ref-token'));
+        }
+      }
+    });
+    menu.addEventListener('mousedown', function(e) {
+      var btn = e.target && e.target.closest ? e.target.closest('[data-ref-token]') : null;
+      if (!btn) return;
+      e.preventDefault();
+      _insertPromptReferenceMention(input, btn.getAttribute('data-ref-token'));
+    });
+  }
+
+function _compilePromptReferenceBindings(prompt) {
+    prompt = String(prompt || '');
+    var items = _promptReferenceItems();
+    if (!items.length) return prompt;
+    var used = items.filter(function(item) {
+      return prompt.indexOf(item.token) >= 0;
+    });
+    if (!used.length) return prompt;
+    var lines = [
+      'Multi-reference image binding:',
+      'Use the referenced images according to these explicit bindings. Do not mix identity, clothing, pose, background, style, text, or object details across images unless the user asks for it.'
+    ];
+    used.forEach(function(item) {
+      lines.push('Image ' + String(item.index + 1) + ' is referenced as ' + item.token + ' in the prompt.');
+    });
+    return lines.join('\n') + '\n\n' + prompt;
+  }
+
+function _invalidPromptReferenceMentions(prompt) {
+    var matches = String(prompt || '').match(/@图\d+/g) || [];
+    if (!matches.length) return [];
+    var seen = {};
+    var items = _promptReferenceItems();
+    var maxRefs = items.length;
+    return matches.filter(function(token) {
+      if (seen[token]) return false;
+      seen[token] = true;
+      var num = parseInt(token.replace('@图', ''), 10) || 0;
+      return num < 1 || num > maxRefs;
+    });
+  }
+
+function _workflowHasReferenceImageInput(fields) {
+    return (fields || []).some(function(f) {
+      if (!f) return false;
+      var zone = f.zone || 'advanced';
+      return _isImageReferenceModeField(f)
+        || _isMultiImageRefsField(f)
+        || (f.class_type === 'LoadImage' && f.field === 'image' && (zone === 'user_input' || !f.zone));
+    });
+  }
+
 function _syncImageReferenceModeUi() {
     var input = document.querySelector('[data-type="image_reference_mode"][data-key]');
     var mode = _currentImageReferenceMode();
@@ -5250,8 +5710,12 @@ function _syncImageReferenceModeUi() {
       multiSection.style.display = needsMulti ? '' : 'none';
       multiSection.classList.toggle('is-required', needsMulti);
       var placeholder = $('#multiRefsPlaceholder');
+      var hint = $('#multiRefsLimitHint');
       var maxRefs = parseInt(multiSection.getAttribute('data-max-refs') || '3', 10) || 3;
-      if (placeholder) placeholder.textContent = needsMulti ? ('选择或拖入 2-' + maxRefs + ' 张参考图') : '当前模式不需要多参考图';
+      var minRefs = parseInt(multiSection.getAttribute('data-min-refs') || '2', 10) || 2;
+      var countText = minRefs === maxRefs ? String(maxRefs) : (String(minRefs) + '-' + String(maxRefs));
+      if (placeholder) placeholder.textContent = needsMulti ? ('选择或拖入 ' + countText + ' 张参考图') : '当前模式不需要多参考图';
+      if (hint) hint.style.display = needsMulti ? '' : 'none';
     }
   }
 
@@ -5409,7 +5873,7 @@ function renderQuickForm(fields) {
         var labelText = f.label || 'Prompt', nodeInfo = f.node_title ? ' [' + f.node_title.split('(')[0].trim() + ']' : '';
         var optimizeCopy = _promptOptimizeCopy(fields);
         var styleControlHtml = '';
-        if (!styleRendered) {
+        if (!styleRendered && _shouldRenderStylePresetControl(fields)) {
           styleControlHtml = _stylePresetControlHtml(fields);
           styleRendered = true;
         }
@@ -5419,7 +5883,9 @@ function renderQuickForm(fields) {
           ideogramCanvasRendered = true;
         }
         var promptFullscreenBtnHtml = '<button id="promptFullscreenBtn" class="prompt-fullscreen-btn" type="button" title="全屏编辑提示词" aria-label="全屏编辑提示词" onclick="CW.openPromptFullscreenEditor()">' + (window.CW && CW.icon ? CW.icon('scaleup', 15) : '↗') + '</button>';
-        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label>' + promptFullscreenBtnHtml + '</div><div class="prompt-input-wrap prompt-input-wrap-with-style"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea>' + styleControlHtml + ideogramCanvasHtml + '</div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="' + escA(optimizeCopy.label) + '" data-optimize-mode="' + escA(optimizeCopy.mode) + '" aria-haspopup="menu" onclick="CW.openPromptOptimizeMenu(event)" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">' + escH(optimizeCopy.label) + '</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
+        var promptMentionMenuHtml = '<div id="promptRefMentionMenu" class="prompt-ref-mention-menu hidden" role="listbox" aria-label="选择参考图"></div>';
+        var promptVoiceBtnHtml = '<button id="promptVoiceBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-voice" type="button" title="语音输入" aria-label="语音输入" aria-pressed="false" onclick="CW.togglePromptVoiceInput()">' + (window.CW && CW.icon ? CW.icon('mic') : '') + ' <span class="prompt-tool-label">语音</span></button>';
+        html += '<div class="fg prompt-fg"><div class="prompt-label-row"><label>' + escH(labelText + nodeInfo) + '</label>' + promptVoiceBtnHtml + promptFullscreenBtnHtml + '</div><div class="prompt-input-wrap prompt-input-wrap-with-style"><textarea id="promptInput" placeholder="' + escA(labelText) + '..."></textarea>' + promptMentionMenuHtml + styleControlHtml + ideogramCanvasHtml + '</div><div class="prompt-actions"><button id="interrogatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-image" type="button" title="图片反推" onclick="CW.interrogatePromptFromImage()">' + (window.CW && CW.icon ? CW.icon('image') : '') + ' <span class="prompt-tool-label">图片反推</span></button><button id="optimizePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant is-compact-disabled" type="button" title="' + escA(optimizeCopy.label) + '" data-optimize-mode="' + escA(optimizeCopy.mode) + '" aria-haspopup="menu" onclick="CW.openPromptOptimizeMenu(event)" disabled>' + (window.CW && CW.icon ? CW.icon('zap') : '') + ' <span class="prompt-tool-label">' + escH(optimizeCopy.label) + '</span></button><button id="translatePromptBtn" class="prompt-tool-btn prompt-tool-btn-vibrant prompt-tool-btn-translate is-compact-disabled" type="button" title="中文/英文提示词切换" onclick="CW.translatePromptLanguage()" disabled>' + (window.CW && CW.icon ? CW.icon('globe') : '') + ' <span class="prompt-tool-label">中英切换</span></button><button id="clearPromptBtn" class="prompt-tool-btn prompt-tool-btn-clear clear-btn is-compact-disabled" type="button" title="清除文字" onclick="CW.clearPrompt()" disabled>' + (window.CW && CW.icon ? CW.icon('trash-2') : '') + ' <span class="prompt-tool-label">清除文字</span></button></div></div>';
       } else if (_isVideoModeField(f)) {
         var modeKey = `${f.node_id}::${f.field}`;
         var isBypass = f.value !== false && f.value !== 'false' && f.value !== 'False';
@@ -5457,7 +5923,8 @@ function renderQuickForm(fields) {
       } else if (_isReferenceAudioField(f)) {
         hasLoadAudio = true;
         quickAudioRendered = true;
-        html += '<div class="ref-image-section ref-audio-section"><label>' + escH(f.label || 'Reference Audio') + '</label><div class="img-upload-zone audio-upload-zone" id="refAudioZone"><div id="refAudioPlaceholder" class="img-upload-placeholder">Click or drag audio</div><audio id="refAudioPreview" class="audio-upload-preview hidden" controls></audio><div id="refAudioActions" class="audio-upload-actions hidden"><span id="refAudioName" class="audio-upload-name"></span><button id="refAudioReplace" class="audio-upload-replace" type="button">重新选择</button></div><input type="hidden" id="refAudioValue" value=""><input type="file" id="refAudioFile" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus" class="hidden"></div></div>';
+        var audioKey = _fieldKeyForMeta(f);
+        html += '<div class="ref-image-section ref-audio-section" data-field-group data-key-wrap="' + escA(audioKey) + '" data-tts-reference-audio="1"><label>' + escH(f.label || 'Reference Audio') + '</label><div class="img-upload-zone audio-upload-zone" id="refAudioZone"><div id="refAudioPlaceholder" class="img-upload-placeholder">Click or drag audio</div><audio id="refAudioPreview" class="audio-upload-preview hidden" controls></audio><div id="refAudioActions" class="audio-upload-actions hidden"><span id="refAudioName" class="audio-upload-name"></span><button id="refAudioReplace" class="audio-upload-replace" type="button">重新选择</button></div><input type="hidden" id="refAudioValue" value=""><input type="file" id="refAudioFile" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus" class="hidden"></div></div>';
       } else if (_isLatentDimensionField(f, 'width') || _isLatentDimensionField(f, 'height')) {
         if (!sizeRendered) {
           html += sizeSectionHtml();
@@ -5467,22 +5934,26 @@ function renderQuickForm(fields) {
       else if (f.type === 'number') {
         var numberKey = `${f.node_id}::${f.field}`;
         var numVal = f.value ?? '';
-        html += '<div class="fg quick-number-fg"><label>' + escH(f.label || f.field) + '</label><input type="number" data-key="' + escA(numberKey) + '" data-type="number" value="' + escA(String(numVal)) + '"' + _numberAttr('min', f.min) + _numberAttr('max', f.max) + _numberAttr('step', f.step || 1) + '></div>';
+        html += '<div class="fg quick-number-fg" data-field-group data-key-wrap="' + escA(numberKey) + '"><label>' + escH(f.label || f.field) + '</label><input type="number" data-key="' + escA(numberKey) + '" data-type="number" value="' + escA(String(numVal)) + '"' + _numberAttr('min', f.min) + _numberAttr('max', f.max) + _numberAttr('step', f.step || 1) + '></div>';
       } else if (f.type === 'select') {
         var selectKey = `${f.node_id}::${f.field}`;
         var selectVal = f.value ?? '';
         var selectOpts = (f.options || []).map(function(o) {
           return '<option value="' + escA(o) + '" ' + (o === selectVal ? 'selected' : '') + '>' + escH(o) + '</option>';
         }).join('');
-        html += '<div class="fg quick-select-fg"><label>' + escH(f.label || f.field) + '</label><select data-key="' + escA(selectKey) + '">' + selectOpts + '</select></div>';
+        html += '<div class="fg quick-select-fg" data-field-group data-key-wrap="' + escA(selectKey) + '"><label>' + escH(f.label || f.field) + '</label><select data-key="' + escA(selectKey) + '">' + selectOpts + '</select></div>';
       } else if (f.type === 'toggle' || f.type === 'bool') {
         var toggleKey = `${f.node_id}::${f.field}`;
         var toggleVal = f.value === true || f.value === 'True' || f.value === 'true';
-        html += '<div class="fg quick-toggle-fg"><label>' + escH(f.label || f.field) + '</label><label class="toggle-label bool-toggle"><input type="checkbox" data-key="' + escA(toggleKey) + '" data-type="bool" value="' + (toggleVal ? 'true' : 'false') + '" ' + (toggleVal ? 'checked' : '') + ' onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label></div>';
+        html += '<div class="fg quick-toggle-fg" data-field-group data-key-wrap="' + escA(toggleKey) + '"><label>' + escH(f.label || f.field) + '</label><label class="toggle-label bool-toggle"><input type="checkbox" data-key="' + escA(toggleKey) + '" data-type="bool" value="' + (toggleVal ? 'true' : 'false') + '" ' + (toggleVal ? 'checked' : '') + ' onchange="this.value=this.checked"><span class="toggle-slider"></span><span class="toggle-state" data-on="开启" data-off="关闭"></span></label></div>';
+      } else if (f.type === 'textarea') {
+        var textareaKey = `${f.node_id}::${f.field}`;
+        var textareaVal = f.value ?? '';
+        html += '<div class="fg quick-textarea-fg" data-field-group data-key-wrap="' + escA(textareaKey) + '"><label>' + escH(f.label || f.field) + '</label><textarea data-key="' + escA(textareaKey) + '">' + escH(String(textareaVal)) + '</textarea></div>';
       } else if (f.type === 'text') {
         var textKey = `${f.node_id}::${f.field}`;
         var textVal = f.value ?? '';
-        html += '<div class="fg quick-text-fg"><label>' + escH(f.label || f.field) + '</label><input type="text" data-key="' + escA(textKey) + '" value="' + escA(String(textVal)) + '"></div>';
+        html += '<div class="fg quick-text-fg" data-field-group data-key-wrap="' + escA(textKey) + '"><label>' + escH(f.label || f.field) + '</label><input type="text" data-key="' + escA(textKey) + '" value="' + escA(String(textVal)) + '"></div>';
       }
     }
     if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadImage && !quickImageRendered) {
@@ -5498,7 +5969,7 @@ function renderQuickForm(fields) {
       html += '<div class="ref-image-section ref-video-section"><label>Reference Video</label><div class="img-upload-zone video-upload-zone" id="refVideoZone"><div id="refVideoPlaceholder" class="img-upload-placeholder">Click or drag video</div><video id="refVideoPreview" class="img-upload-preview video-upload-preview hidden" muted playsinline controls></video><input type="hidden" id="refVideoValue" value=""><input type="file" id="refVideoFile" accept="video/*,.mp4,.webm,.mov,.m4v" class="hidden"></div></div>';
     }
     if (!hasTextEncode && !hasLatentW && !hasLatentH && hasLoadAudio && !quickAudioRendered) {
-      html += '<div class="ref-image-section ref-audio-section"><label>Reference Audio</label><div class="img-upload-zone audio-upload-zone" id="refAudioZone"><div id="refAudioPlaceholder" class="img-upload-placeholder">Click or drag audio</div><audio id="refAudioPreview" class="audio-upload-preview hidden" controls></audio><div id="refAudioActions" class="audio-upload-actions hidden"><span id="refAudioName" class="audio-upload-name"></span><button id="refAudioReplace" class="audio-upload-replace" type="button">重新选择</button></div><input type="hidden" id="refAudioValue" value=""><input type="file" id="refAudioFile" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus" class="hidden"></div></div>';
+      html += '<div class="ref-image-section ref-audio-section" data-field-group data-tts-reference-audio="1"><label>Reference Audio</label><div class="img-upload-zone audio-upload-zone" id="refAudioZone"><div id="refAudioPlaceholder" class="img-upload-placeholder">Click or drag audio</div><audio id="refAudioPreview" class="audio-upload-preview hidden" controls></audio><div id="refAudioActions" class="audio-upload-actions hidden"><span id="refAudioName" class="audio-upload-name"></span><button id="refAudioReplace" class="audio-upload-replace" type="button">重新选择</button></div><input type="hidden" id="refAudioValue" value=""><input type="file" id="refAudioFile" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus" class="hidden"></div></div>';
     }
     if ((hasLatentW || hasLatentH) && !sizeRendered) html += sizeSectionHtml();
     if (hasDirector) html += _directorPanelHtml();
@@ -5519,9 +5990,11 @@ function renderQuickForm(fields) {
       promptInput.addEventListener('input', window.CW.syncClearPromptButton);
       window.CW.syncClearPromptButton();
     }
+    _initPromptReferenceMentions();
     _initStylePresetControl(fields);
     _setStylePresetValue(_savedStylePreset || '');
     if (ideogramCanvasRendered) _initIdeogramCanvasControl(fields);
+    _initTtsVoiceInputModeControl();
     _initVideoModeControl();
     _initBerniniModeControl();
     if (hasBerniniRefs) { _berniniRefsInited = false; setTimeout(function() { _initBerniniRefsZone(); }, 50); }
@@ -5625,7 +6098,7 @@ function renderAdvFields(fields) {
     for (const f of advFields) {
       const key = _fieldKeyForMeta(f);
       const val = f.value ?? '';
-      html += `<div class="fg"><label>${escH(f.label)} <span class="node-tag">[${escH(f.node_title)}]</span></label>`;
+      html += `<div class="fg" data-field-group data-key-wrap="${escA(key)}"><label>${escH(f.label)} <span class="node-tag">[${escH(f.node_title)}]</span></label>`;
       switch (f.type) {
         case 'select': {
           const opts = (f.options || [])
@@ -5648,12 +6121,16 @@ function renderAdvFields(fields) {
           html += `<input type="number" data-key="${key}" value="${val}" step="${step}" ${mn !== '' ? `min="${mn}"` : ''} ${mx !== '' ? `max="${mx}"` : ''}>`;
           break;
         }
+        case 'textarea':
+          html += `<textarea data-key="${key}">${escH(String(val))}</textarea>`;
+          break;
         default:
           html += `<input type="text" data-key="${key}" value="${escH(String(val))}">`;
       }
       html += `</div>`;
     }
     box.innerHTML = html;
+    _initTtsVoiceInputModeControl();
     if (hasDirector) _renderDirectorTrackOnly();
     setTimeout(function() { _bindWanScailVideoTimingSync(fields); }, 0);
   }
@@ -5670,7 +6147,7 @@ function toggleGenForm() {
     if (footer) footer.classList.toggle('mobile-open', open);
     if (title) title.classList.toggle('is-open', open);
     if (arrow) arrow.textContent = open ? '\u25B4' : '\u25BE';
-    if (btn) btn.innerHTML = open ? CW.icon('zap') + ' 收起 \u25B4' : CW.icon('zap') + ' 快速出图 \u25BE';
+    if (btn) btn.innerHTML = open ? CW.icon('zap') + ' 收起 \u25B4' : CW.icon('zap') + ' 任务面板 \u25BE';
   }
 
 var _refImageInited = false;
@@ -5684,6 +6161,7 @@ var _multiRefsInited = false;
 var _multiRefsState = [];
 var _multiRefsUploadPromises = [];
 var _multiRefsSeq = 0;
+var _promptRefMentionActiveIndex = 0;
 var _refVideoInited = false;
 var _refVideoUploadPromise = null;
 var _refVideoUploadToken = 0;
@@ -5731,6 +6209,7 @@ function _resetMultiRefs() {
     });
     _multiRefsState = [];
     _renderMultiRefsList();
+    _hidePromptReferenceMenu();
     _setMultiRefsUploading(false);
   }
 
@@ -6038,6 +6517,7 @@ var __curZone = null;
         _ensureMultiRefsStartWithSingleReference();
       }
       _syncQwenAngleReferencePreview();
+      _renderPromptReferenceMenu($('#promptInput'));
       return d;
     }).finally(function() {
       if (token === _refImageUploadToken) {
@@ -6100,6 +6580,7 @@ var __curZone = null;
       var status = item.uploading ? '<span class="bernini-ref-status">上传中</span>' : (item.error ? '<span class="bernini-ref-status error">失败</span>' : '');
       return '<div class="bernini-ref-item multi-ref-item" data-index="' + index + '">'
         + (preview ? '<img src="' + escA(preview) + '" alt="multi reference">' : '<div class="bernini-ref-thumb"></div>')
+        + '<span class="multi-ref-token">' + escH(_promptReferenceLabel(index)) + '</span>'
         + status
         + '<button type="button" class="bernini-ref-remove" data-multi-ref-remove="' + index + '" title="移除" aria-label="移除">×</button>'
         + '</div>';
@@ -6107,6 +6588,7 @@ var __curZone = null;
     if (placeholder) placeholder.style.display = items.length ? 'none' : '';
     _syncMultiRefsValue();
     _syncImageReferenceModeUi();
+    _renderPromptReferenceMenu($('#promptInput'));
   }
 
   function _addMultiRefFilename(filename) {
@@ -6343,6 +6825,7 @@ var __curZone = null;
         if (placeholder) placeholder.style.display = '';
         valueInput.value = '';
         _syncQwenAngleReferencePreview();
+        _renderPromptReferenceMenu($('#promptInput'));
       });
     }
     zone.addEventListener('dragover', function(e) {
@@ -6614,6 +7097,7 @@ function renderQuickGen() {
   window.CW.closePromptOptimizeMenu = closePromptOptimizeMenu;
   window.CW.openPromptFullscreenEditor = openPromptFullscreenEditor;
   window.CW.closePromptFullscreenEditor = closePromptFullscreenEditor;
+  window.CW.togglePromptVoiceInput = togglePromptVoiceInput;
   window.CW.optimizePrompt = optimizePrompt;
   window.CW.translatePromptLanguage = translatePromptLanguage;
   window.CW.registerPromptTranslationPair = registerPromptTranslationPair;

@@ -1,0 +1,37 @@
+{
+  "1": {
+    "inputs": {
+      "service_url": "http://127.0.0.1:18210/tts",
+      "engine": "qwen_tts",
+      "text": "你好，我是通义千问，很高兴认识你。",
+      "language": "Auto / 自动",
+      "voice_preset": "Serena / 温暖温柔女声（中文）",
+      "reference_audio": "",
+      "reference_text": "",
+      "seed": 0,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "speed": 1.0,
+      "voice_input_mode": "本地预设 Speaker（CustomVoice）",
+      "voice_description": "默认自然朗读（无额外风格）",
+      "voice_style_custom": ""
+    },
+    "class_type": "EZ_TTS_Service",
+    "_meta": {
+      "title": "Qwen TTS"
+    }
+  },
+  "2": {
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "filename_prefix": "tts/qwen_tts"
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "保存音频"
+    }
+  }
+}

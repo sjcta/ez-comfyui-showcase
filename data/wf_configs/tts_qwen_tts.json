@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "workflow": "tts_qwen_tts.json",
+  "fields": [
+    {
+      "key": "1::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "Input Text / 输入文本",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "1::language",
+      "zone": "user_input",
+      "visible": true,
+      "label": "Select Text Language / 选择文本语言",
+      "order": 1,
+      "type": "select",
+      "options": [
+        "Auto / 自动",
+        "English / 英文",
+        "Chinese / 中文",
+        "German / 德语",
+        "Italian / 意大利语",
+        "Portuguese / 葡萄牙语",
+        "Spanish / 西班牙语",
+        "Japanese / 日语",
+        "Korean / 韩语",
+        "French / 法语",
+        "Russian / 俄语"
+      ]
+    },
+    {
+      "key": "1::voice_input_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "音色来源",
+      "order": 2,
+      "type": "select",
+      "options": [
+        "本地预设 Speaker（CustomVoice）",
+        "本地参考音频克隆（Base）"
+      ]
+    },
+    {
+      "key": "1::voice_preset",
+      "zone": "user_input",
+      "visible": true,
+      "label": "Speaker / 预设发音人（本地 CustomVoice）",
+      "order": 3,
+      "type": "select",
+      "options": [
+        "Vivian / 明亮年轻女声（中文）",
+        "Serena / 温暖温柔女声（中文）",
+        "Uncle_Fu / 低沉成熟男声（中文）",
+        "Dylan / 北京青年男声（中文北京话）",
+        "Eric / 成都男声（四川话）",
+        "Ryan / 节奏感男声（英文）",
+        "Aiden / 美式阳光男声（英文）",
+        "Ono_Anna / 轻快日语女声（日语）",
+        "Sohee / 温暖韩语女声（韩语）"
+      ]
+    },
+    {
+      "key": "1::voice_description",
+      "zone": "user_input",
+      "visible": true,
+      "label": "风格/语气预设（CustomVoice）",
+      "order": 4,
+      "type": "select",
+      "options": [
+        "默认自然朗读（无额外风格）",
+        "温柔亲切，语速适中。",
+        "活泼轻快，有感染力。",
+        "沉稳专业，适合知识讲解。",
+        "新闻播报，清晰坚定。",
+        "旁白解说，冷静克制。",
+        "宣传介绍，热情自信。",
+        "口语聊天，轻松自然。",
+        "睡前故事，柔和慢速。",
+        "角色对白，情绪自然，有表演感。",
+        "紧张悬疑，压低声线，节奏稍慢。",
+        "开心愉悦，语调上扬。",
+        "安抚疗愈，声音柔和稳定。"
+      ]
+    },
+    {
+      "key": "1::voice_style_custom",
+      "zone": "user_input",
+      "visible": true,
+      "label": "自定义语气补充（可选）",
+      "order": 5,
+      "type": "textarea"
+    },
+    {
+      "key": "1::reference_audio",
+      "zone": "user_input",
+      "visible": true,
+      "label": "Reference Audio / 参考音频（Base 本地克隆，可选）",
+      "order": 6,
+      "type": "audio",
+      "required": false
+    },
+    {
+      "key": "1::reference_text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "Reference Text / 参考音频逐字稿（可选，提升克隆）",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "1::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 1,
+      "type": "seed",
+      "min": 0,
+      "max": 2147483647
+    },
+    {
+      "key": "1::temperature",
+      "zone": "advanced",
+      "visible": false,
+      "label": "temperature",
+      "order": 2,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 2
+    },
+    {
+      "key": "1::top_p",
+      "zone": "advanced",
+      "visible": false,
+      "label": "top_p",
+      "order": 3,
+      "type": "number",
+      "step": 0.01,
+      "min": 0.05,
+      "max": 1
+    },
+    {
+      "key": "1::speed",
+      "zone": "advanced",
+      "visible": false,
+      "label": "语速",
+      "order": 4,
+      "type": "number",
+      "step": 0.05,
+      "min": 0.5,
+      "max": 2
+    },
+    {
+      "key": "1::engine",
+      "zone": "hidden",
+      "visible": false,
+      "label": "TTS 引擎",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "1::service_url",
+      "zone": "hidden",
+      "visible": false,
+      "label": "TTS 服务地址",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "2::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    }
+  ]
+}

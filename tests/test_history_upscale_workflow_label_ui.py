@@ -16,11 +16,16 @@ class HistoryUpscaleWorkflowLabelUITests(unittest.TestCase):
         self.assertIn("const label = _displayPromptForWorkflowItem(j, rawLabel) || rawLabel;", history_js)
         self.assertIn("const displayPrompt = _displayPromptForWorkflowItem(job, rawDisplayPrompt) || rawDisplayPrompt;", history_js)
 
-    def test_completed_upscale_card_avoids_duplicate_workflow_label(self):
+    def test_task_cards_render_workflow_name_above_prompt_text(self):
         history_js = (ROOT / "static/js/modules/history.js").read_text(encoding="utf-8")
 
-        self.assertIn("const showWfLabel = wfLabel && wfLabel !== label;", history_js)
-        self.assertIn("const showWfLabel = wfLabel && wfLabel !== displayPrompt;", history_js)
+        self.assertIn("function _workflowDisplayName(workflow)", history_js)
+        self.assertIn("const wfLabel = _workflowDisplayName(j.workflow || '');", history_js)
+        self.assertIn("const wfLabel = _workflowDisplayName(job.workflow || '');", history_js)
+        self.assertIn("const wfLabel = _workflowDisplayName(h.workflow || '');", history_js)
+        self.assertIn("gi-wf-label", history_js)
+        self.assertNotIn("const showWfLabel = wfLabel && wfLabel !== label;", history_js)
+        self.assertNotIn("const showWfLabel = wfLabel && wfLabel !== displayPrompt;", history_js)
 
 
 if __name__ == "__main__":

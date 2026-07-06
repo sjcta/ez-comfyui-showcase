@@ -69,7 +69,7 @@ class JobsApiTest(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertIn("job-pause", app.jobs)
             self.assertEqual(app.jobs["job-pause"]["status"], "paused")
-            self.assertEqual(app.jobs["job-pause"]["message"], "已暂停，等待恢复")
+            self.assertEqual(app.jobs["job-pause"]["message"], "任务暂停，等待恢复")
             self.assertEqual(app.jobs["job-pause"]["pause_epoch"], 4)
 
         asyncio.run(run_case())

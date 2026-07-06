@@ -27,6 +27,18 @@ class WorkflowManagerUiContractTests(unittest.TestCase):
         self.assertNotIn("window.CW.refreshWorkflowPreviewFromJob = _refreshWorkflowPreviewFromJob", history_js)
         self.assertIn("refresh workflow previews after delete failed", history_js)
 
+    def test_workflow_picker_does_not_use_audio_outputs_as_image_thumbnails(self):
+        workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
+
+        self.assertIn("function _workflowPreviewMediaType(item)", workflows_js)
+        self.assertIn("function _isWorkflowPreviewImagePath(path)", workflows_js)
+        self.assertIn("wav|flac|mp3|m4a|aac|ogg|opus", workflows_js)
+        self.assertIn("if (mediaType && mediaType !== 'image') return '';", workflows_js)
+        self.assertIn("var meta = (A._wfMeta || {})[job.workflow] || {};", workflows_js)
+        self.assertIn("var info = _workflowPreviewInfo(job.workflow, meta, {});", workflows_js)
+        self.assertIn("media_type: job.media_type || ''", workflows_js)
+        self.assertIn("if (jobSrc) {", workflows_js)
+
     def test_workflow_picker_preview_reuses_sensitive_blur_treatment(self):
         workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()
         css = (ROOT / "static/css/style.css").read_text()
@@ -87,13 +99,34 @@ class WorkflowManagerUiContractTests(unittest.TestCase):
         self.assertIn("var custom = String((meta && meta.name) || '').trim();", workflows_js)
         self.assertIn("if (custom) return custom;", workflows_js)
         self.assertIn("return String(fname || '').replace(/\\.json$/i, '');", workflows_js)
-        self.assertIn("genTitleText.textContent = displayName + ' 快速出图';", workflows_js)
+        self.assertIn("genTitleText.textContent = displayName + ' 任务面板';", workflows_js)
         self.assertIn("if (ws) ws.textContent = displayName;", workflows_js)
         self.assertIn("window.CW.workflowDisplayName = workflowDisplayName;", workflows_js)
         self.assertIn("$('#wfEditName').value = String(meta.name || '').trim();", workflows_js)
         self.assertIn("CW.workflowDisplayName(fname)", node_editor_js)
         self.assertIn("CW.workflowDisplayName(workflow, meta)", auth_js)
         self.assertNotIn("name.replace('.json', '') + ' 快速出图'", workflows_js)
+        self.assertNotIn("displayName + ' 快速出图'", workflows_js)
+
+    def test_main_titles_use_task_panel_language(self):
+        html = (ROOT / "static/index.html").read_text()
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("出图任务列表", html)
+        self.assertIn('<span id="genTitleText">任务面板</span>', html)
+        self.assertIn("CW.icon('zap') + ' 任务面板", generate_js)
+        self.assertNotIn("> 出图历史</span>", html)
+
+    def test_workflow_tabs_are_drag_scrollable(self):
+        app_js = (ROOT / "static/js/app.js").read_text()
+        ui_js = (ROOT / "static/js/modules/ui.js").read_text()
+        css = (ROOT / "static/css/style.css").read_text()
+
+        self.assertIn("window.CW.initDragScroll('#wfTabs');", app_js)
+        self.assertIn("suppressClick", ui_js)
+        self.assertIn('el.addEventListener("click"', ui_js)
+        self.assertIn("e.stopImmediatePropagation", ui_js)
+        self.assertIn(".wf-tabs.dragging", css)
 
     def test_workflow_tabs_use_primary_metadata_tag_before_filename_guess(self):
         workflows_js = (ROOT / "static/js/modules/workflows.js").read_text()

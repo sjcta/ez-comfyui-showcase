@@ -11,6 +11,15 @@
     <rect x="14" y="4" width="4" height="16" rx="1"/>
   </symbol>
 
+  <symbol id="icon-audio-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 12h1"/>
+    <path d="M7 8v8"/>
+    <path d="M11 4v16"/>
+    <path d="M15 7v10"/>
+    <path d="M19 10v4"/>
+    <path d="M22 12h-1"/>
+  </symbol>
+
   <symbol id="icon-dice-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <rect x="2" y="2" width="20" height="20" rx="2"/>
     <circle cx="12" cy="12" r="1.5"/>
@@ -161,6 +170,12 @@
   <symbol id="icon-video" viewBox="0 0 24 24" fill="currentColor" stroke="none">
     <path d="M4.75 6h8.5A3.75 3.75 0 0 1 17 9.75v4.5A3.75 3.75 0 0 1 13.25 18h-8.5A3.75 3.75 0 0 1 1 14.25v-4.5A3.75 3.75 0 0 1 4.75 6Z"/>
     <path d="M18.35 9.05 22 6.98c.67-.38 1.5.1 1.5.87v8.3c0 .77-.83 1.25-1.5.87l-3.65-2.07V9.05Z"/>
+  </symbol>
+
+  <symbol id="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" x2="12" y1="19" y2="22"/>
   </symbol>
 
   <symbol id="icon-clapperboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

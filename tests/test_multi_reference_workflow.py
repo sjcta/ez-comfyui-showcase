@@ -28,7 +28,7 @@ def _multi_fields(primary_node: str) -> dict:
 
 
 class MultiReferenceWorkflowTests(unittest.TestCase):
-    def test_qwen_edit_plus_connects_second_and_third_reference_images(self):
+    def test_qwen_edit_plus_limits_multi_references_to_two_images(self):
         wf = _load_workflow("i2i-Qwen-Edit-v2511.json")
         fields = _multi_fields("41")
 
@@ -36,10 +36,11 @@ class MultiReferenceWorkflowTests(unittest.TestCase):
 
         self.assertEqual(wf["41"]["inputs"]["image"], "a.png")
         self.assertEqual(wf["922"]["inputs"]["image"], "b.png")
-        self.assertEqual(wf["923"]["inputs"]["image"], "c.png")
         self.assertEqual(wf["170:151"]["inputs"]["image2"], ["932", 0])
-        self.assertEqual(wf["170:151"]["inputs"]["image3"], ["933", 0])
+        self.assertNotIn("image3", wf["170:151"]["inputs"])
         self.assertNotIn("image2", wf["44"]["inputs"])
+        self.assertNotIn("923", wf)
+        self.assertEqual(json.loads(fields[MULTI_REFERENCE_IMAGES_FIELD]), ["a.png", "b.png"])
         self.assertEqual(validate_api_prompt(wf), [])
 
     def test_firered_connects_multi_references_to_positive_and_negative_encoders(self):
@@ -54,7 +55,7 @@ class MultiReferenceWorkflowTests(unittest.TestCase):
             self.assertEqual(wf[node_id]["inputs"]["image3"], ["933", 0])
         self.assertEqual(validate_api_prompt(wf), [])
 
-    def test_qwen_rapid_connects_extra_references_directly_to_encoder(self):
+    def test_qwen_rapid_limits_multi_references_to_two_images(self):
         wf = _load_workflow("i2i-Qwen-Rapid.json")
         fields = _multi_fields("78")
 
@@ -62,12 +63,12 @@ class MultiReferenceWorkflowTests(unittest.TestCase):
 
         self.assertEqual(wf["78"]["inputs"]["image"], "a.png")
         self.assertEqual(wf["922"]["class_type"], "LoadImage")
-        self.assertEqual(wf["923"]["class_type"], "LoadImage")
         self.assertEqual(wf["922"]["inputs"]["image"], "b.png")
-        self.assertEqual(wf["923"]["inputs"]["image"], "c.png")
         self.assertEqual(wf["115:111"]["inputs"]["image2"], ["922", 0])
-        self.assertEqual(wf["115:111"]["inputs"]["image3"], ["923", 0])
+        self.assertNotIn("image3", wf["115:111"]["inputs"])
+        self.assertNotIn("923", wf)
         self.assertNotIn("932", wf)
+        self.assertEqual(json.loads(fields[MULTI_REFERENCE_IMAGES_FIELD]), ["a.png", "b.png"])
         self.assertEqual(validate_api_prompt(wf), [])
 
     def test_flux2_chains_reference_latents_for_multi_reference_mode(self):
@@ -84,6 +85,22 @@ class MultiReferenceWorkflowTests(unittest.TestCase):
         self.assertEqual(wf["22"]["inputs"]["conditioning"], ["148", 0])
         self.assertEqual(validate_api_prompt(wf), [])
 
+    def test_flux2_removes_stale_third_reference_nodes_when_only_two_images_are_used(self):
+        wf = _load_workflow("i2i_flux2_dev_turbo_q4km.json")
+        fields = {
+            f"40::{IMAGE_REFERENCE_MODE_FIELD}": "multi",
+            f"40::{MULTI_REFERENCE_IMAGES_FIELD}": json.dumps(["a.png", "b.png"]),
+        }
+
+        apply_multi_reference_image_mode_to_workflow(wf, fields, "i2i_flux2_dev_turbo_q4km.json")
+
+        self.assertEqual(wf["40"]["inputs"]["image"], "a.png")
+        self.assertEqual(wf["140"]["inputs"]["image"], "b.png")
+        self.assertEqual(wf["22"]["inputs"]["conditioning"], ["143", 0])
+        for node_id in ("145", "146", "147", "148"):
+            self.assertNotIn(node_id, wf)
+        self.assertEqual(validate_api_prompt(wf), [])
+
     def test_single_reference_mode_removes_extra_qwen_image_links(self):
         wf = _load_workflow("i2i-Qwen-Edit-v2511.json")
         wf = copy.deepcopy(wf)
@@ -93,6 +110,8 @@ class MultiReferenceWorkflowTests(unittest.TestCase):
         apply_multi_reference_image_mode_to_workflow(wf, fields, "i2i-Qwen-Edit-v2511.json")
 
         self.assertNotIn("image2", wf["170:151"]["inputs"])
+        for node_id in ("922", "923", "932", "933"):
+            self.assertNotIn(node_id, wf)
         self.assertEqual(validate_api_prompt(wf), [])
 
     def test_multi_reference_mode_requires_at_least_two_images(self):
@@ -107,16 +126,19 @@ class MultiReferenceWorkflowTests(unittest.TestCase):
 
     def test_supported_configs_expose_single_multi_switch_fields(self):
         expected = {
-            "i2i-Qwen-Edit-v2511.json": "41",
-            "i2i-FireRed-Edit-8step.json": "143",
-            "i2i_flux2_dev_turbo_q4km.json": "40",
-            "i2i-Qwen-Rapid.json": "78",
-            "i2i-Qwen-Rapid-Q2.json": "78",
-            "i2i-Qwen-Rapid-seedVR2-4k.json": "78",
+            "i2i-Qwen-Edit-v2511.json": ("41", 2),
+            "i2i-FireRed-Edit-8step.json": ("143", 3),
+            "i2i_flux2_dev_turbo_q4km.json": ("40", 3),
+            "i2i-Qwen-Rapid.json": ("78", 2),
+            "i2i-Qwen-Rapid-Q2.json": ("78", 2),
+            "i2i-Qwen-Rapid-seedVR2-4k.json": ("78", 2),
         }
-        for name, primary in expected.items():
+        for name, (primary, max_refs) in expected.items():
             with self.subTest(name=name):
                 config = json.loads((CONFIG_DIR / name).read_text(encoding="utf-8"))
-                keys = [item.get("key") for item in config.get("fields", [])]
+                fields = config.get("fields", [])
+                keys = [item.get("key") for item in fields]
                 self.assertIn(f"{primary}::{IMAGE_REFERENCE_MODE_FIELD}", keys)
                 self.assertIn(f"{primary}::{MULTI_REFERENCE_IMAGES_FIELD}", keys)
+                multi_field = next(item for item in fields if item.get("key") == f"{primary}::{MULTI_REFERENCE_IMAGES_FIELD}")
+                self.assertEqual(multi_field.get("max"), max_refs)

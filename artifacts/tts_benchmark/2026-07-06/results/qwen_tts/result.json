@@ -1,0 +1,74 @@
+{
+  "engine": "qwen_tts",
+  "text": "今天我们测试本地语音合成服务的速度、稳定性和自然度，看看哪一个更适合实时对话场景。",
+  "text_chars": 41,
+  "reference_audio": "/workspace/tts/reference/qwen_clone.wav",
+  "reference_text": "Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.",
+  "rounds": [
+    {
+      "round": 1,
+      "output": "/workspace/tts/results/qwen_tts/qwen_tts_round1.wav",
+      "elapsed_s": 10.0324,
+      "audio_duration_s": 7.92,
+      "rtf": 1.2667,
+      "chars_per_s": 4.0868,
+      "audio_stats": {
+        "sr": 24000,
+        "duration_s": 7.92,
+        "rms": 0.038073,
+        "peak": 0.425781,
+        "clip_pct": 0.0,
+        "silence_pct": 11.4636
+      }
+    },
+    {
+      "round": 2,
+      "output": "/workspace/tts/results/qwen_tts/qwen_tts_round2.wav",
+      "elapsed_s": 4.6093,
+      "audio_duration_s": 7.68,
+      "rtf": 0.6002,
+      "chars_per_s": 8.895,
+      "audio_stats": {
+        "sr": 24000,
+        "duration_s": 7.68,
+        "rms": 0.0582,
+        "peak": 0.585938,
+        "clip_pct": 0.0,
+        "silence_pct": 7.0171
+      }
+    },
+    {
+      "round": 3,
+      "output": "/workspace/tts/results/qwen_tts/qwen_tts_round3.wav",
+      "elapsed_s": 3.9237,
+      "audio_duration_s": 6.48,
+      "rtf": 0.6055,
+      "chars_per_s": 10.4494,
+      "audio_stats": {
+        "sr": 24000,
+        "duration_s": 6.48,
+        "rms": 0.044015,
+        "peak": 0.349609,
+        "clip_pct": 0.0,
+        "silence_pct": 6.7676
+      }
+    }
+  ],
+  "errors": [],
+  "load_s": 59.2842,
+  "summary": {
+    "mean_elapsed_s": 6.1885,
+    "stdev_elapsed_s": 2.7324,
+    "mean_audio_duration_s": 7.36,
+    "stdev_audio_duration_s": 0.6299,
+    "mean_rtf": 0.8241,
+    "stdev_rtf": 0.3129,
+    "mean_chars_per_s": 7.8104,
+    "stdev_chars_per_s": 2.7084,
+    "mean_rms": 0.046763,
+    "mean_peak": 0.453776,
+    "mean_clip_pct": 0.0,
+    "mean_silence_pct": 8.4161,
+    "sample_rate": 24000
+  }
+}

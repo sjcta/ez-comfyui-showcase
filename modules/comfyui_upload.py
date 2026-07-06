@@ -66,6 +66,8 @@ def workflow_load_images(workflow: dict[str, Any]) -> list[str]:
             add_media(inputs.get(input_name))
         if class_type == "LTXDirector":
             add_director_timeline(inputs.get("timeline_data"))
+        if class_type == "EZ_TTS_Service":
+            add_media(inputs.get("reference_audio"))
     return media
 
 

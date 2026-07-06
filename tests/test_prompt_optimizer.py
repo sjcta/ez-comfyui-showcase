@@ -18,6 +18,7 @@ from modules.prompt_optimizer import (
     normalize_interrogated_chinese_prompt,
     normalize_language_switch_prompt,
     normalize_translated_prompt,
+    run_llm_prompt_language_switcher,
     parse_prompt_optimizer_output,
     parse_video_script_optimizer_output,
     run_llm_prompt_optimizer,
@@ -184,11 +185,24 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertEqual(workflow["1"]["class_type"], "Qwen3_VQA")
         self.assertIn("Translate the following image-generation prompt into English", workflow["1"]["inputs"]["text"])
         self.assertIn("keep a valid JSON object with the same keys and structure", workflow["1"]["inputs"]["text"])
+        self.assertIn("Do not summarize, shorten, merge away, or omit any prompt phrase", workflow["1"]["inputs"]["text"])
         self.assertIn("切成片的西瓜", workflow["1"]["inputs"]["text"])
         self.assertEqual(workflow["1"]["inputs"]["model"], "Qwen3-VL-4B-Instruct")
         self.assertEqual(workflow["1"]["inputs"]["quantization"], "4bit")
         self.assertTrue(workflow["1"]["inputs"]["keep_model_loaded"])
         self.assertEqual(workflow["2"]["inputs"]["text"], ["1", 0])
+
+    def test_build_qwen_prompt_language_switch_workflow_raises_long_plain_text_budget(self):
+        prompt = (
+            "人物：年轻女性，棕色长发，白色露肩连衣裙，佩戴精致项链；"
+            "场景：柔和卧室自然光，窗边白色纱帘，浅色床品，背景轻微虚化；"
+            "构图：半身近景，视线看向镜头，手持棒棒糖贴近脸颊；"
+            "光影：暖色柔光，皮肤质感自然，眼神高光清晰；"
+            "风格：写实摄影，浅景深，干净商业写真质感。"
+        )
+        workflow = build_qwen_prompt_language_switch_workflow(prompt, "en", max_new_tokens=256)
+
+        self.assertGreaterEqual(workflow["1"]["inputs"]["max_new_tokens"], 768)
 
     def test_build_qwen_prompt_language_switch_workflow_raises_json_token_budget(self):
         prompt = json.dumps(
@@ -783,6 +797,31 @@ class PromptOptimizerTests(unittest.TestCase):
         self.assertIn("Do not reason", calls[0]["messages"][0]["content"])
         self.assertEqual(calls[0]["messages"][1]["role"], "user")
         self.assertIn("白色杯子", result["optimized_prompt"])
+
+    def test_llm_prompt_language_switcher_uses_expanded_budget_for_long_prompt(self):
+        calls = []
+        prompt = (
+            "人物：年轻女性，棕色长发，白色露肩连衣裙，佩戴精致项链；"
+            "场景：柔和卧室自然光，窗边白色纱帘，浅色床品，背景轻微虚化；"
+            "构图：半身近景，视线看向镜头，手持棒棒糖贴近脸颊；"
+            "光影：暖色柔光，皮肤质感自然，眼神高光清晰；"
+            "风格：写实摄影，浅景深，干净商业写真质感。"
+        )
+
+        def fake_chat(messages, **kwargs):
+            calls.append({"messages": messages, **kwargs})
+            return (
+                "young woman with long brown hair, white off-shoulder dress, delicate necklace, "
+                "soft bedroom natural light, white sheer curtains, pale bedding, softly blurred background, "
+                "half-body close-up, looking at the camera, holding a lollipop near her cheek, warm soft light, "
+                "natural skin texture, clear eye highlights, realistic photography, shallow depth of field, clean commercial portrait quality"
+            )
+
+        result = run_llm_prompt_language_switcher(prompt, "en", chat_fn=fake_chat, max_new_tokens=256)
+
+        self.assertGreaterEqual(calls[0]["max_tokens"], 768)
+        self.assertIn("Do not summarize, shorten, merge away, or omit any prompt phrase", calls[0]["messages"][1]["content"])
+        self.assertIn("white sheer curtains", result["translated_prompt"])
 
     def test_api_prompt_translate_auto_targets_english_for_chinese_prompt(self):
         calls = []

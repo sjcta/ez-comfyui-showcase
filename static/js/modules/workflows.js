@@ -56,11 +56,27 @@
     return previews;
   }
 
+  function _workflowPreviewMediaType(item) {
+    var explicit = String(item && (item.media_type || item.type) || '').toLowerCase();
+    if (explicit === 'image' || explicit === 'video' || explicit === 'audio') return explicit;
+    var filename = String(item && (item.filename || item.image || item.image_path || '') || '');
+    if (/\.(wav|flac|mp3|m4a|aac|ogg|opus)(?:[?#].*)?$/i.test(filename)) return 'audio';
+    if (/\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i.test(filename)) return 'video';
+    if (/\.(png|jpe?g|webp|gif|bmp|avif)(?:[?#].*)?$/i.test(filename)) return 'image';
+    return '';
+  }
+
+  function _isWorkflowPreviewImagePath(path) {
+    return /\.(png|jpe?g|webp|gif|bmp|avif)(?:[?#].*)?$/i.test(String(path || ''));
+  }
+
   function _workflowPreviewImageUrl(item) {
     if (!item) return '';
     if (item.thumb) return API + '/api/thumbs/' + item.thumb;
-    if (item.filename) return API + '/api/images/' + item.filename;
-    if (item.image) return API + '/api/images/' + item.image;
+    var mediaType = _workflowPreviewMediaType(item);
+    var filename = item.filename || item.image || '';
+    if (mediaType && mediaType !== 'image') return '';
+    if (filename && _isWorkflowPreviewImagePath(filename)) return API + '/api/images/' + filename;
     return '';
   }
 
@@ -109,13 +125,18 @@
     if (currentUser && job.user_id && String(job.user_id) !== String(currentUid || '')) return;
     if (!currentUser && job.user_id) return;
 
-    var info = _workflowPreviewInfo(job.workflow, null, {});
-    info.src = _workflowPreviewImageUrl({
+    var meta = (A._wfMeta || {})[job.workflow] || {};
+    var info = _workflowPreviewInfo(job.workflow, meta, {});
+    var jobSrc = _workflowPreviewImageUrl({
       thumb: job.thumb || '',
       filename: job.image || '',
       image: job.image || '',
+      media_type: job.media_type || '',
     });
-    info.sensitive = _isSensitiveWorkflowPreview(job, job.prompt_preview || job.prompt || '');
+    if (jobSrc) {
+      info.src = jobSrc;
+      info.sensitive = _isSensitiveWorkflowPreview(job, job.prompt_preview || job.prompt || '');
+    }
     var cards = document.querySelectorAll('.wf-card[data-name]');
     cards.forEach(function(card) {
       if (card.getAttribute('data-name') !== job.workflow) return;
@@ -835,9 +856,9 @@ async function selectWF(name) {
       genTitle.style.display = '';
       genTitle.classList.add('is-open');
       if (genTitleText) {
-        genTitleText.textContent = displayName + ' 快速出图';
+        genTitleText.textContent = displayName + ' 任务面板';
       } else {
-        genTitle.textContent = displayName + ' 快速出图';
+        genTitle.textContent = displayName + ' 任务面板';
       }
       var genArrow = $('#genArrow');
       if (genArrow) genArrow.textContent = '\u25B4';

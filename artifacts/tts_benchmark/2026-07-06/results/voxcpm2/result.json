@@ -1,0 +1,74 @@
+{
+  "engine": "voxcpm2",
+  "text": "今天我们测试本地语音合成服务的速度、稳定性和自然度，看看哪一个更适合实时对话场景。",
+  "text_chars": 41,
+  "reference_audio": "/workspace/tts/reference/qwen_clone.wav",
+  "reference_text": "Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.",
+  "rounds": [
+    {
+      "round": 1,
+      "output": "/workspace/tts/results/voxcpm2/voxcpm2_round1.wav",
+      "elapsed_s": 10.8913,
+      "audio_duration_s": 6.4,
+      "rtf": 1.7018,
+      "chars_per_s": 3.7645,
+      "audio_stats": {
+        "sr": 48000,
+        "duration_s": 6.4,
+        "rms": 0.116627,
+        "peak": 0.947113,
+        "clip_pct": 0.0,
+        "silence_pct": 12.929
+      }
+    },
+    {
+      "round": 2,
+      "output": "/workspace/tts/results/voxcpm2/voxcpm2_round2.wav",
+      "elapsed_s": 11.0422,
+      "audio_duration_s": 6.88,
+      "rtf": 1.605,
+      "chars_per_s": 3.713,
+      "audio_stats": {
+        "sr": 48000,
+        "duration_s": 6.88,
+        "rms": 0.102939,
+        "peak": 0.85199,
+        "clip_pct": 0.0,
+        "silence_pct": 7.6741
+      }
+    },
+    {
+      "round": 3,
+      "output": "/workspace/tts/results/voxcpm2/voxcpm2_round3.wav",
+      "elapsed_s": 12.1252,
+      "audio_duration_s": 7.52,
+      "rtf": 1.6124,
+      "chars_per_s": 3.3814,
+      "audio_stats": {
+        "sr": 48000,
+        "duration_s": 7.52,
+        "rms": 0.075897,
+        "peak": 0.873596,
+        "clip_pct": 0.0,
+        "silence_pct": 8.9747
+      }
+    }
+  ],
+  "errors": [],
+  "load_s": 23.8106,
+  "summary": {
+    "mean_elapsed_s": 11.3529,
+    "stdev_elapsed_s": 0.5496,
+    "mean_audio_duration_s": 6.9333,
+    "stdev_audio_duration_s": 0.4588,
+    "mean_rtf": 1.6397,
+    "stdev_rtf": 0.044,
+    "mean_chars_per_s": 3.6196,
+    "stdev_chars_per_s": 0.1698,
+    "mean_rms": 0.098488,
+    "mean_peak": 0.8909,
+    "mean_clip_pct": 0.0,
+    "mean_silence_pct": 9.859267,
+    "sample_rate": 48000
+  }
+}

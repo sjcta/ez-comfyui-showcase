@@ -771,6 +771,66 @@
     "thumbnail": "ez-comfy/t2i_z_image_AIO_8step.jpeg",
     "sort_order": 9
   },
+  "tts_higgs_audio_v3.json": {
+    "name": "Higgs Audio v3 TTS",
+    "tags": [
+      "语音TTS",
+      "音频",
+      "TTS",
+      "Higgs Audio"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "EZ Audio Bridge + dedicated local TTS services",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/tts_higgs_audio_v3.json",
+    "thumbnail": "DGX Spark/tts_higgs_audio_v3.png",
+    "sort_order": 59
+  },
+  "tts_indextts2.json": {
+    "name": "Index TTS 2",
+    "tags": [
+      "语音TTS",
+      "音频",
+      "TTS",
+      "IndexTTS2"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "EZ Audio Bridge + dedicated local TTS services",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/tts_indextts2.json",
+    "thumbnail": "DGX Spark/tts_indextts2.webp",
+    "sort_order": 58
+  },
+  "tts_qwen_tts.json": {
+    "name": "千问3-TTS",
+    "tags": [
+      "语音TTS",
+      "音频",
+      "TTS",
+      "Qwen"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "EZ Audio Bridge + dedicated local TTS services",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/tts_qwen_tts.json",
+    "thumbnail": "DGX Spark/tts_qwen_tts.png",
+    "sort_order": 56
+  },
+  "tts_voxcpm2.json": {
+    "name": "VoxCPM2 TTS",
+    "tags": [
+      "语音TTS",
+      "音频",
+      "TTS",
+      "VoxCPM2"
+    ],
+    "owner_id": "1ec621fd",
+    "shared": true,
+    "source": "EZ Audio Bridge + dedicated local TTS services",
+    "source_path": "/Users/ai/projects/ez-comfyui-showcase/data/workflows/DGX Spark/tts_voxcpm2.json",
+    "thumbnail": "DGX Spark/tts_voxcpm2.jpg",
+    "sort_order": 57
+  },
   "v1.json": {
     "name": "v1",
     "tags": [

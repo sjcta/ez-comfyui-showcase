@@ -1,4 +1,4 @@
-"""Helpers for selecting ComfyUI image/video outputs."""
+"""Helpers for selecting ComfyUI image/video/audio outputs."""
 
 from __future__ import annotations
 
@@ -8,13 +8,19 @@ from typing import Any
 
 IMAGE_OUTPUT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 VIDEO_OUTPUT_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
-MEDIA_OUTPUT_EXTS = IMAGE_OUTPUT_EXTS | VIDEO_OUTPUT_EXTS
+AUDIO_OUTPUT_EXTS = {".wav", ".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus"}
+MEDIA_OUTPUT_EXTS = IMAGE_OUTPUT_EXTS | VIDEO_OUTPUT_EXTS | AUDIO_OUTPUT_EXTS
 VIDEO_OUTPUT_KEYS = ("videos", "gifs", "animated")
+AUDIO_OUTPUT_KEYS = ("audio", "audios")
 SAVE_OUTPUT_CLASSES = (
     "SaveImage",
     "SaveVideo",
     "VHS_VideoCombine",
     "VHS_SaveVideo",
+    "SaveAudio",
+    "SaveAudioAdvanced",
+    "SaveAudioMP3",
+    "SaveAudioOpus",
 )
 
 
@@ -22,6 +28,8 @@ def output_media_type(filename: str) -> str:
     ext = os.path.splitext(str(filename or ""))[1].lower()
     if ext in VIDEO_OUTPUT_EXTS:
         return "video"
+    if ext in AUDIO_OUTPUT_EXTS:
+        return "audio"
     return "image"
 
 
@@ -31,6 +39,10 @@ def is_image_output(filename: str) -> bool:
 
 def is_video_output(filename: str) -> bool:
     return os.path.splitext(str(filename or ""))[1].lower() in VIDEO_OUTPUT_EXTS
+
+
+def is_audio_output(filename: str) -> bool:
+    return os.path.splitext(str(filename or ""))[1].lower() in AUDIO_OUTPUT_EXTS
 
 
 def is_media_output(filename: str) -> bool:
@@ -95,6 +107,9 @@ def _prefer_media(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     videos = [ref for ref in refs if is_video_output(ref.get("filename", ""))]
     if videos:
         return videos
+    audios = [ref for ref in refs if is_audio_output(ref.get("filename", ""))]
+    if audios:
+        return audios
     return [ref for ref in refs if is_image_output(ref.get("filename", ""))]
 
 
@@ -104,7 +119,7 @@ def collect_preferred_outputs(
 ) -> list[dict[str, Any]]:
     """Return saved output media first, then fall back to video/image preference."""
     all_media = [
-        ref for ref in _iter_refs(outputs, VIDEO_OUTPUT_KEYS + ("images",))
+        ref for ref in _iter_refs(outputs, VIDEO_OUTPUT_KEYS + AUDIO_OUTPUT_KEYS + ("images",))
         if is_media_output(ref.get("filename", ""))
     ]
     save_node_ids = _save_output_node_ids(workflow)
@@ -137,7 +152,7 @@ def collect_legacy_preferred_outputs(outputs: dict[str, Any]) -> list[dict[str, 
         return videos
 
     image_key_media = [
-        ref for ref in _iter_refs(outputs, ("images",))
+        ref for ref in _iter_refs(outputs, AUDIO_OUTPUT_KEYS + ("images",))
         if is_media_output(ref.get("filename", ""))
     ]
     image_key_videos = [
@@ -146,6 +161,12 @@ def collect_legacy_preferred_outputs(outputs: dict[str, Any]) -> list[dict[str, 
     ]
     if image_key_videos:
         return image_key_videos
+    image_key_audio = [
+        ref for ref in image_key_media
+        if is_audio_output(ref.get("filename", ""))
+    ]
+    if image_key_audio:
+        return image_key_audio
 
     return [
         ref for ref in image_key_media

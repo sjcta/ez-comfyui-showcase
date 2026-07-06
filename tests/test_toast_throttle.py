@@ -79,10 +79,10 @@ class ToastThrottleTest(unittest.TestCase):
 
             vm.runInThisContext(fs.readFileSync('static/js/modules/ui.js', 'utf8'));
             window.CW.toast('abc 文生图 开始出图', 'generating');
-            window.CW.toast('abc 文生图 排队中', 'queued');
-            window.CW.toast('abc 文生图 出图中', 'generating');
+            window.CW.toast('abc 文生图 任务排队中', 'queued');
+            window.CW.toast('abc 文生图 任务执行中', 'generating');
             window.CW.toast('abc 文生图 拉取图片', 'queued');
-            window.CW.toast('abc 文生图 结束出图', 'done');
+            window.CW.toast('abc 文生图 任务成功', 'done');
 
             const container = elements.toastContainer;
             console.log(JSON.stringify({
@@ -103,9 +103,9 @@ class ToastThrottleTest(unittest.TestCase):
         data = json.loads(result.stdout.strip())
 
         self.assertEqual(data["count"], 1)
-        self.assertFalse(any("排队中" in msg for msg in data["messages"]))
-        self.assertFalse(any("出图中" in msg for msg in data["messages"]))
-        self.assertTrue(any("结束出图" in msg for msg in data["messages"]))
+        self.assertFalse(any("任务排队中" in msg for msg in data["messages"]))
+        self.assertFalse(any("任务执行中" in msg for msg in data["messages"]))
+        self.assertTrue(any("任务成功" in msg for msg in data["messages"]))
         self.assertEqual(data["scopes"], ["generation"])
         self.assertFalse(any("开始出图" in msg for msg in data["messages"]))
         self.assertFalse(any("拉取图片" in msg for msg in data["messages"]))

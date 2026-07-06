@@ -33,6 +33,20 @@ class ComfyUIUploadTest(unittest.TestCase):
             ],
         )
 
+    def test_collects_tts_reference_audio_paths(self):
+        workflow = {
+            "1": {
+                "class_type": "EZ_TTS_Service",
+                "inputs": {
+                    "engine": "voxcpm2",
+                    "reference_audio": "u1/2026-07-06/ref.wav",
+                },
+            },
+            "2": {"class_type": "SaveAudio", "inputs": {"audio": ["1", 0]}},
+        }
+
+        self.assertEqual(workflow_load_images(workflow), ["u1/2026-07-06/ref.wav"])
+
     def test_collects_ltx_director_timeline_media(self):
         workflow = {
             "1": {

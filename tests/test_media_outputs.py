@@ -138,6 +138,25 @@ class MediaOutputsTest(unittest.TestCase):
 
         self.assertEqual([item["filename"] for item in selected], ["saved-output.png"])
 
+    def test_save_audio_output_is_collected(self):
+        workflow = {
+            "1": {"class_type": "EZ_TTS_Service"},
+            "2": {"class_type": "SaveAudio"},
+        }
+        outputs = {
+            "2": {
+                "audio": [
+                    {"filename": "ez_tts_00001.flac", "subfolder": "tts", "type": "output"},
+                ],
+            },
+        }
+
+        selected = collect_preferred_outputs(outputs, workflow=workflow)
+
+        self.assertEqual([item["filename"] for item in selected], ["ez_tts_00001.flac"])
+        self.assertEqual(output_media_type(selected[0]["filename"]), "audio")
+        self.assertEqual(output_ref_rel_path(selected[0]), "tts/ez_tts_00001.flac")
+
 
 if __name__ == "__main__":
     unittest.main()

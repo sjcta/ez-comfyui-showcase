@@ -1,0 +1,74 @@
+{
+  "engine": "higgs_audio_v3",
+  "text": "今天我们测试本地语音合成服务的速度、稳定性和自然度，看看哪一个更适合实时对话场景。",
+  "text_chars": 41,
+  "reference_audio": "/workspace/tts/reference/qwen_clone.wav",
+  "reference_text": "Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.",
+  "rounds": [
+    {
+      "round": 1,
+      "output": "/workspace/tts/results/higgs_audio_v3/higgs_audio_v3_round1.wav",
+      "elapsed_s": 47.3166,
+      "audio_duration_s": 7.4,
+      "rtf": 6.3941,
+      "chars_per_s": 0.8665,
+      "audio_stats": {
+        "sr": 24000,
+        "duration_s": 7.4,
+        "rms": 0.078131,
+        "peak": 0.61084,
+        "clip_pct": 0.0,
+        "silence_pct": 4.8243
+      }
+    },
+    {
+      "round": 2,
+      "output": "/workspace/tts/results/higgs_audio_v3/higgs_audio_v3_round2.wav",
+      "elapsed_s": 10.9234,
+      "audio_duration_s": 8.44,
+      "rtf": 1.2942,
+      "chars_per_s": 3.7534,
+      "audio_stats": {
+        "sr": 24000,
+        "duration_s": 8.44,
+        "rms": 0.071722,
+        "peak": 0.551636,
+        "clip_pct": 0.0,
+        "silence_pct": 9.998
+      }
+    },
+    {
+      "round": 3,
+      "output": "/workspace/tts/results/higgs_audio_v3/higgs_audio_v3_round3.wav",
+      "elapsed_s": 10.3503,
+      "audio_duration_s": 7.96,
+      "rtf": 1.3003,
+      "chars_per_s": 3.9612,
+      "audio_stats": {
+        "sr": 24000,
+        "duration_s": 7.96,
+        "rms": 0.073953,
+        "peak": 0.518402,
+        "clip_pct": 0.0,
+        "silence_pct": 7.2686
+      }
+    }
+  ],
+  "errors": [],
+  "load_s": 411.6638,
+  "summary": {
+    "mean_elapsed_s": 22.8634,
+    "stdev_elapsed_s": 17.2926,
+    "mean_audio_duration_s": 7.9333,
+    "stdev_audio_duration_s": 0.425,
+    "mean_rtf": 2.9962,
+    "stdev_rtf": 2.4027,
+    "mean_chars_per_s": 2.8604,
+    "stdev_chars_per_s": 1.4124,
+    "mean_rms": 0.074602,
+    "mean_peak": 0.560293,
+    "mean_clip_pct": 0.0,
+    "mean_silence_pct": 7.363633,
+    "sample_rate": 24000
+  }
+}

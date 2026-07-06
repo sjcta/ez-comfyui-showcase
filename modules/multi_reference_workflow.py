@@ -32,6 +32,10 @@ MULTI_REFERENCE_IMAGE_WORKFLOWS = (
     | FLUX2_MULTI_REFERENCE_WORKFLOWS
 )
 
+QWEN_TWO_REFERENCE_WORKFLOWS = {
+    "i2i-Qwen-Edit-v2511.json",
+} | QWEN_RAPID_MULTI_REFERENCE_WORKFLOWS
+
 
 def _base_name(workflow_name: str | os.PathLike[str] | None) -> str:
     return os.path.basename(str(workflow_name or ""))
@@ -48,7 +52,14 @@ def _field_value(field_values: dict[str, Any] | None, field_name: str, default: 
     return default
 
 
-def _parse_reference_images(value: Any) -> list[str]:
+def _workflow_multi_reference_limit(workflow_name: str | os.PathLike[str] | None) -> int:
+    base = _base_name(workflow_name)
+    if base in QWEN_TWO_REFERENCE_WORKFLOWS:
+        return 2
+    return MAX_MULTI_REFERENCE_IMAGES
+
+
+def _parse_reference_images(value: Any, max_images: int = MAX_MULTI_REFERENCE_IMAGES) -> list[str]:
     if value is None:
         return []
     raw = value
@@ -68,7 +79,8 @@ def _parse_reference_images(value: Any) -> list[str]:
         ref = str(item or "").strip()
         if ref and ref not in refs:
             refs.append(ref)
-    return refs[:MAX_MULTI_REFERENCE_IMAGES]
+    limit = max(1, min(int(max_images or MAX_MULTI_REFERENCE_IMAGES), MAX_MULTI_REFERENCE_IMAGES))
+    return refs[:limit]
 
 
 def _reference_mode(field_values: dict[str, Any] | None, refs: list[str]) -> str:
@@ -111,6 +123,31 @@ def _ensure_node(workflow: dict[str, Any], node_id: str, class_type: str, inputs
     node.setdefault("_meta", {}).setdefault("title", title)
 
 
+def _remove_qwen_extra_reference_nodes(
+    workflow: dict[str, Any],
+    field_values: dict[str, Any],
+    start_index: int,
+) -> None:
+    for idx in range(max(2, start_index), MAX_MULTI_REFERENCE_IMAGES + 1):
+        load_id = str(920 + idx)
+        scale_id = str(930 + idx)
+        workflow.pop(load_id, None)
+        workflow.pop(scale_id, None)
+        field_values.pop(f"{load_id}::image", None)
+
+
+def _remove_flux2_extra_reference_nodes(
+    workflow: dict[str, Any],
+    field_values: dict[str, Any],
+    start_index: int,
+) -> None:
+    for idx in range(max(2, start_index), MAX_MULTI_REFERENCE_IMAGES + 1):
+        base = 140 + (idx - 2) * 5
+        for node_id in range(base, base + 4):
+            workflow.pop(str(node_id), None)
+        field_values.pop(f"{base}::image", None)
+
+
 def _apply_qwen_edit_plus_references(
     workflow: dict[str, Any],
     field_values: dict[str, Any],
@@ -124,12 +161,15 @@ def _apply_qwen_edit_plus_references(
         for field in ("image2", "image3"):
             inputs.pop(field, None)
 
+    active_count = len(refs) if mode == "multi" else 1
+    _remove_qwen_extra_reference_nodes(workflow, field_values, active_count + 1)
+
     if mode != "multi":
         return
     if len(refs) < 2:
         raise ValueError("多图模式至少需要 2 张参考图")
 
-    for idx, image_name in enumerate(refs[1:MAX_MULTI_REFERENCE_IMAGES], start=2):
+    for idx, image_name in enumerate(refs[1:], start=2):
         load_id = str(920 + idx)
         scale_id = str(930 + idx)
         _ensure_node(
@@ -171,12 +211,15 @@ def _apply_qwen_rapid_references(
         for field in ("image2", "image3"):
             inputs.pop(field, None)
 
+    active_count = len(refs) if mode == "multi" else 1
+    _remove_qwen_extra_reference_nodes(workflow, field_values, active_count + 1)
+
     if mode != "multi":
         return
     if len(refs) < 2:
         raise ValueError("多图模式至少需要 2 张参考图")
 
-    for idx, image_name in enumerate(refs[1:MAX_MULTI_REFERENCE_IMAGES], start=2):
+    for idx, image_name in enumerate(refs[1:], start=2):
         load_id = str(920 + idx)
         _ensure_node(
             workflow,
@@ -217,13 +260,16 @@ def _apply_flux2_multi_references(
         return
 
     workflow[guider_id].setdefault("inputs", {})["conditioning"] = [base_ref_id, 0]
+    active_count = len(refs) if mode == "multi" else 1
+    _remove_flux2_extra_reference_nodes(workflow, field_values, active_count + 1)
+
     if mode != "multi":
         return
     if len(refs) < 2:
         raise ValueError("多图模式至少需要 2 张参考图")
 
     tail_id = base_ref_id
-    for idx, image_name in enumerate(refs[1:MAX_MULTI_REFERENCE_IMAGES], start=2):
+    for idx, image_name in enumerate(refs[1:], start=2):
         base = 140 + (idx - 2) * 5
         load_id = str(base)
         scale_id = str(base + 1)
@@ -282,7 +328,8 @@ def apply_multi_reference_image_mode_to_workflow(
     if not isinstance(workflow, dict) or not isinstance(field_values, dict):
         return
 
-    refs = _parse_reference_images(_field_value(field_values, MULTI_REFERENCE_IMAGES_FIELD, ""))
+    max_refs = _workflow_multi_reference_limit(base)
+    refs = _parse_reference_images(_field_value(field_values, MULTI_REFERENCE_IMAGES_FIELD, ""), max_refs)
     mode = _reference_mode(field_values, refs)
     field_values[IMAGE_REFERENCE_MODE_FIELD] = mode
     field_values[MULTI_REFERENCE_IMAGES_FIELD] = json.dumps(refs, ensure_ascii=False)

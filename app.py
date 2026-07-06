@@ -44,7 +44,7 @@ from modules.image_protection import (
 from modules.instance_manager import InstanceManager, InstanceHealth
 import modules.instance_picker as mod_picker
 from modules.job_runner import JobRunner, _workflow_track_timeout
-from modules.media_outputs import collect_preferred_history_outputs, output_media_type, output_ref_rel_path, is_image_output
+from modules.media_outputs import collect_preferred_history_outputs, output_media_type, output_ref_rel_path, is_audio_output, is_image_output
 from modules.llm_client import LLMVisionUnsupportedError, chat_completion, chat_text, configure_llm_client, llm_provider_name
 from modules.multi_reference_workflow import apply_multi_reference_image_mode_to_workflow
 from modules.prompt_interrogator import (
@@ -303,7 +303,7 @@ NODES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", 
 
 
 def _friendly_generation_error(err: Exception) -> str:
-    text = str(err)
+    text = str(err).replace("出图失败", "任务失败").replace("出图中", "任务执行中").replace("结束出图", "任务成功")
     if "Connection refused" in text or "Errno 61" in text or "Errno 111" in text:
         return "ComfyUI 连接被拒绝，请检查出图实例是否仍在运行"
     if "timed out" in text or "TimeoutError" in text:
@@ -1509,6 +1509,13 @@ def _image_media_type(path: str, default: str = "application/octet-stream") -> s
         ".m4v": "video/mp4",
         ".webm": "video/webm",
         ".mov": "video/quicktime",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/ogg",
     }.get(ext, default)
 
 # ── Generation SQLite Database ──
@@ -2493,17 +2500,19 @@ def _workflow_custom_display_name(filename: str) -> str:
 def _insert_generation(record: dict, elapsed: float, user_id: str = ""):
     """Insert a generation record into SQLite."""
     try:
-        if not record.get("thumb") and record.get("filename"):
-            record["thumb"] = make_thumbnail(record.get("filename", "")) or ""
         media_type = str(record.get("media_type") or output_media_type(record.get("filename", "")))
-        if media_type not in {"image", "video"}:
+        if media_type not in {"image", "video", "audio"}:
             media_type = output_media_type(record.get("filename", ""))
+        if media_type in {"image", "video"} and not record.get("thumb") and record.get("filename"):
+            record["thumb"] = make_thumbnail(record.get("filename", "")) or ""
         actual_w, actual_h = get_media_size(record.get("filename", ""), media_type, record.get("thumb", ""))
         if actual_w and actual_h:
             record["width"] = actual_w
             record["height"] = actual_h
         conn = sqlite3.connect(GEN_DB)
         protection_status = str(record.get("protection_status") or IMAGE_PROTECTION_SAFE)
+        if media_type == "audio":
+            protection_status = IMAGE_PROTECTION_SAFE
         if protection_status not in {IMAGE_PROTECTION_PENDING, IMAGE_PROTECTION_SAFE, IMAGE_PROTECTION_PROTECTED, IMAGE_PROTECTION_ERROR}:
             protection_status = IMAGE_PROTECTION_PENDING
         conn.execute(
@@ -4589,6 +4598,8 @@ def _looks_like_seed_field(ct: str, title: str, field: str) -> bool:
 
 
 def _seed_limits_for_field(class_type: str, field: str) -> tuple[int, int] | None:
+    if class_type == "EZ_TTS_Service" and field == "seed":
+        return (0, 2147483647)
     if class_type == "SeedVR2VideoUpscaler" and field == "seed":
         return (0, 4294967295)
     if class_type in ("FlashVSRNode", "FlashVSRNodeAdv") and field == "seed":
@@ -4902,6 +4913,21 @@ BOOGU_I2I_RECOMMENDED_2K_SIZES: tuple[tuple[int, int], ...] = (
 )
 _BOOGU_I2I_REWRITE_CACHE: OrderedDict[str, str] = OrderedDict()
 _BOOGU_I2I_REWRITE_CACHE_MAX = 64
+VOXCPM2_TTS_WORKFLOWS = {"tts_voxcpm2.json"}
+VOXCPM2_CHINESE_DIALECTS = {
+    "四川话",
+    "粤语",
+    "吴语",
+    "东北话",
+    "河南话",
+    "陕西话",
+    "山东话",
+    "天津话",
+    "闽南话",
+}
+VOXCPM2_DIALECT_REWRITE_VERSION = "2026-07-06-v1"
+_VOXCPM2_DIALECT_REWRITE_CACHE: OrderedDict[tuple[str, str], str] = OrderedDict()
+_VOXCPM2_DIALECT_REWRITE_CACHE_MAX = 80
 
 
 def _official_ernie_size_for_aspect(width: int, height: int) -> tuple[int, int]:
@@ -6593,6 +6619,141 @@ def _normalize_boogu_i2i_prompt(workflow_name: str, wf: dict, field_values: dict
     field_values[prompt_key] = instruction_used
 
 
+def _voxcpm2_dialect_rewrite_cache_get(dialect: str, text: str) -> str:
+    key = (str(dialect or "").strip(), str(text or "").strip())
+    if key in _VOXCPM2_DIALECT_REWRITE_CACHE:
+        value = _VOXCPM2_DIALECT_REWRITE_CACHE.pop(key)
+        _VOXCPM2_DIALECT_REWRITE_CACHE[key] = value
+        return value
+    return ""
+
+
+def _voxcpm2_dialect_rewrite_cache_put(dialect: str, text: str, value: str) -> None:
+    key = (str(dialect or "").strip(), str(text or "").strip())
+    if not key[0] or not key[1] or not value:
+        return
+    _VOXCPM2_DIALECT_REWRITE_CACHE[key] = value
+    while len(_VOXCPM2_DIALECT_REWRITE_CACHE) > _VOXCPM2_DIALECT_REWRITE_CACHE_MAX:
+        _VOXCPM2_DIALECT_REWRITE_CACHE.popitem(last=False)
+
+
+def _voxcpm2_dialect_hint(dialect: str) -> str:
+    hints = {
+        "四川话": "使用自然四川话口语词汇和语气词，避免只把普通话句尾加语气词。",
+        "粤语": "使用自然粤语书面口语，可用繁体或常见粤语字词，例如唔、冇、嘅、咗、啲。",
+        "吴语": "偏上海话/苏沪吴语口语，可用侬、伊、阿拉、勒海/来勒、蛮、个、勿/伐、今朝等常见写法。",
+        "东北话": "使用自然东北口语，可用搁这、整、啥玩意儿、咋、挺、老、贼等词，但不要夸张堆砌。",
+        "河南话": "使用自然河南话口语，可用恁、弄啥嘞、不中、晌午等常见表达。",
+        "陕西话": "使用自然陕西话口语，可用额、你弄啥咧、么麻达等常见表达。",
+        "山东话": "使用自然山东话口语，保留原意，不要写成普通话加口音说明。",
+        "天津话": "使用自然天津话口语，保留原意，不要写成普通话加口音说明。",
+        "闽南话": "使用自然闽南话/台闽口语汉字写法，避免拼音和解释。",
+    }
+    return hints.get(str(dialect or "").strip(), "使用真实本地方言口语词汇和语序。")
+
+
+def _cleanup_voxcpm2_dialect_rewrite(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+    text = text.strip().strip("\"'“”")
+    text = re.sub(r"^(改写后|方言改写|输出|结果|台词)\s*[:：]\s*", "", text).strip()
+    text = text.strip().strip("\"'“”")
+    if "\n" in text:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) == 1:
+            text = lines[0]
+    return text
+
+
+def _llm_voxcpm2_dialect_rewrite(text: str, dialect: str, *, chat_fn=chat_text) -> str:
+    raw_text = str(text or "").strip()
+    dialect_value = str(dialect or "").strip()
+    if not raw_text or dialect_value not in VOXCPM2_CHINESE_DIALECTS:
+        return raw_text
+    cached = _voxcpm2_dialect_rewrite_cache_get(dialect_value, raw_text)
+    if cached:
+        return cached
+    system_prompt = (
+        "你是中文 TTS 方言台词改写器。把用户提供的普通话朗读文本改写成指定中文方言的自然口语。"
+        "只输出可直接朗读的改写文本，不要标题、解释、括号标签、拼音、注释或 Markdown。"
+        "保持原意和信息量，不新增人物、地点、情节，不删掉关键事实。"
+        "如果原文是图像描述、产品文案或旁白，也要改写成自然可说的本地方言表达。"
+    )
+    user_prompt = (
+        f"目标方言：{dialect_value}\n"
+        f"方言写法要求：{_voxcpm2_dialect_hint(dialect_value)}\n"
+        "原文：\n"
+        f"{raw_text}"
+    )
+    rewritten = chat_fn(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.2,
+        max_tokens=max(256, min(1600, len(raw_text) * 4 + 160)),
+        timeout=90,
+    )
+    result = _cleanup_voxcpm2_dialect_rewrite(rewritten)
+    if not result:
+        result = raw_text
+    _voxcpm2_dialect_rewrite_cache_put(dialect_value, raw_text, result)
+    return result
+
+
+def _field_key_by_suffix(field_values: dict, suffix: str) -> str:
+    for key in (field_values or {}).keys():
+        if str(key).endswith(suffix):
+            return str(key)
+    return ""
+
+
+def _normalize_voxcpm2_dialect_text(
+    workflow_name: str,
+    field_values: dict,
+    *,
+    allow_llm: bool = False,
+    chat_fn=chat_text,
+) -> None:
+    if os.path.basename(str(workflow_name or "")) not in VOXCPM2_TTS_WORKFLOWS:
+        return
+    language_key = _field_key_by_suffix(field_values, "::language")
+    text_key = _field_key_by_suffix(field_values, "::text")
+    dialect = str(field_values.get(language_key) or "").strip() if language_key else ""
+    if dialect not in VOXCPM2_CHINESE_DIALECTS or not text_key:
+        return
+    raw_text = str(field_values.get(text_key) or "").strip()
+    if not raw_text:
+        return
+    if (
+        field_values.get("__voxcpm2_dialect_language") == dialect
+        and field_values.get("__voxcpm2_dialect_rewritten_text") == raw_text
+    ):
+        return
+    field_values["__voxcpm2_dialect_language"] = dialect
+    field_values["__voxcpm2_dialect_original_text"] = raw_text
+    field_values["__voxcpm2_dialect_rewrite_version"] = VOXCPM2_DIALECT_REWRITE_VERSION
+    if not allow_llm:
+        field_values["__voxcpm2_dialect_rewrite_engine"] = "disabled"
+        return
+    try:
+        rewritten = _llm_voxcpm2_dialect_rewrite(raw_text, dialect, chat_fn=chat_fn)
+    except Exception as exc:
+        field_values["__voxcpm2_dialect_rewrite_engine"] = "failed"
+        field_values["__voxcpm2_dialect_rewrite_error"] = str(exc)[:300]
+        add_log("warn", "voxcpm2_dialect", f"{dialect} rewrite fallback: {str(exc)[:160]}")
+        return
+    rewritten = str(rewritten or "").strip()
+    if not rewritten or rewritten == raw_text:
+        field_values["__voxcpm2_dialect_rewrite_engine"] = "unchanged"
+        return
+    field_values[text_key] = rewritten
+    field_values["__voxcpm2_dialect_rewritten_text"] = rewritten
+    field_values["__voxcpm2_dialect_rewrite_engine"] = "llm"
+
+
 def _refresh_hidden_field_defaults_from_workflow(wf: dict, field_values: dict, workflow_name: str) -> None:
     """Hidden fields are implementation details; retry should use current workflow defaults."""
     try:
@@ -6647,6 +6808,7 @@ def _normalize_workflow_field_values(wf: dict, field_values: dict, workflow_name
     _lock_ltx_singularity_omnicine_fields(workflow_name, normalized)
     _normalize_official_ideogram4_prompt(workflow_name, normalized, allow_llm=allow_llm)
     _normalize_boogu_i2i_prompt(workflow_name, wf, normalized, allow_llm=allow_llm)
+    _normalize_voxcpm2_dialect_text(workflow_name, normalized, allow_llm=allow_llm)
     _sync_ltx_director_timeline_prompts(wf, normalized)
     normalize_bernini_field_values(wf, normalized, workflow_name)
     return normalized
@@ -7009,7 +7171,7 @@ def _parse_with_config(path: str, config: dict) -> dict:
             ftype = "seed"
         if not ftype:
             ftype = "text"
-        for k in ("options", "step", "min", "max", "role"):
+        for k in ("options", "step", "min", "max", "role", "required"):
             if k in field_cfg:
                 fextra[k] = field_cfg[k]
         fields.append({
@@ -7399,7 +7561,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         add_log("info", "generate", "Starting generation", job_id)
         jobs[job_id]["status"] = "generating"
-        jobs[job_id]["message"] = "出图中..."
+        jobs[job_id]["message"] = "任务执行中..."
         jobs[job_id]["generating_at"] = time.time()
         save_jobs()
         await broadcast({"type": "job_update", "job": jobs[job_id]})
@@ -7459,7 +7621,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
 
         if not ws_ok:
             _extra = jobs[job_id].get("ws_error", "") if job_id in jobs else ""
-            raise TimeoutError(f"出图失败{' ('+_extra[:100]+')' if _extra else ''}")
+            raise TimeoutError(f"任务失败{' ('+_extra[:100]+')' if _extra else ''}")
 
         sources = []
         if downloaded:
@@ -7526,8 +7688,10 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
             rel_path = f"{subdir}/{hist_name}"
             dst_path = os.path.join(output_subdir, hist_name)
             shutil.copy2(src, dst_path)
-            thumb_rel = make_thumbnail(rel_path) or ""
+            media_type = str(media_type or output_media_type(filename or src) or "image").lower()
+            thumb_rel = make_thumbnail(rel_path) or "" if media_type in {"image", "video"} else ""
             actual_w, actual_h = get_media_size(rel_path, media_type, thumb_rel)
+            protection_status = IMAGE_PROTECTION_SAFE if media_type == "audio" else IMAGE_PROTECTION_PENDING
             records.append({
                 "id": job_id if idx == 0 else f"{job_id}_{idx + 1:02d}",
                 "filename": rel_path,
@@ -7544,7 +7708,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
                 "batch_id": job_id if batch_count > 1 else "",
                 "batch_index": idx,
                 "batch_count": batch_count,
-                "protection_status": IMAGE_PROTECTION_PENDING,
+                "protection_status": protection_status,
             })
         for record in reversed(records):
             history.insert(0, record)
@@ -7580,7 +7744,7 @@ async def generate_task(job_id, workflow_path, field_values, seed, vllm_was_runn
         jobs[job_id]["status"] = "error"
         jobs[job_id]["trace"] = traceback.format_exc()[:500]
         if isinstance(e, TimeoutError):
-            jobs[job_id]["message"] = "出图失败"
+            jobs[job_id]["message"] = "任务失败"
         else:
             jobs[job_id]["message"] = _friendly_generation_error(e)
         await broadcast({"type": "job_update", "job": jobs[job_id]})
@@ -8238,6 +8402,8 @@ def get_video_size(rel_path: str) -> tuple[int, int]:
 def get_media_size(rel_path: str, media_type: str = "", thumb_rel: str = "") -> tuple[int, int]:
     """Return real media dimensions, falling back to preview thumbnail dimensions for video."""
     normalized = str(media_type or output_media_type(rel_path)).lower()
+    if normalized == "audio":
+        return 0, 0
     if normalized == "video":
         w, h = get_video_size(rel_path)
         if w and h:
@@ -9471,6 +9637,16 @@ API_INTERFACE_CATALOG = [
         "response": "prompt,prompt_zh,structured fields,source_image",
     },
     {
+        "name": "语音转文字",
+        "kind": "submit",
+        "method": "POST",
+        "path": "/api/speech/transcribe",
+        "auth": "user",
+        "description": "上传一段录音，调用 FunASR 常驻服务转写为提示词文本。",
+        "request": "multipart/form-data: file",
+        "response": "text,language,duration,elapsed,provider,model",
+    },
+    {
         "name": "上传图片",
         "kind": "upload",
         "method": "POST",
@@ -10599,7 +10775,7 @@ _UPLOAD_PASSTHROUGH_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 _UPLOAD_NORMALIZE_IMAGE_EXTS = {".tif", ".tiff", ".gif", ".jfif", ".jpe", ".avif", ".heic", ".heif", ""}
 _UPLOAD_ALLOWED_IMAGE_EXTS = _UPLOAD_PASSTHROUGH_IMAGE_EXTS | _UPLOAD_NORMALIZE_IMAGE_EXTS
 _UPLOAD_ALLOWED_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
-_UPLOAD_ALLOWED_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+_UPLOAD_ALLOWED_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm", ".weba"}
 _UPLOAD_FORMAT_EXTS = {
     "PNG": {".png"},
     "JPEG": {".jpg", ".jpeg"},
@@ -10610,6 +10786,8 @@ _UPLOAD_SAFE_PASSTHROUGH_MODES = {"RGB", "RGBA", "L", "LA", "P"}
 _UPLOAD_IMAGE_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_IMAGE_MAX_BYTES", str(50 * 1024 * 1024)))
 _UPLOAD_VIDEO_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_VIDEO_MAX_BYTES", str(512 * 1024 * 1024)))
 _UPLOAD_AUDIO_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_AUDIO_MAX_BYTES", str(128 * 1024 * 1024)))
+ASR_SERVICE_URL = os.environ.get("EZ_ASR_SERVICE_URL", "http://10.10.10.75:18211/asr/transcribe").strip()
+ASR_SERVICE_TIMEOUT = float(os.environ.get("EZ_ASR_SERVICE_TIMEOUT", "45") or 45)
 _UPLOAD_WORKFLOW_MAX_BYTES = int(os.environ.get("EZ_UPLOAD_WORKFLOW_MAX_BYTES", str(10 * 1024 * 1024)))
 _UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
@@ -10766,6 +10944,58 @@ def _normalize_uploaded_audio_content(filename: str, content: bytes) -> bytes:
         detail = (result.stderr or b"").decode("utf-8", "ignore").strip()
         raise HTTPException(400, f"Invalid audio file: {detail or 'ffmpeg conversion failed'}")
     return result.stdout
+
+
+def _transcribe_audio_bytes(content: bytes, filename: str = "speech.wav") -> dict:
+    if not ASR_SERVICE_URL:
+        raise HTTPException(503, "ASR service is not configured")
+    req = urllib.request.Request(
+        ASR_SERVICE_URL,
+        data=content,
+        method="POST",
+        headers={
+            "Content-Type": "audio/wav",
+            "X-Filename": os.path.basename(filename or "speech.wav"),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=ASR_SERVICE_TIMEOUT) as resp:
+            raw = resp.read(2 * 1024 * 1024)
+            status = getattr(resp, "status", 200)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(4096).decode("utf-8", "ignore").strip()
+        raise HTTPException(exc.code or 502, detail or "ASR service rejected audio") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"ASR service unavailable: {exc}") from exc
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(502, "ASR service returned invalid JSON") from exc
+    if status >= 400 or data.get("ok") is False:
+        raise HTTPException(status if status >= 400 else 502, data.get("detail") or data.get("error") or "ASR failed")
+    text = str(data.get("text") or data.get("transcript") or "").strip()
+    return {
+        "ok": True,
+        "text": text,
+        "language": data.get("language", ""),
+        "duration": data.get("duration", data.get("duration_s", 0)),
+        "elapsed": data.get("elapsed", data.get("elapsed_s", 0)),
+        "provider": data.get("provider", "funasr"),
+        "model": data.get("model", ""),
+    }
+
+
+@app.post("/api/speech/transcribe")
+async def api_speech_transcribe(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    content = await _read_upload_limited(file, _UPLOAD_AUDIO_MAX_BYTES, "Audio")
+    if not content:
+        raise HTTPException(400, "Empty file")
+    wav_content = _normalize_uploaded_audio_content(file.filename or "speech.webm", content)
+    started = time.perf_counter()
+    result = _transcribe_audio_bytes(wav_content, "speech.wav")
+    result["elapsed_proxy_s"] = round(time.perf_counter() - started, 4)
+    add_log("info", "speech_asr", f"Speech transcribed by {result.get('provider', 'funasr')}", details=f"user={_user_id(current_user)}")
+    return result
 
 
 @app.post("/api/upload-audio")
@@ -11435,7 +11665,7 @@ def api_generate(req: GenerateRequest, bg: BackgroundTasks, current_user: dict =
     )[:200]
     now_ts = time.time()
     jobs[job_id] = {
-        "id": job_id, "status": "queued", "message": "排队中...",
+        "id": job_id, "status": "queued", "message": "任务排队中...",
         "workflow": req.workflow, "seed": str(seed),
         "workflow_type": workflow_type,
         "prompt_preview": prompt_preview,
@@ -11511,7 +11741,7 @@ async def api_pause_job(job_id: str, current_user: dict = Depends(get_current_us
         now = time.time()
         job["pause_epoch"] = _job_pause_epoch(job) + 1
         job["status"] = "paused"
-        job["message"] = "已暂停，等待恢复"
+        job["message"] = "任务暂停，等待恢复"
         job["paused_at"] = now
         job["last_update"] = now
         job["progress"] = {"pct": 0}
@@ -11539,7 +11769,7 @@ async def api_resume_job(job_id: str, current_user: dict = Depends(get_current_u
         raise HTTPException(404, "Workflow not found")
     now = time.time()
     job["status"] = "queued"
-    job["message"] = "排队中..."
+    job["message"] = "任务排队中..."
     job["last_update"] = now
     job["resumed_at"] = now
     job["progress"] = {"pct": 0}
@@ -11659,7 +11889,7 @@ def api_retry_job(job_id: str, bg: BackgroundTasks, current_user: dict = Depends
     )[:200]
 
     jobs[new_id] = {
-        "id": new_id, "status": "queued", "message": "排队中...",
+        "id": new_id, "status": "queued", "message": "任务排队中...",
         "workflow": wf, "seed": str(seed),
         "workflow_type": _workflow_primary_type(wf),
         "prompt_preview": prompt_preview,
@@ -12088,12 +12318,21 @@ def _history_input_image_refs(row) -> set[str]:
     if not isinstance(params, dict):
         return set()
     refs: set[str] = set()
-    media_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".mp4", ".webm", ".mov", ".m4v")
+    media_exts = (
+        ".png", ".jpg", ".jpeg", ".webp", ".bmp",
+        ".mp4", ".webm", ".mov", ".m4v",
+        ".wav", ".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus",
+    )
     for key, value in params.items():
         if not isinstance(value, str):
             continue
         field = str(key).split("::", 1)[-1].lower()
-        if not (field.startswith("image") or field == "upload"):
+        if not (
+            field.startswith("image")
+            or field.startswith("video")
+            or field.startswith("audio")
+            or field in {"upload", "file"}
+        ):
             continue
         rel = value.replace("\\", "/").lstrip("/")
         if rel.lower().endswith(media_exts):

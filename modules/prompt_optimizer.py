@@ -159,8 +159,9 @@ QWEN_TRANSLATE_TEMPLATE = (
 
 QWEN_LANGUAGE_SWITCH_TEMPLATE = (
     "Translate the following image-generation prompt into {target_language_name}. "
-    "Keep it as a concise, natural text-to-image prompt, not an explanation. Preserve visual details, "
-    "style references, quantities, colors, composition, visible text, and constraints. Preserve proper nouns, "
+    "Keep it as a complete, natural text-to-image prompt, not an explanation. Preserve every visual detail, "
+    "modifier, style reference, quantity, color, composition cue, visible text, and constraint. Do not summarize, "
+    "shorten, merge away, or omit any prompt phrase. Preserve proper nouns, "
     "artist names, brand names, character names, model names, and culturally specific titles in their original "
     "language when direct translation would lose meaning; add a short explanatory visual descriptor only when useful. "
     "If the prompt is a JSON object, keep a valid JSON object with the same keys and structure; translate only "
@@ -401,10 +402,7 @@ def build_qwen_prompt_language_switch_workflow(
     text = _bounded_user_prompt(prompt).strip()
     target = "en" if str(target_language or "").lower().startswith("en") else "zh"
     target_name = "English" if target == "en" else "Chinese"
-    requested_tokens = int(max_new_tokens or 256)
-    if isinstance(_extract_json_object(text), dict):
-        requested_tokens = max(requested_tokens, min(4096, max(1024, int(len(text) * 0.75) + 384)))
-    tokens = max(96, min(requested_tokens, 4096))
+    tokens = _language_switch_token_budget(text, target, max_new_tokens)
     return {
         "1": {
             "inputs": {
@@ -1031,6 +1029,25 @@ def _json_language_switch_payload(leaves: list[tuple[tuple[Any, ...], str]]) -> 
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _language_switch_token_budget(prompt: str, target_language: str, requested_tokens: int | None = None) -> int:
+    text = str(prompt or "")
+    target = "en" if str(target_language or "").lower().startswith("en") else "zh"
+    requested = int(requested_tokens or 256)
+    if isinstance(_extract_json_object(text), dict):
+        auto = max(1024, int(len(text) * 0.9) + 512)
+    else:
+        # Chinese-to-English often expands substantially; a fixed 256-token cap
+        # makes long image prompts lose modifiers and detail phrases.
+        source_is_chinese = CHINESE_RE.search(text)
+        expansion = 2.2 if target == "en" and source_is_chinese else 1.35
+        if len(text) < 80:
+            auto = 256
+        else:
+            floor = 768 if target == "en" and source_is_chinese else 512
+            auto = max(floor, int(len(text) * expansion) + 384)
+    return max(96, min(4096, max(requested, auto)))
+
+
 def _extract_translated_leaf_map(text: str) -> dict[str, str]:
     parsed = _extract_json_object(text)
     if not isinstance(parsed, dict):
@@ -1317,6 +1334,7 @@ def _submit_llm_language_switch(
     model: str | None = None,
 ) -> str:
     prompt = _bounded_user_prompt(prompt)
+    tokens = _language_switch_token_budget(prompt, target, max_new_tokens)
     return _llm_user_text(
         QWEN_LANGUAGE_SWITCH_TEMPLATE.format(
             prompt=prompt,
@@ -1325,7 +1343,7 @@ def _submit_llm_language_switch(
         chat_fn=chat_fn,
         model=model,
         temperature=0.15,
-        max_tokens=max(96, min(int(max_new_tokens or 256), 4096)),
+        max_tokens=tokens,
         timeout=timeout,
     )
 

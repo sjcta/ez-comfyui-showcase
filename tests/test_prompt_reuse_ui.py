@@ -109,7 +109,7 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertNotIn("var defaultPromptValue = ''", generate_js)
         self.assertNotIn("defaultPromptValue = String(f.value || '')", generate_js)
         self.assertIn('<textarea id="promptInput" placeholder="', generate_js)
-        self.assertIn("...\"></textarea>' + styleControlHtml", generate_js)
+        self.assertIn("...\"></textarea>' + promptMentionMenuHtml + styleControlHtml", generate_js)
         self.assertNotIn("preferWorkflowDefaultPrompt", generate_js)
         self.assertNotIn("/SkinTest/i.test(String(A.currentWF || ''))", generate_js)
         self.assertIn("_setStylePresetValue(_savedStylePreset || '')", generate_js)
@@ -188,6 +188,19 @@ class PromptReuseUiContractTests(unittest.TestCase):
         self.assertIn("workflow: A.currentWF", generate_js)
         self.assertIn("await window.CW.selectWF(snap.workflow)", generate_js)
         self.assertIn("f.class_type === 'LoadImage' && f.field === 'image'", generate_js)
+
+    def test_reuse_restores_reference_audio_upload_control(self):
+        generate_js = (ROOT / "static/js/modules/generate.js").read_text()
+
+        self.assertIn("function _isReusableLoadAudioField", generate_js)
+        self.assertIn("return /::(?:audio|reference_audio)$/.test(key);", generate_js)
+        self.assertIn("function _restoreRefAudioValue", generate_js)
+        self.assertIn("preview.src = API + '/api/input-audio/' + encodeURIComponent(refValue);", generate_js)
+        self.assertIn("if (actions) actions.classList.remove('hidden');", generate_js)
+        self.assertIn("function _restoreRefAudioFromFieldValues", generate_js)
+        self.assertIn("_restoreRefAudioFromFieldValues(h.field_values, reuseFieldsMeta)", generate_js)
+        self.assertIn("_restoreRefAudioFromFieldValues(snap.adv || {})", generate_js)
+        self.assertIn("_restoreRefAudioFromFieldValues(j.fields, jobReuseFieldsMeta)", generate_js)
 
     def test_video_mode_controls_reference_image_requirement(self):
         generate_js = (ROOT / "static/js/modules/generate.js").read_text()

@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "workflow": "tts_voxcpm2.json",
+  "fields": [
+    {
+      "key": "1::text",
+      "zone": "user_input",
+      "visible": true,
+      "label": "合成文本",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "1::language",
+      "zone": "user_input",
+      "visible": true,
+      "label": "语言/方言（方言自动改写文本）",
+      "order": 1,
+      "type": "select",
+      "options": [
+        "auto",
+        "Arabic",
+        "Burmese",
+        "Chinese",
+        "Danish",
+        "Dutch",
+        "English",
+        "Finnish",
+        "French",
+        "German",
+        "Greek",
+        "Hebrew",
+        "Hindi",
+        "Indonesian",
+        "Italian",
+        "Japanese",
+        "Khmer",
+        "Korean",
+        "Lao",
+        "Malay",
+        "Norwegian",
+        "Polish",
+        "Portuguese",
+        "Russian",
+        "Spanish",
+        "Swahili",
+        "Swedish",
+        "Tagalog",
+        "Thai",
+        "Turkish",
+        "Vietnamese",
+        "四川话",
+        "粤语",
+        "吴语",
+        "东北话",
+        "河南话",
+        "陕西话",
+        "山东话",
+        "天津话",
+        "闽南话"
+      ]
+    },
+    {
+      "key": "1::voice_input_mode",
+      "zone": "user_input",
+      "visible": true,
+      "label": "功能模式（官方 Demo 三模式）",
+      "order": 2,
+      "type": "select",
+      "options": [
+        "声音设计（无参考音频）",
+        "可控克隆（参考音频+控制指令）",
+        "极致克隆（参考音频+逐字稿）"
+      ]
+    },
+    {
+      "key": "1::voice_preset",
+      "zone": "hidden",
+      "visible": false,
+      "label": "VoxCPM2 音色来源",
+      "order": 3,
+      "type": "select",
+      "options": [
+        "VoxCPM2文字描述音色（0样本）",
+        "VoxCPM2无参考原生生成",
+        "VoxCPM2参考音频克隆（中文样本）",
+        "VoxCPM2参考音频克隆（英文样本）",
+        "自定义参考音频"
+      ]
+    },
+    {
+      "key": "1::voice_description",
+      "zone": "user_input",
+      "visible": true,
+      "label": "Control Instruction（声音/情绪/方言控制）",
+      "order": 4,
+      "type": "textarea"
+    },
+    {
+      "key": "1::reference_audio",
+      "zone": "user_input",
+      "visible": true,
+      "label": "参考音频（可控/极致克隆）",
+      "order": 5,
+      "type": "audio",
+      "required": false
+    },
+    {
+      "key": "1::reference_text",
+      "zone": "advanced",
+      "visible": true,
+      "label": "参考音频逐字稿（极致克隆）",
+      "order": 0,
+      "type": "textarea"
+    },
+    {
+      "key": "1::seed",
+      "zone": "advanced",
+      "visible": true,
+      "label": "种子",
+      "order": 1,
+      "type": "seed",
+      "min": 0,
+      "max": 2147483647
+    },
+    {
+      "key": "1::cfg_value",
+      "zone": "advanced",
+      "visible": true,
+      "label": "CFG（引导强度）",
+      "order": 2,
+      "type": "number",
+      "step": 0.1,
+      "min": 1,
+      "max": 3
+    },
+    {
+      "key": "1::inference_timesteps",
+      "zone": "advanced",
+      "visible": true,
+      "label": "推理步数（最高音质=30）",
+      "order": 3,
+      "type": "number",
+      "step": 1,
+      "min": 4,
+      "max": 30
+    },
+    {
+      "key": "1::temperature",
+      "zone": "advanced",
+      "visible": false,
+      "label": "temperature",
+      "order": 4,
+      "type": "number",
+      "step": 0.05,
+      "min": 0,
+      "max": 2
+    },
+    {
+      "key": "1::top_p",
+      "zone": "advanced",
+      "visible": false,
+      "label": "top_p",
+      "order": 5,
+      "type": "number",
+      "step": 0.01,
+      "min": 0.05,
+      "max": 1
+    },
+    {
+      "key": "1::speed",
+      "zone": "advanced",
+      "visible": false,
+      "label": "语速",
+      "order": 6,
+      "type": "number",
+      "step": 0.05,
+      "min": 0.5,
+      "max": 2
+    },
+    {
+      "key": "1::engine",
+      "zone": "hidden",
+      "visible": false,
+      "label": "TTS 引擎",
+      "order": 0,
+      "type": "text"
+    },
+    {
+      "key": "1::service_url",
+      "zone": "hidden",
+      "visible": false,
+      "label": "TTS 服务地址",
+      "order": 1,
+      "type": "text"
+    },
+    {
+      "key": "2::filename_prefix",
+      "zone": "output",
+      "visible": true,
+      "label": "文件名前缀",
+      "order": 0,
+      "type": "text"
+    }
+  ]
+}

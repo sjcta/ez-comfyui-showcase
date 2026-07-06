@@ -95,15 +95,15 @@ function syncClearPromptButton() {
 }
 
 function _isGenerationStartToast(message, type) {
-  return /开始出图/.test(String(message || '')) &&
+  return /(开始出图|开始任务)/.test(String(message || '')) &&
     (type === 'generating' || type === 'queued' || type === 'info' || !type);
 }
 
 function _isGenerationStatusToastAllowed(message, type) {
   var text = String(message || '');
   if (type === 'done' || type === 'error') return true;
-  if (type === 'queued') return /排队中/.test(text);
-  if (type === 'generating') return /出图中/.test(text);
+  if (type === 'queued') return /(排队中|任务排队中|任务暂停)/.test(text);
+  if (type === 'generating') return /(出图中|任务执行中|任务准备中|任务保存中|任务校验中)/.test(text);
   return false;
 }
 
@@ -111,8 +111,8 @@ function _isGenerationStatusToast(message, type) {
   var text = String(message || '');
   if (type === 'queued' || type === 'generating') return true;
   if (_isGenerationStartToast(text, type)) return true;
-  if ((type === 'done' && /结束出图/.test(text)) || (type === 'error' && /失败/.test(text))) return true;
-  return /(排队中|出图中|保存结果|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
+  if ((type === 'done' && /(结束出图|任务成功)/.test(text)) || (type === 'error' && /(失败|任务失败)/.test(text))) return true;
+  return /(排队中|出图中|任务排队中|任务暂停|任务执行中|任务准备中|任务保存中|任务校验中|保存结果|提交|准备|queued|preparing|starting_comfyui|submitting|generating|downloading)/i.test(text);
 }
 
 function _hasChinese(text) {
@@ -586,7 +586,7 @@ function initDragScroll(selector) {
     if (!el) return;
     if (el.dataset.dragScrollBound === '1') return;
     el.dataset.dragScrollBound = '1';
-    var isDown = false, hasDragged = false, startX, scrollLeft;
+    var isDown = false, hasDragged = false, suppressClick = false, startX, scrollLeft;
     var threshold = 6;
     function wheelDeltaPx(e) {
       var unit = 1;
@@ -619,6 +619,10 @@ function initDragScroll(selector) {
     el.addEventListener("mouseup", function() {
       if (!isDown) return;
       isDown = false;
+      if (hasDragged) {
+        suppressClick = true;
+        setTimeout(function() { suppressClick = false; }, 0);
+      }
       hasDragged = false;
       el.classList.remove("dragging");
     });
@@ -634,6 +638,12 @@ function initDragScroll(selector) {
       e.preventDefault();
       el.scrollLeft = scrollLeft - walk;
     });
+    el.addEventListener("click", function(e) {
+      if (!suppressClick) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+    }, true);
     el.addEventListener("wheel", function(e) {
       var delta = wheelDeltaPx(e);
       var dominant = Math.abs(delta.y) >= Math.abs(delta.x) ? delta.y : delta.x;

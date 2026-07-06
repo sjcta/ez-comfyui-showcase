@@ -266,12 +266,12 @@
       var wfTag = window.CW.wfTag ? window.CW.wfTag(job.workflow, wfMeta.tags) : '';
       var typeLabel = wfTag ? wfTag.text : '';
       var toastByStatus = {
-        queued: ['排队中', 'queued'],
-        paused: ['已暂停', 'queued'],
-        generating: ['出图中', 'generating'],
-        checking: ['内容校验中', 'generating'],
-        done: ['结束出图', 'done'],
-        error: ['失败', 'error']
+        queued: ['任务排队中', 'queued'],
+        paused: ['任务暂停', 'queued'],
+        generating: ['任务执行中', 'generating'],
+        checking: ['任务校验中', 'generating'],
+        done: ['任务成功', 'done'],
+        error: ['任务失败', 'error']
       };
       try {
         if (window.CW.toast && toastByStatus[job.status]) {

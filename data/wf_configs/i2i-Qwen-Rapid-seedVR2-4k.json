@@ -28,7 +28,7 @@
       "type": "multi_image_refs",
       "value": "[]",
       "min": 2,
-      "max": 3
+      "max": 2
     },
     {
       "key": "115:111::prompt",

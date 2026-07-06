@@ -672,7 +672,10 @@ function init() {
     window.CW.initRatioGrid && window.CW.initRatioGrid();
     window.CW.initOverlayUpload && window.CW.initOverlayUpload();
     window.CW.initResizeHandle && window.CW.initResizeHandle();
-    if (window.CW.initDragScroll) window.CW.initDragScroll('.wf-grid');
+    if (window.CW.initDragScroll) {
+      window.CW.initDragScroll('.wf-grid');
+      window.CW.initDragScroll('#wfTabs');
+    }
   // Clear button clears prompt and focuses input
   // (always visible — toggled in HTML)
   (()=>{var el=$('#btnGenerate');if(el)el.addEventListener('click',function(){if(window.CW.doGenerate)window.CW.doGenerate();});})();

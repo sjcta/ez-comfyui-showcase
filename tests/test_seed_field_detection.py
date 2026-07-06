@@ -414,6 +414,20 @@ class SeedFieldDetectionTests(unittest.TestCase):
 
         self.assertEqual(fields["25::noise_seed"], 123456789)
 
+    def test_tts_seed_is_clamped_to_node_safe_range(self):
+        workflow = {
+            "1": {
+                "class_type": "EZ_TTS_Service",
+                "_meta": {"title": "语音TTS"},
+                "inputs": {"seed": 0},
+            }
+        }
+        fields = {"1::seed": 0}
+
+        app._apply_generated_seed_to_seed_fields(workflow, fields, 123456789012345)
+
+        self.assertEqual(fields["1::seed"], 101572473)
+
     def test_random_generate_seed_covers_all_configured_seed_fields(self):
         generated_seed = 123456789012345
         failures = []

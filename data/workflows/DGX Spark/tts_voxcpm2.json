@@ -1,0 +1,38 @@
+{
+  "1": {
+    "inputs": {
+      "service_url": "http://127.0.0.1:18212/tts",
+      "engine": "voxcpm2",
+      "text": "今天我们测试本地语音合成服务的速度、稳定性和自然度。",
+      "language": "Chinese",
+      "voice_preset": "VoxCPM2文字描述音色（0样本）",
+      "reference_audio": "",
+      "reference_text": "",
+      "seed": 0,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "speed": 1.0,
+      "cfg_value": 2.0,
+      "inference_timesteps": 30,
+      "voice_input_mode": "声音设计（无参考音频）",
+      "voice_description": "年轻女性，声音自然清晰"
+    },
+    "class_type": "EZ_TTS_Service",
+    "_meta": {
+      "title": "VoxCPM2 TTS"
+    }
+  },
+  "2": {
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "filename_prefix": "tts/voxcpm2_tts"
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "保存音频"
+    }
+  }
+}

@@ -77,6 +77,18 @@ class JobCardLayoutContractTests(unittest.TestCase):
         self.assertIn("overflow-wrap: anywhere", submitting_block)
         self.assertIn("text-overflow: clip", submitting_block)
 
+    def test_job_card_uses_task_status_labels(self):
+        history_js = (ROOT / "static/js/modules/history.js").read_text()
+        poll_manager_js = (ROOT / "static/js/modules/poll_manager.js").read_text()
+
+        self.assertIn("return '任务失败';", history_js)
+        self.assertIn("return '任务暂停';", history_js)
+        self.assertIn("return '任务成功';", history_js)
+        self.assertIn("title=\"${escA(detail)}\"", history_js)
+        self.assertIn("error: ['任务失败', 'error']", poll_manager_js)
+        self.assertIn("paused: ['任务暂停', 'queued']", poll_manager_js)
+        self.assertIn("done: ['任务成功', 'done']", poll_manager_js)
+
     def test_zero_progress_generating_card_keeps_visible_activity_bar(self):
         css = (ROOT / "static/css/style.css").read_text()
         history_js = (ROOT / "static/js/modules/history.js").read_text()

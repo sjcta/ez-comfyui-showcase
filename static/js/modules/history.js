@@ -385,12 +385,18 @@
       : (itemOrType && itemOrType.media_type);
     explicit = String(explicit || '').toLowerCase();
     if (explicit === 'video') return 'video';
+    if (explicit === 'audio') return 'audio';
     var name = String(filename || (itemOrType && itemOrType.filename) || '');
+    if (/\.(wav|flac|mp3|m4a|aac|ogg|opus)(\?|$)/i.test(name)) return 'audio';
     return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(name) ? 'video' : 'image';
   }
 
   function _isVideoItem(item) {
     return _mediaType(item) === 'video';
+  }
+
+  function _isAudioItem(item) {
+    return _mediaType(item) === 'audio';
   }
 
   function _lightboxDownloadName(filename) {
@@ -463,11 +469,11 @@
     link.dataset.imageUrl = imageUrl;
     link.dataset.filename = downloadName;
     link.dataset.mediaType = resolvedType;
-    link.title = resolvedType === 'video' ? '下载视频' : '下载原图';
+    link.title = resolvedType === 'video' ? '下载视频' : (resolvedType === 'audio' ? '下载音频' : '下载原图');
   }
 
   function _historyOriginalImageRef(item) {
-    if (!item || _isVideoItem(item)) return '';
+    if (!item || _isVideoItem(item) || _isAudioItem(item)) return '';
     var fields = item.field_values || item.fields || {};
     if (!fields || typeof fields !== 'object') return '';
     var imageExts = /\.(png|jpe?g|webp|bmp)(\?|$)/i;
@@ -716,6 +722,13 @@ function _attachSentinel() {
     const image = '图' + '片';
     const picture = '图' + '像';
     return text
+      .replace(/出图失败/g, '任务失败')
+      .replace(/出图中/g, '任务执行中')
+      .replace(/结束出图/g, '任务成功')
+      .replace(/^error$/i, '任务失败')
+      .replace(/^done$/i, '任务成功')
+      .replace(/^paused$/i, '任务暂停')
+      .replace(/^queued$/i, '任务排队中')
       .replace(new RegExp('正在拉取' + image, 'g'), '正在保存结果')
       .replace(new RegExp('拉取' + image + '超时', 'g'), '保存结果超时')
       .replace(new RegExp(image + '校验中', 'g'), '内容校验中')
@@ -728,12 +741,35 @@ function _attachSentinel() {
       .replace(new RegExp('保存' + picture, 'g'), '保存结果');
   }
 
+  function _jobStatusLabel(j, detail) {
+    const status = String((j && j.status) || '').toLowerCase();
+    if (status === 'queued') return '任务排队中';
+    if (status === 'paused') return '任务暂停';
+    if (status === 'preparing' || status === 'dispatching' || status === 'starting_comfyui' || status === 'submitting') return '任务准备中';
+    if (status === 'generating') return '任务执行中';
+    if (status === 'downloading') return '任务保存中';
+    if (status === 'checking') return '任务校验中';
+    if (status === 'done') return '任务成功';
+    if (status === 'error') return '任务失败';
+    if (status === 'retrying') return '任务重试中';
+    return detail || status || '任务状态';
+  }
+
+  function _jobStatusTextHtml(status, label, detail) {
+    const cls = escH(status || '');
+    const title = detail && detail !== label ? ` title="${escA(detail)}"` : '';
+    return `<div class="job-status-text ${cls}"${title}>${escH(label)}</div>`;
+  }
+
   function _renderJobCard(j) {
     const rawLabel = j.prompt_preview || j.workflow?.replace('.json', '') || '...';
     const label = _displayPromptForWorkflowItem(j, rawLabel) || rawLabel;
     const statusMsg = _neutralJobStatusMessage(j.message || j.status);
+    const statusLabel = _jobStatusLabel(j, statusMsg);
     const hasImage = !!j.image;
-    const isVideo = _mediaType(j.media_type, j.image) === 'video';
+    const jobCardMediaType = _mediaType(j.media_type, j.image);
+    const isVideo = jobCardMediaType === 'video';
+    const isAudio = jobCardMediaType === 'audio';
     const checkingPreview = j.status === 'checking' && (j.pending_thumb || j.pending_image);
     const imgSrc = hasImage && !isVideo ? _lightboxImageUrl(j.image) : '';
     const checkingImgSrc = checkingPreview
@@ -744,7 +780,7 @@ function _attachSentinel() {
     // ── Image area ──
     let imgHtml = '';
     if (hasImage) {
-      imgHtml = imgSrc ? `<img src="${escA(imgSrc)}" loading="lazy" alt="">` : _videoPreviewHtml(j.image, j.thumb);
+      imgHtml = isAudio ? _mediaPreviewHtml({ filename: j.image, media_type: 'audio' }) : (imgSrc ? `<img src="${escA(imgSrc)}" loading="lazy" alt="">` : _videoPreviewHtml(j.image, j.thumb));
     } else {
       let statusHtml = '';
       if (checkingPreview) {
@@ -755,17 +791,17 @@ function _attachSentinel() {
       }
       // Status text ABOVE timer (always shown for non-image states)
       if (j.status === 'queued') {
-        statusHtml += `<div class="job-status-text queued">排队中</div>`;
+        statusHtml += _jobStatusTextHtml('queued', statusLabel, statusMsg);
       } else if (j.status === 'paused') {
-        statusHtml += `<div class="job-status-text paused">${escH(statusMsg || '已暂停')}</div>`;
+        statusHtml += _jobStatusTextHtml('paused', statusLabel, statusMsg);
       } else if (j.status === 'generating') {
-        statusHtml += `<div class="job-status-text generating">${escH(statusMsg)}</div>`;
+        statusHtml += _jobStatusTextHtml('generating', statusLabel, statusMsg);
       } else if (j.status === 'downloading') {
-        statusHtml += `<div class="job-status-text downloading">${escH(statusMsg || '正在保存结果...')}</div>`;
+        statusHtml += _jobStatusTextHtml('downloading', statusLabel, statusMsg);
       } else if (j.status === 'checking') {
-        statusHtml += `<div class="job-status-text checking">${escH(statusMsg || '内容校验中')}</div>`;
+        statusHtml += _jobStatusTextHtml('checking', statusLabel, statusMsg);
       } else {
-        statusHtml += `<div class="job-status-text ${escH(j.status)}">${escH(statusMsg)}</div>`;
+        statusHtml += _jobStatusTextHtml(j.status, statusLabel, statusMsg);
       }
       statusHtml += _jobTimerHtml(j);
       imgHtml += _jobStatusOverlayHtml(statusHtml);
@@ -773,9 +809,7 @@ function _attachSentinel() {
 
     // ── Badge ──
     const wfMeta = A._wfMeta[j.workflow] || {};
-    const wfLabel = window.CW && CW.workflowDisplayName
-      ? CW.workflowDisplayName(j.workflow || '', wfMeta)
-      : (String(wfMeta.name || '').trim() || (j.workflow || '').replace(/\.json$/i, ''));
+    const wfLabel = _workflowDisplayName(j.workflow || '');
     const wfTag = window.CW.wfTag ? window.CW.wfTag(j.workflow || '', wfMeta.tags) : '';
     const tagHtml = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
 
@@ -789,9 +823,9 @@ function _attachSentinel() {
     const pauseAction = isPausedJob
       ? `<button class="gi-pause is-resume" type="button" onclick="event.stopPropagation();CW.resumeJob('${escA(j.id)}')" title="恢复排队" aria-label="恢复排队">${CW.icon("play", 12)}</button>`
       : (canPauseJob ? `<button class="gi-pause" type="button" onclick="event.stopPropagation();CW.pauseJob('${escA(j.id)}')" title="暂停排队" aria-label="暂停排队">${CW.icon("pause", 12)}</button>` : '');
-    const showWfLabel = wfLabel && wfLabel !== label;
+    const jobCardMediaClick = isAudio ? ` onclick="CW.toggleAudioCardPreview(event,this)"` : '';
     return `<div class="gi job-card ${escH(j.status)} ${jTypeCls}" data-job-id="${escA(j.id)}">
-      <div class="gi-img ${hasImage ? '' : 'job-placeholder'}${checkingSensitiveCls}">
+      <div class="gi-img ${hasImage ? '' : 'job-placeholder'}${checkingSensitiveCls}"${jobCardMediaClick}>
         ${imgHtml}
         ${j.status === "error" ? `<div class="gi-retry-row"><button class="btn-retry" onclick="event.stopPropagation();CW.retryJob('${escA(j.id)}')">重新尝试</button></div>` : ""}
         ${pauseAction}
@@ -800,7 +834,7 @@ function _attachSentinel() {
       </div>
       <div class="gi-info" onclick="event.stopPropagation();CW.restoreJob('${escA(j.id)}')">
         ${j.status === 'generating' || j.status === 'submitting' ? `<div class="gi-progress-top${_jobProgressClass(j)}"><div class="gi-progress-fill" style="width:${_jobProgressPct(j)}%"></div></div>` : ''}
-        ${showWfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
+        ${wfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
         <div class="gi-prompt" title="${escA(label)}">${escH(label)}</div>
         ${j.status !== 'generating' && j.status !== 'submitting' ? `<div class="gi-meta">
           ${j.queued_at ? `<span>${CW.icon("clock")} ${j.queued_at}</span>` : ''}
@@ -824,8 +858,11 @@ function _attachSentinel() {
     // Status text — update in image area
     const st = card.querySelector('.job-status-text');
     if (st) {
-      const label = _neutralJobStatusMessage(job.message || (job.status === 'generating' ? '出图中' : job.status));
+      const detail = _neutralJobStatusMessage(job.message || job.status);
+      const label = _jobStatusLabel(job, detail);
       st.textContent = label;
+      if (detail && detail !== label) st.setAttribute('title', detail);
+      else st.removeAttribute('title');
       st.className = `job-status-text ${job.status}`;
     }
     // For downloading state, show specific message without progress bar
@@ -906,26 +943,30 @@ function _attachSentinel() {
       const wfMeta = (A._wfMeta || {})[job.workflow] || {};
       const wfTag = window.CW.wfTag ? window.CW.wfTag(job.workflow || '', wfMeta.tags) : '';
       const tagBadge = wfTag ? `<div class="gi-type-badge ${wfTag.cls}">${wfTag.text}</div>` : '';
-      const wfLabel = _workflowCustomDisplayName(job.workflow || '');
+      const wfLabel = _workflowDisplayName(job.workflow || '');
       const rawDisplayPrompt = job.prompt_preview || (job.workflow ? job.workflow.replace('.json', '') : '出图完成');
       const displayPrompt = _displayPromptForWorkflowItem(job, rawDisplayPrompt) || rawDisplayPrompt;
-      const showWfLabel = wfLabel && wfLabel !== displayPrompt;
       const jobBatchCount = Number(job.batch_count || (Array.isArray(job.images) ? job.images.length : 1) || 1);
       const jobBatchBadge = jobBatchCount > 1 ? `<div class="gi-batch-badge">×${jobBatchCount}</div>` : '';
       const protectionStatus = String(job.protection_status || '').toLowerCase();
       const sensitiveCls = (protectionStatus === 'protected' || protectionStatus === 'error') ? ' gi-sensitive' : '';
-      const isVideo = _mediaType(job.media_type, job.image) === 'video';
-      const mediaHtml = isVideo
-        ? _videoPreviewHtml(job.image, job.thumb)
-        : `<img src="${escA(_lightboxImageUrl(job.image))}" loading="lazy" alt="">`;
+      const jobMediaType = _mediaType(job.media_type, job.image);
+      const isVideo = jobMediaType === 'video';
+      const isAudio = jobMediaType === 'audio';
+      const mediaHtml = isAudio
+        ? _mediaPreviewHtml({ filename: job.image, media_type: 'audio' })
+        : (isVideo ? _videoPreviewHtml(job.image, job.thumb) : `<img src="${escA(_lightboxImageUrl(job.image))}" loading="lazy" alt="">`);
+      const completeMediaClickAction = isAudio
+        ? 'CW.toggleAudioCardPreview(event,this)'
+        : `CW.openJobLB('${escA(job.image)}','${escA(job.prompt_preview || '')}', this, '${escA(job.media_type || '')}')`;
       const completeHtml =
-        `<div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();CW.openJobLB('${escA(job.image)}','${escA(job.prompt_preview || '')}', this, '${escA(job.media_type || '')}')">` +
+        `<div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();${completeMediaClickAction}">` +
           mediaHtml +
           tagBadge +
           jobBatchBadge +
         `</div>` +
         `<div class="gi-info">` +
-          (showWfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : '') +
+          (wfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : '') +
           `<div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>` +
           `<div class="gi-meta"><span>${CW.icon("clock")} 刚刚</span>` +
             `<div class="gi-meta-row">` +
@@ -1118,7 +1159,7 @@ function _patchGalleryHTML(gallery, html) {
       });
     }
     Array.prototype.forEach.call(cards, function(card) {
-      if (!card.querySelector('.gi-video-poster')) return;
+      if (!card.querySelector('.gi-video-poster, .gi-audio-preview')) return;
       _setVideoPreviewMaskHeight(card);
       if (card.dataset.videoMaskBound === '1') return;
       card.dataset.videoMaskBound = '1';
@@ -1151,6 +1192,7 @@ function _renderHistCard(h, i) {
     const mainText1 = _historyItemType(h);
     const mainCls1 = _typeClass(mainText1, h.workflow);
     const displayPrompt = _historyDisplayPrompt(h);
+    const wfLabel = _workflowDisplayName(h.workflow || '');
     const sensitiveCls = _isSensitivePreview(h, displayPrompt) ? ' gi-sensitive' : '';
     const tagBadge = mainText1 ? `<div class="gi-type-badge ${mainCls1}">${mainText1}</div>` : '';
     const typeCls1 = mainCls1 ? 'gi-type-' + mainCls1.replace('wf-tag-', '') : '';
@@ -1159,11 +1201,12 @@ function _renderHistCard(h, i) {
     const openAction = isBatch
       ? `CW.openBatchLB('${escA(entry.batch_id)}', this)`
       : `CW.openLB(${i}, this, '${escA(histKey)}')`;
+    const mediaClickAction = _isAudioItem(h) ? 'CW.toggleAudioCardPreview(event,this)' : openAction;
     const batchBadge = isBatch ? `<div class="gi-batch-badge">×${batchCount}</div>` : '';
-    const videoTag = _infoVideoTagHtml(h);
+    const mediaTag = _infoAudioTagHtml(h) || _infoVideoTagHtml(h);
 
 	    return `<div class="gi ${typeCls1}${isBatch ? ' gi-batch-stack' : ''}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(entryKey || histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
-	      <div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();${openAction}">
+	      <div class="gi-img${sensitiveCls}" onclick="event.stopPropagation();${mediaClickAction}">
 	        ${batchStackImages}
 	        ${_mediaPreviewHtml(h)}
 	        ${_favoriteBadgeHtml(h)}
@@ -1172,10 +1215,11 @@ function _renderHistCard(h, i) {
       </div>
       <div class="gi-info">
 	        <div class="gi-info-actions">
-	          ${videoTag}
+	          ${mediaTag}
 	          ${batchBadge}
 	        <button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i}, '${escA(histKey)}')" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>
 	        </div>
+        ${wfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
         <div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>
         <div class="gi-meta">
           <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
@@ -1592,11 +1636,13 @@ function _typeClass(typeText, workflowName) {
     if (typeText === '文生视频') return 'wf-tag-t2v';
     if (typeText === '图生视频') return 'wf-tag-i2v';
     if (/视频/.test(typeText || '')) return 'wf-tag-video';
+    if (/语音|音频|TTS/i.test(typeText || '')) return 'wf-tag-audio';
     if (typeText === '放大') return 'wf-tag-cat';
     return typeText ? 'wf-tag-res' : '';
   }
 
   function _historyItemType(item) {
+    if (_isAudioItem(item)) return '语音TTS';
     if (item && item.workflow_type) return item.workflow_type;
     var workflow = item && item.workflow ? item.workflow : '';
     var meta = (A._wfMeta || {})[workflow] || {};
@@ -1604,7 +1650,7 @@ function _typeClass(typeText, workflowName) {
     return tag && tag.text ? tag.text : '';
   }
 
-  function _workflowCustomDisplayName(workflow) {
+  function _workflowDisplayName(workflow) {
     workflow = String(workflow || '');
     if (!workflow) return '';
     var meta = (A._wfMeta || {})[workflow] || {};
@@ -1612,6 +1658,13 @@ function _typeClass(typeText, workflowName) {
       ? CW.workflowDisplayName(workflow, meta)
       : String(meta.name || '').trim();
     display = String(display || '').trim();
+    return display || workflow.replace(/\.json$/i, '');
+  }
+
+  function _workflowCustomDisplayName(workflow) {
+    workflow = String(workflow || '');
+    if (!workflow) return '';
+    var display = _workflowDisplayName(workflow);
     var fallback = workflow.replace(/\.json$/i, '');
     if (display && display !== workflow && display !== fallback) return display;
     return '';
@@ -1956,6 +2009,11 @@ function setHistoryTypeFilter(value) {
     return `<span class="gi-video-chip" title="视频" aria-label="视频">${CW.icon ? CW.icon("video", 16) : '▣'}</span>`;
   }
 
+  function _infoAudioTagHtml(item) {
+    if (!_isAudioItem(item)) return '';
+    return `<span class="gi-video-chip gi-audio-chip" title="音频" aria-label="音频">${CW.icon ? CW.icon("mic", 16) : 'AUDIO'}</span>`;
+  }
+
   function _videoPreviewSrc(filename) {
     return filename ? `${_lightboxImageUrl(filename)}#t=0.1` : '';
   }
@@ -1967,11 +2025,352 @@ function setHistoryTypeFilter(value) {
     return `<video class="gi-video-preview" src="${escA(src)}" muted playsinline preload="metadata"></video>${_videoPosterHtml()}`;
   }
 
+  function _audioPreviewCanvasHtml() {
+    return '<canvas class="gi-audio-canvas" aria-hidden="true"></canvas>';
+  }
+
+  function _audioPreviewButtonHtml(disabled) {
+    return `<button class="gi-audio-play" type="button" tabindex="-1" title="${disabled ? '音频不可用' : '播放音频'}" aria-label="${disabled ? '音频不可用' : '播放音频'}"${disabled ? ' disabled' : ''} onclick="CW.toggleAudioCardPreview(event,this)">${CW.icon ? CW.icon("audio-wave", 34) : '≋'}</button>`;
+  }
+
   function _mediaPreviewHtml(item) {
     if (_isVideoItem(item)) return _videoPreviewHtml(item.filename, item.thumb);
+    if (_isAudioItem(item)) {
+      var audioSrc = item && item.filename ? _lightboxImageUrl(item.filename) : '';
+      return audioSrc
+        ? `<div class="gi-audio-preview" role="button" tabindex="0" aria-label="播放音频" onclick="CW.toggleAudioCardPreview(event,this)" onkeydown="if(event.key==='Enter'||event.key===' '){CW.toggleAudioCardPreview(event,this)}">${_audioPreviewCanvasHtml()}${_audioPreviewButtonHtml(false)}<audio class="gi-audio-el" preload="metadata" src="${escA(audioSrc)}"></audio></div>`
+        : `<div class="gi-audio-preview is-disabled" data-audio-disabled="1" aria-label="音频不可用" onclick="event.stopPropagation()">${_audioPreviewCanvasHtml()}${_audioPreviewButtonHtml(true)}</div>`;
+    }
     var src = _historyImageSrc(item);
     if (src) return `<img src="${escA(src)}" loading="lazy" alt="">`;
     return '';
+  }
+
+  function _setAudioCardButtonState(button, playing) {
+    if (!button) return;
+    var preview = button.closest ? button.closest('.gi-audio-preview') : null;
+    if (preview) preview.classList.toggle('is-playing', !!playing);
+    button.classList.toggle('is-playing', !!playing);
+    button.title = playing ? '暂停音频' : '播放音频';
+    button.setAttribute('aria-label', playing ? '暂停音频' : '播放音频');
+    button.innerHTML = (CW.icon ? CW.icon('audio-wave', 34) : '≋');
+  }
+
+  var audioCardVizContext = null;
+  var audioCardVizPi2 = Math.PI * 2;
+
+  function _audioCardWebAudioContext() {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!audioCardVizContext) audioCardVizContext = new Ctx();
+    return audioCardVizContext;
+  }
+
+  function _resumeAudioCardVizContext() {
+    if (!audioCardVizContext || audioCardVizContext.state !== 'suspended') return null;
+    try { return audioCardVizContext.resume(); } catch (err) { return null; }
+  }
+
+  function _avgAudioData(values) {
+    if (!values || !values.length) return 0;
+    var sum = 0;
+    for (var i = 0; i < values.length; i += 2) sum += values[i];
+    return sum / Math.ceil(values.length / 2);
+  }
+
+  function _audioVizNow() {
+    return (window.performance && performance.now) ? performance.now() : Date.now();
+  }
+
+  function _advanceAudioVizFade(viz) {
+    var now = _audioVizNow();
+    var elapsed = viz.lastFrameTime ? Math.min(64, now - viz.lastFrameTime) : 16;
+    viz.lastFrameTime = now;
+    var target = typeof viz.fadeTarget === 'number' ? viz.fadeTarget : 1;
+    var duration = target > viz.fadeAlpha ? 280 : 560;
+    var delta = elapsed / duration;
+    if (target > viz.fadeAlpha) {
+      viz.fadeAlpha = Math.min(target, viz.fadeAlpha + delta);
+    } else if (target < viz.fadeAlpha) {
+      viz.fadeAlpha = Math.max(target, viz.fadeAlpha - delta);
+    }
+    return viz.fadeAlpha;
+  }
+
+  function _resetAudioVizStar(viz, star, nearCenter) {
+    var angle = Math.random() * audioCardVizPi2;
+    var span = Math.max(viz.w, viz.h);
+    var depth = nearCenter ? Math.random() * span * 0.18 : Math.random() * span * 0.56;
+    star.x = Math.cos(angle) * depth;
+    star.y = Math.sin(angle) * depth;
+    star.dx = Math.cos(angle) * (0.22 + Math.random() * 0.88);
+    star.dy = Math.sin(angle) * (0.22 + Math.random() * 0.88);
+    star.r = 0.32 + Math.random() * 1.15;
+    star.special = Math.random() > 0.965;
+  }
+
+  function _fitAudioCardCanvas(viz) {
+    var rect = viz.canvas.getBoundingClientRect();
+    var width = Math.max(1, Math.round(rect.width || viz.canvas.clientWidth || 1));
+    var height = Math.max(1, Math.round(rect.height || viz.canvas.clientHeight || 1));
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (viz.w === width && viz.h === height && viz.dpr === dpr) return;
+    viz.w = width;
+    viz.h = height;
+    viz.dpr = dpr;
+    viz.cx = width / 2;
+    viz.cy = height / 2;
+    viz.canvas.width = Math.round(width * dpr);
+    viz.canvas.height = Math.round(height * dpr);
+    viz.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    viz.stars = [];
+    var starCount = Math.max(72, Math.min(220, Math.round((width * height) / 240)));
+    for (var i = 0; i < starCount; i++) {
+      var star = {};
+      _resetAudioVizStar(viz, star, false);
+      viz.stars.push(star);
+    }
+  }
+
+  function _ensureAudioCardVisualizer(audio, preview) {
+    if (!audio || !preview) return null;
+    if (audio.__ezAudioViz) return audio.__ezAudioViz;
+    var canvas = preview.querySelector('.gi-audio-canvas');
+    var ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+    var audioContext = _audioCardWebAudioContext();
+    if (!canvas || !ctx || !audioContext) return null;
+    try {
+      var analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.minDecibels = -100;
+      analyser.maxDecibels = -30;
+      analyser.smoothingTimeConstant = 0.82;
+      var source = audio.__ezAudioVizSource || audioContext.createMediaElementSource(audio);
+      audio.__ezAudioVizSource = source;
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+      audio.__ezAudioViz = {
+        audio: audio,
+        preview: preview,
+        canvas: canvas,
+        ctx: ctx,
+        analyser: analyser,
+        frequencyData: new Uint8Array(analyser.frequencyBinCount),
+        timeData: new Uint8Array(analyser.frequencyBinCount),
+        stars: [],
+        animationId: 0,
+        running: false,
+        fadeAlpha: 0,
+        fadeTarget: 0,
+        lastFrameTime: 0,
+        rotation: 0,
+        w: 0,
+        h: 0,
+        dpr: 0
+      };
+      _fitAudioCardCanvas(audio.__ezAudioViz);
+    } catch (err) {
+      audio.__ezAudioViz = null;
+    }
+    return audio.__ezAudioViz;
+  }
+
+  function _drawAudioCardStars(viz, avg, hit) {
+    var ctx = viz.ctx;
+    var tick = (hit ? (0.62 + avg / 42) : (0.24 + avg / 95)) * Math.max(0.2, viz.fadeAlpha || 0);
+    ctx.save();
+    ctx.translate(viz.cx, viz.cy);
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < viz.stars.length; i++) {
+      var star = viz.stars[i];
+      star.x += star.dx * tick;
+      star.y += star.dy * tick;
+      if (Math.abs(star.x) > viz.cx + 12 || Math.abs(star.y) > viz.cy + 12) {
+        _resetAudioVizStar(viz, star, true);
+      }
+      ctx.beginPath();
+      ctx.fillStyle = star.special || hit
+        ? 'rgba(244,81,186,.72)'
+        : (star.y > viz.cy * .35 ? 'rgba(181,191,212,.54)' : 'rgba(70,86,119,.56)');
+      ctx.arc(star.x, star.y, star.r * (hit ? 1.35 : 1), 0, audioCardVizPi2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function _drawAudioCardAverage(viz, avg, hit) {
+    var ctx = viz.ctx;
+    var base = Math.min(viz.w, viz.h) * 0.11;
+    var radius = base + avg * 0.17;
+    ctx.beginPath();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = hit ? 'rgba(77,218,248,.95)' : 'rgba(77,218,248,.68)';
+    ctx.fillStyle = hit ? 'rgba(29,36,57,.05)' : 'rgba(29,36,57,.12)';
+    ctx.arc(viz.cx, viz.cy, radius, 0, audioCardVizPi2);
+    ctx.stroke();
+    ctx.fill();
+  }
+
+  function _drawAudioCardWaveform(viz, avg, hit) {
+    var ctx = viz.ctx;
+    var data = viz.timeData;
+    var total = Math.min(180, data.length);
+    var radius = Math.min(viz.w, viz.h) * 0.16;
+    var amp = Math.min(viz.w, viz.h) * 0.115;
+    viz.rotation += hit ? 0.035 : -0.018;
+    ctx.save();
+    ctx.translate(viz.cx, viz.cy);
+    ctx.rotate(viz.rotation);
+    ctx.beginPath();
+    for (var i = 0; i <= total; i++) {
+      var idx = Math.floor((i % total) * data.length / total);
+      var value = (data[idx] - 128) / 128;
+      var energy = avg / 255;
+      var r = radius + value * amp + energy * 18;
+      var angle = (i / total) * audioCardVizPi2;
+      var x = Math.cos(angle) * r;
+      var y = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.lineWidth = hit ? 1.35 : 1;
+    ctx.strokeStyle = hit ? 'rgba(157,242,157,.88)' : 'rgba(157,242,157,.32)';
+    ctx.fillStyle = hit ? 'rgba(0,0,0,0)' : 'rgba(29,36,57,.10)';
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function _drawAudioCardVisualizer(viz) {
+    if (!viz || !viz.running || !viz.audio) return;
+    _fitAudioCardCanvas(viz);
+    var isAudible = !viz.audio.paused && !viz.audio.ended;
+    if (isAudible) {
+      viz.analyser.getByteFrequencyData(viz.frequencyData);
+      viz.analyser.getByteTimeDomainData(viz.timeData);
+    } else if (viz.fadeTarget > 0) {
+      viz.fadeTarget = 0;
+    }
+    var alpha = _advanceAudioVizFade(viz);
+    var avg = _avgAudioData(viz.frequencyData);
+    var hit = avg > 92 && alpha > 0.6;
+    var ctx = viz.ctx;
+    var gradient = ctx.createLinearGradient(0, 0, 0, viz.h);
+    gradient.addColorStop(0, '#000011');
+    gradient.addColorStop(0.86, '#060D1F');
+    gradient.addColorStop(1, '#02243F');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, viz.w, viz.h);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, viz.w, viz.h);
+    _drawAudioCardStars(viz, avg, hit);
+    _drawAudioCardAverage(viz, avg, hit);
+    _drawAudioCardWaveform(viz, avg, hit);
+    ctx.globalAlpha = 1;
+    if (viz.fadeTarget <= 0 && alpha <= 0.01) {
+      viz.running = false;
+      viz.animationId = 0;
+      if (viz.preview) viz.preview.classList.remove('is-visualizing');
+      ctx.clearRect(0, 0, viz.w, viz.h);
+      return;
+    }
+    viz.animationId = window.requestAnimationFrame(function() {
+      _drawAudioCardVisualizer(viz);
+    });
+  }
+
+  function _startAudioCardVisualizer(audio, button) {
+    var preview = button && button.closest ? button.closest('.gi-audio-preview') : null;
+    var viz = _ensureAudioCardVisualizer(audio, preview);
+    if (!viz) return;
+    _resumeAudioCardVizContext();
+    if (viz.animationId) window.cancelAnimationFrame(viz.animationId);
+    if (viz.preview) viz.preview.classList.add('is-visualizing');
+    viz.fadeTarget = 1;
+    viz.lastFrameTime = 0;
+    viz.running = true;
+    _drawAudioCardVisualizer(viz);
+  }
+
+  function _stopAudioCardVisualizer(audio) {
+    var viz = audio && audio.__ezAudioViz;
+    if (!viz) return;
+    viz.fadeTarget = 0;
+    if (viz.preview) viz.preview.classList.add('is-visualizing');
+    if (!viz.running) {
+      if (viz.animationId) window.cancelAnimationFrame(viz.animationId);
+      viz.animationId = 0;
+      viz.running = true;
+      viz.lastFrameTime = 0;
+      _drawAudioCardVisualizer(viz);
+    }
+  }
+
+  function _audioPreviewFromTarget(target) {
+    if (!target || !target.closest) return null;
+    var preview = target.closest('.gi-audio-preview');
+    if (preview) return preview;
+    var mediaBox = target.closest('.gi-img');
+    if (mediaBox) return mediaBox.querySelector('.gi-audio-preview');
+    var card = target.closest('.gi');
+    return card ? card.querySelector('.gi-audio-preview') : null;
+  }
+
+  function _bindAudioCardPreview(audio, button) {
+    if (!audio || audio.dataset.previewBound === '1') return;
+    audio.dataset.previewBound = '1';
+    audio.addEventListener('play', function() {
+      _setAudioCardButtonState(button, true);
+      _startAudioCardVisualizer(audio, button);
+    });
+    audio.addEventListener('pause', function() {
+      _setAudioCardButtonState(button, false);
+      _stopAudioCardVisualizer(audio);
+    });
+    audio.addEventListener('ended', function() {
+      _setAudioCardButtonState(button, false);
+      _stopAudioCardVisualizer(audio);
+    });
+    audio.addEventListener('error', function() {
+      _setAudioCardButtonState(button, false);
+      _stopAudioCardVisualizer(audio);
+    });
+  }
+
+  function toggleAudioCardPreview(event, button) {
+    if (event && event.preventDefault) event.preventDefault();
+    if (event && event.stopPropagation) event.stopPropagation();
+    var preview = _audioPreviewFromTarget(button || (event && (event.currentTarget || event.target)));
+    var playButton = preview ? preview.querySelector('.gi-audio-play') : null;
+    if (!preview || preview.dataset.audioDisabled === '1' || !playButton || playButton.disabled) return;
+    var audio = preview.querySelector('audio');
+    if (!audio) return;
+    _bindAudioCardPreview(audio, playButton);
+    if (!audio.paused && !audio.ended) {
+      audio.pause();
+      return;
+    }
+    document.querySelectorAll('.gi-audio-preview audio').forEach(function(other) {
+      if (other !== audio) {
+        try { other.pause(); } catch (err) {}
+      }
+    });
+    if (audio.ended) {
+      try { audio.currentTime = 0; } catch (err) {}
+    }
+    _audioCardWebAudioContext();
+    var resumePromise = _resumeAudioCardVizContext();
+    if (resumePromise && resumePromise.catch) resumePromise.catch(function() {});
+    var playPromise = audio.play();
+    if (playPromise && playPromise.catch) {
+      playPromise.catch(function() {
+        _setAudioCardButtonState(playButton, false);
+        _stopAudioCardVisualizer(audio);
+        if (window.CW && CW.toast) CW.toast('音频暂时无法播放', 'error');
+      });
+    }
   }
 
   function _batchStackImages(entry, cover) {
@@ -2287,16 +2686,18 @@ function _histCardHTML(h, i) {
     const mainText2 = _historyItemType(h);
     const mainCls2 = _typeClass(mainText2, h.workflow);
     const displayPrompt = _historyDisplayPrompt(h);
+    const wfLabel = _workflowDisplayName(h.workflow || '');
     const sensitiveCls = _isSensitivePreview(h, displayPrompt) ? ' gi-sensitive' : '';
     const tagBadge = mainText2 ? `<div class="gi-type-badge ${mainCls2}">${mainText2}</div>` : '';
     const typeCls2 = mainCls2 ? 'gi-type-' + mainCls2.replace('wf-tag-', '') : '';
     const histKey = _histKey(h);
     var entryKey = _galleryEntryKey(entry);
     var openAction = isBatch ? `CW.openBatchLB('${escA(entry.batch_id)}', this)` : `CW.openLB(${i}, this, '${escA(histKey)}')`;
+    var mediaClickAction = _isAudioItem(h) ? 'CW.toggleAudioCardPreview(event,this)' : openAction;
     var batchBadge = isBatch ? `<div class="gi-batch-badge">×${batchCount}</div>` : '';
-    var videoTag = _infoVideoTagHtml(h);
+    var mediaTag = _infoAudioTagHtml(h) || _infoVideoTagHtml(h);
     return `<div class="gi ${typeCls2}${isBatch ? ' gi-batch-stack' : ''}" data-wf="${escA(h.workflow || '')}" data-hist-id="${escA(entryKey || histKey)}" data-hist-idx="${i}" data-favorited="${_isHistoryFavorited(h) ? '1' : '0'}" onclick="CW.fillFormFromHistory(${i}, '${escA(histKey)}')">
-    <div class="gi-img lazy-img${sensitiveCls}" onclick="event.stopPropagation();${openAction}">
+    <div class="gi-img lazy-img${sensitiveCls}" onclick="event.stopPropagation();${mediaClickAction}">
       ${batchStackImages}
       ${_mediaPreviewHtml(h)}
       ${_favoriteBadgeHtml(h)}
@@ -2305,10 +2706,11 @@ function _histCardHTML(h, i) {
     </div>
     <div class="gi-info">
       <div class="gi-info-actions">
-        ${videoTag}
+        ${mediaTag}
         ${batchBadge}
       ${canEdit ? `<button class="gi-reuse" onclick="event.stopPropagation();CW.fillFormFromHistory(${i}, '${escA(histKey)}')" title="复刻出图" aria-label="复刻出图">${CW.icon("copy")}</button>` : ''}
       </div>
+      ${wfLabel ? `<div class="gi-wf-label" title="${escA(wfLabel)}">${escH(wfLabel)}</div>` : ''}
       <div class="gi-prompt" title="${escA(displayPrompt)}">${escH(displayPrompt)}</div>
       <div class="gi-meta">
         <span>${CW.icon("clock")} ${_fmtTime(h.time)}</span>
@@ -4514,6 +4916,7 @@ function renderGallery() {
   window.CW.openLB = openLB;
   window.CW.openBatchLB = openBatchLB;
   window.CW.openJobLB = openJobLB;
+  window.CW.toggleAudioCardPreview = toggleAudioCardPreview;
   window.CW.closeLB = closeLB;
   window.CW.downloadLB = downloadLB;
   window.CW.copyLBPrompt = copyLBPrompt;

@@ -1,0 +1,74 @@
+{
+  "engine": "indextts2",
+  "text": "今天我们测试本地语音合成服务的速度、稳定性和自然度，看看哪一个更适合实时对话场景。",
+  "text_chars": 41,
+  "reference_audio": "/workspace/tts/reference/qwen_clone.wav",
+  "reference_text": "Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.",
+  "rounds": [
+    {
+      "round": 1,
+      "output": "/workspace/tts/results/indextts2/indextts2_round1.wav",
+      "elapsed_s": 11.0825,
+      "audio_duration_s": 7.6858,
+      "rtf": 1.4419,
+      "chars_per_s": 3.6995,
+      "audio_stats": {
+        "sr": 22050,
+        "duration_s": 7.6858,
+        "rms": 0.092859,
+        "peak": 0.999969,
+        "clip_pct": 0.0006,
+        "silence_pct": 9.9468
+      }
+    },
+    {
+      "round": 2,
+      "output": "/workspace/tts/results/indextts2/indextts2_round2.wav",
+      "elapsed_s": 7.6231,
+      "audio_duration_s": 8.4172,
+      "rtf": 0.9057,
+      "chars_per_s": 5.3784,
+      "audio_stats": {
+        "sr": 22050,
+        "duration_s": 8.4172,
+        "rms": 0.097148,
+        "peak": 0.891327,
+        "clip_pct": 0.0,
+        "silence_pct": 11.9402
+      }
+    },
+    {
+      "round": 3,
+      "output": "/workspace/tts/results/indextts2/indextts2_round3.wav",
+      "elapsed_s": 7.4067,
+      "audio_duration_s": 7.9412,
+      "rtf": 0.9327,
+      "chars_per_s": 5.5355,
+      "audio_stats": {
+        "sr": 22050,
+        "duration_s": 7.9412,
+        "rms": 0.095924,
+        "peak": 0.952728,
+        "clip_pct": 0.0,
+        "silence_pct": 14.2555
+      }
+    }
+  ],
+  "errors": [],
+  "load_s": 35.759,
+  "summary": {
+    "mean_elapsed_s": 8.7041,
+    "stdev_elapsed_s": 1.6841,
+    "mean_audio_duration_s": 8.0147,
+    "stdev_audio_duration_s": 0.3031,
+    "mean_rtf": 1.0934,
+    "stdev_rtf": 0.2466,
+    "mean_chars_per_s": 4.8711,
+    "stdev_chars_per_s": 0.8309,
+    "mean_rms": 0.09531,
+    "mean_peak": 0.948008,
+    "mean_clip_pct": 0.0002,
+    "mean_silence_pct": 12.0475,
+    "sample_rate": 22050
+  }
+}
